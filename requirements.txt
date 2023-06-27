@@ -1,0 +1,10 @@
+chromadb
+opencv-python
+cohere
+pydub
+langchain
+deepface
+SpeechRecognition
+names
+pyaudio
+edge-tts

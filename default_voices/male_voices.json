@@ -1,0 +1,364 @@
+[
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-AU, WilliamNeural)",
+        "ShortName": "en-AU-WilliamNeural",
+        "Gender": "Male",
+        "Locale": "en-AU",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft William Online (Natural) - English (Australia)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-CA, LiamNeural)",
+        "ShortName": "en-CA-LiamNeural",
+        "Gender": "Male",
+        "Locale": "en-CA",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Liam Online (Natural) - English (Canada)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-HK, SamNeural)",
+        "ShortName": "en-HK-SamNeural",
+        "Gender": "Male",
+        "Locale": "en-HK",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Sam Online (Natural) - English (Hongkong)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-IN, PrabhatNeural)",
+        "ShortName": "en-IN-PrabhatNeural",
+        "Gender": "Male",
+        "Locale": "en-IN",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Prabhat Online (Natural) - English (India)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-IE, ConnorNeural)",
+        "ShortName": "en-IE-ConnorNeural",
+        "Gender": "Male",
+        "Locale": "en-IE",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Connor Online (Natural) - English (Ireland)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-KE, ChilembaNeural)",
+        "ShortName": "en-KE-ChilembaNeural",
+        "Gender": "Male",
+        "Locale": "en-KE",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Chilemba Online (Natural) - English (Kenya)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-NZ, MitchellNeural)",
+        "ShortName": "en-NZ-MitchellNeural",
+        "Gender": "Male",
+        "Locale": "en-NZ",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Mitchell Online (Natural) - English (New Zealand)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-NG, AbeoNeural)",
+        "ShortName": "en-NG-AbeoNeural",
+        "Gender": "Male",
+        "Locale": "en-NG",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Abeo Online (Natural) - English (Nigeria)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-PH, JamesNeural)",
+        "ShortName": "en-PH-JamesNeural",
+        "Gender": "Male",
+        "Locale": "en-PH",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft James Online (Natural) - English (Philippines)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-SG, WayneNeural)",
+        "ShortName": "en-SG-WayneNeural",
+        "Gender": "Male",
+        "Locale": "en-SG",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Wayne Online (Natural) - English (Singapore)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-ZA, LukeNeural)",
+        "ShortName": "en-ZA-LukeNeural",
+        "Gender": "Male",
+        "Locale": "en-ZA",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Luke Online (Natural) - English (South Africa)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-TZ, ElimuNeural)",
+        "ShortName": "en-TZ-ElimuNeural",
+        "Gender": "Male",
+        "Locale": "en-TZ",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Elimu Online (Natural) - English (Tanzania)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-GB, RyanNeural)",
+        "ShortName": "en-GB-RyanNeural",
+        "Gender": "Male",
+        "Locale": "en-GB",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Ryan Online (Natural) - English (United Kingdom)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-GB, ThomasNeural)",
+        "ShortName": "en-GB-ThomasNeural",
+        "Gender": "Male",
+        "Locale": "en-GB",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Thomas Online (Natural) - English (United Kingdom)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-US, ChristopherNeural)",
+        "ShortName": "en-US-ChristopherNeural",
+        "Gender": "Male",
+        "Locale": "en-US",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Christopher Online (Natural) - English (United States)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "News",
+                "Novel"
+            ],
+            "VoicePersonalities": [
+                "Reliable",
+                "Authority"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-US, EricNeural)",
+        "ShortName": "en-US-EricNeural",
+        "Gender": "Male",
+        "Locale": "en-US",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Eric Online (Natural) - English (United States)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "News",
+                "Novel"
+            ],
+            "VoicePersonalities": [
+                "Rational"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-US, GuyNeural)",
+        "ShortName": "en-US-GuyNeural",
+        "Gender": "Male",
+        "Locale": "en-US",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Guy Online (Natural) - English (United States)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "News",
+                "Novel"
+            ],
+            "VoicePersonalities": [
+                "Passion"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-US, RogerNeural)",
+        "ShortName": "en-US-RogerNeural",
+        "Gender": "Male",
+        "Locale": "en-US",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Roger Online (Natural) - English (United States)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "News",
+                "Novel"
+            ],
+            "VoicePersonalities": [
+                "Lively"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-US, SteffanNeural)",
+        "ShortName": "en-US-SteffanNeural",
+        "Gender": "Male",
+        "Locale": "en-US",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Steffan Online (Natural) - English (United States)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "News",
+                "Novel"
+            ],
+            "VoicePersonalities": [
+                "Rational"
+            ]
+        },
+        "Language": "en"
+    }
+]

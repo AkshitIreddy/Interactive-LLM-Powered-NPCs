@@ -1,0 +1,386 @@
+[
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-AU, NatashaNeural)",
+        "ShortName": "en-AU-NatashaNeural",
+        "Gender": "Female",
+        "Locale": "en-AU",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Natasha Online (Natural) - English (Australia)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-CA, ClaraNeural)",
+        "ShortName": "en-CA-ClaraNeural",
+        "Gender": "Female",
+        "Locale": "en-CA",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Clara Online (Natural) - English (Canada)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-HK, YanNeural)",
+        "ShortName": "en-HK-YanNeural",
+        "Gender": "Female",
+        "Locale": "en-HK",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Yan Online (Natural) - English (Hongkong)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-IN, NeerjaExpressiveNeural)",
+        "ShortName": "en-IN-NeerjaExpressiveNeural",
+        "Gender": "Female",
+        "Locale": "en-IN",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Neerja Online (Natural) - English (India) (Preview)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-IN, NeerjaNeural)",
+        "ShortName": "en-IN-NeerjaNeural",
+        "Gender": "Female",
+        "Locale": "en-IN",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Neerja Online (Natural) - English (India)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-IE, EmilyNeural)",
+        "ShortName": "en-IE-EmilyNeural",
+        "Gender": "Female",
+        "Locale": "en-IE",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Emily Online (Natural) - English (Ireland)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-KE, AsiliaNeural)",
+        "ShortName": "en-KE-AsiliaNeural",
+        "Gender": "Female",
+        "Locale": "en-KE",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Asilia Online (Natural) - English (Kenya)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-NZ, MollyNeural)",
+        "ShortName": "en-NZ-MollyNeural",
+        "Gender": "Female",
+        "Locale": "en-NZ",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Molly Online (Natural) - English (New Zealand)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-NG, EzinneNeural)",
+        "ShortName": "en-NG-EzinneNeural",
+        "Gender": "Female",
+        "Locale": "en-NG",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Ezinne Online (Natural) - English (Nigeria)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-PH, RosaNeural)",
+        "ShortName": "en-PH-RosaNeural",
+        "Gender": "Female",
+        "Locale": "en-PH",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Rosa Online (Natural) - English (Philippines)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-SG, LunaNeural)",
+        "ShortName": "en-SG-LunaNeural",
+        "Gender": "Female",
+        "Locale": "en-SG",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Luna Online (Natural) - English (Singapore)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-ZA, LeahNeural)",
+        "ShortName": "en-ZA-LeahNeural",
+        "Gender": "Female",
+        "Locale": "en-ZA",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Leah Online (Natural) - English (South Africa)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-TZ, ImaniNeural)",
+        "ShortName": "en-TZ-ImaniNeural",
+        "Gender": "Female",
+        "Locale": "en-TZ",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Imani Online (Natural) - English (Tanzania)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-GB, LibbyNeural)",
+        "ShortName": "en-GB-LibbyNeural",
+        "Gender": "Female",
+        "Locale": "en-GB",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Libby Online (Natural) - English (United Kingdom)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-GB, MaisieNeural)",
+        "ShortName": "en-GB-MaisieNeural",
+        "Gender": "Female",
+        "Locale": "en-GB",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Maisie Online (Natural) - English (United Kingdom)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-GB, SoniaNeural)",
+        "ShortName": "en-GB-SoniaNeural",
+        "Gender": "Female",
+        "Locale": "en-GB",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Sonia Online (Natural) - English (United Kingdom)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "General"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Positive"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-US, AriaNeural)",
+        "ShortName": "en-US-AriaNeural",
+        "Gender": "Female",
+        "Locale": "en-US",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Aria Online (Natural) - English (United States)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "News",
+                "Novel"
+            ],
+            "VoicePersonalities": [
+                "Positive",
+                "Confident"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-US, AnaNeural)",
+        "ShortName": "en-US-AnaNeural",
+        "Gender": "Female",
+        "Locale": "en-US",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Ana Online (Natural) - English (United States)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "Cartoon",
+                "Conversation"
+            ],
+            "VoicePersonalities": [
+                "Cute"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-US, JennyNeural)",
+        "ShortName": "en-US-JennyNeural",
+        "Gender": "Female",
+        "Locale": "en-US",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Jenny Online (Natural) - English (United States)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "Conversation",
+                "News"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Considerate",
+                "Comfort"
+            ]
+        },
+        "Language": "en"
+    },
+    {
+        "Name": "Microsoft Server Speech Text to Speech Voice (en-US, MichelleNeural)",
+        "ShortName": "en-US-MichelleNeural",
+        "Gender": "Female",
+        "Locale": "en-US",
+        "SuggestedCodec": "audio-24khz-48kbitrate-mono-mp3",
+        "FriendlyName": "Microsoft Michelle Online (Natural) - English (United States)",
+        "Status": "GA",
+        "VoiceTag": {
+            "ContentCategories": [
+                "News",
+                "Novel"
+            ],
+            "VoicePersonalities": [
+                "Friendly",
+                "Pleasant"
+            ]
+        },
+        "Language": "en"
+    }
+]
