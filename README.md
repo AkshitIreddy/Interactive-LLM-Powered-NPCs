@@ -12,6 +12,10 @@ One of the remarkable aspects of this project is its versatility. You don't need
 
 Whether you're exploring ancient dungeons in Assassin's Creed Valhalla or walking the neon lit streets of Cyberpunk 2077, Interactive LLM Powered NPCs takes your gaming experience to new heights. Prepare yourself for engaging, realistic, and meaningful interactions with NPCs that bring your virtual world to life. 🙌🚀🔥
 
+## Demo 🚀✨
+![thumbnail](https://github.com/AkshitIreddy/Interactive-LLM-Powered-NPCs/assets/90443032/81139091-6e2a-4ae2-a96c-e349fdabf161)
+Demo link: https://youtu.be/QDzNKpeQd-4
+
 ## How It Works 🤔💭
 
 The project's functionality is as fascinating as the conversations it enables. Here's a breakdown of how Interactive LLM Powered NPCs works its magic:
