@@ -15,7 +15,7 @@ Whether you're exploring ancient dungeons in Assassin's Creed Valhalla or walkin
 ## Demo 🚀✨
 ![thumbnail](https://github.com/AkshitIreddy/Interactive-LLM-Powered-NPCs/assets/90443032/feb9590f-3cde-476c-93ef-b0408169c150)
 
-Demo link: https://youtu.be/QDzNKpeQd-4
+Demo link: https://twitter.com/Akshit2089/status/1673687342438051847
 
 ## How It Works 🤔💭
 
