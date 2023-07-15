@@ -17,6 +17,8 @@ Whether you're exploring ancient dungeons in Assassin's Creed Valhalla or walkin
 
 Demo link: https://twitter.com/Akshit2089/status/1673687342438051847
 
+Discord Server: https://discord.gg/CfK7DCWKwy
+
 ## How It Works 🤔💭
 
 The project's functionality is as fascinating as the conversations it enables. Here's a breakdown of how Interactive LLM Powered NPCs works its magic:
