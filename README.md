@@ -182,7 +182,7 @@ Once you have completed these steps, you're ready to play the game. Make sure yo
 
 To begin, launch your game and open the "main.ipynb" file. In the first cell, you'll find the variables "player_name," "game_name," and "interact_key." Set these variables according to your preferences. Once you've done that, run the second cell. If your GPU is struggling to render the facial animation smoothly, you can choose to disable it in parameters.
 
-By running the second cell, a new window will appear. Drag this window to a separate monitor from the one displaying your game. If you don't have another monitor then copy the files from miscellaneous/Single Monitor to the main project directory. Now, direct the camera in your game towards the non-playable character (NPC) you wish to talk to.
+By running the second cell, a new window will appear. Drag this window to a separate monitor from the one displaying your game. If you don't have another monitor then copy the files from miscellaneous/Single Monitor to the main project directory(make sure to enter the game_screen_name variable in main.ipynb) . Now, direct the camera in your game towards the non-playable character (NPC) you wish to talk to.
 
 Click on the new window and hold down the interact key until you see the word "speak" appear in the right-hand corner. Speak your message, and you will notice the text you said appear in the corner. After a moment, the character will respond to you with both facial animation and voice.
 
