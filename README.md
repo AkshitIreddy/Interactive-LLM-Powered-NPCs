@@ -202,7 +202,7 @@ Together, we can shape the future of NPC interactions in gaming and create memor
 
 ## Tools Used 🚀🔧
 
-- 🍪 Cohere's Language Models and Langchain for LLM Agent
+- 🍪 Cohere's Language Models and Embedding Models with Langchain for LLM Agent
 - 🍩 SadTalker For Facial Animation
 - 🍰 Edge-TTS for default voices
 - 🧁 DeepFace for facial recognition, detection, gender, age, emotion detection
