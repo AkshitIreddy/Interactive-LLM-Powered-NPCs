@@ -51,6 +51,8 @@ The project's functionality is as fascinating as the conversations it enables. H
 
 You can download and install this version of Python from here https://www.python.org/downloads/release/python-3106/
 
+Make sure to click on the add to path option when running the installer.
+
 ### 🐙 GIT
 
 Install GIT, a version control system, to easily manage your code and collaborate with others. https://git-scm.com/downloads
