@@ -17,6 +17,9 @@ Whether you're exploring ancient dungeons in Assassin's Creed Valhalla or walkin
 
 Demo link: https://twitter.com/Akshit2089/status/1673687342438051847
 
+Explanation Video:
+https://twitter.com/cohere/status/1687131527174672384
+
 Tutorial Video: https://youtu.be/6SHTlKYKCbs
 
 Discord Server: https://discord.gg/CfK7DCWKwy
