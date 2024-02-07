@@ -195,15 +195,15 @@ If, for some reason, the character you want to talk to is not visible on the scr
 
 ## Conclusion and Contribution 🤝🎮
 
-Interactive LLM Powered NPCs opens up exciting possibilities for enhancing NPC interactions in any game, bringing a new level of realism and immersion to your gaming experience. 💫🎮 By leveraging advanced technologies and the power of language models, this project allows for dynamic and engaging dialogue with NPCs, making each conversation feel unique and lifelike. 💬🌟
+Interactive LLM Powered NPCs opens up exciting possibilities for enhancing NPC interactions in any game, bringing a new level of realism and immersion to your gaming experience. By leveraging advanced technologies and the power of language models, this project allows for dynamic and engaging dialogue with NPCs, making each conversation feel unique and lifelike. 
 
-We invite you to join us in expanding the compatibility of Interactive LLM Powered NPCs by adding games to the "Games" folder. 📁🎁 By doing so, you can help save others the effort of adapting the project to new games and increase the number of available games that are compatible. 🚀🔗
+We invite you to join us in expanding the compatibility of Interactive LLM Powered NPCs by adding games to the "Games" folder. By doing so, you can help save others the effort of adapting the project to new games and increase the number of available games that are compatible. 
 
-If you've created a game compatible with Interactive LLM Powered NPCs, we encourage you to make a pull request and share your game with the community. 🙌🎮 By adding your game to the collection, you contribute to the growing library of supported games and enable more players to enjoy dynamic and realistic NPC interactions. 🎉🌍
+If you've created a game compatible with Interactive LLM Powered NPCs, we encourage you to make a pull request and share your game with the community. By adding your game to the collection, you contribute to the growing library of supported games and enable more players to enjoy dynamic and realistic NPC interactions. 
 
-Additionally, you can contribute to the project by improving existing features, fixing bugs, or suggesting new ideas. Feel free to explore the codebase, join discussions, and collaborate with fellow developers to enhance the project further. 💡💪👥
+Additionally, you can contribute to the project by improving existing features, fixing bugs, or suggesting new ideas. Feel free to explore the codebase, join discussions, and collaborate with fellow developers to enhance the project further. 
 
-Together, we can shape the future of NPC interactions in gaming and create memorable experiences for players worldwide. So, join us on this exciting journey and let's make gaming dialogue more interactive and captivating for everyone! 🚀✨🌟
+Together, we can shape the future of NPC interactions in gaming and create memorable experiences for players worldwide. So, join us on this exciting journey and let's make gaming dialogue more interactive and captivating for everyone! 
 
 ## Tools Used 🚀🔧
 
