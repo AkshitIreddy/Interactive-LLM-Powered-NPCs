@@ -1,5 +1,3 @@
-# Interactive LLM Powered NPCs: Enabling Realistic Dynamic Dialogue with LLM-Powered NPCs in Any Game 
-
 ## Overview 😄📜
 
 Interactive LLM Powered NPCs, is an open-source project that completely transforms your interaction with non-player characters (NPCs) in any game! With this project, you can engage in conversations with NPCs using your microphone to speak.
