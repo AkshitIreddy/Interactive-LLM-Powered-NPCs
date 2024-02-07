@@ -1,4 +1,4 @@
-# Interactive LLM Powered NPCs ✨: Enabling Realistic Dynamic Dialogue with LLM-Powered NPCs in Any Game 🎮🤖🚀
+# Interactive LLM Powered NPCs: Enabling Realistic Dynamic Dialogue with LLM-Powered NPCs in Any Game 
 
 ## Overview 😄📜
 
