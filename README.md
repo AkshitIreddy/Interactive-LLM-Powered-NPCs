@@ -195,7 +195,7 @@ If, for some reason, the character you want to talk to is not visible on the scr
 
 ## Conclusion and Contribution 🤝🎮
 
-Interactive LLM Powered NPCs opens up exciting possibilities for enhancing NPC interactions in any game, bringing a new level of realism and immersion to your gaming experience. By leveraging advanced technologies and the power of language models, this project allows for dynamic and engaging dialogue with NPCs, making each conversation feel unique and lifelike. 
+Interactive LLM Powered NPCs opens up exciting possibilities for enhancing NPC interactions in any game, bringing a new level of realism and immersion to your gaming experience.
 
 We invite you to join us in expanding the compatibility of Interactive LLM Powered NPCs by adding games to the "Games" folder. By doing so, you can help save others the effort of adapting the project to new games and increase the number of available games that are compatible. 
 
