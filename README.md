@@ -1,6 +1,6 @@
 ## Overview 😄📜
 
-Interactive LLM Powered NPCs, is an open-source project that completely transforms your interaction with non-player characters (NPCs) in any game! With this project, you can engage in conversations with NPCs using your microphone to speak.
+Interactive LLM Powered NPCs, is an open-source project that completely transforms your interaction with non-player characters (NPCs) in any game! With this project, you can engage in conversations with NPCs in any game using your microphone to speak.
 
 The project uses sadtalker to synchronize character lip movements, facial recognition to identify different characters, vector stores to provide limitless memory capacity for NPCs, and pre-conversation files to shape the dialogue style of each character. By analyzing the specific NPC you're engaging with, including their personality, knowledge, and communication style, the system adapts accordingly. Moreover, the NPCs are even capable of perceiving your facial expressions through your webcam, adding an additional layer of depth to the interactions.
 
