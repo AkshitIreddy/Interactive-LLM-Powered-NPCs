@@ -305,6 +305,7 @@ function ResponseConsoleApp() {
           <div className="topbar__actions">
             <button
               className="command-button"
+              aria-label="Find anything"
               onClick={() => setCommandOpen(true)}
             >
               <Icon name="search" />

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "react-aria-components";
 import { GAME_PROFILES, ONBOARDING_STEPS } from "./data";
 import { Icon } from "./icons";
@@ -34,11 +34,29 @@ export function Onboarding({
   const [simulation, setSimulation] = useState<"idle" | "running" | "done">(
     "idle",
   );
+  const [hasMoreContent, setHasMoreContent] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
   const current = ONBOARDING_STEPS[step];
 
   useEffect(() => {
-    const content = document.querySelector<HTMLElement>(".onboarding__content");
-    if (content) content.scrollTop = 0;
+    const content = contentRef.current;
+    if (!content) return;
+
+    content.scrollTop = 0;
+    const updateScrollCue = () => {
+      const remaining =
+        content.scrollHeight - content.scrollTop - content.clientHeight;
+      setHasMoreContent(remaining > 12);
+    };
+    const timer = window.setTimeout(updateScrollCue, 0);
+    content.addEventListener("scroll", updateScrollCue, { passive: true });
+    window.addEventListener("resize", updateScrollCue);
+
+    return () => {
+      window.clearTimeout(timer);
+      content.removeEventListener("scroll", updateScrollCue);
+      window.removeEventListener("resize", updateScrollCue);
+    };
   }, [step]);
 
   const next = () => {
@@ -116,7 +134,7 @@ export function Onboarding({
             Finish later
           </button>
         </header>
-        <div className="onboarding__content">
+        <div className="onboarding__content" ref={contentRef}>
           {step === 0 && <Welcome />}
           {step === 1 && <HardwareScan />}
           {step === 2 && (
@@ -167,15 +185,23 @@ export function Onboarding({
           >
             Back
           </Button>
-          <div
-            className="onboarding__progress"
-            aria-label={`Step ${step + 1} of ${ONBOARDING_STEPS.length}`}
-          >
-            <span
-              style={{
-                width: `${((step + 1) / ONBOARDING_STEPS.length) * 100}%`,
-              }}
-            />
+          <div className="onboarding__progress-column">
+            {hasMoreContent && (
+              <div className="onboarding__scroll-hint" aria-hidden="true">
+                <span>Scroll for the remaining options</span>
+                <i />
+              </div>
+            )}
+            <div
+              className="onboarding__progress"
+              aria-label={`Step ${step + 1} of ${ONBOARDING_STEPS.length}`}
+            >
+              <span
+                style={{
+                  width: `${((step + 1) / ONBOARDING_STEPS.length) * 100}%`,
+                }}
+              />
+            </div>
           </div>
           <ActionButton
             onPress={next}
@@ -550,6 +576,11 @@ function ProviderChoice() {
           detail="Choose a hosted voice route; no local speech pack is required."
         />
       </div>
+      <div className="provider-continuation" role="note">
+        <span>Provider guide</span>
+        <strong>Review account, privacy, and model notes below.</strong>
+        <small>Continue scrolling before you finish this step.</small>
+      </div>
       <Disclosure title="Recommended for trying 2.0 · NVIDIA NIM · one account/key">
         Select NVIDIA NIM explicitly in Settings after setup. Free hosted
         endpoints are for individual prototyping, development, and testing with
@@ -675,13 +706,15 @@ function MicrophoneRehearsal({
         </div>
         <button>Change</button>
       </div>
-      <Toggle
-        label="Use push-to-talk"
-        description="Hold one key while speaking. Releasing it immediately ends your turn."
-        isSelected={ptt}
-        onChange={setPtt}
-        privacy="Recommended privacy boundary"
-      />
+      <div className="rehearsal-toggle">
+        <Toggle
+          label="Use push-to-talk"
+          description="Hold one key while speaking. Releasing it immediately ends your turn."
+          isSelected={ptt}
+          onChange={setPtt}
+          privacy="Recommended privacy boundary"
+        />
+      </div>
     </div>
   );
 }
@@ -803,6 +836,13 @@ function PerformanceChoice({
         </p>
       </div>
       <div className="performance-choices">
+        <div className="performance-choices__header" aria-hidden="true">
+          <span />
+          <span>Mode</span>
+          <span>Game impact</span>
+          <span>Response</span>
+          <span>Presence</span>
+        </div>
         {modes.map((mode) => (
           <Button
             key={mode.id}
@@ -870,11 +910,11 @@ function Simulation({ state }: { state: "idle" | "running" | "done" }) {
         </div>
         <div className="simulation-card__telemetry">
           <div>
-            <span>LISTEN</span>
+            <span>Listening</span>
             <i className={state !== "idle" ? "is-lit" : ""} />
           </div>
           <div>
-            <span>TEXT</span>
+            <span>Transcript</span>
             <i
               className={
                 state === "running" || state === "done" ? "is-lit" : ""
@@ -882,7 +922,7 @@ function Simulation({ state }: { state: "idle" | "running" | "done" }) {
             />
           </div>
           <div>
-            <span>MEMORY</span>
+            <span>Memory</span>
             <i
               className={
                 state === "running" || state === "done" ? "is-lit" : ""
@@ -890,11 +930,11 @@ function Simulation({ state }: { state: "idle" | "running" | "done" }) {
             />
           </div>
           <div>
-            <span>REPLY</span>
+            <span>Response</span>
             <i className={state === "done" ? "is-lit" : ""} />
           </div>
           <div>
-            <span>VOICE</span>
+            <span>Voice</span>
             <i className={state === "done" ? "is-lit" : ""} />
           </div>
         </div>
@@ -940,12 +980,20 @@ function Ready({
         private simulation before attempting a real session.
       </p>
       <div className="ready-panel__actions">
-        <ActionButton icon="diagnostics" isDisabled>
-          Connect and verify runtime
-        </ActionButton>
-        <ActionButton icon="play" variant="outline" onPress={onSimulation}>
-          Run private simulation
-        </ActionButton>
+        <div className="ready-panel__action-path ready-panel__action-path--blocked">
+          <span>Required before a real session</span>
+          <ActionButton icon="diagnostics" variant="quiet" isDisabled>
+            Connect and verify runtime
+          </ActionButton>
+          <small>Unavailable in this preview</small>
+        </div>
+        <div className="ready-panel__action-path">
+          <span>Optional fixture replay</span>
+          <ActionButton icon="play" variant="outline" onPress={onSimulation}>
+            Run private simulation
+          </ActionButton>
+          <small>No live connection required</small>
+        </div>
       </div>
       <div className="ready-summary">
         <Metric

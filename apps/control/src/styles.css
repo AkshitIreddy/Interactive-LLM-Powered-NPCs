@@ -7759,3 +7759,760 @@
     }
   }
 }
+
+/*
+ * Main-console legibility pass.
+ *
+ * This layer deliberately targets the shared response spine and the authored
+ * Home, Games, Characters, Conversation, Presence, Performance, Models,
+ * Diagnostics, and Help surfaces. Onboarding and Settings retain their own
+ * independently reviewed typography systems.
+ */
+@layer main-console-legibility {
+  .response-spine__identity span,
+  .response-spine__total span {
+    color: #c5aeb6;
+    font-size: 12px;
+    line-height: 1.2;
+  }
+
+  .response-spine__identity strong {
+    font-size: 15px;
+    line-height: 1.12;
+  }
+
+  .response-spine li strong {
+    font-size: 13px !important;
+    line-height: 1.15;
+  }
+
+  .response-spine li small {
+    color: #a9838e;
+    font-size: 11px !important;
+    line-height: 1.2;
+  }
+
+  .state-banner strong,
+  .state-banner span,
+  .state-banner button {
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
+  .command-deck .dialogue-line > span,
+  .home-grid .dialogue-line > span,
+  .home-grid .memory-tags span,
+  .home-grid .headroom-row span,
+  .home-grid .degrade-note,
+  .home-grid .readiness-list small,
+  .home-strip small,
+  .home-strip .active-profile small {
+    font-size: 11px !important;
+    line-height: 1.45;
+  }
+
+  .command-deck .dialogue-line p,
+  .home-grid .dialogue-line p {
+    font-size: 13px;
+  }
+
+  .library-toolbar .search-field input,
+  .character-list .search-field input {
+    font-size: 13px;
+  }
+
+  .filter-tabs button {
+    min-height: 32px;
+    font-size: 12px;
+  }
+
+  .profile-card__wave {
+    font-size: 10px;
+  }
+
+  .profile-card > p {
+    font-size: 13px;
+    line-height: 1.52;
+  }
+
+  .profile-card dl div {
+    gap: 12px;
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  .profile-card dd {
+    text-align: right;
+  }
+
+  .profile-card__action {
+    font-size: 12px !important;
+  }
+
+  .character-row strong,
+  .character-row small {
+    font-size: 12px !important;
+    line-height: 1.35;
+  }
+
+  .character-detail__hero p,
+  .detail-sheet button,
+  .relationship-track span {
+    font-size: 11px;
+  }
+
+  .detail-sheet__label {
+    font-size: 10px;
+  }
+
+  .detail-sheet h3 {
+    font-size: 15px;
+  }
+
+  .detail-sheet p {
+    font-size: 12px;
+    line-height: 1.55;
+  }
+
+  .conversation-sessions > button span,
+  .conversation-sessions > button small {
+    font-size: 11px !important;
+    line-height: 1.35;
+  }
+
+  .conversation-ledger > header p,
+  .turn__meta,
+  .turn__trace,
+  .trace-detail span,
+  .memory-proposal span,
+  .memory-proposal small,
+  .typed-reply > span,
+  .inspector-block > span,
+  .inspector-block small {
+    font-size: 10px !important;
+    line-height: 1.4;
+  }
+
+  .turn p,
+  .typed-reply textarea,
+  .inspector-block strong,
+  .conversation-inspector .setting-toggle__description {
+    font-size: 12px !important;
+  }
+
+  .trace-detail strong,
+  .memory-proposal strong,
+  .memory-proposal button {
+    font-size: 10px;
+  }
+
+  .presence-control > p,
+  .capability-ladder > div > span,
+  .capability-ladder strong,
+  .capability-ladder small,
+  .confidence-rule > div,
+  .confidence-rule small {
+    font-size: 11px !important;
+    line-height: 1.4;
+  }
+
+  .preview-subtitle,
+  .capture-readout {
+    font-size: 10px;
+  }
+
+  .settings-sections .setting-toggle__privacy {
+    font-size: 10px;
+    line-height: 1.35;
+  }
+
+  .mode-selector__head p,
+  .mode-rail span,
+  .mode-rail small,
+  .waterfall-row > span,
+  .waterfall-row strong,
+  .latency-total > span,
+  .degradation-order li > span,
+  .degradation-order strong,
+  .degradation-order small {
+    font-size: 11px !important;
+    line-height: 1.35;
+  }
+
+  .mode-rail small {
+    color: #9f7b85;
+  }
+
+  .waterfall-row {
+    grid-template-columns: 90px minmax(0, 1fr) 58px;
+  }
+
+  .waterfall-row strong {
+    font-size: 10px !important;
+    white-space: nowrap;
+  }
+
+  .model-summary span,
+  .model-summary strong small,
+  .model-summary > div > small,
+  .model-summary button {
+    font-size: 11px !important;
+    line-height: 1.35;
+  }
+
+  .model-table__head {
+    height: 39px;
+    color: #a47f89;
+    font-size: 10px;
+  }
+
+  .model-row {
+    min-height: 96px;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  .model-name strong,
+  .model-name small,
+  .model-row > span small,
+  .model-state,
+  .model-actions button {
+    font-size: 11px !important;
+    line-height: 1.35;
+  }
+
+  .incident-card > div:nth-child(2) > span,
+  .incident-card p,
+  .incident-clock span,
+  .system-check strong,
+  .system-check > span:nth-of-type(2),
+  .trace-item > span,
+  .trace-item strong,
+  .trace-item small,
+  .environment-panel dl div {
+    font-size: 11px !important;
+    line-height: 1.35;
+  }
+
+  .help-hero > .panel-label,
+  .help-grid > section > .panel-label,
+  .guide-list button > span,
+  .version-card > span {
+    font-size: 11px;
+  }
+
+  .page:has(> .library-toolbar) .page-hero .action-button:disabled,
+  .page:has(> .performance-summary) .page-hero .action-button:disabled,
+  .page:has(> .model-summary) .page-hero .action-button:disabled,
+  .model-table button:disabled {
+    border-color: rgba(95, 251, 255, 0.38);
+    color: #8fbfc3;
+    opacity: 0.72;
+  }
+
+  .page:has(> .presence-hero) .setting-toggle[data-disabled] {
+    color: #b99ca5;
+    opacity: 0.7;
+  }
+
+  .page:has(> .presence-hero)
+    .setting-toggle[data-disabled]
+    .setting-toggle__description {
+    color: #9d7c86;
+  }
+
+  .theme-specimen .specimen-readouts span,
+  .theme-specimen .specimen-card footer span {
+    font-size: 12px;
+  }
+
+  .theme-specimen .specimen-readouts strong {
+    font-size: 22px;
+  }
+}
+
+@layer onboarding-refinement {
+  .onboarding__progress-column {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .onboarding__scroll-hint {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    min-height: 20px;
+    color: var(--teal);
+    font: 700 9px var(--data);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    pointer-events: none;
+  }
+
+  .onboarding__scroll-hint i {
+    width: 8px;
+    height: 8px;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: translateY(-2px) rotate(45deg);
+  }
+
+  .onboarding .hardware-radar__core small,
+  .onboarding .radar-label,
+  .onboarding .scan-row span,
+  .onboarding .choice-card__tag,
+  .onboarding .choice-card > p,
+  .onboarding .choice-card__select,
+  .onboarding .detected-banner strong,
+  .onboarding .detected-banner span,
+  .onboarding .detected-banner button,
+  .onboarding .game-choice__copy strong,
+  .onboarding .generic-choice strong,
+  .onboarding .generic-choice small,
+  .onboarding .pipeline-row__number,
+  .onboarding .pipeline-row__choice strong,
+  .onboarding .rehearsal__label,
+  .onboarding .rehearsal p,
+  .onboarding .device-strip span,
+  .onboarding .device-strip strong,
+  .onboarding .device-strip button,
+  .onboarding .setting-toggle__privacy,
+  .onboarding .simulation-result strong,
+  .onboarding .simulation-result span {
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
+  .onboarding .scan-row strong,
+  .onboarding .game-choice__copy strong,
+  .onboarding .pipeline-row__choice strong,
+  .onboarding .device-strip strong,
+  .onboarding .simulation-result strong {
+    font-size: 12px;
+  }
+
+  .onboarding .radar-label {
+    padding: 4px 6px;
+  }
+
+  .onboarding .choice-card:is([data-disabled], :disabled) {
+    opacity: 0.76;
+    border-color: rgba(255, 76, 95, 0.38);
+    background: linear-gradient(150deg, rgba(35, 14, 23, 0.96), #0c070b);
+  }
+
+  .onboarding .choice-card:is([data-disabled], :disabled) h2,
+  .onboarding .choice-card:is([data-disabled], :disabled) dd,
+  .onboarding .choice-card:is([data-disabled], :disabled) .choice-card__select {
+    color: #c6adb5;
+  }
+
+  .onboarding .choice-card:is([data-disabled], :disabled) p,
+  .onboarding .choice-card:is([data-disabled], :disabled) dt {
+    color: #a98993;
+  }
+
+  .provider-continuation {
+    display: grid;
+    grid-template-columns: 120px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    margin: 0 0 13px;
+    padding: 10px 13px;
+    border-left: 3px solid var(--teal);
+    background: linear-gradient(
+      90deg,
+      rgba(95, 251, 255, 0.11),
+      rgba(183, 42, 62, 0.05)
+    );
+  }
+
+  .provider-continuation > span {
+    color: var(--teal);
+    font: 700 10px var(--data);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .provider-continuation strong {
+    font-size: 12px;
+  }
+
+  .provider-continuation small {
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .rehearsal-toggle {
+    width: min(720px, 100%);
+    margin-top: 12px;
+    border: 1px solid rgba(95, 251, 255, 0.28);
+    background: linear-gradient(90deg, rgba(95, 251, 255, 0.08), transparent);
+  }
+
+  .rehearsal-toggle .setting-toggle {
+    min-height: 78px;
+    padding: 13px 15px;
+    border-bottom: 0;
+  }
+
+  .rehearsal-toggle .setting-toggle__copy {
+    max-width: 560px;
+  }
+
+  .performance-choices__header {
+    display: grid;
+    grid-template-columns: 20px 1fr 0.65fr 0.65fr 0.65fr;
+    align-items: center;
+    gap: 10px;
+    min-height: 36px;
+    padding: 0 14px;
+    border-bottom: 1px solid rgba(95, 251, 255, 0.32);
+    background: linear-gradient(90deg, rgba(95, 251, 255, 0.1), transparent);
+  }
+
+  .performance-choices__header span:not(:first-child) {
+    color: var(--teal);
+    font: 700 10px var(--data);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .onboarding .performance-choice strong,
+  .onboarding .performance-choice > span:not(:first-child),
+  .onboarding .performance-choice small {
+    font-size: 12px !important;
+  }
+
+  .simulation-card {
+    grid-template-columns: minmax(0, 1fr) 175px;
+  }
+
+  .simulation-caption {
+    padding: 11px 13px;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .simulation-card__telemetry {
+    padding: 14px 16px;
+  }
+
+  .simulation-card__telemetry div {
+    grid-template-columns: minmax(0, 1fr) 8px;
+    gap: 8px;
+    min-height: 49px;
+    padding: 10px 0;
+  }
+
+  .simulation-card__telemetry span {
+    color: var(--text-soft);
+    font: 700 11px var(--data);
+    letter-spacing: 0.04em;
+  }
+
+  .ready-panel__actions {
+    align-items: stretch;
+    gap: 18px;
+  }
+
+  .ready-panel__action-path {
+    display: grid;
+    grid-template-rows: auto 46px auto;
+    align-items: center;
+    justify-items: stretch;
+    min-width: 250px;
+    text-align: left;
+  }
+
+  .ready-panel__action-path > span {
+    margin-bottom: 6px;
+    color: var(--teal);
+    font: 700 10px var(--data);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .ready-panel__action-path > small {
+    margin-top: 6px;
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .ready-panel__action-path .action-button {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .ready-panel__action-path--blocked {
+    padding-right: 18px;
+    border-right: 1px solid rgba(255, 76, 95, 0.34);
+  }
+
+  .ready-panel__action-path--blocked > span {
+    color: var(--coral);
+  }
+
+  .ready-panel__action-path--blocked .action-button[data-disabled] {
+    opacity: 0.62;
+    border: 1px solid rgba(255, 76, 95, 0.42);
+    background: rgba(183, 42, 62, 0.08);
+  }
+
+  @media (max-width: 900px) {
+    .onboarding__content {
+      padding-bottom: 44px;
+      scroll-padding-bottom: 44px;
+    }
+
+    .onboarding__scroll-hint {
+      justify-content: flex-end;
+    }
+
+    .provider-continuation {
+      grid-template-columns: 1fr;
+      gap: 4px;
+    }
+
+    .choice-card:is([data-disabled], :disabled) {
+      opacity: 0.82;
+    }
+
+    .simulation-card {
+      grid-template-columns: 1fr;
+    }
+
+    .simulation-card__telemetry {
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+
+    .simulation-card__telemetry div {
+      grid-template-columns: 1fr;
+      gap: 7px;
+      justify-items: center;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .onboarding__content {
+      padding-bottom: 48px;
+      scroll-padding-bottom: 48px;
+    }
+
+    .onboarding__scroll-hint {
+      overflow: hidden;
+      white-space: nowrap;
+    }
+
+    .performance-choices__header,
+    .performance-choice {
+      grid-template-columns: 18px 1fr auto;
+    }
+
+    .performance-choices__header span:nth-child(4),
+    .performance-choices__header span:nth-child(5),
+    .performance-choice > span:nth-of-type(3),
+    .performance-choice > small {
+      display: none;
+    }
+
+    .performance-choice > span:nth-of-type(2) {
+      display: block;
+    }
+
+    .ready-panel__actions {
+      width: 100%;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .ready-panel__action-path {
+      width: 100%;
+      min-width: 0;
+    }
+
+    .ready-panel__action-path--blocked {
+      padding-right: 0;
+      padding-bottom: 12px;
+      border-right: 0;
+      border-bottom: 1px solid rgba(255, 76, 95, 0.34);
+    }
+  }
+}
+
+@layer settings-visual-acceptance {
+  /* Settings actions and privacy-path captions must remain readable at 100%. */
+  .settings-context > button {
+    min-height: 32px;
+    font-size: 12px;
+    font-weight: 650;
+  }
+
+  .privacy-node strong {
+    font-size: 13px;
+  }
+
+  .privacy-node span,
+  .privacy-route span {
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  .settings-main .setting-toggle__privacy {
+    font-size: 11px;
+    line-height: 1.4;
+  }
+
+  .provider-facts b,
+  .provider-guidance a,
+  .experiment-paths__grid span {
+    font-size: 11px;
+  }
+
+  .experiment-paths__head > p {
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  /* Preserve provider identity instead of converting useful copy to ellipses. */
+  .provider-directory__row {
+    min-height: 64px;
+  }
+
+  .provider-directory__row strong,
+  .provider-directory__row small {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .provider-directory__row strong {
+    line-height: 1.25;
+  }
+
+  .provider-directory__row small {
+    margin-top: 2px;
+    line-height: 1.35;
+  }
+
+  /* Disabled routes remain disabled while their configured value stays inspectable. */
+  .loadout-role select:disabled,
+  .manual-fallbacks select:disabled {
+    border-color: #71404d;
+    color: #b899a3;
+    opacity: 1;
+  }
+
+  :root[data-theme="light"][data-contrast="normal"]
+    .loadout-role
+    select:disabled,
+  :root[data-theme="light"][data-contrast="normal"]
+    .manual-fallbacks
+    select:disabled {
+    border-color: #9f6573;
+    color: #68444f;
+  }
+
+  :root[data-theme="light"][data-contrast="normal"] .fixture-label,
+  :root[data-theme="light"][data-contrast="normal"] .fixture-badge {
+    border-color: #a93750;
+    background: #fff1f4;
+    color: #97213c;
+  }
+
+  /* Large Text covers critical settings captions and actionable micro-labels. */
+  :root[data-large-text="true"] .settings-context > button,
+  :root[data-large-text="true"] .privacy-node strong,
+  :root[data-large-text="true"] .privacy-node span,
+  :root[data-large-text="true"] .privacy-route span,
+  :root[data-large-text="true"] .settings-main .setting-toggle__privacy,
+  :root[data-large-text="true"] .setting-toggle__description,
+  :root[data-large-text="true"] .slider-setting strong,
+  :root[data-large-text="true"] .slider-setting span,
+  :root[data-large-text="true"] .slider-setting small,
+  :root[data-large-text="true"] .settings-nav button,
+  :root[data-large-text="true"] .segmented-control button,
+  :root[data-large-text="true"] .provider-facts b,
+  :root[data-large-text="true"] .provider-guidance a,
+  :root[data-large-text="true"] .experiment-paths__head > p,
+  :root[data-large-text="true"] .experiment-paths__grid span,
+  :root[data-large-text="true"] .experiment-paths__grid strong,
+  :root[data-large-text="true"] .experiment-paths__grid small {
+    font-size: 17px !important;
+    line-height: 1.45;
+  }
+
+  @media (min-width: 641px) and (max-width: 900px) {
+    .command-button {
+      width: 112px;
+      padding-inline: 11px;
+    }
+
+    .command-button span {
+      display: inline;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .command-button kbd {
+      display: none;
+    }
+
+    .provider-layout {
+      grid-template-columns: 1fr;
+    }
+
+    .provider-directory {
+      max-height: 420px;
+      border-right: 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .experiment-paths__head {
+      display: block;
+    }
+
+    .experiment-paths__head > p {
+      max-width: none;
+      margin-top: 10px;
+      text-align: left;
+    }
+
+    .experiment-paths__grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .experiment-paths__grid a {
+      grid-column: auto;
+    }
+
+    .experiment-paths__grid strong,
+    .experiment-paths__grid small {
+      overflow-wrap: anywhere;
+    }
+  }
+}
+
+/*
+ * The legacy cyberpunk layer marks every <small> size important. Reopen that
+ * same layer so its large-text Settings exceptions can win without changing
+ * small text elsewhere in the application.
+ */
+@layer cyberpunk-overhaul {
+  :root[data-large-text="true"] .settings-main .slider-setting small,
+  :root[data-large-text="true"]
+    .providers-settings
+    .provider-directory__row
+    small,
+  :root[data-large-text="true"]
+    .providers-settings
+    .experiment-paths__grid
+    small,
+  :root[data-large-text="true"] .providers-settings .fallback-authorize small {
+    font-size: 17px !important;
+    line-height: 1.45;
+  }
+}
