@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en" data-demo-state="home">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Eclipse Harbor — Response Console 2.0</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="demo-root" class="desktop-shell" aria-label="Response Console demo">
+      <div class="wallpaper" aria-hidden="true">
+        <div class="wallpaper-glow"></div>
+        <div class="wallpaper-lines"></div>
+        <div class="wallpaper-mark">
+          <span class="mark-orbit"></span>
+          <span class="mark-core"></span>
+        </div>
+      </div>
+
+      <main class="console-window" id="console-window">
+        <header class="titlebar">
+          <div class="app-identity">
+            <div class="app-mark" aria-hidden="true"><i></i><i></i><i></i></div>
+            <div>
+              <strong>Response Console</strong>
+              <span>Interactive NPC Runtime 2.0</span>
+            </div>
+          </div>
+          <div class="titlebar-status">
+            <span class="privacy-pill"><i></i> Local scene · no capture saved</span>
+            <span class="window-button">—</span>
+            <span class="window-button">□</span>
+            <span class="window-button close">×</span>
+          </div>
+        </header>
+
+        <div class="app-layout">
+          <nav class="sidebar" aria-label="Primary">
+            <div class="sidebar-top">
+              <button class="nav-item selected" id="nav-home" data-view="home" aria-label="Home">
+                <span class="nav-icon home-icon"></span><span>Home</span>
+              </button>
+              <button class="nav-item" id="nav-games" data-view="games" aria-label="Games">
+                <span class="nav-icon games-icon"></span><span>Games</span><em>20</em>
+              </button>
+              <button class="nav-item" data-view="characters"><span class="nav-icon people-icon"></span><span>Characters</span></button>
+              <button class="nav-item" data-view="conversation"><span class="nav-icon chat-icon"></span><span>Conversation</span></button>
+              <button class="nav-item" data-view="presence"><span class="nav-icon presence-icon"></span><span>Presence</span></button>
+              <button class="nav-item" data-view="performance"><span class="nav-icon meter-icon"></span><span>Performance</span></button>
+              <button class="nav-item" data-view="models"><span class="nav-icon cube-icon"></span><span>Models</span></button>
+              <button class="nav-item" data-view="diagnostics"><span class="nav-icon pulse-icon"></span><span>Diagnostics</span></button>
+            </div>
+            <div class="sidebar-bottom">
+              <button class="nav-item" data-view="settings"><span class="nav-icon gear-icon"></span><span>Settings</span></button>
+              <button class="nav-item" data-view="help"><span class="nav-icon help-icon"></span><span>Help</span></button>
+              <div class="machine-card">
+                <div class="machine-glyph"><span></span></div>
+                <div><strong>Hybrid ready</strong><small>Privacy route locked</small></div>
+              </div>
+            </div>
+          </nav>
+
+          <section class="content-stage">
+            <div class="view home-view" data-panel="home">
+              <div class="page-kicker"><span></span>COMMAND DECK</div>
+              <div class="home-heading">
+                <div>
+                  <p class="eyebrow">GOOD EVENING, CAPTAIN</p>
+                  <h1>Your worlds are<br /><span>ready to respond.</span></h1>
+                  <p class="lede">Start a configured single-player game, then speak naturally. Your active privacy route stays visible at every step.</p>
+                </div>
+                <div class="system-orbit" aria-label="System ready">
+                  <svg viewBox="0 0 180 180" role="img" aria-label="All systems ready">
+                    <circle cx="90" cy="90" r="72" class="orbit-track"></circle>
+                    <circle cx="90" cy="90" r="72" class="orbit-progress"></circle>
+                    <circle cx="90" cy="90" r="55" class="orbit-inner"></circle>
+                  </svg>
+                  <div><strong>READY</strong><span>7/7 stages</span></div>
+                </div>
+              </div>
+
+              <div class="home-grid">
+                <article class="hero-card">
+                  <div class="card-sheen"></div>
+                  <div class="game-mini-art" aria-hidden="true">
+                    <div class="mini-moon"></div><div class="mini-beacon"></div><div class="mini-water"></div>
+                  </div>
+                  <div class="hero-copy">
+                    <div class="overline">LAST PLAYED · ORIGINAL SIMULATION</div>
+                    <h2>Eclipse Harbor</h2>
+                    <p>North Breakwater · Mara Venn</p>
+                    <div class="capability-row">
+                      <span>Voice</span><span>Memory</span><span>Visemes</span><span>Subtitles</span>
+                    </div>
+                  </div>
+                  <button class="ghost-action" id="home-open-games">Choose game <b>→</b></button>
+                </article>
+
+                <article class="metric-card signal-card">
+                  <div class="metric-head"><span>Signal path</span><em>HEALTHY</em></div>
+                  <div class="signal-line"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                  <strong>Hybrid / private</strong>
+                  <small>Local audio · hosted language</small>
+                </article>
+
+                <article class="metric-card hotkey-card">
+                  <div class="metric-head"><span>Push to talk</span><em>ACTIVE</em></div>
+                  <div class="keycap"><span>LEFT</span><strong>ALT</strong></div>
+                  <small>Hold in any supported game</small>
+                </article>
+              </div>
+            </div>
+
+            <div class="view games-view" data-panel="games" aria-hidden="true">
+              <div class="view-header">
+                <div><p class="eyebrow">GAME LIBRARY</p><h1>Choose a world</h1><p>Profiles define the safe, game-aware conversation boundary.</p></div>
+                <button class="small-action">＋ Add manually</button>
+              </div>
+              <div class="library-layout">
+                <div class="profile-list">
+                  <button class="game-card featured" id="game-eclipse">
+                    <div class="cover eclipse-cover"><span class="cover-moon"></span><span class="cover-tower"></span><b>EH</b></div>
+                    <div class="game-card-copy"><span class="cert-dot"></span><div><strong>Eclipse Harbor</strong><small>Original simulation · Replay verified</small></div><em>4 capabilities</em></div>
+                  </button>
+                  <button class="game-card muted-game"><div class="cover rune-cover">ᚱ</div><div class="game-card-copy"><span></span><div><strong>Northern Realms</strong><small>Profile installed</small></div><em>Offline</em></div></button>
+                  <button class="game-card muted-game"><div class="cover colony-cover">◫</div><div class="game-card-copy"><span></span><div><strong>Colony 47</strong><small>Profile installed</small></div><em>Audio</em></div></button>
+                </div>
+                <aside class="library-note">
+                  <span class="note-icon">i</span>
+                  <strong>Single-player boundary</strong>
+                  <p>Executable adapters remain disabled whenever a protected online mode is detected.</p>
+                </aside>
+              </div>
+            </div>
+
+            <div class="view profile-view" data-panel="profile" aria-hidden="true">
+              <div class="profile-hero">
+                <div class="profile-art" aria-hidden="true">
+                  <div class="profile-sky"></div><div class="profile-moon"></div><div class="profile-city"></div><div class="profile-beam"></div>
+                  <div class="profile-gradient"></div>
+                  <span class="fiction-label">ORIGINAL FICTIONAL PROFILE</span>
+                </div>
+                <div class="profile-copy">
+                  <div class="profile-back">← Game library</div>
+                  <p class="eyebrow">REPLAY VERIFIED · v2 PROFILE</p>
+                  <h1>Eclipse Harbor</h1>
+                  <p>A stormbound harbor where old signal towers remember every ship they failed to guide home.</p>
+                  <div class="character-chip"><span class="avatar-mini">MV</span><div><strong>Mara Venn</strong><small>Signal keeper · North Breakwater</small></div></div>
+                </div>
+              </div>
+              <div class="profile-actions">
+                <div class="profile-facts">
+                  <div><span>Identity</span><strong>Manual + profile evidence</strong></div>
+                  <div><span>Conversation</span><strong>Audio + subtitles</strong></div>
+                  <div><span>Animation</span><strong>Viseme replay</strong></div>
+                </div>
+                <button id="scan-game" class="primary-action"><span class="button-icon scan-symbol"></span><b>Scan this PC</b><small>Verify a safe simulation target</small></button>
+              </div>
+            </div>
+
+            <div class="view scan-view" data-panel="scanning" aria-hidden="true">
+              <div class="scan-shell">
+                <div class="radar">
+                  <i></i><i></i><i></i><span class="radar-sweep"></span><b class="radar-core"></b>
+                </div>
+                <p class="eyebrow">DETERMINISTIC COMPATIBILITY SCAN</p>
+                <h1 id="scan-title">Locating Eclipse Harbor…</h1>
+                <p id="scan-detail">Checking the isolated simulation fixture. No real game process is inspected in this demo.</p>
+                <div class="scan-steps">
+                  <div class="scan-step done"><span>✓</span><b>Profile signature</b><em>Verified</em></div>
+                  <div class="scan-step active" id="scan-step-target"><span></span><b>Simulation target</b><em>Scanning</em></div>
+                  <div class="scan-step" id="scan-step-safety"><span></span><b>Safety policy</b><em>Queued</em></div>
+                  <div class="scan-step" id="scan-step-media"><span></span><b>Capture & audio</b><em>Queued</em></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="view ready-view" data-panel="ready" aria-hidden="true">
+              <div class="ready-panel">
+                <div class="ready-check"><span>✓</span></div>
+                <p class="eyebrow">SAFE TO START</p>
+                <h1>Eclipse Harbor is ready</h1>
+                <p>Original simulation fixture · no anti-cheat · no networked game mode</p>
+                <div class="ready-routing">
+                  <span><i></i> Local microphone</span><b>→</b><span><i></i> Private memory</span><b>→</b><span><i></i> Hosted language</span>
+                </div>
+                <button id="start-simulation" class="launch-action"><span class="launch-ring">▶</span><span><strong>Start simulation</strong><small>Eclipse Harbor · Mara Venn</small></span></button>
+              </div>
+            </div>
+
+            <div class="view game-view" data-panel="game" aria-hidden="true">
+              <section class="game-world" aria-label="Original Eclipse Harbor simulated game scene">
+                <svg class="harbor-scene" viewBox="0 0 1100 740" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Moonlit fictional harbor with signal keeper Mara Venn">
+                  <defs>
+                    <linearGradient id="nightSky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#081823"/><stop offset="0.55" stop-color="#102d37"/><stop offset="1" stop-color="#17424a"/></linearGradient>
+                    <linearGradient id="sea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0d3940"/><stop offset="1" stop-color="#06171e"/></linearGradient>
+                    <linearGradient id="coat" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#26404a"/><stop offset="1" stop-color="#101d25"/></linearGradient>
+                    <radialGradient id="moonGlow"><stop offset="0" stop-color="#e5f5e8" stop-opacity=".82"/><stop offset=".28" stop-color="#95cfc6" stop-opacity=".26"/><stop offset="1" stop-color="#5da99a" stop-opacity="0"/></radialGradient>
+                    <filter id="soft"><feGaussianBlur stdDeviation="13"/></filter>
+                  </defs>
+                  <rect width="1100" height="740" fill="url(#nightSky)"/>
+                  <circle cx="844" cy="126" r="120" fill="url(#moonGlow)" filter="url(#soft)"/>
+                  <circle cx="844" cy="126" r="51" fill="#cee5dc"/><circle cx="828" cy="111" r="9" fill="#a9cac2" opacity=".38"/><circle cx="860" cy="142" r="14" fill="#a9cac2" opacity=".28"/>
+                  <g class="stars" fill="#d9ffff"><circle cx="90" cy="82" r="1.5"/><circle cx="190" cy="148" r="1"/><circle cx="310" cy="62" r="1.3"/><circle cx="446" cy="136" r=".9"/><circle cx="600" cy="74" r="1.4"/><circle cx="735" cy="176" r=".9"/><circle cx="1000" cy="75" r="1.2"/></g>
+                  <path d="M0 310 C115 270 175 292 260 260 C353 224 445 282 540 247 C624 216 698 246 766 219 C873 178 984 251 1100 203 L1100 440 L0 440Z" fill="#0b2028"/>
+                  <g class="city" fill="#173640"><path d="M0 350h93v-65h42v65h50v-111h74v111h47v-42h41v42h83v-96h58v96h45v-144h50v144h82v-76h58v76h69v-118h67v118h67v-53h62v53h112v95H0Z"/>
+                    <g fill="#6bc8ba" opacity=".48"><rect x="207" y="260" width="8" height="4"/><rect x="231" y="280" width="8" height="4"/><rect x="453" y="282" width="7" height="4"/><rect x="557" y="242" width="8" height="4"/><rect x="832" y="276" width="8" height="4"/><rect x="958" y="323" width="8" height="4"/></g>
+                  </g>
+                  <path d="M0 405 C183 382 330 427 508 396 C726 360 885 416 1100 382 V740H0Z" fill="url(#sea)"/>
+                  <g class="water-lines" fill="none" stroke-linecap="round"><path d="M34 452c139-32 201 25 352-5s230 20 350-5 242 12 334-2"/><path d="M75 515c116-22 193 25 310-1s246 22 374-4 203 12 288-2"/><path d="M0 582c150-29 240 29 374-2s211 23 355-4 262 16 371-4"/><path d="M39 650c166-23 257 27 420-3s224 20 354-2 193 12 267-3"/></g>
+                  <g class="lighthouse" transform="translate(90 206)"><path d="M0 244h178l-18-24H25Z" fill="#09181e"/><path d="M72 51h50l21 169H50Z" fill="#19353e"/><path d="M76 51h42l-5 169H61Z" fill="#204650"/><path d="M66 43h62v15H66Z" fill="#0a1a21"/><rect x="78" y="8" width="39" height="36" rx="3" fill="#162d35"/><rect x="84" y="14" width="27" height="21" fill="#9cf0d6"/><path d="M70 8h55l-14-13H85Z" fill="#0a171d"/><path class="beacon-ray" d="M111 14L490-72v86L111 31Z" fill="#86ead1" opacity=".12"/></g>
+                  <g class="mara" transform="translate(510 142)">
+                    <ellipse cx="190" cy="522" rx="182" ry="31" fill="#061318" opacity=".55"/>
+                    <path d="M102 263c17-40 50-63 88-64 47 1 82 25 98 70l55 253H34Z" fill="url(#coat)"/>
+                    <path d="M107 277l83 68 92-66 45 243H55Z" fill="#1b313a"/>
+                    <path d="M154 277l36 68 41-69-18 246h-47Z" fill="#13242c"/>
+                    <path d="M127 103c9-72 110-95 151-35 21 31 12 87-6 118-20 35-45 65-83 62-41-3-74-42-84-82-5-22-2-44 22-63Z" fill="#ac725a"/>
+                    <path d="M121 130c-18-86 48-122 103-112 48 8 79 57 61 117l-22-52-27 20-57-22-39 32-9 54-18-22Z" fill="#121b22"/>
+                    <path d="M239 39c15 17 24 44 22 69l23 28c10-45-5-89-45-97Z" fill="#233541"/>
+                    <path d="M124 218c20 24 43 33 67 34 26 0 51-11 73-38l15 37-88 59-79-62Z" fill="#915843"/>
+                    <path d="M158 143c11-8 23-9 35-2" stroke="#3a211e" stroke-width="5" fill="none" stroke-linecap="round"/><path d="M224 141c11-7 22-6 32 1" stroke="#3a211e" stroke-width="5" fill="none" stroke-linecap="round"/>
+                    <ellipse cx="176" cy="151" rx="5" ry="4" fill="#162f32"/><ellipse cx="240" cy="150" rx="5" ry="4" fill="#162f32"/>
+                    <path d="M209 150l-5 35 17 5" stroke="#7c493a" stroke-width="4" fill="none" stroke-linecap="round"/>
+                    <g class="mara-mouth"><path class="mouth-rest" d="M184 211c14 7 31 7 47-1" stroke="#5e302d" stroke-width="5" fill="none" stroke-linecap="round"/><ellipse class="mouth-open" cx="208" cy="213" rx="19" ry="5" fill="#381b20"/><path class="mouth-light" d="M191 210c10 4 22 4 34 0" stroke="#d68c78" stroke-width="2.5" fill="none" stroke-linecap="round"/></g>
+                    <path d="M128 131c-12 4-14 37 5 47" stroke="#925643" stroke-width="10" fill="none" stroke-linecap="round"/>
+                    <path d="M285 132c13 5 10 36-4 46" stroke="#925643" stroke-width="9" fill="none" stroke-linecap="round"/>
+                    <path d="M272 88c19 47 12 101-6 135" stroke="#243641" stroke-width="13" fill="none" stroke-linecap="round"/>
+                    <path d="M101 284c-42 41-72 106-88 185l60 22 59-159Z" fill="#213a43"/><path d="M286 295c46 48 73 116 87 184l-61 21-58-165Z" fill="#1c333c"/>
+                    <g class="signal-badge" transform="translate(235 333)"><circle r="22" fill="#102127" stroke="#5fd2be" stroke-width="2"/><path d="M-9 7L0-10 9 7M-5 2h10" fill="none" stroke="#7ce1cc" stroke-width="2"/></g>
+                  </g>
+                </svg>
+
+                <div class="game-topbar">
+                  <div class="location-tag"><span>◈</span><div><small>ECLIPSE HARBOR</small><strong>North Breakwater · 22:14</strong></div></div>
+                  <div class="simulation-label">ORIGINAL SIMULATION</div>
+                </div>
+
+                <div class="conversation-overlay">
+                  <div class="speaker-id"><span class="speaker-ring">MV</span><div><small>SIGNAL KEEPER</small><strong>Mara Venn</strong></div><em id="speaker-status">Nearby · selected</em></div>
+                  <div class="subtitle-stack">
+                    <div class="player-caption"><span>YOU</span><p id="player-line">Hold Left Alt to speak</p></div>
+                    <div class="npc-caption"><span>MARA</span><p id="mara-line">The north beacon is quiet. For now.</p></div>
+                  </div>
+                  <button class="ptt-control" id="ptt-button"><span class="ptt-icon"></span><div><small>PUSH TO TALK</small><strong>Hold Left Alt</strong></div><i></i></button>
+                </div>
+
+                <aside class="response-panel">
+                  <div class="response-heading"><div><small>LIVE SIGNAL</small><strong>Response Spine</strong></div><span id="spine-total">READY</span></div>
+                  <ol class="response-spine" id="response-spine">
+                    <li data-stage="listening"><i></i><div><strong>Listening</strong><small>Microphone armed</small></div><em>—</em></li>
+                    <li data-stage="transcribing"><i></i><div><strong>Transcribing</strong><small>Local speech</small></div><em>—</em></li>
+                    <li data-stage="identifying"><i></i><div><strong>Identifying</strong><small>Profile evidence</small></div><em>—</em></li>
+                    <li data-stage="remembering"><i></i><div><strong>Remembering</strong><small>Private memory</small></div><em>—</em></li>
+                    <li data-stage="responding"><i></i><div><strong>Responding</strong><small>Hosted language</small></div><em>—</em></li>
+                    <li data-stage="voicing"><i></i><div><strong>Voicing</strong><small>Local synthesis</small></div><em>—</em></li>
+                    <li data-stage="animating"><i></i><div><strong>Animating</strong><small>Anchored visemes</small></div><em>—</em></li>
+                  </ol>
+                  <div class="illustrative-hud">
+                    <div class="hud-label"><span></span>ILLUSTRATIVE · SIMULATED RUN</div>
+                    <div class="hud-grid"><div><small>FIRST VOICE</small><strong>1.2s</strong></div><div><small>FRAME IMPACT</small><strong>2.7%</strong></div><div><small>PRIVACY</small><strong>HYBRID</strong></div><div><small>CONFIDENCE</small><strong>0.96</strong></div></div>
+                  </div>
+                  <button id="stop-session" class="stop-action"><span>■</span> Stop session</button>
+                </aside>
+
+                <div class="voice-wave" id="voice-wave" aria-hidden="true"></div>
+                <div class="game-vignette"></div>
+              </section>
+
+              <div class="stop-card" id="stop-card">
+                <div class="stop-check">✓</div><div><small>SESSION CLOSED SAFELY</small><strong>Memory committed after delivered dialogue</strong></div>
+                <button id="close-simulation">Close simulation</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </main>
+
+      <footer class="taskbar" aria-hidden="true">
+        <div class="taskbar-apps"><span class="start-glyph">⊞</span><span class="search-glyph">⌕</span><span class="task-app active"><i></i></span><span class="task-app folder">▰</span></div>
+        <div class="taskbar-tray"><span>⌃</span><span>◉</span><span>▰</span><span>ENG</span><strong>10:24<small>8/28/2026</small></strong></div>
+      </footer>
+    </div>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

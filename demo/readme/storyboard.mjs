@@ -1,0 +1,35 @@
+export const DEMO_SPEC = Object.freeze({
+  title: 'Eclipse Harbor — Response Console 2.0',
+  character: 'Mara Venn',
+  viewport: Object.freeze({ width: 1440, height: 900, deviceScaleFactor: 1 }),
+  output: Object.freeze({ width: 960, fps: 15, colors: 256 }),
+  openingAnchorHoldSeconds: 0.1,
+  minimumCycleSeconds: 27,
+  presentationMinimumSeconds: 28,
+  presentationMaximumSeconds: 32,
+  expectedMinimumSeconds: 29,
+  expectedMaximumSeconds: 38,
+  cues: Object.freeze([
+    'console-ready',
+    'game-selected',
+    'scan-complete',
+    'simulation-started',
+    'player-speaking',
+    'mara-responding',
+    'session-stopped',
+    'console-restored',
+  ]),
+});
+
+export const SCENE_STATES = Object.freeze({
+  HOME: 'home',
+  GAMES: 'games',
+  PROFILE: 'profile',
+  SCANNING: 'scanning',
+  READY: 'ready',
+  GAME: 'game',
+  LISTENING: 'listening',
+  THINKING: 'thinking',
+  SPEAKING: 'speaking',
+  STOPPED: 'stopped',
+});

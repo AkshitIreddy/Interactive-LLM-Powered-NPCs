@@ -1,0 +1,43 @@
+# Version 2 risk register
+
+Scale: probability (P) and impact (I) are Low/Medium/High. Residual status remains open until the stated evidence exists.
+
+| ID | Risk | P | I | Prevention/mitigation | Trigger and fallback | Owner/evidence |
+| --- | --- | --- | --- | --- | --- | --- |
+| RK01 | Tauri/WebView overhead harms game frame pacing | M | H | Keep media out of WebView; minimize/suspend UI work; release-build spike | Frame gate violated → WinUI 3 shell spike using same Rust/native contracts | Desktop; ADR-0001 benchmark |
+| RK02 | Windows capture returns black/stale/protected frames or fails exclusive fullscreen | H | H | WGC/DXGI capability probes; profile mode matrix | Capture confidence/mode unsupported → borderless guidance or audio/subtitles | Media; rendered capture matrix |
+| RK03 | Overlay conflicts with anti-cheat/protected online mode | M | Critical | Detect/refuse ambiguity; data-only profile; no injection/hooks/adapters | Any protection/online uncertainty → capture/overlay off, no bypass | Security/profile refusal tests |
+| RK04 | Generic screen-space lip-sync looks artificial or consumes too much GPU | H | H | Fresh-frame mouth residual, benchmark baseline vs MuseTalk, strict visual/resource gates | Miss any gate → experimental disabled, audio/subtitles | Visual; blind review + 12 GB contention |
+| RK05 | External target/identity evidence varies across games and builds | H | M | Manual selection baseline; read-only screen evidence separately qualified; profiles remain data-only | Unknown/ambiguous identity → retain explicit selected/offscreen character and audio/subtitles | Profiles/media; selection and reacquisition fixtures |
+| RK06 | End-to-end latency misses conversational target | M | Critical | Persistent workers, streaming pipeline, parallel identity/retrieval, clause TTS, QPC tracing | Budget pressure → shorten response, reduce vision/effects/vector, hosted route only if pre-authorized | Runtime; heavy-load p50/p95 |
+| RK07 | Optional local lip-sync contends with game GPU/VRAM | H | Critical | API-first conversation; one explicit visual lease; disclose pack size/RAM/VRAM; live DXGI budget | FPS/budget trigger → disable/unload animation; audio/subtitles continue | Resource broker; cap/frame tests |
+| RK08 | Lip-sync pack recommendation is wrong across NVIDIA/AMD/Intel/drivers | H | H | Immutable per-backend packs; measured hardware matrix; attested self-test; explicit user choice | Self-test/resource mismatch → disable animation and continue audio/subtitles | Model manager; matrix results |
+| RK09 | Lip-sync model/library license blocks redistribution | M | Critical | Candidate ledger and transitive asset review before pack admission | Restriction/ambiguity → exclude or segregated direct upstream only if terms permit | Release/legal review; provenance manifest |
+| RK10 | Profile content infringes game/wiki/performer rights | M | Critical | Original/provenanced prose; no copied wiki, game media/audio or actor clones | Unknown provenance → record rejected/non-distributable | Content; per-record provenance |
+| RK11 | Provider catalog/model/pricing facts drift | H | M | Dynamic discovery + signed curated catalog; preserve exact user IDs; snapshot results | Model retired/capability changed → visible remediation, no silent remap | Providers; catalog/fixture tests |
+| RK12 | “OpenAI-compatible” endpoints differ semantically | H | M | Best-effort label, capability probes and conformance fixtures | Missing streaming/schema/cancel → disable that capability or adapter | Providers; endpoint contract report |
+| RK13 | Provider outage/rate limits interrupt play | M | H | Typed retryability, deadlines, circuit breakers, pre-authorized fallback UI | Circuit opens → exact authorized route or retryable error/local option | Providers; fault fixtures |
+| RK14 | Credentials leak to UI/logs/reports/children | L | Critical | Credential Manager, opaque refs, typed redaction, no command/env secrets, canaries | Canary detected → RC block, rotate credential, security incident review | Security; canary scan |
+| RK15 | Malicious model/profile archive escapes staging | L | Critical | TUF/hash/size, safe extractor, no scripts/commands, path/link/bomb rejection | Any validation fail → discard/quarantine staging, active version unchanged | Security/model manager fuzz |
+| RK16 | IPC malformed/stale output corrupts a new turn | M | H | Version/nonce/sequence/deadline/cancellation generation/limits | Old/malformed → discard, trace error; worker circuit if repeated | Runtime; Protobuf fuzz/reorder tests |
+| RK17 | Worker crash leaks GPU/audio/texture resources | M | H | Job Objects, explicit leases/handles/generations, kill-stage tests | Timeout/heartbeat loss → terminate/restart/quarantine and degrade | Supervisor; four-hour/kill tests |
+| RK18 | SQLite WAL/migration/disk-full loses memory | L | H | Transactions, immutable turns, backups, migration journal, checkpoint/disk tests | Migration/health fail → retain old DB/read-only recovery; no destructive retry | Memory; fault/migration suite |
+| RK19 | Legacy import executes pickle/code or merges wrong duplicate | L | Critical | Allowlist text parsers, reject binary/pickle, immutable dry-run, conflict rule | Unsafe/conflict → batch inactive with report | Migration; malicious fixture + rollback |
+| RK20 | Character identity switches after occlusion or across faces | H | H | Multi-signal temporal tracking, confidence lock, explicit selection | Confidence/ambiguity → keep selected/offscreen audio or ask user, never one-frame switch | Identity; deterministic replays |
+| RK21 | Webcam/privacy behavior surprises users | M | H | Off by default, explicit local-only consent/preview/device/retention, no demographics | Permission/device absent → neutral no-op, no repeated prompts mid-game | UI/security; privacy snapshots |
+| RK22 | Offline mode or local lip-sync unexpectedly makes network calls | L | Critical | Egress policy at runtime; pack self-test offline; deny-all CI/test | Any attempt → RC block and trace offending component | Security; firewall test |
+| RK23 | 20 profiles become shallow placeholders | M | H | Fixed completeness schema, authored-content/provenance and replay gates by waves | Any missing field/evidence → profile and RC fail, no reduced claim | Profiles; validator matrix |
+| RK24 | Replay evidence is mistaken for live certification | M | H | Separate `replay_verified`/`live_certified` fields in schema/UI/docs | No live evidence → UI labels replay only and uses conservative fallback | Profiles; schema/UI snapshot |
+| RK25 | Clean-machine packaging depends on developer toolchain/runtime | M | H | NSIS base contains required small runtime; optional lip-sync packs self-contained; clean VMs | Missing runtime → installer/pack RC fails, not user manual-install docs | Release; Win10/11 VM reports |
+| RK26 | UI becomes a generic dense developer dashboard | M | M | Task-based IA, progressive disclosure, Response Console tokens and rendered reviews | Novice cannot complete flow/visual review fails → redesign before RC | UI; screenshots/usability script |
+| RK27 | Accessibility regressions in custom visuals/overlay | M | H | Semantic React Aria components, status not color-only, high contrast/reduced motion/scaling | Axe/Narrator/keyboard/rendered failure → RC block | UI; accessibility report |
+| RK28 | Benchmarks are misleading or fabricated by simulation/vendor numbers | M | Critical | Immutable fixtures/manifests, exact environment, label vendor/synthetic, NOT MEASURED status | Missing reproducible run → remove claim, keep illustrative label only | Performance; result manifests |
+| RK29 | Public release occurs before user approval | L | Critical | No push/tag/release/public host/feed; local artifacts only; external-action gate | Any external action requested indirectly → stop and seek explicit approval | Release; command/action audit |
+| RK30 | Scope prevents truthful completion of full 2.0 in one iteration | H | H | Hard phased gates, requirement matrix, no placeholder substitutions, explicit fail/not measured | Remaining row → continue or record user-approved deferral; never call RC ready | Program; traceability report |
+
+## Risk review cadence
+
+- Re-evaluate P/I and mitigation evidence at each phase gate and before enabling any new profile, provider route, or lip-sync pack.
+- Any Critical impact risk without passing prevention/fallback evidence blocks the affected capability or RC.
+- Closed risks remain in the register with a link to immutable evidence; they are not deleted.
+- New risks discovered by testing become numbered rows before work continues, so the register—not a progress summary—remains authoritative.

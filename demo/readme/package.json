@@ -1,0 +1,23 @@
+{
+  "name": "@npc2/readme-demo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Deterministic, copyright-safe Eclipse Harbor README demo",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "dry-run": "node render.mjs --dry-run",
+    "contact-sheet": "node render.mjs --contact-sheet",
+    "render": "node render.mjs",
+    "refresh-evidence": "node refresh-evidence.mjs",
+    "verify": "node verify.mjs"
+  },
+  "devDependencies": {
+    "ffmpeg-static": "5.2.0",
+    "ffprobe-static": "3.1.0",
+    "gifsmith": "0.3.5"
+  }
+}

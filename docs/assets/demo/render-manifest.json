@@ -1,0 +1,213 @@
+{
+  "schemaVersion": 1,
+  "production": "Eclipse Harbor — Response Console 2.0",
+  "copyrightSafe": true,
+  "deterministic": true,
+  "illustrativePerformanceHud": true,
+  "startedAt": "2026-08-28T20:43:02.053Z",
+  "completedAt": "2026-08-28T20:54:05.328Z",
+  "source": {
+    "renderer": "demo/readme/render.mjs",
+    "scene": "demo/readme/scene/",
+    "storyboard": "demo/readme/storyboard.mjs",
+    "provenance": "docs/assets/demo/PROVENANCE.md"
+  },
+  "toolchain": {
+    "gifsmith": "0.3.5",
+    "capture": {
+      "mode": "deterministic",
+      "format": "png"
+    },
+    "encode": {
+      "width": 960,
+      "fps": 15,
+      "speed": 1.15,
+      "colors": 256,
+      "dither": "none",
+      "palette": "full",
+      "webpQuality": 91,
+      "mp4Crf": 16
+    },
+    "loop": {
+      "strategy": "anchor",
+      "minimumCycleSeconds": 27,
+      "openingAnchorHoldSeconds": 0.1
+    }
+  },
+  "theme": {
+    "source": "apps/control/src/styles.css exact-reference-overrides",
+    "geometry": "Cyberware field with clean Settings framing",
+    "tokens": {
+      "void": "#090308",
+      "wine": "#12070D",
+      "raisedWine": "#210A13",
+      "structuralCoral": "#FF4C5F",
+      "deepCoral": "#B72A3E",
+      "selectedCyan": "#5FFBFF",
+      "offWhite": "#F7F3F4",
+      "mutedRedGrey": "#BBA4AC"
+    },
+    "yellowUsage": "none"
+  },
+  "plan": {
+    "plannedSeconds": 29.4,
+    "cues": [
+      "console-ready",
+      "game-selected",
+      "scan-complete",
+      "simulation-started",
+      "player-speaking",
+      "mara-responding",
+      "session-stopped",
+      "console-restored"
+    ]
+  },
+  "result": {
+    "sourceFrames": 454,
+    "pacedFrames": 454,
+    "loopFrames": 453,
+    "durationSeconds": 30.2,
+    "loop": {
+      "strategy": "anchor",
+      "anchorFrame": 0,
+      "endFrame": 453,
+      "seamMSE": 0
+    },
+    "warnings": [
+      "Temporal review surfaced seven expected authored transitions; each strip received human review."
+    ]
+  },
+  "visualReview": {
+    "contactFramesInspected": 6,
+    "temporalStripsInspected": 9,
+    "findingsAcceptedAsExpected": [
+      "01: expected Home-to-Games route transition immediately after the scripted click.",
+      "02: expected Games-to-Profile route transition immediately after the scripted selection.",
+      "03: expected Profile-to-Scan transition and authored radar motion.",
+      "04: expected scan completion state change from animated progress to Ready.",
+      "05: expected Ready-to-Simulation route transition immediately after Start.",
+      "06: expected compatibility-scan stage progression while the radar remains active.",
+      "07: expected Simulation-to-Home route transition after the explicit Close action.",
+      "08: expected stop overlay arrival and final viseme/portrait settling.",
+      "09: expected compatibility-scan stage progression while the radar remains active."
+    ],
+    "approved": true
+  },
+  "media": {
+    "demo.gif": {
+      "bytes": 5050908,
+      "sha256": "4b85222b54a94c3bdb55c36657a0f2c6f9640def4c02809143b207eff2aaa613",
+      "codec": "gif",
+      "width": 960,
+      "height": 600,
+      "durationSeconds": 30.2,
+      "pixelFormat": "bgra",
+      "frameRate": "15/1",
+      "frames": 453
+    },
+    "demo.webp": {
+      "bytes": 3364864,
+      "sha256": "989dacebf63842b683c22f72ae80e19db0b84a75a07ae18a748eed0a3e94283d",
+      "codec": "webp",
+      "width": 960,
+      "height": 600,
+      "durationSeconds": 30.199,
+      "pixelFormat": null,
+      "frameRate": "15/1",
+      "frames": 339
+    },
+    "demo.mp4": {
+      "bytes": 2416982,
+      "sha256": "a27480c3cfeca36b72f3a2b8baff204fbe04e23d7ccd3a762f719d0da350a3a3",
+      "codec": "h264",
+      "width": 960,
+      "height": 600,
+      "durationSeconds": 30.2,
+      "pixelFormat": "yuv420p",
+      "frameRate": "15/1",
+      "frames": 453
+    }
+  },
+  "supplemental": {
+    "poster.png": {
+      "bytes": 172247,
+      "sha256": "6340f38e51ffb6227ada4bb3672af67eead66466fe856ebd56b92470cf468664"
+    },
+    "contact-sheet.png": {
+      "bytes": 306714,
+      "sha256": "251b4f4269fca048e15ab91db04bb15875cac5b8144ff9392993d89f00e74cc7"
+    },
+    "temporal-review-summary.md": {
+      "bytes": 1218,
+      "sha256": "494297dfab25d4fa2039e02587f4b36c65fd6ef222eda1eb71734bd2c4b1ccbb"
+    }
+  },
+  "notes": [
+    "All art, names, dialogue, and interface material are original to this repository.",
+    "The HUD values are illustrative and are not benchmark measurements.",
+    "Render throughput is intentionally omitted because deterministic capture decouples it from playback quality.",
+    "This manifest finalized a completed staged encode after animated-image duration probing was corrected; no recapture or re-encode occurred.",
+    "Dirty local source makes this mutable local-review evidence, not immutable release-candidate evidence."
+  ],
+  "evidence": {
+    "schemaVersion": 1,
+    "refreshedAt": "2026-08-28T23:52:49.201Z",
+    "classification": "mutable-local-review",
+    "immutableRcEvidence": false,
+    "reason": "The Git working tree is dirty. This evidence identifies mutable local source and is suitable for local review only; it is not immutable release-candidate evidence.",
+    "sourceIdentity": {
+      "git": {
+        "headCommit": "503ef3b64a921b6a11efa9e3e0432a0c3de3b619",
+        "branch": "feat/2.0-overhaul",
+        "dirty": true
+      },
+      "sourceDigest": {
+        "algorithm": "sha256:path-nul-bytes-nul:v1",
+        "sha256": "e82a0642b3c9420c072b7a4aecab08e615ac7c1443b4a33366eefd4e82687d35",
+        "fileCount": 17,
+        "files": [
+          "apps/control/src/styles.css",
+          "demo/readme/.gitignore",
+          "demo/readme/finalize-staged.mjs",
+          "demo/readme/package-lock.json",
+          "demo/readme/package.json",
+          "demo/readme/README.md",
+          "demo/readme/refresh-evidence.mjs",
+          "demo/readme/render.mjs",
+          "demo/readme/scene-config.mjs",
+          "demo/readme/scene/app.js",
+          "demo/readme/scene/index.html",
+          "demo/readme/scene/styles.css",
+          "demo/readme/source-identity.mjs",
+          "demo/readme/storyboard.mjs",
+          "demo/readme/test/demo.test.mjs",
+          "demo/readme/verify-lib.mjs",
+          "demo/readme/verify.mjs"
+        ],
+        "scopes": [
+          "demo/readme",
+          "apps/control/src/styles.css"
+        ],
+        "excludedSegments": [
+          ".render-work",
+          ".secrets",
+          "artifacts",
+          "dist",
+          "node_modules"
+        ]
+      },
+      "packageLocks": {
+        "demoPackageLock": {
+          "path": "demo/readme/package-lock.json",
+          "used": true,
+          "sha256": "4774a1ffe2f8970e2874840f3f90d86dd2b821649efee6e46a504263b5d4d624"
+        },
+        "rootPnpmLock": {
+          "path": "pnpm-lock.yaml",
+          "used": false,
+          "sha256": null
+        }
+      }
+    }
+  }
+}
