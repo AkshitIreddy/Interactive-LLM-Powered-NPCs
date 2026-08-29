@@ -29,7 +29,7 @@ pub enum WireRequest {
     Ping,
     Doctor,
     ValidateProfiles,
-    SimulateTurn(NativeSimulationRequest),
+    SimulateTurn(Box<NativeSimulationRequest>),
     Cancel { new_generation: u64 },
     Shutdown,
 }
@@ -191,7 +191,10 @@ impl ControlClient {
         &self,
         request: NativeSimulationRequest,
     ) -> Result<NativeSimulationResult, ClientError> {
-        match self.request(WireRequest::SimulateTurn(request)).await? {
+        match self
+            .request(WireRequest::SimulateTurn(Box::new(request)))
+            .await?
+        {
             WireResponse::Simulation { result } => Ok(result),
             _ => Err(ClientError::UnexpectedResponse),
         }
@@ -735,6 +738,32 @@ mod tests {
         // Serde's tagged unit variant rejects the extra content as a malformed
         // response rather than creating a generic map that could leak it.
         assert!(serde_json::from_slice::<WireResponse>(response).is_err());
+    }
+
+    #[test]
+    fn boxed_simulation_request_preserves_wire_shape() {
+        let request = WireRequest::SimulateTurn(Box::new(NativeSimulationRequest {
+            session_id: "session-1".into(),
+            turn_id: "turn-1".into(),
+            game_id: "eclipse-harbor".into(),
+            character_id: Some("mara-venn".into()),
+            generic_selection: None,
+            transcript: "Can you hear me?".into(),
+            locale: "en-US".into(),
+        }));
+
+        assert_eq!(
+            serde_json::to_value(request).expect("serialize simulation request"),
+            serde_json::json!({
+                "type": "simulate_turn",
+                "sessionId": "session-1",
+                "turnId": "turn-1",
+                "gameId": "eclipse-harbor",
+                "characterId": "mara-venn",
+                "transcript": "Can you hear me?",
+                "locale": "en-US"
+            })
+        );
     }
 
     #[tokio::test]
