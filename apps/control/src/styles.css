@@ -6087,6 +6087,9 @@
     :root[data-contrast="normal"] {
       --sidebar: 0px;
     }
+    .page:has(> .diagnostics-grid) .page-hero {
+      flex-wrap: wrap;
+    }
     .onboarding {
       grid-template-columns: 1fr;
     }
