@@ -22,6 +22,7 @@ fn fixture_transport(io_timeout: Duration) -> ElevenLabsWebSocketTransport {
     ElevenLabsWebSocketTransport::new(ElevenLabsWebSocketTransportConfig {
         connect_timeout: Duration::from_secs(2),
         io_timeout,
+        close_timeout: Duration::from_millis(50),
         max_frame_bytes: 64 * 1_024,
         max_message_bytes: 128 * 1_024,
         allow_insecure_loopback: true,
@@ -220,6 +221,46 @@ async fn receive_deadline_is_bounded_and_content_free() {
 }
 
 #[tokio::test]
+async fn close_aborts_an_unresponsive_peer_within_the_barge_in_budget() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind fixture server");
+    let address = listener.local_addr().expect("fixture address");
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("accept fixture client");
+        let _unresponsive_socket = tokio_tungstenite::accept_async(stream)
+            .await
+            .expect("upgrade fixture websocket");
+        // Intentionally do not poll the peer after the upgrade: it neither reads
+        // the close frame nor sends a close acknowledgement.
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    });
+
+    let transport = fixture_transport(Duration::from_secs(1));
+    let endpoint = format!("ws://{address}/v1/text-to-speech/voice-1/stream-input");
+    let mut connection = transport
+        .connect(fixture_request(endpoint))
+        .await
+        .expect("connect to local fixture");
+    let started = tokio::time::Instant::now();
+    connection
+        .close()
+        .await
+        .expect("close or hard-abort succeeds");
+    let elapsed = started.elapsed();
+    assert!(elapsed >= Duration::from_millis(30));
+    assert!(elapsed <= Duration::from_millis(150));
+    assert_eq!(
+        connection
+            .send(WireCommand::ElevenLabs(ElevenLabsCommand::Finish))
+            .await,
+        Err(TransportError::Closed)
+    );
+    assert_eq!(connection.receive().await, None);
+    server.await.expect("fixture server completes");
+}
+
+#[tokio::test]
 async fn oversized_provider_message_is_a_bounded_protocol_failure() {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
@@ -371,6 +412,14 @@ fn configuration_rejects_unbounded_or_zero_deadlines() {
         ElevenLabsWebSocketTransport::new(ElevenLabsWebSocketTransportConfig {
             max_frame_bytes: 2 * 1_048_576,
             max_message_bytes: 1_048_576,
+            ..ElevenLabsWebSocketTransportConfig::default()
+        })
+        .err(),
+        Some(TransportError::Protocol)
+    );
+    assert_eq!(
+        ElevenLabsWebSocketTransport::new(ElevenLabsWebSocketTransportConfig {
+            close_timeout: Duration::from_millis(151),
             ..ElevenLabsWebSocketTransportConfig::default()
         })
         .err(),

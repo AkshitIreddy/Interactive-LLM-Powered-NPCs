@@ -41,6 +41,8 @@ const MAX_HEADER_COUNT: usize = 32;
 const MAX_HEADER_VALUE_BYTES: usize = 8_192;
 const MAX_QUERY_PAIRS: usize = 32;
 const MAX_ALIGNMENT_ITEMS: usize = 16_384;
+const MAX_ALIGNMENT_TIMESTAMP_MS: u64 = 4 * 60 * 60 * 1_000;
+const MAX_CHARACTER_DURATION_MS: u64 = 60_000;
 const MAX_COMMAND_BYTES: usize = 128 * 1_024;
 const DEFAULT_MAX_MESSAGE_BYTES: usize = 2 * 1_048_576;
 const OFFICIAL_HOST: &str = "api.elevenlabs.io";
@@ -50,8 +52,11 @@ const OFFICIAL_HOST: &str = "api.elevenlabs.io";
 pub struct ElevenLabsWebSocketTransportConfig {
     /// Maximum time allowed for DNS, TCP, TLS and the WebSocket upgrade.
     pub connect_timeout: Duration,
-    /// Maximum time allowed for one send, receive or close operation.
+    /// Maximum time allowed for one send or receive operation.
     pub io_timeout: Duration,
+    /// Graceful close budget before the socket is authoritatively dropped.
+    /// This is a separate barge-in boundary and may never exceed 150 ms.
+    pub close_timeout: Duration,
     /// Maximum decoded WebSocket frame size accepted from the provider.
     pub max_frame_bytes: usize,
     /// Maximum reassembled WebSocket message size accepted from the provider.
@@ -65,6 +70,7 @@ impl Default for ElevenLabsWebSocketTransportConfig {
         Self {
             connect_timeout: Duration::from_secs(15),
             io_timeout: Duration::from_secs(30),
+            close_timeout: Duration::from_millis(100),
             max_frame_bytes: DEFAULT_MAX_MESSAGE_BYTES,
             max_message_bytes: DEFAULT_MAX_MESSAGE_BYTES,
             allow_insecure_loopback: false,
@@ -78,6 +84,8 @@ impl ElevenLabsWebSocketTransportConfig {
             || self.connect_timeout > Duration::from_secs(60)
             || self.io_timeout.is_zero()
             || self.io_timeout > Duration::from_secs(180)
+            || self.close_timeout.is_zero()
+            || self.close_timeout > Duration::from_millis(150)
             || !(1_024..=8 * 1_048_576).contains(&self.max_frame_bytes)
             || !(1_024..=8 * 1_048_576).contains(&self.max_message_bytes)
             || self.max_frame_bytes > self.max_message_bytes
@@ -134,8 +142,9 @@ impl TtsTransport for ElevenLabsWebSocketTransport {
             .map_err(|_| TransportError::Timeout)?
             .map_err(map_websocket_error)?;
         Ok(Box::new(ElevenLabsWebSocketConnection {
-            socket,
+            socket: Some(socket),
             io_timeout: self.config.io_timeout,
+            close_timeout: self.config.close_timeout,
             max_message_bytes: self.config.max_message_bytes,
             pending: VecDeque::new(),
             terminal_received: false,
@@ -296,8 +305,9 @@ fn is_websocket_managed_header(name: &HeaderName) -> bool {
 }
 
 struct ElevenLabsWebSocketConnection {
-    socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
+    socket: Option<WebSocketStream<MaybeTlsStream<TcpStream>>>,
     io_timeout: Duration,
+    close_timeout: Duration,
     max_message_bytes: usize,
     pending: VecDeque<WireEvent>,
     terminal_received: bool,
@@ -316,7 +326,8 @@ impl TtsConnection for ElevenLabsWebSocketConnection {
                 .map_err(|_| TransportError::Protocol)?
                 .into(),
         );
-        let result = tokio::time::timeout(self.io_timeout, self.socket.send(message))
+        let socket = self.socket.as_mut().ok_or(TransportError::Closed)?;
+        let result = tokio::time::timeout(self.io_timeout, socket.send(message))
             .await
             .map_err(|_| TransportError::Timeout)?
             .map_err(map_websocket_error);
@@ -335,7 +346,11 @@ impl TtsConnection for ElevenLabsWebSocketConnection {
             return None;
         }
         loop {
-            let next = match tokio::time::timeout(self.io_timeout, self.socket.next()).await {
+            let socket = match self.socket.as_mut() {
+                Some(socket) => socket,
+                None => return Some(Err(TransportError::Closed)),
+            };
+            let next = match tokio::time::timeout(self.io_timeout, socket.next()).await {
                 Err(_) => return Some(Err(TransportError::Timeout)),
                 Ok(None) => return Some(Err(TransportError::Closed)),
                 Ok(Some(Err(error))) => return Some(Err(map_websocket_error(error))),
@@ -349,7 +364,10 @@ impl TtsConnection for ElevenLabsWebSocketConnection {
                     }
                 }
                 Message::Ping(payload) => {
-                    let pong = self.socket.send(Message::Pong(payload));
+                    let Some(socket) = self.socket.as_mut() else {
+                        return Some(Err(TransportError::Closed));
+                    };
+                    let pong = socket.send(Message::Pong(payload));
                     match tokio::time::timeout(self.io_timeout, pong).await {
                         Err(_) => return Some(Err(TransportError::Timeout)),
                         Ok(Err(error)) => return Some(Err(map_websocket_error(error))),
@@ -376,10 +394,33 @@ impl TtsConnection for ElevenLabsWebSocketConnection {
             return Ok(());
         }
         self.closed = true;
-        tokio::time::timeout(self.io_timeout, self.socket.close(None))
-            .await
-            .map_err(|_| TransportError::Timeout)?
-            .map_err(map_websocket_error)
+        let Some(mut socket) = self.socket.take() else {
+            return Ok(());
+        };
+        let close = tokio::time::timeout(self.close_timeout, graceful_close(&mut socket)).await;
+        // `socket` is dropped on every branch. A stalled graceful close therefore
+        // becomes a hard transport abort within the cancellation budget.
+        match close {
+            Err(_) | Ok(Ok(())) => Ok(()),
+            Ok(Err(WebSocketError::ConnectionClosed | WebSocketError::AlreadyClosed)) => Ok(()),
+            Ok(Err(error)) => Err(map_websocket_error(error)),
+        }
+    }
+}
+
+async fn graceful_close(
+    socket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+) -> Result<(), WebSocketError> {
+    socket.close(None).await?;
+    loop {
+        match socket.next().await {
+            None | Some(Ok(Message::Close(_))) => return Ok(()),
+            Some(Err(WebSocketError::ConnectionClosed | WebSocketError::AlreadyClosed)) => {
+                return Ok(())
+            }
+            Some(Err(error)) => return Err(error),
+            Some(Ok(_)) => {}
+        }
     }
 }
 
@@ -518,9 +559,31 @@ fn word_alignment(alignment: CharacterAlignment) -> Result<Vec<WordAlignment>, T
         || alignment
             .chars
             .iter()
-            .any(|value| value.is_empty() || value.len() > 32)
+            .any(|value| value.chars().count() != 1)
     {
         return Err(TransportError::Protocol);
+    }
+
+    let mut previous_start = 0;
+    let mut previous_end = 0;
+    for (index, (&start, &duration)) in alignment
+        .char_start_times_ms
+        .iter()
+        .zip(&alignment.char_durations_ms)
+        .enumerate()
+    {
+        let Some(end) = start.checked_add(duration) else {
+            return Err(TransportError::Protocol);
+        };
+        if start > MAX_ALIGNMENT_TIMESTAMP_MS
+            || duration > MAX_CHARACTER_DURATION_MS
+            || end > MAX_ALIGNMENT_TIMESTAMP_MS
+            || (index > 0 && (start < previous_start || end < previous_end))
+        {
+            return Err(TransportError::Protocol);
+        }
+        previous_start = start;
+        previous_end = end;
     }
 
     let mut words = Vec::new();
@@ -659,6 +722,43 @@ mod tests {
         assert_eq!(words[0].end_ms, 20);
         assert_eq!(words[1].word, "NPC");
         assert_eq!(words[1].source_text_start, Some(3));
+    }
+
+    #[test]
+    fn word_alignment_rejects_multi_scalar_and_unbounded_timing() {
+        let multi_scalar = CharacterAlignment {
+            chars: vec!["ab".to_owned()],
+            char_start_times_ms: vec![0],
+            char_durations_ms: vec![10],
+        };
+        assert_eq!(word_alignment(multi_scalar), Err(TransportError::Protocol));
+
+        let non_monotonic = CharacterAlignment {
+            chars: vec!["a".to_owned(), "b".to_owned()],
+            char_start_times_ms: vec![100, 90],
+            char_durations_ms: vec![10, 10],
+        };
+        assert_eq!(word_alignment(non_monotonic), Err(TransportError::Protocol));
+
+        let excessive_duration = CharacterAlignment {
+            chars: vec!["a".to_owned()],
+            char_start_times_ms: vec![0],
+            char_durations_ms: vec![MAX_CHARACTER_DURATION_MS + 1],
+        };
+        assert_eq!(
+            word_alignment(excessive_duration),
+            Err(TransportError::Protocol)
+        );
+
+        let excessive_timestamp = CharacterAlignment {
+            chars: vec!["a".to_owned()],
+            char_start_times_ms: vec![MAX_ALIGNMENT_TIMESTAMP_MS + 1],
+            char_durations_ms: vec![0],
+        };
+        assert_eq!(
+            word_alignment(excessive_timestamp),
+            Err(TransportError::Protocol)
+        );
     }
 
     #[test]

@@ -30,6 +30,8 @@ impl Default for CartesiaConfig {
 #[derive(Clone, Debug)]
 pub struct ElevenLabsConfig {
     pub endpoint_root: String,
+    /// `false` requests account-gated Zero Retention Mode. Ordinary routes
+    /// should leave this `true` unless the selected account supports ZRM.
     pub enable_logging: bool,
     pub inactivity_timeout_seconds: u16,
 }
@@ -38,7 +40,7 @@ impl Default for ElevenLabsConfig {
     fn default() -> Self {
         Self {
             endpoint_root: "wss://api.elevenlabs.io/v1/text-to-speech".into(),
-            enable_logging: false,
+            enable_logging: true,
             inactivity_timeout_seconds: 60,
         }
     }
@@ -134,6 +136,29 @@ impl ProviderFlavor {
                 cancellation: true,
                 usage: false,
             },
+        }
+    }
+
+    fn validate_session_request(&self, request: &TtsSessionRequest) -> Result<(), &'static str> {
+        if !matches!(self, Self::ElevenLabs(_)) {
+            return Ok(());
+        }
+        let supported = request.output.channels == 1
+            && match request.output.encoding {
+                crate::PcmEncoding::PcmS16Le => {
+                    matches!(
+                        request.output.sample_rate_hz,
+                        16_000 | 22_050 | 24_000 | 44_100
+                    )
+                }
+                crate::PcmEncoding::MuLaw | crate::PcmEncoding::ALaw => {
+                    request.output.sample_rate_hz == 8_000
+                }
+            };
+        if supported {
+            Ok(())
+        } else {
+            Err("unsupported_output_format")
         }
     }
 
@@ -412,6 +437,9 @@ impl HostedAdapter {
             .validate()
             .and_then(|_| request.output.validate().map(|_| ()))
             .and_then(|_| request.clause_policy.validate())
+            .map_err(|code| invalid(provider_id, code))?;
+        self.flavor
+            .validate_session_request(&request)
             .map_err(|code| invalid(provider_id, code))?;
         if request.locale.trim().is_empty() || request.locale.len() > 35 {
             return Err(invalid(provider_id, "invalid_locale"));

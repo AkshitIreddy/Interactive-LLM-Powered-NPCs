@@ -65,6 +65,114 @@ async fn credential_is_resolved_once_at_connect_time_and_never_cloned() {
     assert_eq!(resolver.resolution_count(), 2);
 }
 
+#[tokio::test]
+async fn default_elevenlabs_route_uses_ordinary_account_logging() {
+    let transport = Arc::new(MockTransport::default());
+    let resolver: Arc<dyn ProviderCredentialResolver> =
+        Arc::new(OneShotCredential::new("fixture-elevenlabs-key"));
+    let provider = ElevenLabsProvider::new(
+        Arc::clone(&transport) as Arc<dyn TtsTransport>,
+        resolver,
+        bindings(),
+        ElevenLabsConfig::default(),
+    );
+    let _session = provider
+        .start_session(request())
+        .await
+        .expect("default ElevenLabs route starts");
+    let opens = transport.opens();
+    assert_eq!(opens.len(), 1);
+    assert_eq!(
+        opens[0].query.get("enable_logging").map(String::as_str),
+        Some("true")
+    );
+}
+
+#[tokio::test]
+async fn elevenlabs_rejects_mislabeled_audio_formats_before_credential_or_network_io() {
+    let invalid_outputs = [
+        AudioFormat {
+            encoding: PcmEncoding::PcmS16Le,
+            sample_rate_hz: 24_000,
+            channels: 2,
+        },
+        AudioFormat {
+            encoding: PcmEncoding::PcmS16Le,
+            sample_rate_hz: 48_000,
+            channels: 1,
+        },
+        AudioFormat {
+            encoding: PcmEncoding::MuLaw,
+            sample_rate_hz: 16_000,
+            channels: 1,
+        },
+        AudioFormat {
+            encoding: PcmEncoding::ALaw,
+            sample_rate_hz: 16_000,
+            channels: 1,
+        },
+    ];
+
+    for output in invalid_outputs {
+        let transport = Arc::new(MockTransport::default());
+        let resolver = Arc::new(OneShotCredential::new("unused-fixture-key"));
+        let provider = ElevenLabsProvider::new(
+            Arc::clone(&transport) as Arc<dyn TtsTransport>,
+            Arc::clone(&resolver) as Arc<dyn ProviderCredentialResolver>,
+            bindings(),
+            ElevenLabsConfig::default(),
+        );
+        let mut invalid = request();
+        invalid.output = output;
+        let error = provider
+            .start_session(invalid)
+            .await
+            .err()
+            .expect("unsupported output must be rejected");
+        assert_eq!(error.kind, TtsErrorKind::InvalidRequest);
+        assert_eq!(error.code, "unsupported_output_format");
+        assert!(transport.opens().is_empty());
+        assert_eq!(resolver.resolution_count(), 0);
+    }
+}
+
+#[tokio::test]
+async fn elevenlabs_accepts_supported_mono_output_formats() {
+    for (encoding, sample_rate_hz, expected) in [
+        (PcmEncoding::PcmS16Le, 16_000, "pcm_16000"),
+        (PcmEncoding::PcmS16Le, 22_050, "pcm_22050"),
+        (PcmEncoding::PcmS16Le, 24_000, "pcm_24000"),
+        (PcmEncoding::PcmS16Le, 44_100, "pcm_44100"),
+        (PcmEncoding::MuLaw, 8_000, "ulaw_8000"),
+        (PcmEncoding::ALaw, 8_000, "alaw_8000"),
+    ] {
+        let transport = Arc::new(MockTransport::default());
+        let resolver: Arc<dyn ProviderCredentialResolver> =
+            Arc::new(OneShotCredential::new("fixture-telephony-key"));
+        let provider = ElevenLabsProvider::new(
+            Arc::clone(&transport) as Arc<dyn TtsTransport>,
+            resolver,
+            bindings(),
+            ElevenLabsConfig::default(),
+        );
+        let mut supported = request();
+        supported.output = AudioFormat {
+            encoding,
+            sample_rate_hz,
+            channels: 1,
+        };
+        let _session = provider
+            .start_session(supported)
+            .await
+            .expect("supported output route starts");
+        let opens = transport.opens();
+        assert_eq!(
+            opens[0].query.get("output_format").map(String::as_str),
+            Some(expected)
+        );
+    }
+}
+
 fn identity() -> SessionIdentity {
     SessionIdentity {
         session_id: "session-7".into(),
