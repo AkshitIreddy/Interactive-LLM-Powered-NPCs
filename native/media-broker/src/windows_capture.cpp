@@ -3,6 +3,7 @@
 #include "windows_capture.hpp"
 
 #include <Windows.Graphics.Capture.Interop.h>
+#include <d3d11_4.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Graphics.Capture.h>
@@ -23,6 +24,8 @@ using namespace winrt::Windows::Graphics::DirectX::Direct3D11;
 
 struct GraphicsCapture::Impl {
     std::mutex mutex;
+    ComPtr<ID3D11Device> d3d_device;
+    ComPtr<ID3D11DeviceContext> d3d_context;
     IDirect3DDevice direct3d_device{nullptr};
     GraphicsCaptureItem item{nullptr};
     Direct3D11CaptureFramePool frame_pool{nullptr};
@@ -53,16 +56,31 @@ struct GraphicsCapture::Impl {
                 return;
             }
             const auto content_size = frame.ContentSize();
-            ComPtr<ID3D11Texture2D> texture;
+            ComPtr<ID3D11Texture2D> frame_texture;
             auto access = frame.Surface().as<
                 ::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
-            winrt::check_hresult(access->GetInterface(IID_PPV_ARGS(&texture)));
+            winrt::check_hresult(access->GetInterface(IID_PPV_ARGS(&frame_texture)));
+
+            D3D11_TEXTURE2D_DESC description{};
+            frame_texture->GetDesc(&description);
+            description.Usage = D3D11_USAGE_DEFAULT;
+            description.CPUAccessFlags = 0;
+            description.MiscFlags = 0;
+
+            ComPtr<ID3D11Texture2D> owned_texture;
+            winrt::check_hresult(
+                d3d_device->CreateTexture2D(&description, nullptr, &owned_texture));
+            d3d_context->CopyResource(owned_texture.Get(), frame_texture.Get());
+
+            // The frame pool owns frame_texture. Windows explicitly forbids retaining
+            // its surface after the frame is checked back in, so publish only the
+            // independent copy after returning the WGC frame to the pool.
             frame.Close();
 
             {
                 std::scoped_lock lock(mutex);
                 latest = OwnedCaptureFrame{
-                    std::move(texture),
+                    std::move(owned_texture),
                     {content_size.Width, content_size.Height},
                     std::chrono::steady_clock::now(),
                     ++sequence,
@@ -99,6 +117,13 @@ bool GraphicsCapture::start(const HWND window, ID3D11Device* device, Failure& fa
     }
 
     try {
+        impl_->d3d_device = device;
+        impl_->d3d_device->GetImmediateContext(&impl_->d3d_context);
+        ComPtr<ID3D11Multithread> multithread;
+        if (SUCCEEDED(impl_->d3d_context.As(&multithread))) {
+            multithread->SetMultithreadProtected(TRUE);
+        }
+
         ComPtr<IDXGIDevice> dxgi_device;
         winrt::check_hresult(device->QueryInterface(IID_PPV_ARGS(&dxgi_device)));
         ComPtr<IInspectable> inspectable;
@@ -177,6 +202,8 @@ void GraphicsCapture::stop() noexcept {
     impl_->frame_pool = nullptr;
     impl_->item = nullptr;
     impl_->direct3d_device = nullptr;
+    impl_->d3d_context.Reset();
+    impl_->d3d_device.Reset();
     impl_->closed.store(false, std::memory_order_release);
     std::scoped_lock lock(impl_->mutex);
     impl_->latest.reset();
