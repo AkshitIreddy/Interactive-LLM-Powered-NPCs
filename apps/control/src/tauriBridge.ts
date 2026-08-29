@@ -357,7 +357,8 @@ export async function startNativeSimulation(
   const events = new Channel<unknown>();
   events.onmessage = (wireEvent) => {
     const event = normalizeNativeSimulationEvent(wireEvent);
-    if (event) onEvent(event);
+    if (!event) return;
+    onEvent(event);
   };
   await invoke("start_simulation", {
     request: {

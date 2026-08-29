@@ -17,7 +17,7 @@ vi.mock("./tauriBridge", () => ({
   loadNativeBootstrapHealth: bridge.loadBootstrap,
   syntheticReplayCaptureAvailability: () => ({
     available: false,
-    reason: "nativeCommandNotConfigured",
+    reason: "releaseBuild",
   }),
   runSyntheticReplayCapture: vi.fn(),
   readSyntheticReplayCaptureDiagnostics: vi.fn(),
@@ -58,6 +58,7 @@ const authenticatedBootstrap = {
       renderAudioAvailable: true,
       detail: "Authenticated broker ready.",
     },
+    capabilities: { debugSyntheticReplayCapture: true },
   },
 };
 
@@ -92,6 +93,9 @@ describe("native simulation evidence in the control UI", () => {
 
     expect(
       await screen.findByText("Runtime and media broker authenticated"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("synthetic-replay-capture-control"),
     ).toBeInTheDocument();
     await user.click(
       screen.getByRole("button", { name: "Run a private simulation" }),

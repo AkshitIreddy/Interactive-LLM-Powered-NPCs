@@ -14,6 +14,14 @@ describe("P0 honesty boundaries", () => {
     expect(document.body).not.toHaveTextContent("ready to answer");
   });
 
+  it("does not reveal debug capture controls from a release/browser query", () => {
+    window.history.replaceState(null, "", "/?syntheticReplayTest=1");
+    render(<App />);
+    expect(
+      screen.queryByTestId("synthetic-replay-capture-control"),
+    ).not.toBeInTheDocument();
+  });
+
   it("labels every static game profile as authored and not live-certified", () => {
     window.history.replaceState(null, "", "/?page=games");
     render(<App />);

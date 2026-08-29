@@ -420,9 +420,6 @@ function ResponseConsoleApp() {
             startSimulation={startSimulation}
             simulationEvidence={simulationEvidence}
             nativeBootstrap={nativeBootstrap}
-            showSyntheticReplayCaptureTest={
-              params.get("syntheticReplayTest") === "1"
-            }
           />
         </main>
       </div>

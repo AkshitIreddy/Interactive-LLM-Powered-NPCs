@@ -44,7 +44,6 @@ interface PageProps {
   startSimulation: () => void;
   simulationEvidence: SimulationEvidence;
   nativeBootstrap: NativeBootstrapHealth;
-  showSyntheticReplayCaptureTest: boolean;
 }
 
 export function CurrentPage(props: PageProps) {
@@ -149,7 +148,6 @@ function HomePage({
   startSimulation,
   simulationEvidence,
   nativeBootstrap,
-  showSyntheticReplayCaptureTest,
 }: PageProps) {
   const active = isSimulating || state === "active";
   const nativeEvidence = simulationEvidence.source === "nativeRuntime";
@@ -294,7 +292,7 @@ function HomePage({
           </div>
         </div>
       </section>
-      {showSyntheticReplayCaptureTest && debugCaptureEnabled && (
+      {debugCaptureEnabled && (
         <SyntheticReplayCaptureControl
           availability={syntheticReplayCaptureAvailability(true)}
         />
