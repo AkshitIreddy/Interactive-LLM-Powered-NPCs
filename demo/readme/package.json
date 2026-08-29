@@ -8,6 +8,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "pretest": "npm ci --offline",
     "test": "node --test",
     "dry-run": "node render.mjs --dry-run",
     "contact-sheet": "node render.mjs --contact-sheet",
