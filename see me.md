@@ -46,24 +46,29 @@ described as real spoken/lip-synced application E2E.
 
 ### Current state and exact next steps
 
-1. Respect `C:\Users\akshi\Desktop\Code Palace\gpu use.txt`. It is currently
-   owned by another real-E2E workload (`yes`); do not clear or contend with it.
-2. When it returns to `no` and `nvidia-smi` shows no compute workload, run
-   `run_onnx_qualification.sh` from the test root. It reserves the GPU only
-   around CUDA execution and restores `no` in `trap` cleanup.
-3. Verify that ONNX Runtime actually uses `CUDAExecutionProvider`; reject CPU
-   fallback. Inspect MP4 stream metadata/duration, PCM metrics and multiple
-   mouth frames. Run a second 720p Eclipse Harbor video pass only after the
-   static-face pass has passed visual review.
-4. If the ONNX result fails quality/safety/latency, preserve its report then
-   clean only its exact test cache. Do not promote any Wav2Lip-derived artifact
-   into the installer because its upstream non-commercial license and this
-   conversion’s provenance both disqualify it.
-5. For a truthful live application test, implement the bounded Windows-only
+1. The real ONNX runs are now complete, CUDA-gated, and released the shared GPU
+   file to `no` after each bounded interval. The accepted **offline** full
+   exchange is:
+   `C:\Users\akshi\AppData\Local\InteractiveNPCsTests\wav2lip-qualification-20260829T163112Z\outputs\eclipse-harbor-full-exchange-offline.mp4`.
+   It starts with an explicit typed player question, begins Mara's actual stock
+   TTS at 2620 ms, and shows local ONNX mouth motion. It is visibly labeled
+   original synthetic/offline/not-live-app-E2E.
+2. Retain the final only as functional evidence. Blind review found the mouth
+   changes clear and identity stable, but lower-face detail remains soft. The
+   candidate fails polished/prod visual acceptance and must never enter a pack,
+   installer, default visual mode, benchmark claim, or live-game claim.
+3. Preserve the exact rejected artifacts for the adversarial record: unsafe
+   official TorchScript checkpoint, short 238-frame mux, full-face blur, green
+   intro, and moving-mouth-before-audio intro. Do not reuse any of them.
+4. For a truthful live application test, implement the bounded Windows-only
    runtime-host qualification path: concrete ElevenLabs transport, Runtime
    Core TTS bridge, dev-only WASAPI `AudioSink`, explicit live-audio
    authorization/provider/voice selection, and an honest `lip_sync_unavailable`
    state. Production audio still requires the planned broker shared-PCM mapping.
+5. Before any later CUDA experiment, re-read
+   `C:\Users\akshi\Desktop\Code Palace\gpu use.txt`, require `no`, inspect
+   `nvidia-smi` for compute ownership, use the test-root mutex/wrapper, and
+   restore `no` in cleanup. Do not contend with another project.
 
 The adversarial ledger for this continuation is
 `artifacts/actual-ui-demo/ADVERSARIAL_REFINEMENT_LEDGER.md`.
