@@ -58,8 +58,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .play_submitted(&identity, 1, Box::pin(stream), CancellationToken::new())
         .await?;
     sink.stop(&identity).await?;
-    if !receipt.completed {
-        return Err("PCM was not fully submitted to WASAPI callbacks".into());
+    if !receipt.source_submission_complete || !receipt.endpoint_drain_complete {
+        return Err("PCM submission or bounded endpoint drain did not complete".into());
     }
     if receipt.source_duration == Duration::ZERO {
         return Err("input contained no PCM frames".into());
