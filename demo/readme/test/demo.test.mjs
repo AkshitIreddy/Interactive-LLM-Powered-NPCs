@@ -5,7 +5,11 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { createScene } from '../scene-config.mjs';
 import { DEMO_SPEC } from '../storyboard.mjs';
-import { createSourceIdentity } from '../source-identity.mjs';
+import {
+  createSourceIdentity,
+  RENDER_INPUT_PATHS,
+  verifyPortableEvidenceBinding,
+} from '../source-identity.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const demoRoot = path.resolve(here, '..');
@@ -18,7 +22,7 @@ test('locks the approved deterministic publication contract', () => {
   assert.equal(DEMO_SPEC.presentationMaximumSeconds, 32);
 });
 
-test('source identity binds Git, scoped source files, and the used lockfile', () => {
+test('source identity binds Git, effective render inputs, and the used lockfile', () => {
   const repoRoot = path.resolve(demoRoot, '..', '..');
   const identity = createSourceIdentity(repoRoot);
   assert.match(identity.git.headCommit, /^[0-9a-f]{40}$/);
@@ -26,11 +30,71 @@ test('source identity binds Git, scoped source files, and the used lockfile', ()
   assert.equal(typeof identity.git.dirty, 'boolean');
   assert.match(identity.sourceDigest.sha256, /^[0-9a-f]{64}$/);
   assert.ok(identity.sourceDigest.files.includes('demo/readme/scene/styles.css'));
-  assert.ok(identity.sourceDigest.files.includes('apps/control/src/styles.css'));
+  assert.deepEqual(identity.sourceDigest.files, RENDER_INPUT_PATHS);
+  assert.ok(!identity.sourceDigest.files.includes('demo/readme/source-identity.mjs'));
+  assert.ok(!identity.sourceDigest.files.includes('demo/readme/package.json'));
+  assert.ok(!identity.sourceDigest.files.includes('apps/control/src/styles.css'));
   assert.ok(identity.sourceDigest.files.every((file) => !/(?:node_modules|dist|artifacts|\.secrets|\.render-work)/.test(file)));
   assert.equal(identity.packageLocks.demoPackageLock.used, true);
   assert.match(identity.packageLocks.demoPackageLock.sha256, /^[0-9a-f]{64}$/);
   assert.deepEqual(identity.packageLocks.rootPnpmLock, { path: 'pnpm-lock.yaml', used: false, sha256: null });
+});
+
+test('portable evidence follows content across a sanitized Git history', () => {
+  const repoRoot = path.resolve(demoRoot, '..', '..');
+  const identity = createSourceIdentity(repoRoot);
+  const approved = {
+    schemaVersion: 1,
+    contract: 'portable-content-addressed-local-review-v1',
+    renderInputs: identity.sourceDigest,
+    packageLocks: identity.packageLocks,
+    renderManifest: { path: 'docs/assets/demo/render-manifest.json', sha256: 'a'.repeat(64) },
+    provenance: { path: 'docs/assets/demo/PROVENANCE.md', sha256: 'b'.repeat(64) },
+  };
+
+  const relocatedIdentity = {
+    ...identity,
+    git: { headCommit: 'f'.repeat(40), branch: 'local-rc-sanitized', dirty: false },
+  };
+  assert.doesNotThrow(() => verifyPortableEvidenceBinding({
+    approved,
+    currentIdentity: relocatedIdentity,
+    renderManifestSha256: 'a'.repeat(64),
+    provenanceSha256: 'b'.repeat(64),
+  }));
+
+  assert.throws(() => verifyPortableEvidenceBinding({
+    approved,
+    currentIdentity: {
+      ...relocatedIdentity,
+      sourceDigest: { ...relocatedIdentity.sourceDigest, sha256: '0'.repeat(64) },
+    },
+    renderManifestSha256: 'a'.repeat(64),
+    provenanceSha256: 'b'.repeat(64),
+  }), /render-input digest/);
+
+  assert.throws(() => verifyPortableEvidenceBinding({
+    approved,
+    currentIdentity: relocatedIdentity,
+    renderManifestSha256: '0'.repeat(64),
+    provenanceSha256: 'b'.repeat(64),
+  }), /render-manifest digest/);
+
+  assert.throws(() => verifyPortableEvidenceBinding({
+    approved,
+    currentIdentity: {
+      ...relocatedIdentity,
+      packageLocks: {
+        ...relocatedIdentity.packageLocks,
+        demoPackageLock: {
+          ...relocatedIdentity.packageLocks.demoPackageLock,
+          sha256: '0'.repeat(64),
+        },
+      },
+    },
+    renderManifestSha256: 'a'.repeat(64),
+    provenanceSha256: 'b'.repeat(64),
+  }), /package-lock binding/);
 });
 
 test('scene is self-contained and labels simulated numbers honestly', () => {

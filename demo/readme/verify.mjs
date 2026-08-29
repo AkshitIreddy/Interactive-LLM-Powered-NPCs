@@ -3,13 +3,17 @@ import { fileURLToPath } from 'node:url';
 import ffprobeStatic from 'ffprobe-static';
 import { readFileSync, statSync } from 'node:fs';
 import { sha256, verifyMediaSet } from './verify-lib.mjs';
-import { createSourceIdentity } from './source-identity.mjs';
+import { createSourceIdentity, verifyPortableEvidenceBinding } from './source-identity.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const publicRoot = path.resolve(here, '..', '..', 'docs', 'assets', 'demo');
 const repoRoot = path.resolve(here, '..', '..');
 const report = verifyMediaSet(publicRoot, ffprobeStatic.path);
-const manifest = JSON.parse(readFileSync(path.join(publicRoot, 'render-manifest.json'), 'utf8'));
+const manifestPath = path.join(publicRoot, 'render-manifest.json');
+const provenancePath = path.join(publicRoot, 'PROVENANCE.md');
+const approvedPath = path.join(here, 'approved-evidence.json');
+const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+const approved = JSON.parse(readFileSync(approvedPath, 'utf8'));
 const identity = createSourceIdentity(repoRoot);
 
 for (const [name, actual] of Object.entries(report)) {
@@ -28,13 +32,30 @@ for (const name of ['poster.png', 'contact-sheet.png', 'temporal-review-summary.
 }
 const recordedIdentity = manifest.evidence?.sourceIdentity;
 if (!recordedIdentity) throw new Error('render-manifest.json is missing evidence.sourceIdentity');
-for (const key of ['headCommit', 'branch', 'dirty']) {
-  if (recordedIdentity.git?.[key] !== identity.git[key]) throw new Error(`source identity Git ${key} changed since evidence refresh`);
-}
-if (recordedIdentity.sourceDigest?.sha256 !== identity.sourceDigest.sha256) throw new Error('scoped source digest changed since evidence refresh');
-if (recordedIdentity.packageLocks?.demoPackageLock?.sha256 !== identity.packageLocks.demoPackageLock.sha256) throw new Error('demo package-lock hash changed since evidence refresh');
-if (recordedIdentity.packageLocks?.rootPnpmLock?.used !== false || recordedIdentity.packageLocks?.rootPnpmLock?.sha256 !== null) throw new Error('root pnpm lock must be explicitly recorded as unused');
+if (!/^[0-9a-f]{40}$/.test(recordedIdentity.git?.headCommit ?? '')) throw new Error('recorded source identity has an invalid Git commit');
+if (typeof recordedIdentity.git?.branch !== 'string' || recordedIdentity.git.branch.length === 0) throw new Error('recorded source identity has an invalid Git branch');
+if (typeof recordedIdentity.git?.dirty !== 'boolean') throw new Error('recorded source identity has an invalid Git dirty state');
+if (!/^[0-9a-f]{64}$/.test(recordedIdentity.sourceDigest?.sha256 ?? '')) throw new Error('recorded source identity has an invalid scoped digest');
+if (recordedIdentity.packageLocks?.rootPnpmLock?.used !== false || recordedIdentity.packageLocks?.rootPnpmLock?.sha256 !== null) throw new Error('recorded root pnpm lock must be explicitly marked unused');
 if (manifest.evidence.classification !== 'mutable-local-review' || manifest.evidence.immutableRcEvidence !== false) throw new Error('evidence must be classified as mutable local-review, not immutable RC evidence');
 if (!manifest.notes?.some((note) => note.includes('mutable local-review evidence'))) throw new Error('manifest must state the dirty-source evidence limitation');
 
-console.log(JSON.stringify({ ok: true, root: publicRoot, media: report, evidence: manifest.evidence }, null, 2));
+verifyPortableEvidenceBinding({
+  approved,
+  currentIdentity: identity,
+  renderManifestSha256: sha256(manifestPath),
+  provenanceSha256: sha256(provenancePath),
+});
+
+console.log(JSON.stringify({
+  ok: true,
+  root: publicRoot,
+  media: report,
+  evidence: {
+    classification: manifest.evidence.classification,
+    immutableRcEvidence: manifest.evidence.immutableRcEvidence,
+    recordedRenderContext: recordedIdentity.git,
+    approvedContract: approved.contract,
+    currentSourceIdentity: identity,
+  },
+}, null, 2));

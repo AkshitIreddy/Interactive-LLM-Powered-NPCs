@@ -20,7 +20,9 @@ npm run verify
 
 `npm run render` writes all encodes to a staging directory, validates them, and only then transactionally promotes the GIF, animated WebP, MP4 review copy, poster, contact sheet, and manifest into `docs/assets/demo/`. Existing approved outputs are restored if promotion fails.
 
-`npm run refresh-evidence` does not capture, encode, or replace media. It binds the current manifest to Git HEAD/branch/dirty state, a deterministic digest of this renderer plus the final app theme stylesheet, and the exact demo lockfile. A dirty checkout is explicitly classified as mutable local-review evidence rather than immutable release-candidate evidence.
+`npm run refresh-evidence` does not capture, encode, or replace media. It records the current Git context in the render manifest and updates `approved-evidence.json`, the portable content-addressed binding between the approved manifest, provenance statement, exact renderer lockfile, and the files that can affect the deterministic render. Run it only as an explicit evidence-authoring step; ordinary tests and packaging never rewrite checked-in evidence.
+
+The Git commit, branch, and dirty state inside `render-manifest.json` describe the checkout used when that local-review manifest was authored. They are deliberately not a relocation lock: a clean sanitized release source has a different commit history even when every byte is identical. `npm run verify` instead checks the portable SHA-256 evidence contract, all media and supplemental hashes, media format constraints, and the recorded provenance shape. The release packager independently binds the complete current Git commit and full source-candidate digest before and after compilation, so moving the same content into a clean sanitized history does not weaken release provenance.
 
 The production contract is locked in `storyboard.mjs`: 1440×900 capture, 960 px output, 15 fps, 1.15× scene speed, PNG frames, a 256-colour full GIF palette with no dithering, an opening anchor hold of 0.1 seconds, and a forward anchor loop of at least 27 seconds.
 

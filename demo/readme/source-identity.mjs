@@ -1,10 +1,19 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-const EXCLUDED_SEGMENTS = new Set(['node_modules', 'dist', 'artifacts', '.secrets', '.render-work']);
-const SOURCE_SCOPES = ['demo/readme', 'apps/control/src/styles.css'];
+export const RENDER_INPUT_PATHS = Object.freeze([
+  'demo/readme/finalize-staged.mjs',
+  'demo/readme/package-lock.json',
+  'demo/readme/render.mjs',
+  'demo/readme/scene-config.mjs',
+  'demo/readme/scene/app.js',
+  'demo/readme/scene/index.html',
+  'demo/readme/scene/styles.css',
+  'demo/readme/storyboard.mjs',
+  'demo/readme/verify-lib.mjs',
+]);
 
 function git(repoRoot, args, { allowFailure = false } = {}) {
   try {
@@ -15,28 +24,47 @@ function git(repoRoot, args, { allowFailure = false } = {}) {
   }
 }
 
-function included(relativePath) {
-  return !relativePath.split(/[\\/]/).some((segment) => EXCLUDED_SEGMENTS.has(segment));
+function fail(message) {
+  throw new Error(`README demo evidence: ${message}`);
 }
 
-function collectFiles(repoRoot, relativePath, files) {
-  const absolute = path.join(repoRoot, relativePath);
-  const stats = statSync(absolute);
-  if (stats.isFile()) {
-    if (included(relativePath)) files.push(relativePath.replaceAll('\\', '/'));
-    return;
+function equalJson(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+export function verifyPortableEvidenceBinding({ approved, currentIdentity, renderManifestSha256, provenanceSha256 }) {
+  if (approved?.schemaVersion !== 1 || approved?.contract !== 'portable-content-addressed-local-review-v1') {
+    fail('unsupported approved-evidence contract');
   }
-  for (const entry of readdirSync(absolute, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-    const child = path.join(relativePath, entry.name);
-    if (!included(child)) continue;
-    if (entry.isDirectory() || entry.isFile()) collectFiles(repoRoot, child, files);
+  if (approved.renderManifest?.path !== 'docs/assets/demo/render-manifest.json') {
+    fail('approved render-manifest path is invalid');
+  }
+  if (approved.provenance?.path !== 'docs/assets/demo/PROVENANCE.md') {
+    fail('approved provenance path is invalid');
+  }
+  if (approved.renderInputs?.algorithm !== currentIdentity.sourceDigest.algorithm) {
+    fail('render-input digest algorithm changed');
+  }
+  if (approved.renderInputs?.sha256 !== currentIdentity.sourceDigest.sha256) {
+    fail('render-input digest changed');
+  }
+  if (approved.renderInputs?.fileCount !== currentIdentity.sourceDigest.fileCount ||
+      !equalJson(approved.renderInputs?.files, currentIdentity.sourceDigest.files)) {
+    fail('render-input file set changed');
+  }
+  if (!equalJson(approved.packageLocks, currentIdentity.packageLocks)) {
+    fail('renderer package-lock binding changed');
+  }
+  if (approved.renderManifest?.sha256 !== renderManifestSha256) {
+    fail('render-manifest digest changed');
+  }
+  if (approved.provenance?.sha256 !== provenanceSha256) {
+    fail('provenance digest changed');
   }
 }
 
 export function deterministicSourceDigest(repoRoot) {
-  const files = [];
-  for (const scope of SOURCE_SCOPES) collectFiles(repoRoot, scope, files);
-  files.sort((a, b) => a.localeCompare(b));
+  const files = [...RENDER_INPUT_PATHS];
   const digest = createHash('sha256');
   for (const relative of files) {
     digest.update(relative, 'utf8');
@@ -49,8 +77,6 @@ export function deterministicSourceDigest(repoRoot) {
     sha256: digest.digest('hex'),
     fileCount: files.length,
     files,
-    scopes: SOURCE_SCOPES,
-    excludedSegments: [...EXCLUDED_SEGMENTS].sort(),
   };
 }
 

@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "contract": "portable-content-addressed-local-review-v1",
+  "renderInputs": {
+    "algorithm": "sha256:path-nul-bytes-nul:v1",
+    "sha256": "245ac569f13d9f661b2ae8f59655f4778f6a15318cd64157ad2d2aa8a919d825",
+    "fileCount": 9,
+    "files": [
+      "demo/readme/finalize-staged.mjs",
+      "demo/readme/package-lock.json",
+      "demo/readme/render.mjs",
+      "demo/readme/scene-config.mjs",
+      "demo/readme/scene/app.js",
+      "demo/readme/scene/index.html",
+      "demo/readme/scene/styles.css",
+      "demo/readme/storyboard.mjs",
+      "demo/readme/verify-lib.mjs"
+    ]
+  },
+  "packageLocks": {
+    "demoPackageLock": {
+      "path": "demo/readme/package-lock.json",
+      "used": true,
+      "sha256": "4774a1ffe2f8970e2874840f3f90d86dd2b821649efee6e46a504263b5d4d624"
+    },
+    "rootPnpmLock": {
+      "path": "pnpm-lock.yaml",
+      "used": false,
+      "sha256": null
+    }
+  },
+  "renderManifest": {
+    "path": "docs/assets/demo/render-manifest.json",
+    "sha256": "b4b897321f5216dd78e84fde9f977e023e99474937277b9ed9084a0dd8f42cff"
+  },
+  "provenance": {
+    "path": "docs/assets/demo/PROVENANCE.md",
+    "sha256": "42533dbfc53fd045eb9bf0e4d24bf785d33cbc1d4f84e7ada883e5b784f3909f"
+  }
+}
