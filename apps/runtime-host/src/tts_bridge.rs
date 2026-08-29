@@ -417,10 +417,10 @@ fn validated_stream(
                         ));
                         break;
                     }
-                    yield Ok(SpeechStreamItem::Audio(core_audio(last, true)));
                     while let Some(metadata) = pending_metadata.pop_front() {
                         yield Ok(metadata);
                     }
+                    yield Ok(SpeechStreamItem::Audio(core_audio(last, true)));
                     break;
                 }
             }
@@ -572,7 +572,7 @@ mod tests {
     };
 
     use super::*;
-    use futures_util::StreamExt;
+    use futures_util::{StreamExt, TryStreamExt};
     use interactive_npcs_credential_vault::{SecretValue, VaultError};
     use npc_providers_tts::{
         ProviderCapabilities, PushOutcome, SessionState, TtsEvent, WordAlignment,
@@ -829,6 +829,41 @@ mod tests {
                         cancellation_generation: 3,
                     }
         }));
+    }
+
+    #[tokio::test]
+    async fn emits_alignment_before_final_eos_when_provider_sends_one_audio_chunk() {
+        let plan = FakeSessionPlan::events([
+            pcm(0, &[7, -7]),
+            TtsEvent::Alignment(vec![WordAlignment {
+                word: "eastern".to_owned(),
+                start_ms: 8,
+                end_ms: 90,
+                source_text_start: Some(4),
+                source_text_length: Some(7),
+            }]),
+            TtsEvent::Completed,
+        ]);
+        let (bridge, _) = fake_bridge([plan]);
+        let mut session = core_session(&bridge).await;
+        let output = session
+            .synthesize(speech(1), CancellationToken::new())
+            .await
+            .expect("sentence synthesis starts")
+            .try_collect::<Vec<_>>()
+            .await
+            .expect("valid stream");
+
+        assert_eq!(output.len(), 2);
+        assert!(matches!(output[0], SpeechStreamItem::Alignment(_)));
+        assert!(matches!(
+            &output[1],
+            SpeechStreamItem::Audio(AudioChunk {
+                sequence: 0,
+                end_of_stream: true,
+                ..
+            })
+        ));
     }
 
     #[tokio::test]
