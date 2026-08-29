@@ -1,0 +1,14 @@
+{
+  "schema_version": "npc.worker-pack/v1",
+  "pack_id": "dev.worker.kokoro",
+  "display_name": "Kokoro ONNX TTS deterministic stub",
+  "development_stub": true,
+  "bundles_third_party": false,
+  "installation_owner": "model_manager",
+  "protocol": { "version": "1.0", "encodings": ["length_delimited_json", "length_delimited_protobuf"], "transports": ["stdio", "supervisor_created_named_pipe"], "max_frame_bytes": 1048576, "network_access": false },
+  "worker": { "id": "worker-kokoro-stub", "kind": "tts", "engine": "kokoro-onnx-compatible-contract" },
+  "capabilities": { "input_modalities": ["text", "voice_intent"], "output_modalities": ["pcm_audio", "word_alignment"], "compute_backends": ["cpu", "onnx_runtime", "directml"], "streaming_output": true, "cancellation": true, "network_access": false, "experimental": false, "sample_rates_hz": [16000, 22050, 24000, 48000] },
+  "resource_estimate": { "idle_ram_mib": 28, "loaded_ram_mib": 48, "peak_ram_mib": 72, "loaded_vram_mib": 0, "peak_vram_mib": 0, "cpu_threads_recommended": 1, "concurrent_requests": 1, "estimate_class": "deterministic_stub_ceiling", "evidence": "Conservative fixture-process scheduling ceiling; not a model benchmark." },
+  "development": { "entrypoint": "workers/stubs/worker.py", "default_model_id": "fixture.tts.kokoro-v1", "purpose": "orchestration_and_protocol_testing_only" },
+  "production_pack_requirements": { "third_party_payloads_bundled_here": false, "installed_by": "model_manager", "required_artifact_roles": ["signed_worker_binary", "pinned_onnx_runtime", "verified_kokoro_model", "verified_voice_data", "license_and_attribution"], "activation_gates": ["sha256_and_signature", "runtime_abi", "windows_cpu_qualification", "voice_provenance", "license_review", "self_test"] }
+}

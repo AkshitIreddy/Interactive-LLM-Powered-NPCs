@@ -1,0 +1,97 @@
+syntax = "proto3";
+
+package npc.media.control.v1;
+
+// The native codec deliberately implements this wire contract without requiring
+// a protobuf runtime in the latency-sensitive broker process. Unknown scalar and
+// length-delimited fields are skipped for forward compatibility.
+message EnvelopeV1 {
+  uint32 version = 1;
+  bytes launch_nonce = 2;             // exactly 32 bytes
+  string session_id = 3;              // 8..64 safe identifier characters
+  uint64 sequence = 4;                // strictly monotonic per pipe connection
+  uint64 deadline_qpc = 5;            // same-machine QueryPerformanceCounter
+  uint64 cancellation_generation = 6;
+  CommandKind command = 7;
+  bytes payload = 8;                  // command message below, maximum frame 64 KiB
+}
+
+message ResponseV1 {
+  uint32 version = 1;
+  uint64 response_to_sequence = 2;
+  StatusCode status = 3;
+  uint64 cancellation_generation = 4;
+  bytes payload = 5;
+}
+
+enum CommandKind {
+  COMMAND_UNSPECIFIED = 0;
+  HEALTH = 1;
+  SELECT_TARGET = 2;
+  CLEAR_TARGET = 3;
+  CONFIGURE_PTT = 4;
+  AUDIO_STATUS = 5;
+  SUBMIT_OCCLUSION = 6;
+  SUBMIT_PATCH = 7;
+  CANCEL = 8;
+  DIAGNOSTICS = 9;
+  SHUTDOWN = 10;
+}
+
+enum StatusCode {
+  OK = 0;
+  INVALID_FRAME = 1;
+  UNSUPPORTED_VERSION = 2;
+  AUTHENTICATION_FAILED = 3;
+  SESSION_MISMATCH = 4;
+  SEQUENCE_REPLAYED = 5;
+  DEADLINE_EXPIRED = 6;
+  DEADLINE_TOO_FAR = 7;
+  CANCELLATION_MISMATCH = 8;
+  PAYLOAD_INVALID = 9;
+  TARGET_BLOCKED = 10;
+  CAPABILITY_UNAVAILABLE = 11;
+  INTERNAL_ERROR = 12;
+}
+
+message Empty {}
+
+message SelectTarget {
+  uint64 native_window = 1;
+  uint32 expected_process_id = 2;
+  repeated string allowed_process_names = 3;
+}
+
+message ConfigurePtt { uint32 virtual_key = 1; }
+
+message SubmitOcclusion {
+  double face_confidence = 1;
+  double landmark_confidence = 2;
+  double visibility_ratio = 3;
+  bool mouth_occluded = 4;
+  uint64 measured_qpc = 5;
+}
+
+message SharedTextureDescriptor {
+  uint64 source_process_handle_value = 1;
+  uint64 adapter_luid = 2;
+  uint64 keyed_mutex_acquire_key = 3;
+  uint64 keyed_mutex_release_key = 4;
+  uint32 width = 5;
+  uint32 height = 6;
+  uint32 dxgi_format = 7;
+}
+
+message SubmitPatch {
+  uint64 source_frame_sequence = 1;
+  uint64 cancellation_generation = 2;
+  double left = 3;
+  double top = 4;
+  double right = 5;
+  double bottom = 6;
+  double confidence = 7;
+  uint64 produced_qpc = 8;
+  optional SharedTextureDescriptor shared_texture = 9;
+}
+
+message Cancel { uint64 new_generation = 1; }

@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0.0",
+  "profile_id": "minecraft-java",
+  "assertions": {
+    "profile_validation": {
+      "expected_valid": true,
+      "expected_schema_version": "2.0.0"
+    },
+    "detection": {
+      "store": "standalone",
+      "store_id": null,
+      "display_name": "Minecraft: Java Edition",
+      "install_directory": "C:/Replay/Minecraft Launcher",
+      "executable": "javaw.exe",
+      "expected_match": true
+    },
+    "selection": {
+      "character_id": "villager",
+      "offscreen": true,
+      "expected_strategy": "explicit_selection",
+      "expected_evidence": "explicit_selection"
+    },
+    "routes": {
+      "conversation": true,
+      "subtitles": true,
+      "memory": true,
+      "audio": true
+    },
+    "refusal": {
+      "protected_online": "blocked",
+      "anti_cheat": "blocked",
+      "risk_gated_profile": false
+    }
+  },
+  "simulation": {
+    "session_id": "profile-replay-minecraft-java",
+    "turn_id": "minecraft-java-turn-1",
+    "transcript": "Deterministic profile replay: respond to the selected offscreen character.",
+    "locale": "en-US"
+  }
+}

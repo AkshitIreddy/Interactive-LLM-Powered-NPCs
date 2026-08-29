@@ -1,0 +1,279 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://interactive-npcs.local/schemas/game-profile-v2.schema.json",
+  "title": "GameProfileV2",
+  "description": "Strict authored-content profile for external Windows capture, manual character selection, audio, and subtitles. It cannot declare mods, hooks, injected code, native-rig integration, or executable adapters.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "display_name", "game", "detection", "safety", "capabilities", "content", "characters", "defaults", "diagnostics", "troubleshooting", "prompts"],
+  "properties": {
+    "schema_version": { "const": "2.0.0" },
+    "id": { "$ref": "#/$defs/slug" },
+    "display_name": { "$ref": "#/$defs/name" },
+    "game": { "$ref": "#/$defs/game" },
+    "detection": { "$ref": "#/$defs/detection" },
+    "safety": { "$ref": "#/$defs/safety" },
+    "capabilities": { "$ref": "#/$defs/capabilities" },
+    "content": { "$ref": "#/$defs/content" },
+    "characters": { "type": "array", "minItems": 1, "maxItems": 256, "items": { "$ref": "#/$defs/character" } },
+    "defaults": { "$ref": "#/$defs/defaults" },
+    "diagnostics": { "type": "array", "minItems": 1, "maxItems": 128, "items": { "$ref": "#/$defs/diagnostic" } },
+    "troubleshooting": { "type": "array", "minItems": 1, "maxItems": 128, "items": { "$ref": "#/$defs/troubleshooting" } },
+    "prompts": { "$ref": "#/$defs/globalPrompts" }
+  },
+  "$defs": {
+    "slug": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "minLength": 1, "maxLength": 80 },
+    "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "shortText": { "type": "string", "minLength": 1, "maxLength": 1024 },
+    "longText": { "type": "string", "minLength": 1, "maxLength": 32768 },
+    "locale": { "type": "string", "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$", "maxLength": 35 },
+    "stringList": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/shortText" } },
+    "game": {
+      "type": "object", "additionalProperties": false,
+      "required": ["publisher", "release_year", "genres"],
+      "properties": {
+        "publisher": { "$ref": "#/$defs/name" },
+        "release_year": { "type": "integer", "minimum": 1970, "maximum": 2100 },
+        "genres": { "type": "array", "minItems": 1, "maxItems": 24, "uniqueItems": true, "items": { "$ref": "#/$defs/name" } },
+        "official_url": { "type": "string", "format": "uri", "pattern": "^https://", "maxLength": 2048 }
+      }
+    },
+    "detection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["processes", "stores", "builds", "capture"],
+      "properties": {
+        "processes": {
+          "description": "OR candidates used only to find an eligible game window for external capture. Any required=true primary process satisfies detection; false entries are auxiliary signals only.",
+          "type": "array", "minItems": 1, "maxItems": 32, "items": { "$ref": "#/$defs/process" },
+          "contains": { "type": "object", "properties": { "required": { "const": true } }, "required": ["required"] },
+          "minContains": 1
+        },
+        "stores": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "$ref": "#/$defs/store" } },
+        "builds": { "type": "array", "minItems": 1, "maxItems": 128, "items": { "$ref": "#/$defs/build" } },
+        "capture": { "$ref": "#/$defs/capture" }
+      }
+    },
+    "process": {
+      "type": "object", "additionalProperties": false,
+      "required": ["executable", "required"],
+      "properties": {
+        "executable": { "type": "string", "pattern": "^[^/\\\\:]+\\.[Ee][Xx][Ee]$", "minLength": 5, "maxLength": 255 },
+        "required": { "type": "boolean" },
+        "window_title_regex": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "store": {
+      "type": "object", "additionalProperties": false,
+      "required": ["store", "install_directory_hints"],
+      "properties": {
+        "store": { "enum": ["steam", "epic", "gog", "microsoft", "standalone"] },
+        "app_id": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$", "minLength": 1, "maxLength": 128 },
+        "install_directory_hints": { "type": "array", "maxItems": 16, "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9 &._()'-]*(?:/[A-Za-z0-9][A-Za-z0-9 &._()'-]*)*$", "minLength": 1, "maxLength": 512 } }
+      }
+    },
+    "build": {
+      "type": "object", "additionalProperties": false,
+      "required": ["build_id", "status"],
+      "properties": {
+        "build_id": { "type": "string", "pattern": "^[A-Za-z0-9.*+_-]+$", "minLength": 1, "maxLength": 128 },
+        "status": { "enum": ["supported", "experimental", "blocked"] },
+        "reason": { "$ref": "#/$defs/shortText" }
+      }
+    },
+    "capture": {
+      "type": "object", "additionalProperties": false,
+      "required": ["preferred_methods", "excluded_window_title_regexes", "allow_exclusive_fullscreen", "fallback"],
+      "properties": {
+        "preferred_methods": {
+          "description": "External, process-isolated methods only. Audio/subtitles is mandatory so dialogue remains usable without pixels.",
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": { "enum": ["windows_graphics_capture", "desktop_duplication", "audio_subtitles"] },
+          "contains": { "const": "audio_subtitles" }, "minContains": 1
+        },
+        "excluded_window_title_regexes": { "type": "array", "maxItems": 32, "items": { "type": "string", "minLength": 1, "maxLength": 256 } },
+        "allow_exclusive_fullscreen": { "type": "boolean" },
+        "fallback": { "const": "audio_subtitles" },
+        "ui_regions": { "type": "array", "maxItems": 64, "default": [], "items": { "$ref": "#/$defs/uiRegion" } }
+      }
+    },
+    "uiRegion": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "purpose", "rect"],
+      "properties": {
+        "id": { "$ref": "#/$defs/slug" },
+        "purpose": { "enum": ["exclude_identity", "exclude_compositing", "subtitle_safe_zone", "dialogue_indicator", "nameplate_hint"] },
+        "rect": {
+          "type": "object", "additionalProperties": false,
+          "required": ["x", "y", "width", "height"],
+          "properties": {
+            "x": { "type": "number", "minimum": 0, "maximum": 1 },
+            "y": { "type": "number", "minimum": 0, "maximum": 1 },
+            "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+            "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+          }
+        }
+      }
+    },
+    "safety": {
+      "type": "object", "additionalProperties": false,
+      "required": ["single_player_only", "online_policy", "anti_cheat_policy", "declarative_only", "risk_notes"],
+      "properties": {
+        "single_player_only": { "const": true },
+        "online_policy": { "const": "blocked" },
+        "anti_cheat_policy": { "const": "block_when_detected" },
+        "declarative_only": { "const": true },
+        "risk_notes": { "$ref": "#/$defs/stringList" }
+      }
+    },
+    "capabilityTier": { "enum": ["unsupported", "experimental", "replay_verified", "live_certified"] },
+    "capabilityEvidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "reference", "summary"],
+      "properties": {
+        "kind": { "enum": ["deterministic_replay", "declarative_contract", "not_verified"] },
+        "reference": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$", "minLength": 1, "maxLength": 256 },
+        "summary": { "$ref": "#/$defs/shortText" }
+      }
+    },
+    "capabilityClaim": {
+      "type": "object", "additionalProperties": false,
+      "required": ["tier", "evidence", "fallback"],
+      "properties": {
+        "tier": { "$ref": "#/$defs/capabilityTier" },
+        "evidence": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "$ref": "#/$defs/capabilityEvidence" } },
+        "fallback": { "$ref": "#/$defs/shortText" }
+      }
+    },
+    "capabilities": {
+      "type": "object", "additionalProperties": false,
+      "required": ["conversation", "identity", "capture", "subtitles", "memory", "screen_space_lip_sync"],
+      "properties": {
+        "conversation": { "$ref": "#/$defs/capabilityClaim" },
+        "identity": { "$ref": "#/$defs/capabilityClaim" },
+        "capture": { "$ref": "#/$defs/capabilityClaim" },
+        "subtitles": { "$ref": "#/$defs/capabilityClaim" },
+        "memory": { "$ref": "#/$defs/capabilityClaim" },
+        "screen_space_lip_sync": {
+          "description": "Generic external mouth-region compositing only; never native-rig control. It remains explicitly experimental and unverified.",
+          "allOf": [
+            { "$ref": "#/$defs/capabilityClaim" },
+            {
+              "type": "object",
+              "properties": {
+                "tier": { "const": "experimental" },
+                "evidence": {
+                  "type": "array", "minItems": 1, "maxItems": 16,
+                  "items": {
+                    "allOf": [
+                      { "$ref": "#/$defs/capabilityEvidence" },
+                      { "type": "object", "properties": { "kind": { "const": "not_verified" } } }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "content": {
+      "type": "object", "additionalProperties": false,
+      "required": ["world_lore", "spoiler_policy", "spoiler_tiers", "background_npc_rules", "provenance"],
+      "properties": {
+        "world_lore": { "$ref": "#/$defs/longText" },
+        "spoiler_policy": { "$ref": "#/$defs/shortText" },
+        "spoiler_tiers": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "$ref": "#/$defs/spoilerTier" } },
+        "background_npc_rules": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/shortText" } },
+        "provenance": { "type": "array", "minItems": 1, "maxItems": 256, "items": { "$ref": "#/$defs/provenance" } }
+      }
+    },
+    "spoilerTier": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "description", "default_enabled"],
+      "properties": { "id": { "$ref": "#/$defs/slug" }, "description": { "$ref": "#/$defs/shortText" }, "default_enabled": { "type": "boolean" } }
+    },
+    "provenance": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "title", "kind"],
+      "properties": {
+        "id": { "$ref": "#/$defs/slug" }, "title": { "$ref": "#/$defs/name" },
+        "kind": { "enum": ["original", "official", "licensed", "legacy_import"] },
+        "source_url": { "type": "string", "format": "uri", "pattern": "^https://", "maxLength": 2048 },
+        "license": { "$ref": "#/$defs/name" }, "notes": { "$ref": "#/$defs/shortText" }
+      },
+      "allOf": [
+        { "if": { "properties": { "kind": { "enum": ["official", "licensed"] } }, "required": ["kind"] }, "then": { "required": ["source_url"] } },
+        { "if": { "properties": { "kind": { "const": "licensed" } }, "required": ["kind"] }, "then": { "required": ["license"] } }
+      ]
+    },
+    "character": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "display_name", "aliases", "biography", "personality", "dialogue_style", "background_npc", "prompt", "voice", "identity", "model"],
+      "properties": {
+        "id": { "$ref": "#/$defs/slug" }, "display_name": { "$ref": "#/$defs/name" },
+        "aliases": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "$ref": "#/$defs/name" } },
+        "biography": { "$ref": "#/$defs/longText" }, "personality": { "$ref": "#/$defs/longText" },
+        "dialogue_style": { "$ref": "#/$defs/longText" }, "background_npc": { "type": "boolean" },
+        "prompt": { "$ref": "#/$defs/characterPrompt" }, "voice": { "$ref": "#/$defs/voice" },
+        "identity": { "$ref": "#/$defs/identity" }, "model": { "$ref": "#/$defs/model" }
+      }
+    },
+    "characterPrompt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["role", "objectives", "constraints", "knowledge_refs"],
+      "properties": {
+        "role": { "$ref": "#/$defs/longText" },
+        "objectives": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/shortText" } },
+        "constraints": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/shortText" } },
+        "knowledge_refs": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": { "$ref": "#/$defs/slug" } }
+      }
+    },
+    "voice": {
+      "type": "object", "additionalProperties": false,
+      "required": ["description", "locale", "style_tags"],
+      "properties": {
+        "description": { "$ref": "#/$defs/shortText" }, "locale": { "$ref": "#/$defs/locale" },
+        "style_tags": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "$ref": "#/$defs/name" } },
+        "provider_voice_id": { "type": "string", "pattern": "^[A-Za-z0-9._:-]+$", "minLength": 1, "maxLength": 160 }
+      }
+    },
+    "identity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["strategy", "evidence", "fallback"],
+      "properties": {
+        "strategy": { "const": "explicit_selection" },
+        "evidence": { "type": "array", "minItems": 1, "maxItems": 1, "uniqueItems": true, "items": { "const": "explicit_selection" } },
+        "fallback": { "const": "explicit_selection" }
+      }
+    },
+    "model": {
+      "type": "object", "additionalProperties": false,
+      "required": ["quality_tier", "context_budget"],
+      "properties": { "quality_tier": { "enum": ["fast", "balanced", "quality"] }, "context_budget": { "type": "integer", "minimum": 512, "maximum": 1048576 } }
+    },
+    "defaults": {
+      "type": "object", "additionalProperties": false,
+      "required": ["character_id", "model", "voice"],
+      "properties": { "character_id": { "$ref": "#/$defs/slug" }, "model": { "$ref": "#/$defs/model" }, "voice": { "$ref": "#/$defs/voice" } }
+    },
+    "diagnostic": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "severity", "check", "remediation"],
+      "properties": { "id": { "$ref": "#/$defs/slug" }, "severity": { "enum": ["info", "warning", "error"] }, "check": { "$ref": "#/$defs/shortText" }, "remediation": { "$ref": "#/$defs/shortText" } }
+    },
+    "troubleshooting": {
+      "type": "object", "additionalProperties": false,
+      "required": ["symptom", "cause", "steps"],
+      "properties": { "symptom": { "$ref": "#/$defs/shortText" }, "cause": { "$ref": "#/$defs/shortText" }, "steps": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "$ref": "#/$defs/shortText" } } }
+    },
+    "globalPrompts": {
+      "type": "object", "additionalProperties": false,
+      "required": ["system_preamble", "safety_rules", "background_npc_template"],
+      "properties": {
+        "system_preamble": { "$ref": "#/$defs/longText" },
+        "safety_rules": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/shortText" } },
+        "background_npc_template": { "$ref": "#/$defs/longText" }
+      }
+    }
+  }
+}

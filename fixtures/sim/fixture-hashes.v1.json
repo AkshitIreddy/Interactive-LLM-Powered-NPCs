@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "npc.sim.fixture-ledger.v1",
+  "algorithm": "sha256-canonical-json",
+  "fixtures": [
+    { "path": "resources/low-vram-6gb.json", "sha256": "31242b452a62e50b98b22e1f4500c7e72a24da039f37fe9cf3838a985d592e63" },
+    { "path": "resources/reference-balanced-12gb.json", "sha256": "b1095fd426b4878fa80b55ec38cc996de4e93d6fb461c8e536f1bf275912d6ce" },
+    { "path": "resources/silent-shared-machine.json", "sha256": "9ec40bd11720d166bf0a749614b614e0120391d4a712828cd6748a2a0ce39647" },
+    { "path": "scenarios/animation-worker-crash.scenario.v1.json", "sha256": "dd1a81ef56ae0de9a1841b4fe9e7c58aa40718f0fb1498ff7b22e37d724e6f15" },
+    { "path": "scenarios/barge-in.scenario.v1.json", "sha256": "a61dc3c46b96a8a3d240b63005c443466ca6fdf01f808d9d7c17d318c1587cb3" },
+    { "path": "scenarios/happy-path.scenario.v1.json", "sha256": "e68b5787b61ccfab61cc8cd26939bc99c7c5b477eaf86782e33b2fef0a3b10d5" },
+    { "path": "scenarios/low-vram.scenario.v1.json", "sha256": "84748bf94a32767c20f46e4dcc6dad0188a91145147561e485554c25be00cb5c" },
+    { "path": "scenarios/offscreen-named-npc.scenario.v1.json", "sha256": "57c4aa8cf47b111bb519c54fdb13891ce5531d2a76e2a97b92103a3a011bc1c2" },
+    { "path": "scenarios/privacy-offline.scenario.v1.json", "sha256": "c236a2be15b627e865bb7f727018ed4a9b2e0e1db507fd58c78db6e107994bd0" },
+    { "path": "scenarios/provider-error.scenario.v1.json", "sha256": "aebd1a0e400b6cb257d115460ae80fa19f452f8470f77853597d03afa52dbc11" },
+    { "path": "schemas/benchmark.v1.schema.json", "sha256": "78d7d222d6415d28b8e95e2bc5bb75141a67a6dd1cc555d591fe29355fe9c1dd" },
+    { "path": "schemas/event.v1.schema.json", "sha256": "de286bd0cdb43a9317c3336d11ff3a53559929a6ee32049b69c802fd75438430" },
+    { "path": "schemas/resource-profile.v1.schema.json", "sha256": "c231131dd5fa044624db31b995148bef290d33b0fea28046b5ac5cf273327a32" },
+    { "path": "schemas/scenario-manifest.v1.schema.json", "sha256": "9e856b360a1b7acbb35d0a09186c3b6c212ce10981d08a169285a8e66e5b9e9d" }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "@npc2/simulation-harness",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Deterministic virtual-time simulation and benchmark harness for NPC 2.0",
+  "scripts": {
+    "sim": "node src/cli.ts",
+    "test": "node --test test/primitives.test.ts test/scenarios.test.ts",
+    "verify": "node src/cli.ts verify"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

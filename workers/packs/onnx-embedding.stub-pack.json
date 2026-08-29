@@ -1,0 +1,14 @@
+{
+  "schema_version": "npc.worker-pack/v1",
+  "pack_id": "dev.worker.onnx-embedding",
+  "display_name": "ONNX embedding deterministic stub",
+  "development_stub": true,
+  "bundles_third_party": false,
+  "installation_owner": "model_manager",
+  "protocol": { "version": "1.0", "encodings": ["length_delimited_json", "length_delimited_protobuf"], "transports": ["stdio", "supervisor_created_named_pipe"], "max_frame_bytes": 1048576, "network_access": false },
+  "worker": { "id": "worker-onnx-embedding-stub", "kind": "embedding", "engine": "onnx-runtime-compatible-contract" },
+  "capabilities": { "input_modalities": ["text_batch"], "output_modalities": ["normalized_embedding_batch"], "compute_backends": ["cpu", "onnx_runtime", "directml"], "streaming_output": false, "cancellation": true, "network_access": false, "experimental": false, "maximum_dimensions": 4096 },
+  "resource_estimate": { "idle_ram_mib": 28, "loaded_ram_mib": 44, "peak_ram_mib": 64, "loaded_vram_mib": 0, "peak_vram_mib": 0, "cpu_threads_recommended": 1, "concurrent_requests": 2, "estimate_class": "deterministic_stub_ceiling", "evidence": "Conservative fixture-process scheduling ceiling; not a model benchmark." },
+  "development": { "entrypoint": "workers/stubs/worker.py", "default_model_id": "fixture.embedding.onnx-v1", "purpose": "orchestration_and_protocol_testing_only" },
+  "production_pack_requirements": { "third_party_payloads_bundled_here": false, "installed_by": "model_manager", "required_artifact_roles": ["signed_worker_binary", "pinned_onnx_runtime", "verified_int8_model", "tokenizer_metadata", "license_and_attribution"], "activation_gates": ["sha256_and_signature", "runtime_abi", "hardware_compatibility", "dimension_compatibility", "license_review", "self_test"] }
+}

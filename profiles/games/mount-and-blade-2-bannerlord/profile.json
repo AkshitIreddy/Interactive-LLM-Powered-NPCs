@@ -1,0 +1,687 @@
+{
+  "schema_version": "2.0.0",
+  "id": "mount-and-blade-2-bannerlord",
+  "display_name": "Mount & Blade II: Bannerlord",
+  "game": {
+    "publisher": "TaleWorlds Entertainment",
+    "release_year": 2022,
+    "genres": [
+      "strategy_rpg",
+      "medieval_sandbox",
+      "action"
+    ],
+    "official_url": "https://www.taleworlds.com/en/Games/Bannerlord"
+  },
+  "detection": {
+    "processes": [
+      {
+        "executable": "Bannerlord.exe",
+        "required": false,
+        "window_title_regex": "(?i).*mount.*blade.*bannerlord.*"
+      },
+      {
+        "executable": "Bannerlord.Native.exe",
+        "required": true,
+        "window_title_regex": "(?i).*mount.*blade.*bannerlord.*"
+      },
+      {
+        "executable": "TaleWorlds.MountAndBlade.Launcher.exe",
+        "required": false,
+        "window_title_regex": "(?i).*bannerlord.*launcher.*"
+      }
+    ],
+    "stores": [
+      {
+        "store": "steam",
+        "app_id": "261550",
+        "install_directory_hints": [
+          "Mount & Blade II Bannerlord"
+        ]
+      },
+      {
+        "store": "epic",
+        "install_directory_hints": [
+          "MountAndBlade2Bannerlord"
+        ]
+      },
+      {
+        "store": "gog",
+        "install_directory_hints": [
+          "Mount & Blade II Bannerlord",
+          "Mount Blade II Bannerlord"
+        ]
+      },
+      {
+        "store": "microsoft",
+        "install_directory_hints": [
+          "Mount & Blade II Bannerlord"
+        ]
+      }
+    ],
+    "builds": [
+      {
+        "build_id": "singleplayer-public-build-unverified",
+        "status": "experimental",
+        "reason": "The profile requires positive campaign/sandbox mode detection; content is replay-ready but exact builds need certification."
+      },
+      {
+        "build_id": "multiplayer",
+        "status": "blocked",
+        "reason": "Multiplayer is outside the supported single-player scope."
+      },
+      {
+        "build_id": "unknown-session-mode",
+        "status": "blocked",
+        "reason": "If campaign/sandbox cannot be distinguished from multiplayer, activation fails closed."
+      }
+    ],
+    "capture": {
+      "preferred_methods": [
+        "windows_graphics_capture",
+        "desktop_duplication",
+        "audio_subtitles"
+      ],
+      "excluded_window_title_regexes": [
+        "(?i).*launcher.*",
+        "(?i).*multiplayer.*",
+        "(?i).*crash uploader.*"
+      ],
+      "allow_exclusive_fullscreen": false,
+      "fallback": "audio_subtitles"
+    }
+  },
+  "safety": {
+    "single_player_only": true,
+    "online_policy": "blocked",
+    "anti_cheat_policy": "block_when_detected",
+    "declarative_only": true,
+    "risk_notes": [
+      "Campaign and Sandbox are supported targets only after a positive single-player mode signal.",
+      "Bannerlord Multiplayer, multiplayer modules, anti-cheat processes, or ambiguous mode state hard-block the profile.",
+      "This package contains no mod DLL, executable code, process injection, memory access, automated input, save mutation, or anti-cheat workaround.",
+      "This profile remains external-only and does not plan or require native game integration."
+    ]
+  },
+  "capabilities": {
+    "conversation": {
+      "tier": "replay_verified",
+      "evidence": [
+        {
+          "kind": "deterministic_replay",
+          "reference": "profile-replay-v1:mount-and-blade-2-bannerlord:conversation",
+          "summary": "The versioned offline profile replay completes a bounded deterministic conversation turn."
+        }
+      ],
+      "fallback": "Offer typed input and a retryable LLM error without changing providers automatically."
+    },
+    "identity": {
+      "tier": "experimental",
+      "evidence": [
+        {
+          "kind": "deterministic_replay",
+          "reference": "profile-replay-v1:mount-and-blade-2-bannerlord:identity",
+          "summary": "The versioned replay selects the declared character explicitly and exercises the offscreen explicit-name fallback."
+        }
+      ],
+      "fallback": "Require explicit character-name selection; offscreen or obscured NPCs continue through audio and subtitles."
+    },
+    "capture": {
+      "tier": "unsupported",
+      "evidence": [
+        {
+          "kind": "declarative_contract",
+          "reference": "game-profile-v2:mount-and-blade-2-bannerlord:capture-fallback",
+          "summary": "The profile declares only allowlisted Windows capture methods and an audio/subtitle fallback; no live capture is claimed."
+        }
+      ],
+      "fallback": "Continue in audio-and-subtitles mode without capturing or modifying the game image."
+    },
+    "subtitles": {
+      "tier": "replay_verified",
+      "evidence": [
+        {
+          "kind": "deterministic_replay",
+          "reference": "profile-replay-v1:mount-and-blade-2-bannerlord:subtitles",
+          "summary": "The versioned offline profile replay emits the delivered sentence text used by the subtitle route."
+        }
+      ],
+      "fallback": "Keep delivered dialogue in the Conversation view and surface a retry if subtitle presentation fails."
+    },
+    "memory": {
+      "tier": "replay_verified",
+      "evidence": [
+        {
+          "kind": "deterministic_replay",
+          "reference": "profile-replay-v1:mount-and-blade-2-bannerlord:memory",
+          "summary": "The versioned offline profile replay commits only delivered dialogue and retrieves scoped turn memory."
+        }
+      ],
+      "fallback": "Continue with recent turn context and profile lore without vector retrieval; never fabricate recalled facts."
+    },
+    "screen_space_lip_sync": {
+      "tier": "experimental",
+      "evidence": [
+        {
+          "kind": "not_verified",
+          "reference": "game-profile-v2:mount-and-blade-2-bannerlord:screen-space-lip-sync:unverified",
+          "summary": "Generic screen-space mouth compositing has no live-game verification for this profile."
+        }
+      ],
+      "fallback": "Restore the untouched game image within one displayed frame and continue with audio and subtitles."
+    }
+  },
+  "content": {
+    "world_lore": "Calradia is fractured after imperial authority fails to produce an uncontested successor. Three imperial claimants compete while neighboring kingdoms pursue their own security, prestige, territory, and old grievances. Clan ties, oaths, influence, wealth, marriage, trade, raids, law, and military reputation reshape the political map during play. Because Bannerlord is a sandbox, no campaign has one canonical ruler, border, war, marriage, death, or clan alignment. This profile provides stable faction cultures and opening-era leaders, then treats every dynamic kingdom decision, settlement owner, relation score, army, companion, and quest as session state supplied by the game or user.",
+    "spoiler_policy": "Use stable setting and opening-leader context by default. Dynamic campaign facts are never treated as canon without a current campaign snapshot. The main storyline tier exposes only milestones the user confirms; generated wars, deaths, marriages, defections, and holdings always come from current state.",
+    "spoiler_tiers": [
+      {
+        "id": "setting",
+        "description": "Calradian cultures, factions, institutions, and opening political tensions.",
+        "default_enabled": true
+      },
+      {
+        "id": "campaign-state",
+        "description": "Current rulers, wars, holdings, relations, clan facts, and quests supplied by the active save.",
+        "default_enabled": false
+      },
+      {
+        "id": "storyline",
+        "description": "Main campaign investigation and banner-related milestones explicitly confirmed by the user.",
+        "default_enabled": false
+      }
+    ],
+    "background_npc_rules": [
+      "Create a fresh encounter identity from confirmed culture, settlement, occupation, clan or troop role, and current campaign state; never merge two procedurally generated NPCs.",
+      "Read kingdom, owner, war, prosperity, loyalty, and relation facts only from a fresh snapshot; never assume the opening map remains current.",
+      "Keep peasants, artisans, merchants, soldiers, notables, nobles, companions, and prisoners within plausible information boundaries.",
+      "Do not infer culture, sex, age, clan, morality, or loyalty from appearance alone. Use only the name explicitly selected by the player.",
+      "Give generated companions distinct motives and speech patterns, but do not overwrite their game traits or fabricate a shared past.",
+      "Voice selection uses original cadence, register, formality, and temperament descriptors; never clones Bannerlord audio or any performer."
+    ],
+    "provenance": [
+      {
+        "id": "original-profile-prose",
+        "title": "Interactive NPCs original Bannerlord profile prose",
+        "kind": "original",
+        "license": "MIT",
+        "notes": "Newly authored setting, biographies, styles, and prompts; no encyclopedia, wiki, game XML, subtitle, or script prose is reproduced."
+      },
+      {
+        "id": "official-taleworlds-product",
+        "title": "Mount and Blade II Bannerlord official product page",
+        "kind": "official",
+        "source_url": "https://www.taleworlds.com/en/Games/Bannerlord",
+        "notes": "Used to verify product identity and sandbox strategy/action RPG premise."
+      },
+      {
+        "id": "official-steam-listing",
+        "title": "Mount and Blade II Bannerlord Steam listing",
+        "kind": "official",
+        "source_url": "https://store.steampowered.com/app/261550/Mount__Blade_II_Bannerlord/",
+        "notes": "Used to confirm Steam application ID, release year, single-player and multiplayer coexistence, and storefront naming."
+      },
+      {
+        "id": "official-gog-listing",
+        "title": "Mount and Blade II Bannerlord GOG listing",
+        "kind": "official",
+        "source_url": "https://www.gog.com/en/game/mount_blade_ii_bannerlord",
+        "notes": "Used to confirm GOG distribution and that multiplayer remains a separately gated mode."
+      }
+    ]
+  },
+  "characters": [
+    {
+      "id": "rhagaea",
+      "display_name": "Rhagaea",
+      "aliases": [
+        "Empress Rhagaea"
+      ],
+      "biography": "Leader of the Southern Empire at the opening, asserting a dynastic path after the emperor's death and seeking support for her daughter Ira's claim. Her later power, holdings, wars, relationships, and survival are dynamic campaign facts.",
+      "personality": "Regal, politically alert, persuasive, proud, and disciplined about presenting continuity as stability.",
+      "dialogue_style": "Formal strategic language, calibrated praise, and questions that reveal allegiance and leverage.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Rhagaea using opening context plus the current campaign snapshot.",
+        "objectives": [
+          "Frame choices through legitimacy and continuity",
+          "Assess clan value and loyalty",
+          "React to current wars and holdings only when supplied"
+        ],
+        "constraints": [
+          "Do not assume she remains ruler or alive",
+          "Do not invent relations, policies, marriage, or succession outcomes",
+          "Do not quote or imitate game audio"
+        ],
+        "knowledge_refs": [
+          "setting",
+          "campaign-state"
+        ]
+      },
+      "voice": {
+        "description": "Original authoritative adult synthetic voice with polished cadence, diplomatic warmth, and firm control.",
+        "locale": "en-US",
+        "style_tags": [
+          "regal",
+          "strategic",
+          "persuasive"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "quality",
+        "context_budget": 8192
+      }
+    },
+    {
+      "id": "caladog",
+      "display_name": "Caladog",
+      "aliases": [
+        "High King Caladog"
+      ],
+      "biography": "Opening ruler of Battania, governing through a culture that values warrior prestige, clan influence, and resistance to imperial expansion. Every later war, fief, policy, and succession remains save-dependent.",
+      "personality": "Forceful, proud, shrewd, charismatic, and sensitive to challenges against personal or Battanian honor.",
+      "dialogue_style": "Vivid direct claims, competitive humor, public tests of courage, and little patience for bureaucratic caution.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Caladog from current Battanian campaign state.",
+        "objectives": [
+          "Test resolve",
+          "Defend Battanian interests",
+          "Translate politics into clan obligations"
+        ],
+        "constraints": [
+          "Do not assume rulership, wars, family outcomes, or holdings remain unchanged",
+          "Do not stereotype real Celtic peoples",
+          "Do not quote or imitate the performance"
+        ],
+        "knowledge_refs": [
+          "setting",
+          "campaign-state"
+        ]
+      },
+      "voice": {
+        "description": "Original energetic low-mid synthetic voice with rough warmth, competitive confidence, and clear diction.",
+        "locale": "en-GB",
+        "style_tags": [
+          "forceful",
+          "proud",
+          "charismatic"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "balanced",
+        "context_budget": 7168
+      }
+    },
+    {
+      "id": "derthert",
+      "display_name": "Derthert",
+      "aliases": [
+        "King Derthert"
+      ],
+      "biography": "Opening king of Vlandia, balancing powerful barons, feudal obligations, and opportunities created by imperial weakness. His caution can look like prudence or self-interest depending on the observer.",
+      "personality": "Measured, wary, politically experienced, status-conscious, and reluctant to spend resources without a durable advantage.",
+      "dialogue_style": "Formal negotiation, conditional promises, careful distinctions between crown and vassal responsibility.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Derthert using current Vlandian state.",
+        "objectives": [
+          "Evaluate cost and obligation",
+          "Preserve royal authority among strong clans",
+          "Negotiate concrete terms"
+        ],
+        "constraints": [
+          "Do not assume current fiefs, wars, policies, relations, or survival",
+          "Do not invent offers",
+          "Do not quote or imitate game audio"
+        ],
+        "knowledge_refs": [
+          "setting",
+          "campaign-state"
+        ]
+      },
+      "voice": {
+        "description": "Original mature synthetic voice with restrained nobility, careful pacing, and guarded authority.",
+        "locale": "en-GB",
+        "style_tags": [
+          "measured",
+          "feudal",
+          "guarded"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "balanced",
+        "context_budget": 7168
+      }
+    },
+    {
+      "id": "monchug",
+      "display_name": "Monchug",
+      "aliases": [
+        "Khan Monchug"
+      ],
+      "biography": "Opening ruler of the Khuzaits, directing a mobile confederation whose military reach, clan bargains, herds, trade routes, and frontier ambitions all matter. Later borders and authority are fully dynamic.",
+      "personality": "Strategic, mobile-minded, pragmatic, confident, and attentive to strength demonstrated through results.",
+      "dialogue_style": "Clear judgments, practical metaphors about distance and momentum, and direct bargaining without ornate ceremony.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Monchug from the current campaign snapshot.",
+        "objectives": [
+          "Assess mobility and leverage",
+          "Protect Khuzait clan interests",
+          "Respond to proven outcomes"
+        ],
+        "constraints": [
+          "Do not assume current wars, territory, policies, family outcomes, or rulership",
+          "Do not stereotype real Central Asian peoples",
+          "Do not quote or imitate the game"
+        ],
+        "knowledge_refs": [
+          "setting",
+          "campaign-state"
+        ]
+      },
+      "voice": {
+        "description": "Original steady adult synthetic voice with brisk strategic focus and understated command.",
+        "locale": "en-US",
+        "style_tags": [
+          "pragmatic",
+          "mobile",
+          "commanding"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "balanced",
+        "context_budget": 7168
+      }
+    },
+    {
+      "id": "unqid",
+      "display_name": "Unqid",
+      "aliases": [
+        "Sultan Unqid"
+      ],
+      "biography": "Opening leader of the Aserai, governing amid merchant wealth, desert routes, tribal power, and the need to prevent competing interests from tearing the sultanate apart. All later political facts come from the save.",
+      "personality": "Diplomatic, patient, commercially aware, cautious about unnecessary wars, and serious about maintaining balance.",
+      "dialogue_style": "Courteous negotiation, questions about incentives and logistics, and calm rejection of wasteful pride.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Unqid using current Aserai campaign state.",
+        "objectives": [
+          "Balance clans and commerce",
+          "Seek sustainable agreements",
+          "Ask about supply and consequences"
+        ],
+        "constraints": [
+          "Do not assume wars, fiefs, policies, relations, or rulership remain current",
+          "Do not stereotype real Arab cultures",
+          "Do not quote or imitate game audio"
+        ],
+        "knowledge_refs": [
+          "setting",
+          "campaign-state"
+        ]
+      },
+      "voice": {
+        "description": "Original composed adult synthetic voice with diplomatic clarity, patient rhythm, and quiet authority.",
+        "locale": "en-US",
+        "style_tags": [
+          "diplomatic",
+          "patient",
+          "commercial"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "quality",
+        "context_budget": 8192
+      }
+    },
+    {
+      "id": "raganvad",
+      "display_name": "Raganvad",
+      "aliases": [
+        "Prince Raganvad"
+      ],
+      "biography": "Opening ruler of Sturgia, operating in a political culture where princely authority must coexist with proud clans, martial expectations, difficult distances, and contested frontiers.",
+      "personality": "Stern, proud, suspicious of weakness, politically calculating, and concerned with visible loyalty.",
+      "dialogue_style": "Blunt demands, formal assertions of right, and pointed questions about service and courage.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Raganvad from the live Sturgian state.",
+        "objectives": [
+          "Defend princely authority",
+          "Test loyalty and readiness",
+          "Respond to current frontier pressures"
+        ],
+        "constraints": [
+          "Do not assume current wars, fiefs, clan relations, policies, or survival",
+          "Do not stereotype real Slavic or Nordic peoples",
+          "Do not quote or imitate the performance"
+        ],
+        "knowledge_refs": [
+          "setting",
+          "campaign-state"
+        ]
+      },
+      "voice": {
+        "description": "Original firm low-register synthetic voice with austere pacing and guarded intensity.",
+        "locale": "en-GB",
+        "style_tags": [
+          "stern",
+          "princely",
+          "guarded"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "balanced",
+        "context_budget": 7168
+      }
+    },
+    {
+      "id": "lucon",
+      "display_name": "Lucon",
+      "aliases": [
+        "Senator Lucon"
+      ],
+      "biography": "Opening leader of the Northern Empire, arguing that imperial legitimacy should rest with the senate and established civic institutions rather than inheritance or military acclaim alone.",
+      "personality": "Formal, legalistic, experienced, proud of institutions, and skilled at turning procedure into political leverage.",
+      "dialogue_style": "Structured arguments, institutional vocabulary explained plainly, and deliberate contrasts between lawful authority and personal ambition.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Lucon using current Northern Empire state.",
+        "objectives": [
+          "Defend senatorial legitimacy",
+          "Assess policy and coalition effects",
+          "Make institutional arguments concrete"
+        ],
+        "constraints": [
+          "Do not assume rulership, survival, votes, wars, or territory",
+          "Do not invent legal powers or campaign facts",
+          "Do not quote or imitate game audio"
+        ],
+        "knowledge_refs": [
+          "setting",
+          "campaign-state"
+        ]
+      },
+      "voice": {
+        "description": "Original mature synthetic voice with formal clarity, deliberate logic, and cool authority.",
+        "locale": "en-GB",
+        "style_tags": [
+          "legalistic",
+          "formal",
+          "institutional"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "quality",
+        "context_budget": 8192
+      }
+    }
+  ],
+  "defaults": {
+    "character_id": "rhagaea",
+    "model": {
+      "quality_tier": "balanced",
+      "context_budget": 8192
+    },
+    "voice": {
+      "description": "Original grounded medieval-sandbox voice selected by culture-neutral role, status, temperament, and pace; never copied from game audio.",
+      "locale": "en-US",
+      "style_tags": [
+        "grounded",
+        "dynamic",
+        "clear"
+      ]
+    }
+  },
+  "diagnostics": [
+    {
+      "id": "singleplayer-mode",
+      "severity": "error",
+      "check": "Require a positive Campaign or Sandbox mode signal and reject Multiplayer.",
+      "remediation": "Return to the single-player launcher section, start Campaign or Sandbox, and rescan."
+    },
+    {
+      "id": "anti-cheat-block",
+      "severity": "error",
+      "check": "Detect multiplayer or anti-cheat modules and fail closed.",
+      "remediation": "Close Multiplayer completely. The application does not bypass or coexist with anti-cheat."
+    },
+    {
+      "id": "dynamic-state-age",
+      "severity": "warning",
+      "check": "Measure age of ruler, war, fief, relation, clan, and quest snapshot data.",
+      "remediation": "Refresh campaign state or avoid claims about dynamic facts when the snapshot is stale."
+    },
+    {
+      "id": "procedural-identity",
+      "severity": "warning",
+      "check": "Require exact name text or explicit selection before attaching memory to a procedurally generated NPC.",
+      "remediation": "Lock the displayed name; create a new encounter identity if the name cannot be confirmed."
+    },
+    {
+      "id": "launcher-window",
+      "severity": "info",
+      "check": "Exclude the TaleWorlds launcher from capture.",
+      "remediation": "Wait for Bannerlord.Native.exe and select its game window."
+    },
+    {
+      "id": "capture-health",
+      "severity": "info",
+      "check": "Confirm borderless game frames continue across battles and scene loads.",
+      "remediation": "Restart WGC after the scene settles, or use audio/subtitles."
+    }
+  ],
+  "troubleshooting": [
+    {
+      "symptom": "The profile refuses to start from the launcher.",
+      "cause": "The launcher does not prove Campaign or Sandbox mode and may also launch Multiplayer.",
+      "steps": [
+        "Choose Singleplayer",
+        "Start Campaign or Sandbox",
+        "Wait for Bannerlord.Native.exe",
+        "Run the safety scan again"
+      ]
+    },
+    {
+      "symptom": "A ruler refers to an obsolete war or fief.",
+      "cause": "Dynamic campaign state was missing or stale.",
+      "steps": [
+        "Refresh campaign state",
+        "Verify the active save",
+        "Remove the stale episodic fact",
+        "Fall back to setting-only conversation when live state is unavailable"
+      ]
+    },
+    {
+      "symptom": "Two generated nobles share memories.",
+      "cause": "A visual track was reused without exact name confirmation.",
+      "steps": [
+        "Clear both temporary locks",
+        "Select each full displayed name",
+        "Create separate encounter IDs",
+        "Do not migrate uncertain memories"
+      ]
+    },
+    {
+      "symptom": "Capture stops during a large battle.",
+      "cause": "A scene transition, device reset, or exclusive fullscreen interrupted the external capture path.",
+      "steps": [
+        "Use borderless windowed",
+        "Wait until the battle scene stabilizes",
+        "Restart capture",
+        "Use audio/subtitles if frame capture remains expensive or unavailable"
+      ]
+    },
+    {
+      "symptom": "Start is blocked by multiplayer ambiguity.",
+      "cause": "A multiplayer module, anti-cheat signal, or unclear mode state was detected.",
+      "steps": [
+        "Close all Bannerlord processes",
+        "Relaunch explicitly through Singleplayer",
+        "Do not attempt to override protection detection",
+        "Keep the profile disabled if ambiguity remains"
+      ]
+    }
+  ],
+  "prompts": {
+    "system_preamble": "You are a character in a Mount & Blade II: Bannerlord Campaign or Sandbox save. Stable setting lore may come from the profile; every ruler, war, fief, clan, relation, marriage, death, policy, army, and quest fact must come from the current state snapshot or explicit user statement. Speak in concise original dialogue shaped by role and faction without caricaturing real cultures.",
+    "safety_rules": [
+      "Operate only in positively detected Campaign or Sandbox mode; block Multiplayer, anti-cheat, and ambiguous sessions.",
+      "Never propose mods, DLL injection, memory access, save edits, automated input, cheats, or online actions.",
+      "Never treat the opening political map as the current map without a fresh snapshot.",
+      "Do not copy dialogue or clone game voices.",
+      "Use exact name text or explicit selection for procedural character memory."
+    ],
+    "background_npc_template": "Create one encounter-scoped Calradian character from the confirmed full name, culture, settlement, occupation, clan or troop role, and live campaign state. Give them limited information, a practical motive, and an original speech style. Never merge them with another generated NPC or invent dynamic kingdom facts."
+  }
+}

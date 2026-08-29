@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "npc.sim.scenario.v1",
+  "id": "barge-in",
+  "description": "Player interruption cancels queued language, audio, and animation work using a new generation.",
+  "seed": 2003,
+  "resourceProfile": "reference-balanced-12gb",
+  "privacy": { "mode": "hosted", "networkAllowed": true },
+  "providers": { "stt": "mock-assemblyai", "llm": "mock-groq", "tts": "mock-elevenlabs" },
+  "turn": {
+    "sessionId": "session-barge",
+    "turnId": "turn-004",
+    "npc": { "id": "cyberpunk-jackie", "name": "Jackie Welles", "visibility": "visible" }
+  },
+  "stream": [
+    { "atMs": 35, "source": "stt", "kind": "partial", "payload": { "text": "What happened", "networkRequest": true, "provider": "mock-assemblyai" } },
+    { "atMs": 170, "source": "stt", "kind": "final", "payload": { "text": "What happened at the docks?", "confidence": 0.96 } },
+    { "atMs": 195, "source": "identity", "kind": "resolved", "payload": { "strategy": "adapter_actor_id", "confidence": 1 } },
+    { "atMs": 225, "source": "memory", "kind": "retrieved", "payload": { "episodicCount": 4, "factCount": 5, "latencyMs": 30 } },
+    { "atMs": 285, "source": "llm", "kind": "token", "payload": { "text": "We", "networkRequest": true, "provider": "mock-groq" } },
+    { "atMs": 330, "source": "llm", "kind": "token", "payload": { "text": " found the shipment" } },
+    { "atMs": 365, "source": "llm", "kind": "sentence", "payload": { "text": "We found the shipment." } },
+    { "atMs": 420, "source": "tts", "kind": "audio_chunk", "payload": { "chunkIndex": 0, "sampleCount": 1440, "sampleRateHz": 24000, "networkRequest": true, "provider": "mock-elevenlabs" } },
+    { "atMs": 430, "source": "animation", "kind": "viseme", "payload": { "id": "W", "durationMs": 90 } },
+    { "atMs": 460, "source": "control", "kind": "barge_in", "payload": { "reason": "player_started_speaking" } },
+    { "atMs": 480, "source": "llm", "kind": "token", "payload": { "text": " but—" } },
+    { "atMs": 510, "source": "tts", "kind": "audio_chunk", "payload": { "chunkIndex": 1, "sampleCount": 960, "sampleRateHz": 24000 } },
+    { "atMs": 550, "source": "animation", "kind": "viseme", "payload": { "id": "B", "durationMs": 80 } },
+    { "atMs": 600, "source": "llm", "kind": "complete", "payload": { "finishReason": "cancelled", "text": "We found the shipment, but—" } },
+    { "atMs": 625, "source": "tts", "kind": "complete", "payload": { "chunks": 2 } },
+    { "atMs": 640, "source": "animation", "kind": "complete", "payload": { "visemeCount": 2 } }
+  ],
+  "faults": [],
+  "expected": {
+    "status": "cancelled",
+    "traceSha256": "0cc8e00373e60bb7871063ccb4eb3dc4d857b4232eac928b53bcb202b6fdfe6a",
+    "firstAudioAtMs": 420,
+    "speechEndToFirstAudioMs": 250,
+    "networkAttempts": 3,
+    "degradationReasons": []
+  }
+}

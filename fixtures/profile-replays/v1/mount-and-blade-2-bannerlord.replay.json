@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0.0",
+  "profile_id": "mount-and-blade-2-bannerlord",
+  "assertions": {
+    "profile_validation": {
+      "expected_valid": true,
+      "expected_schema_version": "2.0.0"
+    },
+    "detection": {
+      "store": "steam",
+      "store_id": "261550",
+      "display_name": "Mount & Blade II: Bannerlord",
+      "install_directory": "C:/Replay/Mount & Blade II Bannerlord",
+      "executable": "Bannerlord.Native.exe",
+      "expected_match": true
+    },
+    "selection": {
+      "character_id": "rhagaea",
+      "offscreen": true,
+      "expected_strategy": "explicit_selection",
+      "expected_evidence": "explicit_selection"
+    },
+    "routes": {
+      "conversation": true,
+      "subtitles": true,
+      "memory": true,
+      "audio": true
+    },
+    "refusal": {
+      "protected_online": "blocked",
+      "anti_cheat": "blocked",
+      "risk_gated_profile": false
+    }
+  },
+  "simulation": {
+    "session_id": "profile-replay-mount-and-blade-2-bannerlord",
+    "turn_id": "mount-and-blade-2-bannerlord-turn-1",
+    "transcript": "Deterministic profile replay: respond to the selected offscreen character.",
+    "locale": "en-US"
+  }
+}

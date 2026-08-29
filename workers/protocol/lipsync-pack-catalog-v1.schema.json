@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://interactive-npcs.invalid/schemas/lipsync-pack-catalog-v1.schema.json",
+  "title": "Generic Lip-Sync Candidate Development Catalog v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "catalog_id",
+    "display_name",
+    "development_descriptor",
+    "downloadable_catalog",
+    "contains_download_locations",
+    "contains_model_payloads",
+    "network_access",
+    "game_specific_adapters",
+    "selection_policy",
+    "candidates"
+  ],
+  "properties": {
+    "schema_version": { "const": "npc.lipsync-pack-catalog/v1" },
+    "catalog_id": { "$ref": "#/$defs/id" },
+    "display_name": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "development_descriptor": { "const": true },
+    "downloadable_catalog": { "const": false },
+    "contains_download_locations": { "const": false },
+    "contains_model_payloads": { "const": false },
+    "network_access": { "const": false },
+    "game_specific_adapters": { "const": false },
+    "selection_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "user_initiated_only",
+        "automatic_selection",
+        "automatic_download",
+        "explicit_candidate_id_required",
+        "installed_verified_pack_required",
+        "qualification_required",
+        "fallback_chain"
+      ],
+      "properties": {
+        "user_initiated_only": { "const": true },
+        "automatic_selection": { "const": false },
+        "automatic_download": { "const": false },
+        "explicit_candidate_id_required": { "const": true },
+        "installed_verified_pack_required": { "const": true },
+        "qualification_required": { "const": true },
+        "fallback_chain": { "type": "array", "maxItems": 0 }
+      }
+    },
+    "candidates": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/candidate" }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{1,95}[a-z0-9]$"
+    },
+    "stringList": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "display_name",
+        "implementation_kind",
+        "status",
+        "source_access",
+        "supported_platforms",
+        "live_selectable",
+        "offline_selectable",
+        "requires_private_access",
+        "requirements",
+        "constraints"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "display_name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "implementation_kind": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "status": {
+          "enum": [
+            "conditional_private_access",
+            "public_experimental",
+            "baseline",
+            "deferred",
+            "offline_only"
+          ]
+        },
+        "source_access": { "enum": ["private_ngc", "public_upstream", "project_developed"] },
+        "supported_platforms": { "const": ["windows_x64"] },
+        "live_selectable": { "type": "boolean" },
+        "offline_selectable": { "type": "boolean" },
+        "requires_private_access": { "type": "boolean" },
+        "requirements": { "$ref": "#/$defs/stringList" },
+        "constraints": { "$ref": "#/$defs/stringList" }
+      }
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "npc.sim.scenario.v1",
+  "id": "privacy-offline",
+  "description": "Offline mode completes a full local turn with an explicit zero-network-attempt assertion.",
+  "seed": 2007,
+  "resourceProfile": "reference-balanced-12gb",
+  "privacy": { "mode": "offline", "networkAllowed": false },
+  "providers": { "stt": "mock-local", "llm": "mock-local", "tts": "mock-local" },
+  "turn": {
+    "sessionId": "session-offline",
+    "turnId": "turn-001",
+    "npc": { "id": "stardew-leah", "name": "Leah", "visibility": "visible" }
+  },
+  "stream": [
+    { "atMs": 70, "source": "stt", "kind": "partial", "payload": { "text": "How is the" } },
+    { "atMs": 210, "source": "stt", "kind": "final", "payload": { "text": "How is the sculpture going?", "confidence": 0.97 } },
+    { "atMs": 235, "source": "identity", "kind": "resolved", "payload": { "strategy": "profile_schedule_and_manual_target", "confidence": 0.98 } },
+    { "atMs": 265, "source": "memory", "kind": "retrieved", "payload": { "episodicCount": 2, "factCount": 2, "latencyMs": 30 } },
+    { "atMs": 355, "source": "llm", "kind": "token", "payload": { "text": "Slowly," } },
+    { "atMs": 405, "source": "llm", "kind": "token", "payload": { "text": " but it finally feels alive." } },
+    { "atMs": 440, "source": "llm", "kind": "sentence", "payload": { "text": "Slowly, but it finally feels alive." } },
+    { "atMs": 520, "source": "tts", "kind": "audio_chunk", "payload": { "chunkIndex": 0, "sampleCount": 1920, "sampleRateHz": 24000 } },
+    { "atMs": 540, "source": "animation", "kind": "viseme", "payload": { "id": "S", "durationMs": 90 } },
+    { "atMs": 620, "source": "llm", "kind": "complete", "payload": { "finishReason": "stop", "text": "Slowly, but it finally feels alive." } },
+    { "atMs": 690, "source": "tts", "kind": "audio_chunk", "payload": { "chunkIndex": 1, "sampleCount": 1440, "sampleRateHz": 24000 } },
+    { "atMs": 750, "source": "tts", "kind": "complete", "payload": { "chunks": 2, "deliveredText": "Slowly, but it finally feels alive." } },
+    { "atMs": 770, "source": "animation", "kind": "complete", "payload": { "visemeCount": 1 } }
+  ],
+  "faults": [],
+  "expected": {
+    "status": "completed",
+    "traceSha256": "d02952df825c747091180781adb5f342d0637d72b4042bca300fb71f3f287caa",
+    "firstAudioAtMs": 520,
+    "speechEndToFirstAudioMs": 310,
+    "networkAttempts": 0,
+    "degradationReasons": []
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0.0",
+  "profile_id": "fallout-4",
+  "assertions": {
+    "profile_validation": {
+      "expected_valid": true,
+      "expected_schema_version": "2.0.0"
+    },
+    "detection": {
+      "store": "steam",
+      "store_id": "377160",
+      "display_name": "Fallout 4",
+      "install_directory": "C:/Replay/Fallout 4",
+      "executable": "Fallout4.exe",
+      "expected_match": true
+    },
+    "selection": {
+      "character_id": "commonwealth-resident",
+      "offscreen": true,
+      "expected_strategy": "explicit_selection",
+      "expected_evidence": "explicit_selection"
+    },
+    "routes": {
+      "conversation": true,
+      "subtitles": true,
+      "memory": true,
+      "audio": true
+    },
+    "refusal": {
+      "protected_online": "blocked",
+      "anti_cheat": "blocked",
+      "risk_gated_profile": false
+    }
+  },
+  "simulation": {
+    "session_id": "profile-replay-fallout-4",
+    "turn_id": "fallout-4-turn-1",
+    "transcript": "Deterministic profile replay: respond to the selected offscreen character.",
+    "locale": "en-US"
+  }
+}

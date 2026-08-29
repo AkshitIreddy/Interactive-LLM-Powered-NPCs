@@ -1,0 +1,77 @@
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+.secrets/
+apikeys.json
+*.pem
+*.pfx
+*.key
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# JavaScript / frontend
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+
+# Rust / C++
+target/
+build/
+cmake-build-*/
+CMakeUserPresets.json
+compile_commands.json
+**/Cargo.lock
+!/Cargo.lock
+!/apps/control/src-tauri/Cargo.lock
+
+# Python / local model workers
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Runtime state and downloaded assets
+.cache/
+cache/
+downloads/
+models/
+runtimes/
+runtime-data/
+logs/
+crashes/
+diagnostics/
+*.dmp
+*.log
+*.part
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+
+# Legacy prototype scratch outputs
+temp.py
+temp/audio.*
+temp/facial_animation.*
+temp/screen.*
+temp/extracted_face.*
+temp/webcam_photo.*
+video_temp/*
+!video_temp/temp.txt
+
+# Generated packaging output
+artifacts/
+packages/
+sbom/
+tools/game-load/out/

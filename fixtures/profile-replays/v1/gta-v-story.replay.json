@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0.0",
+  "profile_id": "gta-v-story",
+  "assertions": {
+    "profile_validation": {
+      "expected_valid": true,
+      "expected_schema_version": "2.0.0"
+    },
+    "detection": {
+      "store": "steam",
+      "store_id": "3240220",
+      "display_name": "Grand Theft Auto V — Story Mode Only",
+      "install_directory": "C:/Replay/Grand Theft Auto V Enhanced",
+      "executable": "GTA5.exe",
+      "expected_match": true
+    },
+    "selection": {
+      "character_id": "franklin-clinton",
+      "offscreen": true,
+      "expected_strategy": "explicit_selection",
+      "expected_evidence": "explicit_selection"
+    },
+    "routes": {
+      "conversation": true,
+      "subtitles": true,
+      "memory": true,
+      "audio": true
+    },
+    "refusal": {
+      "protected_online": "blocked",
+      "anti_cheat": "blocked",
+      "risk_gated_profile": true
+    }
+  },
+  "simulation": {
+    "session_id": "profile-replay-gta-v-story",
+    "turn_id": "gta-v-story-turn-1",
+    "transcript": "Deterministic profile replay: respond to the selected offscreen character.",
+    "locale": "en-US"
+  }
+}

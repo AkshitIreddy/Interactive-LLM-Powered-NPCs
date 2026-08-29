@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0.0",
+  "profile_id": "skyrim-special-edition",
+  "assertions": {
+    "profile_validation": {
+      "expected_valid": true,
+      "expected_schema_version": "2.0.0"
+    },
+    "detection": {
+      "store": "steam",
+      "store_id": "489830",
+      "display_name": "The Elder Scrolls V: Skyrim Special Edition",
+      "install_directory": "C:/Replay/Skyrim Special Edition",
+      "executable": "SkyrimSE.exe",
+      "expected_match": true
+    },
+    "selection": {
+      "character_id": "hold-resident",
+      "offscreen": true,
+      "expected_strategy": "explicit_selection",
+      "expected_evidence": "explicit_selection"
+    },
+    "routes": {
+      "conversation": true,
+      "subtitles": true,
+      "memory": true,
+      "audio": true
+    },
+    "refusal": {
+      "protected_online": "blocked",
+      "anti_cheat": "blocked",
+      "risk_gated_profile": false
+    }
+  },
+  "simulation": {
+    "session_id": "profile-replay-skyrim-special-edition",
+    "turn_id": "skyrim-special-edition-turn-1",
+    "transcript": "Deterministic profile replay: respond to the selected offscreen character.",
+    "locale": "en-US"
+  }
+}

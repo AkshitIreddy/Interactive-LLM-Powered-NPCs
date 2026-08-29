@@ -1,0 +1,257 @@
+{
+  "format": "npc-provider-catalog",
+  "schema_version": 1,
+  "catalog_revision": 6,
+  "published_at": "2026-08-28T00:00:00Z",
+  "content": {
+    "providers": [
+      {
+        "id": "openai", "display_name": "OpenAI", "execution": "hosted", "lifecycle": "stable", "egress": "provider_cloud",
+        "modalities": ["llm", "stt"],
+        "endpoint": { "base_url": "https://api.openai.com", "user_configurable": false, "tls_required": true },
+        "credential": { "required": true, "credential_reference_kind": "windows_credential_manager" },
+        "capabilities": { "streaming_input": true, "streaming_output": true, "cancellation": true, "model_discovery": true, "structured_output": true, "word_timestamps": true, "visemes_or_alignment": false, "voice_discovery": false },
+        "privacy": { "transmitted_data": ["text", "audio", "derived_game_context"], "policy_url": "https://openai.com/policies/privacy-policy/", "explicit_consent_required": true }
+      },
+      {
+        "id": "gemini", "display_name": "Google Gemini", "execution": "hosted", "lifecycle": "stable", "egress": "provider_cloud",
+        "modalities": ["llm"],
+        "endpoint": { "base_url": "https://generativelanguage.googleapis.com", "user_configurable": false, "tls_required": true },
+        "credential": { "required": true, "credential_reference_kind": "windows_credential_manager" },
+        "capabilities": { "streaming_input": false, "streaming_output": true, "cancellation": true, "model_discovery": true, "structured_output": true, "word_timestamps": false, "visemes_or_alignment": false, "voice_discovery": false },
+        "privacy": { "transmitted_data": ["text", "derived_game_context"], "policy_url": "https://policies.google.com/privacy", "explicit_consent_required": true }
+      },
+      {
+        "id": "anthropic", "display_name": "Anthropic", "execution": "hosted", "lifecycle": "stable", "egress": "provider_cloud",
+        "modalities": ["llm"],
+        "endpoint": { "base_url": "https://api.anthropic.com", "user_configurable": false, "tls_required": true },
+        "credential": { "required": true, "credential_reference_kind": "windows_credential_manager" },
+        "capabilities": { "streaming_input": false, "streaming_output": true, "cancellation": true, "model_discovery": false, "structured_output": true, "word_timestamps": false, "visemes_or_alignment": false, "voice_discovery": false },
+        "privacy": { "transmitted_data": ["text", "derived_game_context"], "policy_url": "https://www.anthropic.com/legal/privacy", "explicit_consent_required": true }
+      },
+      {
+        "id": "groq", "display_name": "Groq", "execution": "hosted", "lifecycle": "stable", "egress": "provider_cloud",
+        "modalities": ["llm"],
+        "endpoint": { "base_url": "https://api.groq.com", "user_configurable": false, "tls_required": true },
+        "credential": { "required": true, "credential_reference_kind": "windows_credential_manager" },
+        "capabilities": { "streaming_input": false, "streaming_output": true, "cancellation": true, "model_discovery": true, "structured_output": true, "word_timestamps": false, "visemes_or_alignment": false, "voice_discovery": false },
+        "privacy": { "transmitted_data": ["text", "derived_game_context"], "policy_url": "https://groq.com/privacy-policy/", "explicit_consent_required": true }
+      },
+      {
+        "id": "cohere", "display_name": "Cohere", "execution": "hosted", "lifecycle": "stable", "egress": "provider_cloud",
+        "modalities": ["llm", "embedding", "rerank"],
+        "endpoint": { "base_url": "https://api.cohere.com", "user_configurable": false, "tls_required": true },
+        "credential": { "required": true, "credential_reference_kind": "windows_credential_manager" },
+        "capabilities": { "streaming_input": false, "streaming_output": true, "cancellation": true, "model_discovery": true, "structured_output": true, "word_timestamps": false, "visemes_or_alignment": false, "voice_discovery": false },
+        "privacy": { "transmitted_data": ["text", "derived_game_context"], "policy_url": "https://cohere.com/privacy", "explicit_consent_required": true },
+        "usage_tiers": [
+          { "id": "trial", "lifecycle": "experimental", "intended_use": "evaluation", "notes": "Free evaluation keys are rate-limited and intended for testing or proofs of concept, not a production route.", "documentation_url": "https://docs.cohere.com/v2/docs/rate-limits" },
+          { "id": "production", "lifecycle": "stable", "intended_use": "production", "notes": "Production use requires an appropriate production key and remains subject to model-specific availability, terms, and rate limits.", "documentation_url": "https://docs.cohere.com/v2/docs/rate-limits" }
+        ]
+      },
+      {
+        "id": "nvidia-nim", "display_name": "NVIDIA NIM API Catalog (development preview)", "execution": "hosted", "lifecycle": "experimental", "egress": "provider_cloud",
+        "modalities": ["llm", "embedding", "rerank", "stt", "tts"],
+        "endpoint": { "base_url": "https://integrate.api.nvidia.com/v1", "user_configurable": false, "tls_required": true },
+        "credential": { "required": true, "credential_reference_kind": "windows_credential_manager" },
+        "capabilities": { "streaming_input": false, "streaming_output": true, "cancellation": true, "model_discovery": true, "structured_output": false, "word_timestamps": true, "visemes_or_alignment": true, "voice_discovery": true },
+        "privacy": { "transmitted_data": ["text", "audio", "derived_game_context"], "policy_url": "https://assets.ngc.nvidia.com/products/api-catalog/legal/NVIDIA%20API%20Trial%20Terms%20of%20Service.pdf", "explicit_consent_required": true },
+        "usage_tiers": [
+          { "id": "trial", "lifecycle": "experimental", "intended_use": "evaluation", "notes": "NVIDIA Developer Program hosted NIM endpoints are a no-cost trial for one-account prototyping, development, testing, and evaluation only; endpoint availability is model-specific.", "documentation_url": "https://developer.nvidia.com/nim" },
+          { "id": "production", "lifecycle": "qualification_required", "intended_use": "production", "notes": "The Developer Program trial grants no production or commercial entitlement; production requires a separate eligible NVIDIA or partner subscription and its terms.", "documentation_url": "https://docs.api.nvidia.com/nim/docs/run-anywhere" }
+        ],
+        "trial_terms": {
+          "access_scope": "Free NVIDIA-hosted NIM API endpoints are for prototyping, development, testing, and evaluation only; not every API Catalog or Speech NIM is a hosted free endpoint.",
+          "account_scope": "One NVIDIA Developer account and Developer API key can authenticate calls to API Catalog model endpoints available to that account; availability and entitlement remain model-specific.",
+          "rate_limit_policy": "dynamic_model_specific_unpublished",
+          "rate_limit_note": "NVIDIA does not publish one universal trial limit; limits vary by model and concurrent demand and must be checked in the signed-in API Catalog account.",
+          "production_use": "prohibited",
+          "commercial_use": "prohibited",
+          "prohibited_data": ["confidential", "controlled_or_sensitive", "personal", "game_secrets"],
+          "session_retention": "not_stored_after_session_unless_service_discloses",
+          "security_abuse_logging": true,
+          "product_improvement_collection_disclosed": true,
+          "service_specific_disclosures_apply": true,
+          "exact_model_terms_apply": true,
+          "terms_url": "https://assets.ngc.nvidia.com/products/api-catalog/legal/NVIDIA%20API%20Trial%20Terms%20of%20Service.pdf",
+          "access_url": "https://developer.nvidia.com/nim",
+          "rate_limits_url": "https://forums.developer.nvidia.com/t/nvidia-nim-faq/300317"
+        },
+        "recommendation": {
+          "kind": "experimentation_convenience",
+          "reason": "Convenient for user-directed experimentation because one NVIDIA Developer account/key can cover multiple available preview model services; every model and modality still requires explicit selection and readiness checks.",
+          "requires_explicit_model_selection": true,
+          "never_default": true,
+          "never_automatic_fallback": true
+        }
+      },
+      {
+        "id": "openai-compatible", "display_name": "OpenAI-compatible endpoint", "execution": "hosted", "lifecycle": "experimental", "egress": "user_configured_endpoint",
+        "modalities": ["llm"],
+        "endpoint": { "base_url": null, "user_configurable": true, "tls_required": false },
+        "credential": { "required": false, "credential_reference_kind": null },
+        "capabilities": { "streaming_input": false, "streaming_output": true, "cancellation": true, "model_discovery": true, "structured_output": false, "word_timestamps": false, "visemes_or_alignment": false, "voice_discovery": false },
+        "privacy": { "transmitted_data": ["text", "derived_game_context"], "policy_url": null, "explicit_consent_required": true }
+      },
+      {
+        "id": "deepgram", "display_name": "Deepgram", "execution": "hosted", "lifecycle": "stable", "egress": "provider_cloud",
+        "modalities": ["stt", "tts"],
+        "endpoint": { "base_url": "https://api.deepgram.com", "user_configurable": false, "tls_required": true },
+        "credential": { "required": true, "credential_reference_kind": "windows_credential_manager" },
+        "capabilities": { "streaming_input": true, "streaming_output": true, "cancellation": true, "model_discovery": false, "structured_output": false, "word_timestamps": true, "visemes_or_alignment": false, "voice_discovery": false },
+        "privacy": { "transmitted_data": ["text", "audio"], "policy_url": "https://deepgram.com/privacy", "explicit_consent_required": true }
+      },
+      {
+        "id": "assemblyai", "display_name": "AssemblyAI", "execution": "hosted", "lifecycle": "stable", "egress": "provider_cloud",
+        "modalities": ["stt"],
+        "endpoint": { "base_url": "https://api.assemblyai.com", "user_configurable": false, "tls_required": true },
+        "credential": { "required": true, "credential_reference_kind": "windows_credential_manager" },
+        "capabilities": { "streaming_input": true, "streaming_output": true, "cancellation": true, "model_discovery": false, "structured_output": false, "word_timestamps": true, "visemes_or_alignment": false, "voice_discovery": false },
+        "privacy": { "transmitted_data": ["audio"], "policy_url": "https://www.assemblyai.com/legal/privacy-policy", "explicit_consent_required": true }
+      },
+      {
+        "id": "elevenlabs", "display_name": "ElevenLabs", "execution": "hosted", "lifecycle": "stable", "egress": "provider_cloud",
+        "modalities": ["stt", "tts"],
+        "endpoint": { "base_url": "https://api.elevenlabs.io", "user_configurable": false, "tls_required": true },
+        "credential": { "required": true, "credential_reference_kind": "windows_credential_manager" },
+        "capabilities": { "streaming_input": true, "streaming_output": true, "cancellation": true, "model_discovery": false, "structured_output": false, "word_timestamps": true, "visemes_or_alignment": true, "voice_discovery": true },
+        "privacy": { "transmitted_data": ["text", "audio"], "policy_url": "https://elevenlabs.io/privacy-policy", "explicit_consent_required": true }
+      },
+      {
+        "id": "cartesia", "display_name": "Cartesia", "execution": "hosted", "lifecycle": "stable", "egress": "provider_cloud",
+        "modalities": ["tts"],
+        "endpoint": { "base_url": "https://api.cartesia.ai", "user_configurable": false, "tls_required": true },
+        "credential": { "required": true, "credential_reference_kind": "windows_credential_manager" },
+        "capabilities": { "streaming_input": true, "streaming_output": true, "cancellation": true, "model_discovery": false, "structured_output": false, "word_timestamps": true, "visemes_or_alignment": true, "voice_discovery": true },
+        "privacy": { "transmitted_data": ["text"], "policy_url": "https://cartesia.ai/privacy", "explicit_consent_required": true }
+      },
+      {
+        "id": "inworld", "display_name": "Inworld", "execution": "hosted", "lifecycle": "stable", "egress": "provider_cloud",
+        "modalities": ["tts"],
+        "endpoint": { "base_url": "https://api.inworld.ai", "user_configurable": false, "tls_required": true },
+        "credential": { "required": true, "credential_reference_kind": "windows_credential_manager" },
+        "capabilities": { "streaming_input": true, "streaming_output": true, "cancellation": true, "model_discovery": false, "structured_output": false, "word_timestamps": false, "visemes_or_alignment": true, "voice_discovery": true },
+        "privacy": { "transmitted_data": ["text"], "policy_url": "https://inworld.ai/privacy-policy", "explicit_consent_required": true }
+      },
+      {
+        "id": "moonshine-local", "display_name": "Moonshine local", "execution": "local", "lifecycle": "qualification_required", "egress": "offline",
+        "modalities": ["stt"], "endpoint": { "base_url": null, "user_configurable": false, "tls_required": false },
+        "credential": { "required": false, "credential_reference_kind": null },
+        "capabilities": { "streaming_input": true, "streaming_output": true, "cancellation": true, "model_discovery": false, "structured_output": false, "word_timestamps": true, "visemes_or_alignment": false, "voice_discovery": false },
+        "privacy": { "transmitted_data": [], "policy_url": null, "explicit_consent_required": false }
+      },
+      {
+        "id": "nemotron-local", "display_name": "NVIDIA Nemotron Speech local", "execution": "local", "lifecycle": "qualification_required", "egress": "offline",
+        "modalities": ["stt"], "endpoint": { "base_url": null, "user_configurable": false, "tls_required": false },
+        "credential": { "required": false, "credential_reference_kind": null },
+        "capabilities": { "streaming_input": true, "streaming_output": true, "cancellation": true, "model_discovery": false, "structured_output": false, "word_timestamps": true, "visemes_or_alignment": false, "voice_discovery": false },
+        "privacy": { "transmitted_data": [], "policy_url": null, "explicit_consent_required": false }
+      },
+      {
+        "id": "whispercpp-local", "display_name": "whisper.cpp local", "execution": "local", "lifecycle": "qualification_required", "egress": "offline",
+        "modalities": ["stt"], "endpoint": { "base_url": null, "user_configurable": false, "tls_required": false },
+        "credential": { "required": false, "credential_reference_kind": null },
+        "capabilities": { "streaming_input": true, "streaming_output": true, "cancellation": true, "model_discovery": false, "structured_output": false, "word_timestamps": true, "visemes_or_alignment": false, "voice_discovery": false },
+        "privacy": { "transmitted_data": [], "policy_url": null, "explicit_consent_required": false }
+      },
+      {
+        "id": "kokoro-local", "display_name": "Kokoro ONNX local", "execution": "local", "lifecycle": "qualification_required", "egress": "offline",
+        "modalities": ["tts"], "endpoint": { "base_url": null, "user_configurable": false, "tls_required": false },
+        "credential": { "required": false, "credential_reference_kind": null },
+        "capabilities": { "streaming_input": false, "streaming_output": true, "cancellation": true, "model_discovery": false, "structured_output": false, "word_timestamps": false, "visemes_or_alignment": false, "voice_discovery": false },
+        "privacy": { "transmitted_data": [], "policy_url": null, "explicit_consent_required": false }
+      },
+      {
+        "id": "chatterbox-local", "display_name": "Chatterbox local", "execution": "local", "lifecycle": "qualification_required", "egress": "offline",
+        "modalities": ["tts"], "endpoint": { "base_url": null, "user_configurable": false, "tls_required": false },
+        "credential": { "required": false, "credential_reference_kind": null },
+        "capabilities": { "streaming_input": false, "streaming_output": false, "cancellation": true, "model_discovery": false, "structured_output": false, "word_timestamps": false, "visemes_or_alignment": false, "voice_discovery": false },
+        "privacy": { "transmitted_data": [], "policy_url": null, "explicit_consent_required": false }
+      },
+      {
+        "id": "qwen-tts-local", "display_name": "Qwen TTS local", "execution": "local", "lifecycle": "qualification_required", "egress": "offline",
+        "modalities": ["tts"], "endpoint": { "base_url": null, "user_configurable": false, "tls_required": false },
+        "credential": { "required": false, "credential_reference_kind": null },
+        "capabilities": { "streaming_input": false, "streaming_output": false, "cancellation": true, "model_discovery": false, "structured_output": false, "word_timestamps": false, "visemes_or_alignment": false, "voice_discovery": false },
+        "privacy": { "transmitted_data": [], "policy_url": null, "explicit_consent_required": false }
+      },
+      {
+        "id": "llamacpp-local", "display_name": "llama.cpp local", "execution": "local", "lifecycle": "qualification_required", "egress": "offline",
+        "modalities": ["llm"], "endpoint": { "base_url": null, "user_configurable": false, "tls_required": false },
+        "credential": { "required": false, "credential_reference_kind": null },
+        "capabilities": { "streaming_input": false, "streaming_output": true, "cancellation": true, "model_discovery": false, "structured_output": true, "word_timestamps": false, "visemes_or_alignment": false, "voice_discovery": false },
+        "privacy": { "transmitted_data": [], "policy_url": null, "explicit_consent_required": false }
+      },
+      {
+        "id": "onnx-embedding-local", "display_name": "ONNX embedding worker", "execution": "local", "lifecycle": "qualification_required", "egress": "offline",
+        "modalities": ["embedding"], "endpoint": { "base_url": null, "user_configurable": false, "tls_required": false },
+        "credential": { "required": false, "credential_reference_kind": null },
+        "capabilities": { "streaming_input": false, "streaming_output": false, "cancellation": true, "model_discovery": false, "structured_output": false, "word_timestamps": false, "visemes_or_alignment": false, "voice_discovery": false },
+        "privacy": { "transmitted_data": [], "policy_url": null, "explicit_consent_required": false }
+      }
+    ],
+    "models": [
+      { "id": "openai.llm.discovered-default", "provider_id": "openai", "upstream_id": "$user_selected", "display_name": "Selected OpenAI model", "modality": "llm", "lifecycle": "stable", "languages": ["und"], "capabilities": { "streaming": true, "structured_output": true, "low_latency": true, "multilingual": true, "word_timestamps": false, "visemes_or_alignment": false }, "availability": "implemented_adapter", "availability_note": "Runtime adapter and fixture conformance tests are present.", "qualification_requirements": [], "qualification_evidence": null, "eligibility": { "default_candidate": true, "automatic_fallback_candidate": false, "qualification_gate": null } },
+      { "id": "openai.stt.discovered-default", "provider_id": "openai", "upstream_id": "$user_selected", "display_name": "Selected OpenAI transcription model", "modality": "stt", "lifecycle": "stable", "languages": ["und"], "capabilities": { "streaming": true, "structured_output": false, "low_latency": true, "multilingual": true, "word_timestamps": true, "visemes_or_alignment": false }, "availability": "implemented_adapter", "availability_note": "Runtime adapter and fixture conformance tests are present.", "qualification_requirements": [], "qualification_evidence": null, "eligibility": { "default_candidate": true, "automatic_fallback_candidate": false, "qualification_gate": null } },
+      { "id": "gemini.llm.discovered-default", "provider_id": "gemini", "upstream_id": "$user_selected", "display_name": "Selected Gemini model", "modality": "llm", "lifecycle": "stable", "languages": ["und"], "capabilities": { "streaming": true, "structured_output": true, "low_latency": true, "multilingual": true, "word_timestamps": false, "visemes_or_alignment": false }, "availability": "implemented_adapter", "availability_note": "Runtime adapter and fixture conformance tests are present.", "qualification_requirements": [], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": null } },
+      { "id": "anthropic.llm.user-selected", "provider_id": "anthropic", "upstream_id": "$user_selected", "display_name": "Selected Anthropic model", "modality": "llm", "lifecycle": "stable", "languages": ["und"], "capabilities": { "streaming": true, "structured_output": true, "low_latency": false, "multilingual": true, "word_timestamps": false, "visemes_or_alignment": false }, "availability": "implemented_adapter", "availability_note": "Runtime adapter and fixture conformance tests are present.", "qualification_requirements": [], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": null } },
+      { "id": "groq.llm.discovered-default", "provider_id": "groq", "upstream_id": "$user_selected", "display_name": "Selected Groq model", "modality": "llm", "lifecycle": "stable", "languages": ["und"], "capabilities": { "streaming": true, "structured_output": true, "low_latency": true, "multilingual": true, "word_timestamps": false, "visemes_or_alignment": false }, "availability": "implemented_adapter", "availability_note": "Runtime adapter and fixture conformance tests are present.", "qualification_requirements": [], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": null } },
+      { "id": "cohere.llm.discovered-default", "provider_id": "cohere", "upstream_id": "$user_selected", "display_name": "Selected Cohere Chat model", "modality": "llm", "lifecycle": "stable", "languages": ["und"], "capabilities": { "streaming": true, "structured_output": true, "low_latency": false, "multilingual": true, "word_timestamps": false, "visemes_or_alignment": false }, "availability": "implemented_adapter", "availability_note": "Cohere Chat has a runtime adapter with streaming, discovery, cancellation, and fixture conformance tests.", "qualification_requirements": [], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": null } },
+      { "id": "cohere.embedding.discovered-default", "provider_id": "cohere", "upstream_id": "$user_selected", "display_name": "Selected Cohere Embed model", "modality": "embedding", "lifecycle": "experimental", "languages": ["und"], "capabilities": { "streaming": false, "structured_output": false, "low_latency": false, "multilingual": true, "word_timestamps": false, "visemes_or_alignment": false }, "availability": "catalog_only", "availability_note": "Catalog metadata only; no Cohere Embed runtime adapter is implemented.", "qualification_requirements": [], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": "runtime_adapter_and_fixture_conformance" } },
+      { "id": "cohere.rerank.discovered-default", "provider_id": "cohere", "upstream_id": "$user_selected", "display_name": "Selected Cohere Rerank model", "modality": "rerank", "lifecycle": "experimental", "languages": ["und"], "capabilities": { "streaming": false, "structured_output": false, "low_latency": false, "multilingual": true, "word_timestamps": false, "visemes_or_alignment": false }, "availability": "catalog_only", "availability_note": "Catalog metadata only; no Cohere Rerank runtime adapter is implemented.", "qualification_requirements": [], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": "runtime_adapter_and_fixture_conformance" } },
+      { "id": "nvidia-nim.llm.discovered-default", "provider_id": "nvidia-nim", "upstream_id": "$user_selected", "display_name": "Selected NVIDIA NIM Chat model", "modality": "llm", "lifecycle": "experimental", "languages": ["und"], "capabilities": { "streaming": true, "structured_output": false, "low_latency": false, "multilingual": false, "word_timestamps": false, "visemes_or_alignment": false }, "availability": "implemented_adapter", "availability_note": "Dedicated NVIDIA NIM Chat adapter and fixture conformance tests are present; model discovery/probing determines optional per-model features.", "live_qualification": "passed_synthetic", "qualification_requirements": [], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": "explicit_user_model_selection_and_endpoint_probe" } },
+      { "id": "nvidia-nim.embedding.nemotron-3-embed-1b", "provider_id": "nvidia-nim", "upstream_id": "nvidia/nemotron-3-embed-1b", "display_name": "NVIDIA Nemotron 3 Embed 1B", "modality": "embedding", "lifecycle": "experimental", "languages": ["und"], "capabilities": { "streaming": false, "structured_output": false, "low_latency": false, "multilingual": false, "word_timestamps": false, "visemes_or_alignment": false, "embedding_dimensions": 2048 }, "availability": "implemented_adapter", "availability_note": "Exact-model embedding transport, fixtures, runtime integration, authentication, and a synthetic hosted endpoint probe succeeded; no live timing is treated as benchmark evidence.", "live_qualification": "passed_synthetic", "qualification_requirements": [], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": "explicit_user_model_selection_and_egress_consent" } },
+      { "id": "nvidia-nim.rerank.discovered-default", "provider_id": "nvidia-nim", "upstream_id": "$endpoint_probe_required", "display_name": "Available NVIDIA NIM rerank endpoint", "modality": "rerank", "lifecycle": "experimental", "languages": ["und"], "capabilities": { "streaming": false, "structured_output": false, "low_latency": false, "multilingual": false, "word_timestamps": false, "visemes_or_alignment": false }, "availability": "catalog_only", "availability_note": "Transport adapter and fixtures exist, but tested hosted rerank routes were unavailable; this route remains catalog-only until an exact endpoint is qualified.", "live_qualification": "endpoint_unavailable", "qualification_requirements": [], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": "available_exact_endpoint_probe_and_runtime_qualification" } },
+      { "id": "nvidia-nim.stt.nemotron-asr-streaming", "provider_id": "nvidia-nim", "upstream_id": "nemotron-asr-streaming", "display_name": "NVIDIA NIM Nemotron Streaming ASR", "modality": "stt", "lifecycle": "experimental", "languages": ["en-US"], "capabilities": { "streaming": true, "structured_output": false, "low_latency": false, "multilingual": false, "word_timestamps": false, "visemes_or_alignment": false }, "availability": "implemented_adapter", "availability_note": "Fixed NVCF/Riva gRPC adapter and integration fixtures are green; live audio qualification is still pending, so the route is visible but non-selectable.", "live_qualification": "pending", "adapter_lifecycle": "experimental_awaiting_live_audio_qualification", "qualification_requirements": [], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": "successful_live_asr_qualification" } },
+      { "id": "nvidia-nim-magpie", "provider_id": "nvidia-nim", "upstream_id": "magpie-tts-multilingual", "display_name": "NVIDIA Magpie Multilingual TTS", "modality": "tts", "lifecycle": "experimental", "languages": ["und"], "capabilities": { "streaming": true, "structured_output": false, "low_latency": false, "multilingual": true, "word_timestamps": true, "visemes_or_alignment": true, "discovered_voice_count": 86, "eligible_stock_voice_count": 30, "voice_cloning_supported": false, "stock_voice_only": true, "audio_sample_rates_hz": [22050, 44100], "audio_channels": 1, "audio_encoding": "linear_pcm" }, "availability": "implemented_adapter", "availability_note": "Fixed NVCF HTTP/gRPC adapter tests are green; authorized HTTP voice discovery/synthesis produced non-silent unclipped 22.05 kHz mono WAV from a provider-stock voice, while live gRPC streaming qualification remains pending and must be disclosed.", "live_qualification": "passed_synthetic", "adapter_lifecycle": "experimental_http_smoke_qualified_awaiting_grpc_streaming_qualification", "qualification_requirements": [], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": "explicit_user_stock_voice_selection_and_live_grpc_warning" } },
+      { "id": "openai-compatible.llm.user-selected", "provider_id": "openai-compatible", "upstream_id": "$user_selected", "display_name": "Selected compatible endpoint model", "modality": "llm", "lifecycle": "experimental", "languages": ["und"], "capabilities": { "streaming": true, "structured_output": false, "low_latency": false, "multilingual": false, "word_timestamps": false, "visemes_or_alignment": false }, "availability": "implemented_adapter", "availability_note": "A best-effort runtime adapter exists; endpoint capability probing is required before manual selection.", "qualification_requirements": [], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": "endpoint_capability_probe" } },
+      { "id": "deepgram.stt.user-selected", "provider_id": "deepgram", "upstream_id": "$user_selected", "display_name": "Selected Deepgram transcription model", "modality": "stt", "lifecycle": "stable", "languages": ["und"], "capabilities": { "streaming": true, "structured_output": false, "low_latency": true, "multilingual": true, "word_timestamps": true, "visemes_or_alignment": false }, "availability": "implemented_adapter", "availability_note": "Runtime adapter and fixture conformance tests are present.", "qualification_requirements": [], "qualification_evidence": null, "eligibility": { "default_candidate": true, "automatic_fallback_candidate": false, "qualification_gate": null } },
+      { "id": "deepgram.tts.user-selected", "provider_id": "deepgram", "upstream_id": "$user_selected", "display_name": "Selected Deepgram speech model", "modality": "tts", "lifecycle": "stable", "languages": ["und"], "capabilities": { "streaming": true, "structured_output": false, "low_latency": true, "multilingual": false, "word_timestamps": false, "visemes_or_alignment": false }, "availability": "implemented_adapter", "availability_note": "Runtime adapter and fixture conformance tests are present.", "qualification_requirements": [], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": null } },
+      { "id": "assemblyai.stt.default", "provider_id": "assemblyai", "upstream_id": "$provider_default", "display_name": "AssemblyAI streaming transcription", "modality": "stt", "lifecycle": "stable", "languages": ["und"], "capabilities": { "streaming": true, "structured_output": false, "low_latency": true, "multilingual": true, "word_timestamps": true, "visemes_or_alignment": false }, "availability": "implemented_adapter", "availability_note": "Runtime adapter and fixture conformance tests are present.", "qualification_requirements": [], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": null } },
+      { "id": "elevenlabs.stt.default", "provider_id": "elevenlabs", "upstream_id": "$provider_default", "display_name": "ElevenLabs transcription", "modality": "stt", "lifecycle": "stable", "languages": ["und"], "capabilities": { "streaming": true, "structured_output": false, "low_latency": true, "multilingual": true, "word_timestamps": true, "visemes_or_alignment": false }, "availability": "implemented_adapter", "availability_note": "Runtime adapter and fixture conformance tests are present.", "qualification_requirements": [], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": null } },
+      { "id": "elevenlabs.tts.user-selected", "provider_id": "elevenlabs", "upstream_id": "$user_selected", "display_name": "Selected ElevenLabs speech model", "modality": "tts", "lifecycle": "stable", "languages": ["und"], "capabilities": { "streaming": true, "structured_output": false, "low_latency": true, "multilingual": true, "word_timestamps": true, "visemes_or_alignment": true }, "availability": "implemented_adapter", "availability_note": "Runtime adapter and fixture conformance tests are present.", "qualification_requirements": [], "qualification_evidence": null, "eligibility": { "default_candidate": true, "automatic_fallback_candidate": false, "qualification_gate": null } },
+      { "id": "cartesia.tts.user-selected", "provider_id": "cartesia", "upstream_id": "$user_selected", "display_name": "Selected Cartesia speech model", "modality": "tts", "lifecycle": "stable", "languages": ["und"], "capabilities": { "streaming": true, "structured_output": false, "low_latency": true, "multilingual": true, "word_timestamps": true, "visemes_or_alignment": true }, "availability": "implemented_adapter", "availability_note": "Runtime adapter and fixture conformance tests are present.", "qualification_requirements": [], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": null } },
+      { "id": "inworld.tts.user-selected", "provider_id": "inworld", "upstream_id": "$user_selected", "display_name": "Selected Inworld speech model", "modality": "tts", "lifecycle": "stable", "languages": ["und"], "capabilities": { "streaming": true, "structured_output": false, "low_latency": true, "multilingual": true, "word_timestamps": false, "visemes_or_alignment": true }, "availability": "implemented_adapter", "availability_note": "Runtime adapter and fixture conformance tests are present.", "qualification_requirements": [], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": null } },
+      { "id": "moonshine.stt.small", "provider_id": "moonshine-local", "upstream_id": "moonshine-small", "display_name": "Moonshine Small", "modality": "stt", "lifecycle": "qualification_required", "languages": ["en"], "capabilities": { "streaming": true, "structured_output": false, "low_latency": true, "multilingual": false, "word_timestamps": true, "visemes_or_alignment": false }, "availability": "pack_candidate_unqualified", "availability_note": "Candidate only; no signed, licensed, self-tested, benchmark-qualified pack is installed.", "qualification_requirements": ["signed_pack", "runtime_self_test", "license_review", "benchmark"], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": "signed_pack_self_test_license_benchmark" } },
+      { "id": "moonshine.stt.medium", "provider_id": "moonshine-local", "upstream_id": "moonshine-medium", "display_name": "Moonshine Medium", "modality": "stt", "lifecycle": "qualification_required", "languages": ["en"], "capabilities": { "streaming": true, "structured_output": false, "low_latency": true, "multilingual": false, "word_timestamps": true, "visemes_or_alignment": false }, "availability": "pack_candidate_unqualified", "availability_note": "Candidate only; no signed, licensed, self-tested, benchmark-qualified pack is installed.", "qualification_requirements": ["signed_pack", "runtime_self_test", "license_review", "benchmark"], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": "signed_pack_self_test_license_benchmark" } },
+      { "id": "nemotron.stt.streaming", "provider_id": "nemotron-local", "upstream_id": "nemotron-streaming", "display_name": "Nemotron Streaming", "modality": "stt", "lifecycle": "qualification_required", "languages": ["en"], "capabilities": { "streaming": true, "structured_output": false, "low_latency": true, "multilingual": false, "word_timestamps": true, "visemes_or_alignment": false }, "availability": "pack_candidate_unqualified", "availability_note": "Candidate only; no signed, licensed, self-tested, benchmark-qualified pack is installed.", "qualification_requirements": ["signed_pack", "runtime_self_test", "license_review", "benchmark"], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": "signed_pack_self_test_license_benchmark" } },
+      { "id": "whispercpp.stt.user-selected", "provider_id": "whispercpp-local", "upstream_id": "$user_selected_ggml", "display_name": "Imported whisper.cpp model", "modality": "stt", "lifecycle": "qualification_required", "languages": ["und"], "capabilities": { "streaming": true, "structured_output": false, "low_latency": false, "multilingual": true, "word_timestamps": true, "visemes_or_alignment": false }, "availability": "pack_candidate_unqualified", "availability_note": "Candidate only; no signed, licensed, self-tested, benchmark-qualified pack is installed.", "qualification_requirements": ["signed_pack", "runtime_self_test", "license_review", "benchmark"], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": "signed_pack_self_test_license_benchmark" } },
+      { "id": "kokoro.tts.onnx", "provider_id": "kokoro-local", "upstream_id": "kokoro-onnx", "display_name": "Kokoro ONNX", "modality": "tts", "lifecycle": "qualification_required", "languages": ["en"], "capabilities": { "streaming": true, "structured_output": false, "low_latency": true, "multilingual": false, "word_timestamps": false, "visemes_or_alignment": false }, "availability": "pack_candidate_unqualified", "availability_note": "Candidate only; no signed, licensed, self-tested, benchmark-qualified pack is installed.", "qualification_requirements": ["signed_pack", "runtime_self_test", "license_review", "benchmark"], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": "signed_pack_self_test_license_benchmark" } },
+      { "id": "chatterbox.tts.candidate", "provider_id": "chatterbox-local", "upstream_id": "chatterbox", "display_name": "Chatterbox candidate", "modality": "tts", "lifecycle": "qualification_required", "languages": ["en"], "capabilities": { "streaming": false, "structured_output": false, "low_latency": false, "multilingual": false, "word_timestamps": false, "visemes_or_alignment": false }, "availability": "pack_candidate_unqualified", "availability_note": "Candidate only; no signed, licensed, self-tested, benchmark-qualified pack is installed.", "qualification_requirements": ["signed_pack", "runtime_self_test", "license_review", "benchmark"], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": "signed_pack_self_test_license_benchmark" } },
+      { "id": "qwen.tts.candidate", "provider_id": "qwen-tts-local", "upstream_id": "qwen-tts", "display_name": "Qwen TTS candidate", "modality": "tts", "lifecycle": "qualification_required", "languages": ["und"], "capabilities": { "streaming": false, "structured_output": false, "low_latency": false, "multilingual": true, "word_timestamps": false, "visemes_or_alignment": false }, "availability": "pack_candidate_unqualified", "availability_note": "Candidate only; no signed, licensed, self-tested, benchmark-qualified pack is installed.", "qualification_requirements": ["signed_pack", "runtime_self_test", "license_review", "benchmark"], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": "signed_pack_self_test_license_benchmark" } },
+      { "id": "local.llm.custom-gguf", "provider_id": "llamacpp-local", "upstream_id": "$user_imported_gguf", "display_name": "Imported llama.cpp GGUF", "modality": "llm", "lifecycle": "qualification_required", "languages": ["und"], "capabilities": { "streaming": true, "structured_output": true, "low_latency": false, "multilingual": false, "word_timestamps": false, "visemes_or_alignment": false }, "availability": "pack_candidate_unqualified", "availability_note": "Import candidate only; no signed, licensed, self-tested, benchmark-qualified GGUF pack is installed.", "qualification_requirements": ["signed_pack", "runtime_self_test", "license_review", "benchmark"], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": "signed_pack_self_test_license_benchmark" } },
+      { "id": "local.embedding.custom-onnx-int8", "provider_id": "onnx-embedding-local", "upstream_id": "$user_imported_onnx", "display_name": "Imported INT8 ONNX embedding model", "modality": "embedding", "lifecycle": "qualification_required", "languages": ["und"], "capabilities": { "streaming": false, "structured_output": false, "low_latency": true, "multilingual": false, "word_timestamps": false, "visemes_or_alignment": false }, "availability": "pack_candidate_unqualified", "availability_note": "Import candidate only; no signed, licensed, self-tested, benchmark-qualified ONNX pack is installed.", "qualification_requirements": ["signed_pack", "runtime_self_test", "license_review", "benchmark"], "qualification_evidence": null, "eligibility": { "default_candidate": false, "automatic_fallback_candidate": false, "qualification_gate": "signed_pack_self_test_license_benchmark" } }
+    ],
+    "pack_templates": [
+      { "id": "pack.stt.moonshine", "display_name": "Moonshine STT pack", "modality": "stt", "engine": "onnx-runtime", "lifecycle": "qualification_required", "source_repository": "https://github.com/usefulsensors/moonshine", "distribution": "upstream_download_after_qualification", "runtime_abi": "npc-onnx-stt-v1", "license_review": "required_before_catalog_promotion", "required_manifest_fields": ["immutable_source_revision", "artifact_url", "sha256", "size_bytes", "runtime_abi", "platform", "architecture", "resource_envelope", "license_terms", "attribution", "self_test", "catalog_signature", "license_approval", "benchmark_report"] },
+      { "id": "pack.stt.nemotron", "display_name": "Nemotron Streaming STT pack", "modality": "stt", "engine": "nvidia-runtime", "lifecycle": "qualification_required", "source_repository": "https://huggingface.co/nvidia", "distribution": "upstream_download_after_qualification", "runtime_abi": "npc-streaming-stt-v1", "license_review": "required_before_catalog_promotion", "required_manifest_fields": ["immutable_source_revision", "artifact_url", "sha256", "size_bytes", "runtime_abi", "platform", "architecture", "resource_envelope", "license_terms", "attribution", "self_test", "catalog_signature", "license_approval", "benchmark_report"] },
+      { "id": "pack.stt.whispercpp", "display_name": "whisper.cpp STT pack", "modality": "stt", "engine": "whisper.cpp", "lifecycle": "qualification_required", "source_repository": "https://github.com/ggml-org/whisper.cpp", "distribution": "user_import", "runtime_abi": "npc-whispercpp-v1", "license_review": "engine_and_model_review_required", "required_manifest_fields": ["immutable_source_revision", "sha256", "size_bytes", "runtime_abi", "platform", "architecture", "resource_envelope", "license_terms", "attribution", "self_test", "catalog_signature", "license_approval", "benchmark_report"] },
+      { "id": "pack.tts.kokoro", "display_name": "Kokoro ONNX TTS pack", "modality": "tts", "engine": "onnx-runtime", "lifecycle": "qualification_required", "source_repository": "https://huggingface.co/hexgrad/Kokoro-82M", "distribution": "upstream_download_after_qualification", "runtime_abi": "npc-onnx-tts-v1", "license_review": "required_before_catalog_promotion", "required_manifest_fields": ["immutable_source_revision", "artifact_url", "sha256", "size_bytes", "runtime_abi", "platform", "architecture", "resource_envelope", "license_terms", "attribution", "self_test", "catalog_signature", "license_approval", "benchmark_report"] },
+      { "id": "pack.tts.chatterbox", "display_name": "Chatterbox TTS pack", "modality": "tts", "engine": "isolated-python-3.12", "lifecycle": "qualification_required", "source_repository": "https://github.com/resemble-ai/chatterbox", "distribution": "upstream_download_after_qualification", "runtime_abi": "npc-python-tts-v1", "license_review": "required_before_catalog_promotion", "required_manifest_fields": ["immutable_source_revision", "artifact_url", "sha256", "size_bytes", "runtime_abi", "platform", "architecture", "resource_envelope", "license_terms", "attribution", "self_test", "catalog_signature", "license_approval", "benchmark_report"] },
+      { "id": "pack.tts.qwen", "display_name": "Qwen TTS pack", "modality": "tts", "engine": "isolated-python-3.12", "lifecycle": "qualification_required", "source_repository": "https://github.com/QwenLM", "distribution": "upstream_download_after_qualification", "runtime_abi": "npc-python-tts-v1", "license_review": "exact_model_and_code_license_review_required", "required_manifest_fields": ["immutable_source_revision", "artifact_url", "sha256", "size_bytes", "runtime_abi", "platform", "architecture", "resource_envelope", "license_terms", "attribution", "self_test", "catalog_signature", "license_approval", "benchmark_report"] },
+      { "id": "pack.llm.llamacpp-gguf", "display_name": "llama.cpp GGUF pack", "modality": "llm", "engine": "llama.cpp", "lifecycle": "qualification_required", "source_repository": "https://github.com/ggml-org/llama.cpp", "distribution": "user_import", "runtime_abi": "npc-llamacpp-v1", "license_review": "per_model_review_required", "required_manifest_fields": ["immutable_source_revision", "sha256", "size_bytes", "runtime_abi", "platform", "architecture", "resource_envelope", "license_terms", "attribution", "self_test", "catalog_signature", "license_approval", "benchmark_report"] },
+      { "id": "pack.embedding.onnx-int8", "display_name": "INT8 ONNX embedding pack", "modality": "embedding", "engine": "onnx-runtime", "lifecycle": "qualification_required", "source_repository": "user-supplied", "distribution": "user_import", "runtime_abi": "npc-onnx-embedding-v1", "license_review": "per_model_review_required", "required_manifest_fields": ["immutable_source_revision", "sha256", "size_bytes", "runtime_abi", "platform", "architecture", "resource_envelope", "license_terms", "attribution", "self_test", "catalog_signature", "license_approval", "benchmark_report"] }
+    ],
+    "voice_intents": [
+      { "id": "voice.calm-grounded", "display_name": "Calm and grounded", "tags": ["calm", "grounded", "measured"], "pace": 0.90, "pitch_semitones": -0.5, "warmth": 0.72, "energy": 0.35, "roughness": 0.18, "expressiveness": 0.42 },
+      { "id": "voice.warm-companion", "display_name": "Warm companion", "tags": ["warm", "grounded", "friendly"], "pace": 0.98, "pitch_semitones": 0.3, "warmth": 0.90, "energy": 0.55, "roughness": 0.08, "expressiveness": 0.68 },
+      { "id": "voice.bright-curious", "display_name": "Bright and curious", "tags": ["bright", "curious", "nimble"], "pace": 1.08, "pitch_semitones": 1.2, "warmth": 0.66, "energy": 0.72, "roughness": 0.05, "expressiveness": 0.78 },
+      { "id": "voice.steady-authority", "display_name": "Steady authority", "tags": ["authoritative", "grounded", "measured"], "pace": 0.88, "pitch_semitones": -1.4, "warmth": 0.45, "energy": 0.62, "roughness": 0.30, "expressiveness": 0.40 },
+      { "id": "voice.weathered-dry", "display_name": "Weathered and dry", "tags": ["weathered", "grounded", "restrained"], "pace": 0.92, "pitch_semitones": -1.8, "warmth": 0.38, "energy": 0.46, "roughness": 0.62, "expressiveness": 0.36 },
+      { "id": "voice.quick-wry", "display_name": "Quick and wry", "tags": ["wry", "nimble", "restrained"], "pace": 1.14, "pitch_semitones": 0.4, "warmth": 0.48, "energy": 0.65, "roughness": 0.20, "expressiveness": 0.64 },
+      { "id": "voice.intense-commanding", "display_name": "Intense and commanding", "tags": ["intense", "authoritative", "dramatic"], "pace": 1.02, "pitch_semitones": -0.8, "warmth": 0.28, "energy": 0.90, "roughness": 0.46, "expressiveness": 0.82 },
+      { "id": "voice.soft-enigmatic", "display_name": "Soft and enigmatic", "tags": ["soft", "enigmatic", "measured"], "pace": 0.84, "pitch_semitones": 0.8, "warmth": 0.58, "energy": 0.28, "roughness": 0.10, "expressiveness": 0.54 }
+    ],
+    "fallback_policy": {
+      "automatic_fallback_enabled": false,
+      "never_silent_egress_change": true,
+      "never_silent_provider_change": true,
+      "execution_modes": [
+        { "mode": "cloud", "allowed_egress": ["provider_cloud", "user_configured_endpoint"] },
+        { "mode": "hybrid", "allowed_egress": ["offline", "provider_cloud", "user_configured_endpoint"] },
+        { "mode": "fully_local", "allowed_egress": ["offline"] }
+      ]
+    }
+  },
+  "signatures": []
+}

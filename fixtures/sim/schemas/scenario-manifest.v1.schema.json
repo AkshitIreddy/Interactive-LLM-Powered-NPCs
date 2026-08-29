@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://npc2.local/schemas/scenario-manifest.v1.schema.json",
+  "title": "NPC 2.0 deterministic scenario manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "description", "seed", "resourceProfile", "privacy", "providers", "turn", "stream", "faults", "expected"],
+  "properties": {
+    "schemaVersion": { "const": "npc.sim.scenario.v1" },
+    "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "description": { "type": "string", "minLength": 12 },
+    "seed": { "type": "integer", "minimum": 0 },
+    "resourceProfile": { "type": "string" },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "networkAllowed"],
+      "properties": {
+        "mode": { "enum": ["hosted", "hybrid", "fully_local", "offline"] },
+        "networkAllowed": { "type": "boolean" }
+      }
+    },
+    "providers": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "turn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "turnId", "npc"],
+      "properties": {
+        "sessionId": { "type": "string" },
+        "turnId": { "type": "string" },
+        "npc": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "name", "visibility"],
+          "properties": {
+            "id": { "type": "string" },
+            "name": { "type": "string" },
+            "visibility": { "enum": ["visible", "offscreen", "unknown"] }
+          }
+        }
+      }
+    },
+    "stream": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["atMs", "source", "kind", "payload"],
+        "properties": {
+          "atMs": { "type": "integer", "minimum": 0 },
+          "source": { "enum": ["stt", "identity", "memory", "llm", "tts", "animation", "control"] },
+          "kind": { "enum": ["partial", "final", "resolved", "retrieved", "token", "sentence", "complete", "audio_chunk", "viseme", "barge_in"] },
+          "payload": { "type": "object" }
+        }
+      }
+    },
+    "faults": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["atMs", "target", "kind", "code"],
+        "properties": {
+          "atMs": { "type": "integer", "minimum": 0 },
+          "target": { "enum": ["stt", "identity", "memory", "llm", "tts", "animation", "resource"] },
+          "kind": { "enum": ["provider_error", "worker_crash", "timeout", "low_vram"] },
+          "code": { "type": "string" },
+          "retryable": { "type": "boolean" },
+          "freeVramMiB": { "type": "integer", "minimum": 0 },
+          "requiredVramMiB": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "expected": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "enum": ["completed", "cancelled", "failed", "degraded"] },
+        "traceSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "firstAudioAtMs": { "type": ["integer", "null"] },
+        "speechEndToFirstAudioMs": { "type": ["integer", "null"] },
+        "networkAttempts": { "type": "integer", "minimum": 0 },
+        "degradationReasons": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+      }
+    }
+  }
+}

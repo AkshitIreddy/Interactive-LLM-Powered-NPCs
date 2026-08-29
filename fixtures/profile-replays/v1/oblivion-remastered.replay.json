@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0.0",
+  "profile_id": "oblivion-remastered",
+  "assertions": {
+    "profile_validation": {
+      "expected_valid": true,
+      "expected_schema_version": "2.0.0"
+    },
+    "detection": {
+      "store": "steam",
+      "store_id": "2623190",
+      "display_name": "The Elder Scrolls IV: Oblivion Remastered",
+      "install_directory": "C:/Replay/Oblivion Remastered",
+      "executable": "OblivionRemastered-Win64-Shipping.exe",
+      "expected_match": true
+    },
+    "selection": {
+      "character_id": "martin-septim",
+      "offscreen": true,
+      "expected_strategy": "explicit_selection",
+      "expected_evidence": "explicit_selection"
+    },
+    "routes": {
+      "conversation": true,
+      "subtitles": true,
+      "memory": true,
+      "audio": true
+    },
+    "refusal": {
+      "protected_online": "blocked",
+      "anti_cheat": "blocked",
+      "risk_gated_profile": false
+    }
+  },
+  "simulation": {
+    "session_id": "profile-replay-oblivion-remastered",
+    "turn_id": "oblivion-remastered-turn-1",
+    "transcript": "Deterministic profile replay: respond to the selected offscreen character.",
+    "locale": "en-US"
+  }
+}

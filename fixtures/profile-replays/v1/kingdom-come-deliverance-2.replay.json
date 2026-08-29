@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0.0",
+  "profile_id": "kingdom-come-deliverance-2",
+  "assertions": {
+    "profile_validation": {
+      "expected_valid": true,
+      "expected_schema_version": "2.0.0"
+    },
+    "detection": {
+      "store": "steam",
+      "store_id": "1771300",
+      "display_name": "Kingdom Come: Deliverance II",
+      "install_directory": "C:/Replay/KingdomComeDeliverance2",
+      "executable": "KingdomCome.exe",
+      "expected_match": true
+    },
+    "selection": {
+      "character_id": "hans-capon",
+      "offscreen": true,
+      "expected_strategy": "explicit_selection",
+      "expected_evidence": "explicit_selection"
+    },
+    "routes": {
+      "conversation": true,
+      "subtitles": true,
+      "memory": true,
+      "audio": true
+    },
+    "refusal": {
+      "protected_online": "blocked",
+      "anti_cheat": "blocked",
+      "risk_gated_profile": false
+    }
+  },
+  "simulation": {
+    "session_id": "profile-replay-kingdom-come-deliverance-2",
+    "turn_id": "kingdom-come-deliverance-2-turn-1",
+    "transcript": "Deterministic profile replay: respond to the selected offscreen character.",
+    "locale": "en-US"
+  }
+}

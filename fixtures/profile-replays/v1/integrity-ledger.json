@@ -1,0 +1,147 @@
+{
+  "schema_version": "1.0.0",
+  "hash_algorithm": "sha256",
+  "authored_profile_count": 20,
+  "entries": [
+    {
+      "profile_id": "baldurs-gate-3",
+      "profile_path": "profiles/games/baldurs-gate-3/profile.json",
+      "profile_sha256": "8d3627e169079aa30d452ad0560df9043507369067a6917aa21adaa3ee804b08",
+      "replay_path": "fixtures/profile-replays/v1/baldurs-gate-3.replay.json",
+      "replay_sha256": "850ab29fd1d17f77b19091e191f6372e9ac81f951ca28047bf580c0b33343da7"
+    },
+    {
+      "profile_id": "cyberpunk-2077",
+      "profile_path": "profiles/games/cyberpunk-2077/profile.json",
+      "profile_sha256": "8bc4a544f0d016abb4c9020e9e93567e137af626e476d39f2383132a84b14410",
+      "replay_path": "fixtures/profile-replays/v1/cyberpunk-2077.replay.json",
+      "replay_sha256": "5a181124206f58f56ba73f8f85e67026fb195714119a850e4ef219228ef9b163"
+    },
+    {
+      "profile_id": "divinity-original-sin-2",
+      "profile_path": "profiles/games/divinity-original-sin-2/profile.json",
+      "profile_sha256": "e7e3c1e7023c524f1ddf401e59e767973cd01731492bf0badf3ef8f27813d2e7",
+      "replay_path": "fixtures/profile-replays/v1/divinity-original-sin-2.replay.json",
+      "replay_sha256": "0bd5292e3a04dc8de7435c3ddb3d8492499ac31a646203232b6bf156518b796e"
+    },
+    {
+      "profile_id": "dragon-age-inquisition",
+      "profile_path": "profiles/games/dragon-age-inquisition/profile.json",
+      "profile_sha256": "e053d689ee83c36261cefbd1c94c650af1c711d62a2a574e5f86fbde2a397d99",
+      "replay_path": "fixtures/profile-replays/v1/dragon-age-inquisition.replay.json",
+      "replay_sha256": "773d4cb362c3998da8149b36e6b0593ebde3baf80ac308b7c3bc90a8d74e3630"
+    },
+    {
+      "profile_id": "elden-ring-offline",
+      "profile_path": "profiles/games/elden-ring-offline/profile.json",
+      "profile_sha256": "47709ef6aaa59654710a11184bfc2a4451d08909f11b74faf0fd0bb1132023ec",
+      "replay_path": "fixtures/profile-replays/v1/elden-ring-offline.replay.json",
+      "replay_sha256": "50ef788260197e8cd9e17f2bfe3839f5dd482d6d7e011b63ea8fa4418396d4ea"
+    },
+    {
+      "profile_id": "fallout-4",
+      "profile_path": "profiles/games/fallout-4/profile.json",
+      "profile_sha256": "2e89b10c0263e5b7cf8dba7f1fcf71cde95718b6066385230a5797a402f995a2",
+      "replay_path": "fixtures/profile-replays/v1/fallout-4.replay.json",
+      "replay_sha256": "36d200fcc109a64375b9d9a394076c3a4c3d237c314c07461add80e42e0ed219"
+    },
+    {
+      "profile_id": "fallout-new-vegas",
+      "profile_path": "profiles/games/fallout-new-vegas/profile.json",
+      "profile_sha256": "9be3c70baf913b85e38a355ecb336b105ad85443d0cbce46a26de38971c9fa2e",
+      "replay_path": "fixtures/profile-replays/v1/fallout-new-vegas.replay.json",
+      "replay_sha256": "f80d4a0ab7386fb50ca27af97b388e817e5ceb86b5fdfecfcc5c419a945819a1"
+    },
+    {
+      "profile_id": "gta-v-story",
+      "profile_path": "profiles/games/gta-v-story/profile.json",
+      "profile_sha256": "9c53fc38022dbb093e3cdf605dfd297a5ddf5386ae0b3c40f4eb4102e2b78874",
+      "replay_path": "fixtures/profile-replays/v1/gta-v-story.replay.json",
+      "replay_sha256": "0b44d3a6116c76cbe9efa5eebbca10ce181e53480249987ded4ee659b9ab6014"
+    },
+    {
+      "profile_id": "kenshi",
+      "profile_path": "profiles/games/kenshi/profile.json",
+      "profile_sha256": "9a91c4f47d4d9bf03235655d23f98e39b834ec0b9fa40d89690c3f6629336454",
+      "replay_path": "fixtures/profile-replays/v1/kenshi.replay.json",
+      "replay_sha256": "e99c83f59dbcc218e7d93ab51caffdc3347ad7c94c687c2832465c0b0edb6424"
+    },
+    {
+      "profile_id": "kingdom-come-deliverance-2",
+      "profile_path": "profiles/games/kingdom-come-deliverance-2/profile.json",
+      "profile_sha256": "5701b7d8efb3a160ba1568e21d88b1912804f1473c3d0c61f19520c186e0c3df",
+      "replay_path": "fixtures/profile-replays/v1/kingdom-come-deliverance-2.replay.json",
+      "replay_sha256": "2d27342919e10885113866be3dce12a8f9a17d8f85ba62e1924f31aaa80b2fa5"
+    },
+    {
+      "profile_id": "mass-effect-legendary-edition",
+      "profile_path": "profiles/games/mass-effect-legendary-edition/profile.json",
+      "profile_sha256": "4a54018a47764e63707c74c4a26b7a266c17db06b2e8b75b3bc1e4d76ceda628",
+      "replay_path": "fixtures/profile-replays/v1/mass-effect-legendary-edition.replay.json",
+      "replay_sha256": "f00ea28028b267b4e8a04b4d1fa7db5ec8695d4acc077a6957c6ae84b524efff"
+    },
+    {
+      "profile_id": "minecraft-java",
+      "profile_path": "profiles/games/minecraft-java/profile.json",
+      "profile_sha256": "8706094a9866dc815891880f93ff6b7ee367cfc19ec6b5fb8b0d2e902879e4c6",
+      "replay_path": "fixtures/profile-replays/v1/minecraft-java.replay.json",
+      "replay_sha256": "a32139620d3582787c701604f8821e9067ede7ca38885fac3b4df605fd99f2e1"
+    },
+    {
+      "profile_id": "mount-and-blade-2-bannerlord",
+      "profile_path": "profiles/games/mount-and-blade-2-bannerlord/profile.json",
+      "profile_sha256": "756c22472f35fb1969a4cb0e35d71d617f85a80e5d02951fc8caadd4049dc5e6",
+      "replay_path": "fixtures/profile-replays/v1/mount-and-blade-2-bannerlord.replay.json",
+      "replay_sha256": "d0a6b1e3646eceaa2986806aac4bd673d9409cbacf9fbdb2a161e9d7ad70af3a"
+    },
+    {
+      "profile_id": "oblivion-remastered",
+      "profile_path": "profiles/games/oblivion-remastered/profile.json",
+      "profile_sha256": "4c207d7534b5b6a4230c6786e49d401c97badaa5b2e23d07290b8eeb1ad60efe",
+      "replay_path": "fixtures/profile-replays/v1/oblivion-remastered.replay.json",
+      "replay_sha256": "f33f47b34bf47620378c39a05bd46ce4456163c0f11e33e6faf54e9df9ace288"
+    },
+    {
+      "profile_id": "red-dead-redemption-2-story",
+      "profile_path": "profiles/games/red-dead-redemption-2-story/profile.json",
+      "profile_sha256": "00ecd8b35f45d6871bafa89884985b6bb5ab9e1d91e08f24420612365f97aa68",
+      "replay_path": "fixtures/profile-replays/v1/red-dead-redemption-2-story.replay.json",
+      "replay_sha256": "ca7eafa60d8dc65ea31780b9432d065ae0abf5effb3727de6dcae03c8a9a2819"
+    },
+    {
+      "profile_id": "skyrim-special-edition",
+      "profile_path": "profiles/games/skyrim-special-edition/profile.json",
+      "profile_sha256": "8400dc169ef31aff52a266730a3b643c3b4ffac26102d93149e3ed6f9e8a680b",
+      "replay_path": "fixtures/profile-replays/v1/skyrim-special-edition.replay.json",
+      "replay_sha256": "c43e3d0b9e61a3f8e31d13f1801e4ace7a249622fa81f38c6017cac90150c71c"
+    },
+    {
+      "profile_id": "stardew-valley",
+      "profile_path": "profiles/games/stardew-valley/profile.json",
+      "profile_sha256": "09760c5777612f08f70b20513bee49790b6ed11cd7f97e535a4caecd779cec20",
+      "replay_path": "fixtures/profile-replays/v1/stardew-valley.replay.json",
+      "replay_sha256": "ebb1a5d9999306d344a29567589e0dc7a6558fcff011a8a17740f2c60fdc201a"
+    },
+    {
+      "profile_id": "starfield",
+      "profile_path": "profiles/games/starfield/profile.json",
+      "profile_sha256": "7a2c0ec98057df7420dd74a47f9e1f1d9d324184813e1ac113de0eb47bef3463",
+      "replay_path": "fixtures/profile-replays/v1/starfield.replay.json",
+      "replay_sha256": "9d96b256ba9228881dccfb7bef250a8f01c21fdf53bc6de8580ea6002aea6855"
+    },
+    {
+      "profile_id": "the-sims-4",
+      "profile_path": "profiles/games/the-sims-4/profile.json",
+      "profile_sha256": "911ceccc2c7eb36d0c1ef0e1442284779948571e9a8e366b1214052915a0219c",
+      "replay_path": "fixtures/profile-replays/v1/the-sims-4.replay.json",
+      "replay_sha256": "845eb11da52857379ce86ad344c041f7cd3eccfe51b483feeb3832ff5c9e4f21"
+    },
+    {
+      "profile_id": "the-witcher-3",
+      "profile_path": "profiles/games/the-witcher-3/profile.json",
+      "profile_sha256": "620927e8136c2c2a8df4ec36ecf0025b8d3eaef08d374d0ba2925cceee17b3bf",
+      "replay_path": "fixtures/profile-replays/v1/the-witcher-3.replay.json",
+      "replay_sha256": "af64fb6e3040f7764b2a41dbef201c01609e0d007aacf330d09eb756d8c9bb59"
+    }
+  ]
+}

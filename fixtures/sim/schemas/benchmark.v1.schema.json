@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://npc2.local/schemas/benchmark.v1.schema.json",
+  "title": "NPC 2.0 deterministic virtual benchmark report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "measurementKind", "canonicalReleaseBenchmark", "warning", "summary", "observations"],
+  "properties": {
+    "schemaVersion": { "const": "npc.sim.benchmark.v1" },
+    "measurementKind": { "const": "deterministic_virtual_time" },
+    "canonicalReleaseBenchmark": { "const": false },
+    "warning": { "type": "string" },
+    "summary": { "type": "object" },
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["scenarioId", "executionMode", "resourceProfileId", "powerMode", "cpuBoostEnabled", "competingAgents", "competingWorkloadLabel", "canonicalMeasurement", "status", "virtualMetrics", "traceSha256"],
+        "properties": {
+          "scenarioId": { "type": "string" },
+          "executionMode": { "enum": ["hosted", "hybrid", "fully_local", "offline"] },
+          "resourceProfileId": { "type": "string" },
+          "powerMode": { "enum": ["silent", "balanced", "turbo", "unknown"] },
+          "cpuBoostEnabled": { "type": "boolean" },
+          "competingAgents": { "type": "boolean" },
+          "competingWorkloadLabel": { "type": "string" },
+          "canonicalMeasurement": { "const": false },
+          "status": { "enum": ["completed", "cancelled", "failed", "degraded"] },
+          "virtualMetrics": { "type": "object" },
+          "traceSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    }
+  }
+}

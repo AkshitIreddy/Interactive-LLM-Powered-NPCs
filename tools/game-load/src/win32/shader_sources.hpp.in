@@ -1,0 +1,13 @@
+#pragma once
+
+namespace game_load::win32::shaders {
+
+inline constexpr char scene[] = R"GAMELOADHLSL(
+@GAME_LOAD_SCENE_HLSL@
+)GAMELOADHLSL";
+
+inline constexpr char pressure[] = R"GAMELOADHLSL(
+@GAME_LOAD_PRESSURE_HLSL@
+)GAMELOADHLSL";
+
+}  // namespace game_load::win32::shaders

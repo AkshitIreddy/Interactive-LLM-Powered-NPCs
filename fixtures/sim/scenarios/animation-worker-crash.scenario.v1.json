@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "npc.sim.scenario.v1",
+  "id": "animation-worker-crash",
+  "description": "Animation worker crash is quarantined while streamed speech completes through audio and subtitles.",
+  "seed": 2005,
+  "resourceProfile": "reference-balanced-12gb",
+  "privacy": { "mode": "hybrid", "networkAllowed": true },
+  "providers": { "stt": "mock-local", "llm": "mock-openai", "tts": "mock-local" },
+  "turn": {
+    "sessionId": "session-worker-crash",
+    "turnId": "turn-019",
+    "npc": { "id": "fallout4-piper", "name": "Piper Wright", "visibility": "visible" }
+  },
+  "stream": [
+    { "atMs": 45, "source": "stt", "kind": "partial", "payload": { "text": "Any new leads" } },
+    { "atMs": 175, "source": "stt", "kind": "final", "payload": { "text": "Any new leads?", "confidence": 0.98 } },
+    { "atMs": 200, "source": "identity", "kind": "resolved", "payload": { "strategy": "adapter_actor_id", "confidence": 1 } },
+    { "atMs": 230, "source": "memory", "kind": "retrieved", "payload": { "episodicCount": 3, "factCount": 4, "latencyMs": 30 } },
+    { "atMs": 290, "source": "llm", "kind": "token", "payload": { "text": "One", "networkRequest": true, "provider": "mock-openai" } },
+    { "atMs": 340, "source": "llm", "kind": "token", "payload": { "text": " worth chasing." } },
+    { "atMs": 370, "source": "llm", "kind": "sentence", "payload": { "text": "One worth chasing." } },
+    { "atMs": 425, "source": "tts", "kind": "audio_chunk", "payload": { "chunkIndex": 0, "sampleCount": 1440, "sampleRateHz": 24000 } },
+    { "atMs": 440, "source": "animation", "kind": "viseme", "payload": { "id": "W", "durationMs": 100 } },
+    { "atMs": 520, "source": "animation", "kind": "viseme", "payload": { "id": "O", "durationMs": 90 } },
+    { "atMs": 560, "source": "llm", "kind": "complete", "payload": { "finishReason": "stop", "text": "One worth chasing." } },
+    { "atMs": 610, "source": "tts", "kind": "audio_chunk", "payload": { "chunkIndex": 1, "sampleCount": 1440, "sampleRateHz": 24000 } },
+    { "atMs": 680, "source": "tts", "kind": "complete", "payload": { "chunks": 2, "deliveredText": "One worth chasing." } },
+    { "atMs": 700, "source": "animation", "kind": "complete", "payload": { "visemeCount": 2 } }
+  ],
+  "faults": [
+    { "atMs": 500, "target": "animation", "kind": "worker_crash", "code": "animation_worker_exit_0xc0000005", "retryable": true }
+  ],
+  "expected": {
+    "status": "degraded",
+    "traceSha256": "c3499b68c1f899dccf7f2a03bbc26aca2b9478f6c69ca048b29d8bb98966d77f",
+    "firstAudioAtMs": 425,
+    "speechEndToFirstAudioMs": 250,
+    "networkAttempts": 1,
+    "degradationReasons": ["animation_worker_quarantined"]
+  }
+}

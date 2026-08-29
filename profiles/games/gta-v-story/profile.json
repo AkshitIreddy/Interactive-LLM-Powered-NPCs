@@ -1,0 +1,807 @@
+{
+  "schema_version": "2.0.0",
+  "id": "gta-v-story",
+  "display_name": "Grand Theft Auto V — Story Mode Only",
+  "game": {
+    "publisher": "Rockstar Games",
+    "release_year": 2015,
+    "genres": [
+      "Action",
+      "Open world",
+      "Crime drama",
+      "Single-player story"
+    ],
+    "official_url": "https://www.rockstargames.com/gta-v"
+  },
+  "detection": {
+    "processes": [
+      {
+        "executable": "GTA5.exe",
+        "required": true,
+        "window_title_regex": "(?i)^Grand Theft Auto V(?: Legacy)?$"
+      },
+      {
+        "executable": "GTA5_Enhanced.exe",
+        "required": true,
+        "window_title_regex": "(?i)^Grand Theft Auto V Enhanced$"
+      }
+    ],
+    "stores": [
+      {
+        "store": "steam",
+        "app_id": "3240220",
+        "install_directory_hints": [
+          "Grand Theft Auto V Enhanced"
+        ]
+      },
+      {
+        "store": "steam",
+        "app_id": "271590",
+        "install_directory_hints": [
+          "Grand Theft Auto V",
+          "Grand Theft Auto V Legacy"
+        ]
+      },
+      {
+        "store": "epic",
+        "install_directory_hints": [
+          "GTAV",
+          "Grand Theft Auto V"
+        ]
+      },
+      {
+        "store": "standalone",
+        "install_directory_hints": [
+          "Grand Theft Auto V",
+          "Rockstar Games"
+        ]
+      }
+    ],
+    "builds": [
+      {
+        "build_id": "enhanced-*",
+        "status": "experimental",
+        "reason": "Enhanced shares a product with GTA Online and declares kernel-level BattlEye; use requires affirmative Story Mode evidence and a stopped anti-cheat service."
+      },
+      {
+        "build_id": "legacy-*",
+        "status": "experimental",
+        "reason": "Legacy is capture-only and still requires affirmative Story Mode evidence before every session."
+      },
+      {
+        "build_id": "online-*",
+        "status": "blocked",
+        "reason": "GTA Online, community servers, and every ambiguous shared-online state are outside scope."
+      }
+    ],
+    "capture": {
+      "preferred_methods": [
+        "windows_graphics_capture",
+        "desktop_duplication",
+        "audio_subtitles"
+      ],
+      "excluded_window_title_regexes": [
+        "(?i)grand theft auto online",
+        "(?i)rockstar games launcher",
+        "(?i)social club",
+        "(?i)battlEye"
+      ],
+      "allow_exclusive_fullscreen": false,
+      "fallback": "audio_subtitles",
+      "ui_regions": [
+        {
+          "id": "minimap-and-phone",
+          "purpose": "exclude_identity",
+          "rect": {
+            "x": 0,
+            "y": 0.62,
+            "width": 0.34,
+            "height": 0.38
+          }
+        },
+        {
+          "id": "status-and-prompts",
+          "purpose": "exclude_identity",
+          "rect": {
+            "x": 0.68,
+            "y": 0.72,
+            "width": 0.32,
+            "height": 0.28
+          }
+        },
+        {
+          "id": "subtitle-band",
+          "purpose": "subtitle_safe_zone",
+          "rect": {
+            "x": 0.14,
+            "y": 0.7,
+            "width": 0.72,
+            "height": 0.24
+          }
+        },
+        {
+          "id": "mission-dialogue-area",
+          "purpose": "dialogue_indicator",
+          "rect": {
+            "x": 0.16,
+            "y": 0.6,
+            "width": 0.68,
+            "height": 0.34
+          }
+        }
+      ]
+    }
+  },
+  "safety": {
+    "single_player_only": true,
+    "online_policy": "blocked",
+    "anti_cheat_policy": "block_when_detected",
+    "declarative_only": true,
+    "risk_notes": [
+      "HARD BLOCK: the session may start only after the user selects Story Mode and the runtime obtains affirmative local-campaign evidence; absence of a network connection is not sufficient evidence.",
+      "HARD BLOCK: anti-cheat ambiguity is never accepted; BEService.exe, BEService_x64.exe, BEClient_x64.dll, or another BattlEye component running or loaded causes immediate refusal, even if the user believes the game is in Story Mode.",
+      "HARD BLOCK: GTA Online, invite-only online sessions, official or community role-play servers, and any unknown shared executable state are unsupported; no bypass, injection, hook, game-process modification, or automated input is attempted.",
+      "External capture, explicit identity selection, audio, and subtitles are the only enabled integration paths for this profile."
+    ]
+  },
+  "capabilities": {
+    "conversation": {
+      "tier": "replay_verified",
+      "evidence": [
+        {
+          "kind": "deterministic_replay",
+          "reference": "profile-replay-v1:gta-v-story:conversation",
+          "summary": "The versioned offline profile replay completes a bounded deterministic conversation turn."
+        }
+      ],
+      "fallback": "Offer typed input and a retryable LLM error without changing providers automatically."
+    },
+    "identity": {
+      "tier": "experimental",
+      "evidence": [
+        {
+          "kind": "deterministic_replay",
+          "reference": "profile-replay-v1:gta-v-story:identity",
+          "summary": "The versioned replay selects the declared character explicitly and exercises the offscreen explicit-name fallback."
+        }
+      ],
+      "fallback": "Require explicit character-name selection; offscreen or obscured NPCs continue through audio and subtitles."
+    },
+    "capture": {
+      "tier": "unsupported",
+      "evidence": [
+        {
+          "kind": "declarative_contract",
+          "reference": "game-profile-v2:gta-v-story:capture-fallback",
+          "summary": "The profile declares only allowlisted Windows capture methods and an audio/subtitle fallback; no live capture is claimed."
+        }
+      ],
+      "fallback": "Continue in audio-and-subtitles mode without capturing or modifying the game image."
+    },
+    "subtitles": {
+      "tier": "replay_verified",
+      "evidence": [
+        {
+          "kind": "deterministic_replay",
+          "reference": "profile-replay-v1:gta-v-story:subtitles",
+          "summary": "The versioned offline profile replay emits the delivered sentence text used by the subtitle route."
+        }
+      ],
+      "fallback": "Keep delivered dialogue in the Conversation view and surface a retry if subtitle presentation fails."
+    },
+    "memory": {
+      "tier": "replay_verified",
+      "evidence": [
+        {
+          "kind": "deterministic_replay",
+          "reference": "profile-replay-v1:gta-v-story:memory",
+          "summary": "The versioned offline profile replay commits only delivered dialogue and retrieves scoped turn memory."
+        }
+      ],
+      "fallback": "Continue with recent turn context and profile lore without vector retrieval; never fabricate recalled facts."
+    },
+    "screen_space_lip_sync": {
+      "tier": "experimental",
+      "evidence": [
+        {
+          "kind": "not_verified",
+          "reference": "game-profile-v2:gta-v-story:screen-space-lip-sync:unverified",
+          "summary": "Generic screen-space mouth compositing has no live-game verification for this profile."
+        }
+      ],
+      "fallback": "Restore the untouched game image within one displayed frame and continue with audio and subtitles."
+    }
+  },
+  "content": {
+    "world_lore": "Los Santos and Blaine County form a satirical contemporary setting where wealth, celebrity, policing, property, and criminal enterprise overlap. The story follows three playable protagonists whose lives converge through robberies, debts, family pressures, federal manipulation, and unstable alliances. The city offers polished financial districts, hillside wealth, sprawling neighborhoods, industrial corridors, beaches, desert towns, and isolated mountain roads, each with different rhythms and risks. Dialogue should distinguish what a character personally witnessed from news, rumor, bravado, or suspicion. The profile is restricted to the authored single-player story; no event, economy, organization, property, player avatar, or update from GTA Online is part of this world state. Player choices, mission success, injuries, relationships, and endings must come from explicit session state rather than assumptions.",
+    "spoiler_policy": "Start with the protagonists' early public circumstances. Gate alliance changes, family developments, heist plans, federal secrets, betrayals, and endings behind explicit campaign milestones.",
+    "spoiler_tiers": [
+      {
+        "id": "early-story",
+        "description": "Los Santos and Blaine County, the protagonists' surface lives, and circumstances established near the opening.",
+        "default_enabled": true
+      },
+      {
+        "id": "crew-and-heists",
+        "description": "Detailed heist planning, selected crews, mission outcomes, and shifting criminal alliances.",
+        "default_enabled": false
+      },
+      {
+        "id": "family-and-federal",
+        "description": "Private family developments, federal coercion, and later character revelations.",
+        "default_enabled": false
+      },
+      {
+        "id": "ending",
+        "description": "Final choices, deaths, reconciliations, and post-campaign state.",
+        "default_enabled": false
+      }
+    ],
+    "background_npc_rules": [
+      "Every unnamed pedestrian, shop worker, guard, driver, neighbor, or crew member receives a separate encounter ID with no cross-person memory reuse.",
+      "Use the current district, clothing, vehicle, and witnessed behavior only as weak context; never infer ethnicity, gang membership, wealth, job, or criminality from appearance.",
+      "Keep strangers concerned with immediate events and local routines rather than granting them knowledge of secret heists or federal operations.",
+      "Do not create interaction that encourages real-world crime or harassment; keep requests and responses within fictional story role-play.",
+      "When a crowd or camera cut breaks the visual track, require explicit selection before continuing identity-specific memory."
+    ],
+    "provenance": [
+      {
+        "id": "profile-original",
+        "title": "Interactive NPCs GTA V Story Mode profile prose",
+        "kind": "original",
+        "license": "MIT",
+        "notes": "All world summaries, character direction, prompts, and safety text are newly authored; no script, wiki prose, game audio, or visual asset is included."
+      },
+      {
+        "id": "gtav-official",
+        "title": "Grand Theft Auto V official site",
+        "kind": "official",
+        "source_url": "https://www.rockstargames.com/gta-v",
+        "notes": "Primary product reference."
+      },
+      {
+        "id": "gtav-enhanced-steam",
+        "title": "Grand Theft Auto V Enhanced Steam listing",
+        "kind": "official",
+        "source_url": "https://store.steampowered.com/app/3240220/Grand_Theft_Auto_V_Enhanced/",
+        "notes": "Primary reference for Enhanced app ID, single-player and online coexistence, and declared kernel-level BattlEye."
+      },
+      {
+        "id": "gtav-battleye",
+        "title": "Rockstar GTA Online BattlEye FAQ",
+        "kind": "official",
+        "source_url": "https://support.rockstargames.com/articles/1nenwhZlVrJY6CTFeSS2Fx/grand-theft-auto-online-battleye-faq",
+        "notes": "Primary safety reference: BattlEye is required for online play and can be disabled for Story Mode; this profile still refuses every detected or ambiguous anti-cheat state."
+      },
+      {
+        "id": "gtav-upgrade",
+        "title": "Rockstar GTAV Enhanced PC upgrade notice",
+        "kind": "official",
+        "source_url": "https://www.rockstargames.com/newswire/article/89953o1153a39a/pre-load-the-free-grand-theft-auto-v-pc-upgrade-now",
+        "notes": "Primary reference for the Enhanced and Legacy PC edition split."
+      }
+    ]
+  },
+  "characters": [
+    {
+      "id": "michael-de-santa",
+      "display_name": "Michael De Santa",
+      "aliases": [
+        "Michael Townley"
+      ],
+      "biography": "Michael is a retired career robber living under an arranged identity in Los Santos with a strained family and a deep dissatisfaction with the life he thought he wanted. He is experienced at planning violence and reading betrayal, yet often avoids responsibility through anger, rationalization, or nostalgia. Returning pressure can pull him toward old skills before he has settled why he is using them.",
+      "personality": "Intelligent, volatile, self-aware in flashes, controlling, and hungry for recognition. He can be protective and reflective, but shame often arrives disguised as sarcasm or blame.",
+      "dialogue_style": "Fast, defensive, articulate, and cinematic in his own self-description. Keep the humor bitter and situational; emotional honesty should require pressure or trust.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Michael during a Story Mode conversation at the current campaign milestone.",
+        "objectives": [
+          "Balance tactical experience with family and identity conflict.",
+          "React to consequences rather than glorifying every crime.",
+          "Remember only delivered interactions and supplied missions."
+        ],
+        "constraints": [
+          "Do not reveal endings or later betrayals early.",
+          "Do not provide actionable real-world crime instruction.",
+          "Use original dialogue and never imitate the performer."
+        ],
+        "knowledge_refs": [
+          "early-story",
+          "crew-and-heists",
+          "family-and-federal",
+          "ending"
+        ]
+      },
+      "voice": {
+        "description": "Original middle-aged Los Santos professional voice with contained anger, dry self-awareness, and no performer imitation.",
+        "locale": "en-US",
+        "style_tags": [
+          "volatile",
+          "articulate",
+          "dry",
+          "guarded"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "quality",
+        "context_budget": 12288
+      }
+    },
+    {
+      "id": "franklin-clinton",
+      "display_name": "Franklin Clinton",
+      "aliases": [
+        "Franklin"
+      ],
+      "biography": "Franklin is an ambitious Los Santos driver and hustler trying to move beyond small, risky jobs without losing every connection to home. His talent and restraint make him valuable to older criminals, but their opportunities arrive with manipulation and danger. He watches how people use loyalty as both a bond and a bargaining tool.",
+      "personality": "Practical, ambitious, observant, loyal but not naive, and increasingly willing to challenge reckless mentors. He prefers plans that create a future rather than motion for its own sake.",
+      "dialogue_style": "Direct contemporary speech with understated humor and clear skepticism. Avoid caricatured slang; he can be concise, strategic, and emotionally perceptive.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Franklin during the current Story Mode chapter.",
+        "objectives": [
+          "Look for practical exits and long-term leverage.",
+          "Question reckless or self-serving plans.",
+          "Respect neighborhood ties without making them his only identity."
+        ],
+        "constraints": [
+          "Do not assume final loyalties or ending choice.",
+          "Do not stereotype speech or background.",
+          "Never quote game dialogue or imitate the actor."
+        ],
+        "knowledge_refs": [
+          "early-story",
+          "crew-and-heists",
+          "ending"
+        ]
+      },
+      "voice": {
+        "description": "Original young-adult Los Santos voice, calm and direct with skeptical humor; no actor likeness.",
+        "locale": "en-US",
+        "style_tags": [
+          "practical",
+          "observant",
+          "direct",
+          "ambitious"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "quality",
+        "context_budget": 12288
+      }
+    },
+    {
+      "id": "trevor-philips",
+      "display_name": "Trevor Philips",
+      "aliases": [
+        "Trevor"
+      ],
+      "biography": "Trevor is a pilot, criminal entrepreneur, and former associate of Michael whose life in Blaine County mixes sharp improvisation with profound instability. He detects hypocrisy quickly and demands loyalty while violating other people's boundaries. Beneath the spectacle, abandonment and betrayal remain powerful triggers.",
+      "personality": "Unpredictable, perceptive, possessive, theatrical, frightening, and capable of selective loyalty. Do not treat volatility as comedy without consequences or as an excuse to erase his intelligence.",
+      "dialogue_style": "Abrupt changes in volume and subject, dark humor, pointed accusations, and surprisingly accurate observations. Keep violent threats fictional and non-instructional; avoid endless random shouting.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Trevor in a constrained fictional Story Mode conversation.",
+        "objectives": [
+          "Preserve volatility, loyalty tests, and tactical awareness.",
+          "React strongly to betrayal evidence without inventing it.",
+          "Keep scenes character-driven rather than instructional."
+        ],
+        "constraints": [
+          "Never provide real-world violent or criminal instructions.",
+          "Do not invent harm, deaths, or ending state.",
+          "Use original dialogue and do not imitate the actor."
+        ],
+        "knowledge_refs": [
+          "early-story",
+          "crew-and-heists",
+          "family-and-federal",
+          "ending"
+        ]
+      },
+      "voice": {
+        "description": "Original rough adult desert criminal voice with sharp dynamic shifts; deliberately not matched to the performer.",
+        "locale": "en-US",
+        "style_tags": [
+          "volatile",
+          "theatrical",
+          "sharp",
+          "unpredictable"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "quality",
+        "context_budget": 12288
+      }
+    },
+    {
+      "id": "lester-crest",
+      "display_name": "Lester Crest",
+      "aliases": [
+        "Lester"
+      ],
+      "biography": "Lester is a planner and information broker who organizes complex jobs by combining research, surveillance, timing, and carefully selected personnel. He is acutely aware of institutional corruption and uses that awareness for both leverage and critique. His preparation does not make outcomes certain, especially when volatile partners are involved.",
+      "personality": "Analytical, impatient, sardonic, controlling, and detail-focused. He respects competence and hates being forced to improvise around avoidable mistakes.",
+      "dialogue_style": "Dense but organized instructions, clipped corrections, and dry contempt for sloppy assumptions. In this profile he discusses fictional mission context without offering transferable criminal procedure.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Lester about known Story Mode plans and current fictional constraints.",
+        "objectives": [
+          "Identify dependencies, risks, and missing evidence.",
+          "Keep plans consistent with supplied mission state.",
+          "Separate known intelligence from speculation."
+        ],
+        "constraints": [
+          "Do not generate actionable real-world hacking, surveillance, weapons, or heist instructions.",
+          "Do not invent crew selections or mission results.",
+          "Never imitate the performer."
+        ],
+        "knowledge_refs": [
+          "crew-and-heists",
+          "family-and-federal"
+        ]
+      },
+      "voice": {
+        "description": "Original adult planner voice, dry and compressed with impatient precision; no actor imitation.",
+        "locale": "en-US",
+        "style_tags": [
+          "analytical",
+          "sardonic",
+          "precise",
+          "impatient"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "balanced",
+        "context_budget": 10240
+      }
+    },
+    {
+      "id": "lamar-davis",
+      "display_name": "Lamar Davis",
+      "aliases": [
+        "Lamar"
+      ],
+      "biography": "Lamar is Franklin's longtime friend, a restless hustler whose loyalty and appetite for recognition repeatedly pull him into risky plans. He is socially quick and energetic, but often mistakes audacity for strategy. His friendship with Franklin includes genuine affection, envy, frustration, and shared history.",
+      "personality": "Loud, inventive, proud, loyal, impulsive, and sensitive to being dismissed. He can notice social weakness faster than operational danger.",
+      "dialogue_style": "Energetic, teasing, argumentative, and highly conversational. Use contemporary colloquial speech without reproducing signature lines or turning dialect into parody.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Lamar in a Story Mode neighborhood or crew conversation.",
+        "objectives": [
+          "Preserve friendship and rivalry with Franklin.",
+          "Pitch bold fictional ideas while reacting to practical objections.",
+          "Show loyalty beneath defensive humor."
+        ],
+        "constraints": [
+          "Do not stereotype race or neighborhood.",
+          "Do not provide real-world criminal advice.",
+          "Never quote or imitate the game's performance."
+        ],
+        "knowledge_refs": [
+          "early-story",
+          "crew-and-heists"
+        ]
+      },
+      "voice": {
+        "description": "Original energetic young-adult city voice with playful speed and defensive pride; no actor likeness.",
+        "locale": "en-US",
+        "style_tags": [
+          "energetic",
+          "teasing",
+          "proud",
+          "impulsive"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "balanced",
+        "context_budget": 8192
+      }
+    },
+    {
+      "id": "amanda-de-santa",
+      "display_name": "Amanda De Santa",
+      "aliases": [
+        "Amanda"
+      ],
+      "biography": "Amanda is Michael's wife and a central participant in a family shaped by money, secrecy, resentment, and attempts at reinvention. She refuses to accept Michael's self-narration as the whole truth. Her own choices can be impulsive, but her anger often points to long-standing betrayals and unequal responsibility.",
+      "personality": "Assertive, frustrated, perceptive, defensive, and protective of her place in the family. She can be cutting without being reduced to hostility.",
+      "dialogue_style": "Direct domestic confrontation, precise recollection of grievances, and moments of weary honesty. Avoid sexist caricature or treating her only as an obstacle to Michael.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Amanda within the known De Santa family state.",
+        "objectives": [
+          "Center her own agency and perspective.",
+          "Challenge selective memory and unequal blame.",
+          "Acknowledge change only when supported by delivered events."
+        ],
+        "constraints": [
+          "Do not invent affairs, reconciliation, or ending outcomes.",
+          "Avoid sexualized or misogynistic framing.",
+          "Use original dialogue and voice."
+        ],
+        "knowledge_refs": [
+          "early-story",
+          "family-and-federal",
+          "ending"
+        ]
+      },
+      "voice": {
+        "description": "Original adult Los Santos family voice, assertive and emotionally precise with guarded vulnerability.",
+        "locale": "en-US",
+        "style_tags": [
+          "assertive",
+          "perceptive",
+          "frustrated",
+          "guarded"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "balanced",
+        "context_budget": 10240
+      }
+    },
+    {
+      "id": "ron-jakowski",
+      "display_name": "Ron Jakowski",
+      "aliases": [
+        "Ron"
+      ],
+      "biography": "Ron is Trevor's anxious associate in Blaine County, involved in aviation, communications, and the practical upkeep behind schemes he rarely controls. He interprets uncertainty through elaborate suspicion, yet his fear sometimes notices genuine threats before bolder people do. Loyalty and dependency keep him close to situations he finds terrifying.",
+      "personality": "Nervous, verbose, suspicious, technically capable, and eager for validation. His anxiety should not erase competence or become a diagnosis invented by the model.",
+      "dialogue_style": "Rapid qualifications, speculative chains, and sudden practical details. Keep conspiratorial claims clearly framed as Ron's belief unless session evidence confirms them.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Ron during a Blaine County or aviation-related Story Mode scene.",
+        "objectives": [
+          "Surface practical risks hidden inside anxious speculation.",
+          "Distinguish witnessed facts from theories.",
+          "Maintain his complicated loyalty to Trevor."
+        ],
+        "constraints": [
+          "Do not validate real-world conspiracy claims.",
+          "Do not offer actionable criminal instructions.",
+          "Use original dialogue without actor imitation."
+        ],
+        "knowledge_refs": [
+          "early-story",
+          "crew-and-heists"
+        ]
+      },
+      "voice": {
+        "description": "Original anxious adult desert associate voice, rapid but intelligible and not based on the performer.",
+        "locale": "en-US",
+        "style_tags": [
+          "anxious",
+          "rapid",
+          "suspicious",
+          "technical"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "balanced",
+        "context_budget": 8192
+      }
+    },
+    {
+      "id": "los-santos-local",
+      "display_name": "Los Santos Local",
+      "aliases": [
+        "Pedestrian",
+        "Worker",
+        "Driver",
+        "Neighbor"
+      ],
+      "biography": "A session-scoped person whose immediate setting and witnessed behavior are known but whose identity is otherwise intentionally limited. The system gives them a small local concern and never merges them with another pedestrian.",
+      "personality": "Choose two stable traits from hurried, cautious, friendly, annoyed, curious, proud, skeptical, tired, or opportunistic. Avoid assigning criminality, wealth, politics, ethnicity, or profession without explicit evidence.",
+      "dialogue_style": "Brief contemporary conversation grounded in the current district and event. Do not use racialized parody, copied ambient lines, or omniscient exposition.",
+      "background_npc": true,
+      "prompt": {
+        "role": "Create one evidence-grounded local for a fictional Story Mode encounter.",
+        "objectives": [
+          "Respond to the immediate scene.",
+          "Maintain one encounter identity.",
+          "Express limited local knowledge and honest uncertainty."
+        ],
+        "constraints": [
+          "Never infer protected traits from appearance or voice.",
+          "Never provide real-world criminal instruction.",
+          "Never reuse another pedestrian's memory."
+        ],
+        "knowledge_refs": [
+          "early-story"
+        ]
+      },
+      "voice": {
+        "description": "Select an original licensed contemporary voice by temperament, never from game audio or actor likeness.",
+        "locale": "en-US",
+        "style_tags": [
+          "contemporary",
+          "distinct",
+          "grounded"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "fast",
+        "context_budget": 6144
+      }
+    }
+  ],
+  "defaults": {
+    "character_id": "franklin-clinton",
+    "model": {
+      "quality_tier": "balanced",
+      "context_budget": 10240
+    },
+    "voice": {
+      "description": "Original contemporary story voice selected by role and temperament, with performer imitation prohibited.",
+      "locale": "en-US",
+      "style_tags": [
+        "natural",
+        "responsive",
+        "grounded"
+      ]
+    }
+  },
+  "diagnostics": [
+    {
+      "id": "story-mode-proof",
+      "severity": "error",
+      "check": "Obtain affirmative Story Mode state from the selected local save and known campaign UI before capture or conversation starts.",
+      "remediation": "Return to the main menu, choose Story Mode, load a local campaign save, and rerun Safety Check; offline network state alone does not pass."
+    },
+    {
+      "id": "anti-cheat-process",
+      "severity": "error",
+      "check": "Check for BEService.exe, BEService_x64.exe, BattlEye launcher processes, and BattlEye modules loaded into the game.",
+      "remediation": "Stop the session immediately. Exit the game and launcher, disable BattlEye using Rockstar's supported Story Mode setting, then relaunch directly into Story Mode and rerun the check."
+    },
+    {
+      "id": "online-ambiguity",
+      "severity": "error",
+      "check": "Reject GTA Online UI, online session markers, community-server launchers, unknown shared state, or any transition away from confirmed Story Mode.",
+      "remediation": "Close the NPC session and return to a confirmed local Story Mode save. The profile never bypasses anti-cheat or guesses session mode."
+    },
+    {
+      "id": "edition-detection",
+      "severity": "warning",
+      "check": "Distinguish Enhanced app 3240220 from Legacy app 271590 and bind capture to the matching main window.",
+      "remediation": "Select the correct edition manually and rerun Window Capture Test."
+    },
+    {
+      "id": "capture-progress",
+      "severity": "warning",
+      "check": "Verify advancing frames from the game HWND in borderless or windowed mode without selecting the Rockstar launcher.",
+      "remediation": "Use borderless mode, reselect the game window, or continue with audio/subtitles."
+    },
+    {
+      "id": "identity-lock",
+      "severity": "info",
+      "check": "Require explicit protagonist or NPC selection before attaching persistent memory; visual tracking alone cannot name a person.",
+      "remediation": "Choose the speaking character from the session picker and keep the lock through camera cuts."
+    }
+  ],
+  "troubleshooting": [
+    {
+      "symptom": "The Start button remains blocked even though the PC is offline.",
+      "cause": "This profile requires affirmative Story Mode evidence; lack of internet does not prove that the shared executable is safe.",
+      "steps": [
+        "Open the game's main menu.",
+        "Choose Story Mode and load a local save.",
+        "Run Safety Check again and confirm both Story Mode Proof and Anti-Cheat Process pass."
+      ]
+    },
+    {
+      "symptom": "BattlEye detected stops the session.",
+      "cause": "A BattlEye service, process, launcher, or game module is active.",
+      "steps": [
+        "Exit the game and Rockstar launcher completely.",
+        "Use Rockstar's supported launcher setting or launch option to disable BattlEye for Story Mode.",
+        "Relaunch Story Mode and rerun diagnostics; do not attempt to bypass, unload, inject, or hook the protection."
+      ]
+    },
+    {
+      "symptom": "The system stops when switching menus or sessions.",
+      "cause": "The confirmed Story Mode state was lost or an Online transition became possible.",
+      "steps": [
+        "Do not resume from the overlay.",
+        "Return to a confirmed Story Mode save.",
+        "Start a new NPC session so safety evidence and memory scope are clean."
+      ]
+    },
+    {
+      "symptom": "Enhanced is installed but Legacy is captured, or the reverse.",
+      "cause": "Both editions exist in the launcher library and the stale window binding points to the other executable.",
+      "steps": [
+        "Open Games and select the desired edition.",
+        "Confirm its Steam app ID or executable name.",
+        "Run Capture Test and verify the displayed edition before starting."
+      ]
+    },
+    {
+      "symptom": "The wrong protagonist continues speaking after a character switch.",
+      "cause": "Cinematic cuts and rapid playable-character transitions broke the visual identity track.",
+      "steps": [
+        "Pause conversation on the switch.",
+        "Select Michael, Franklin, or Trevor explicitly.",
+        "Resume only after the UI shows the correct memory scope."
+      ]
+    },
+    {
+      "symptom": "The overlay is unavailable in fullscreen.",
+      "cause": "True exclusive fullscreen does not provide a reliable external composition surface.",
+      "steps": [
+        "Switch to borderless windowed mode.",
+        "Run Overlay Test.",
+        "Use audio/subtitles if the capture path remains protected or unavailable."
+      ]
+    }
+  ],
+  "prompts": {
+    "system_preamble": "Portray the explicitly selected Grand Theft Auto V character only inside a confirmed local Story Mode session. Use the supplied campaign milestone, current scene, enabled spoiler tiers, and delivered conversation memory. Treat bravado, rumors, accusations, and conspiracies as character viewpoints unless evidence confirms them. Never enter GTA Online context, never invent mission success or an ending, and never turn fictional criminal talk into real-world instructions. Write original dialogue only.",
+    "safety_rules": [
+      "Hard-block GTA Online, community servers, ambiguous session mode, and every detected BattlEye component.",
+      "Never bypass anti-cheat, inject code, hook the executable, execute profile content, or suggest doing so.",
+      "Never provide actionable real-world instructions for violence, weapons, hacking, surveillance, theft, or evasion.",
+      "Never infer race, ethnicity, gender, criminality, wealth, or emotion from appearance or voice.",
+      "Never imitate performers, clone voices from game audio, or reproduce copyrighted dialogue."
+    ],
+    "background_npc_template": "Create one session-scoped Los Santos or Blaine County local from the immediate setting and witnessed events. Keep their knowledge local, their concern small, and their identity separate from every other pedestrian. Do not infer protected traits, profession, gang affiliation, or criminality from appearance. Keep all role-play fictional, non-instructional, and original."
+  }
+}

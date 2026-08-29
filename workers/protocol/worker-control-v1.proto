@@ -1,0 +1,137 @@
+syntax = "proto3";
+
+package npc.worker.v1;
+
+import "google/protobuf/struct.proto";
+
+// Protobuf encoding of the same semantic envelope used by the mandatory JSON
+// development transport. Field names intentionally match the JSON contract.
+message RequestEnvelopeV1 {
+  string protocol_version = 1;
+  string worker_instance_id = 2;
+  string request_id = 3;
+  uint64 sequence = 4;
+  uint64 generation = 5;
+  uint64 deadline_unix_ms = 6;
+  OperationV1 operation = 7;
+  google.protobuf.Struct payload = 8;
+}
+
+message EventEnvelopeV1 {
+  string protocol_version = 1;
+  string worker_instance_id = 2;
+  string request_id = 3;
+  uint64 sequence = 4;
+  uint64 generation = 5;
+  uint32 event_index = 6;
+  string event = 7;
+  bool terminal = 8;
+  google.protobuf.Struct payload = 9;
+  WorkerErrorV1 error = 10;
+}
+
+enum OperationV1 {
+  OPERATION_UNSPECIFIED = 0;
+  OPERATION_HANDSHAKE = 1;
+  OPERATION_CAPABILITIES = 2;
+  OPERATION_HEALTH = 3;
+  OPERATION_WARM = 4;
+  OPERATION_LOAD = 5;
+  OPERATION_UNLOAD = 6;
+  OPERATION_INFER = 7;
+  OPERATION_CANCEL = 8;
+  OPERATION_SHUTDOWN = 9;
+}
+
+message WorkerErrorV1 {
+  string code = 1;
+  string message = 2;
+  bool retryable = 3;
+  google.protobuf.Struct details = 4;
+}
+
+message CapabilitiesV1 {
+  string worker_id = 1;
+  string worker_kind = 2;
+  repeated string engines = 3;
+  repeated string operations = 4;
+  repeated string input_modalities = 5;
+  repeated string output_modalities = 6;
+  repeated string compute_backends = 7;
+  bool streaming_output = 8;
+  bool cancellation = 9;
+  bool network_access = 10;
+  bool deterministic_stub = 11;
+}
+
+message ResourceEstimateV1 {
+  uint64 idle_ram_mib = 1;
+  uint64 loaded_ram_mib = 2;
+  uint64 peak_ram_mib = 3;
+  uint64 loaded_vram_mib = 4;
+  uint64 peak_vram_mib = 5;
+  uint32 cpu_threads_recommended = 6;
+  uint32 concurrent_requests = 7;
+  string estimate_class = 8;
+  string evidence = 9;
+}
+
+// Generic external-current-frame lip-sync input. The lease strings are opaque
+// supervisor identities, not paths, URLs, OS handles, or encoded media. Frame
+// and audio content remain on the runtime-owned out-of-band media plane.
+message GenericLipSyncRequestV1 {
+  string frame_lease_id = 1;
+  string audio_lease_id = 2;
+  uint64 frame_lease_expires_qpc = 3;
+  uint64 audio_lease_expires_qpc = 4;
+  string selected_encounter_id = 5;
+  string selected_track_id = 6;
+  uint64 source_frame_sequence = 7;
+  uint64 source_capture_qpc = 8;
+  uint64 qpc_frequency_hz = 9;
+  NormalizedRegionV1 face_region_normalized = 10;
+  NormalizedRegionV1 mouth_region_normalized = 11;
+  uint64 presentation_deadline_qpc = 12;
+  uint64 cancellation_generation = 13;
+}
+
+message NormalizedRegionV1 {
+  double x = 1;
+  double y = 2;
+  double width = 3;
+  double height = 4;
+}
+
+message MouthPatchFreshnessV1 {
+  uint64 presentation_deadline_qpc = 1;
+  uint64 frame_lease_expires_qpc = 2;
+  uint64 audio_lease_expires_qpc = 3;
+  bool requires_exact_source_frame_sequence = 4;
+  bool discard_if_source_advanced = 5;
+  bool discard_if_generation_changed = 6;
+  bool restore_unmodified_on_rejection = 7;
+}
+
+// Metadata describing a proposed mouth residual. A production worker may name
+// a separately allocated output lease in patch_lease_id. No pixel, image, audio,
+// path, URL, or handle bytes are legal inline in this message. The deterministic
+// stub omits patch_lease_id and sets presentable=false and metadata_only=true.
+message MouthPatchProposalV1 {
+  string proposal_kind = 1;
+  string frame_lease_id = 2;
+  string audio_lease_id = 3;
+  string selected_encounter_id = 4;
+  string selected_track_id = 5;
+  uint64 source_frame_sequence = 6;
+  uint64 source_capture_qpc = 7;
+  uint64 qpc_frequency_hz = 8;
+  uint64 cancellation_generation = 9;
+  double confidence = 10;
+  NormalizedRegionV1 mask_bounds_normalized = 11;
+  MouthPatchFreshnessV1 freshness = 12;
+  string patch_lease_id = 13;
+  bool presentable = 14;
+  bool metadata_only = 15;
+  bool no_pixels_inline = 16;
+  bool image_modified = 17;
+}

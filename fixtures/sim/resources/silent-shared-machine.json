@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "npc.sim.resource-profile.v1",
+  "id": "silent-shared-machine",
+  "description": "Current development machine in G-Helper Silent mode with CPU boost disabled and competing agent workloads.",
+  "power": {
+    "mode": "silent",
+    "cpuBoostEnabled": false,
+    "source": "user-reported"
+  },
+  "workload": {
+    "competingAgents": true,
+    "competingWorkloadLabel": "multi-agent implementation session"
+  },
+  "resources": {
+    "cpuLogicalCores": 32,
+    "ramMiB": 16384,
+    "vramBudgetMiB": 9216,
+    "vramFreeMiB": 4096,
+    "targetFps": 60
+  },
+  "benchmark": {
+    "canonical": false,
+    "reason": "Power-constrained shared development state; functional simulation only."
+  }
+}

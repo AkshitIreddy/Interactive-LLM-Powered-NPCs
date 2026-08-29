@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0.0",
+  "profile_id": "divinity-original-sin-2",
+  "assertions": {
+    "profile_validation": {
+      "expected_valid": true,
+      "expected_schema_version": "2.0.0"
+    },
+    "detection": {
+      "store": "steam",
+      "store_id": "435150",
+      "display_name": "Divinity: Original Sin 2 - Definitive Edition",
+      "install_directory": "C:/Replay/Divinity Original Sin 2",
+      "executable": "EoCApp.exe",
+      "expected_match": true
+    },
+    "selection": {
+      "character_id": "ifan-ben-mezd",
+      "offscreen": true,
+      "expected_strategy": "explicit_selection",
+      "expected_evidence": "explicit_selection"
+    },
+    "routes": {
+      "conversation": true,
+      "subtitles": true,
+      "memory": true,
+      "audio": true
+    },
+    "refusal": {
+      "protected_online": "blocked",
+      "anti_cheat": "blocked",
+      "risk_gated_profile": false
+    }
+  },
+  "simulation": {
+    "session_id": "profile-replay-divinity-original-sin-2",
+    "turn_id": "divinity-original-sin-2-turn-1",
+    "transcript": "Deterministic profile replay: respond to the selected offscreen character.",
+    "locale": "en-US"
+  }
+}

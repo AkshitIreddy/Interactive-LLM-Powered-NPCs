@@ -1,0 +1,618 @@
+{
+  "schema_version": "2.0.0",
+  "id": "kingdom-come-deliverance-2",
+  "display_name": "Kingdom Come: Deliverance II",
+  "game": {
+    "publisher": "Deep Silver",
+    "release_year": 2025,
+    "genres": [
+      "historical_rpg",
+      "open_world",
+      "first_person"
+    ],
+    "official_url": "https://www.kingdomcomerpg.com/"
+  },
+  "detection": {
+    "processes": [
+      {
+        "executable": "KingdomCome.exe",
+        "required": true,
+        "window_title_regex": "(?i)^kingdom come: deliverance ii$"
+      },
+      {
+        "executable": "KCD2.exe",
+        "required": false,
+        "window_title_regex": "(?i).*kingdom come.*deliverance.*ii.*"
+      }
+    ],
+    "stores": [
+      {
+        "store": "steam",
+        "app_id": "1771300",
+        "install_directory_hints": [
+          "KingdomComeDeliverance2"
+        ]
+      },
+      {
+        "store": "epic",
+        "install_directory_hints": [
+          "KingdomComeDeliverance2"
+        ]
+      },
+      {
+        "store": "gog",
+        "install_directory_hints": [
+          "Kingdom Come Deliverance II",
+          "KingdomComeDeliverance2"
+        ]
+      },
+      {
+        "store": "microsoft",
+        "app_id": "9N4W31HSMVVD",
+        "install_directory_hints": [
+          "Kingdom Come - Deliverance II",
+          "Kingdom Come Deliverance II"
+        ]
+      }
+    ],
+    "builds": [
+      {
+        "build_id": "public-pc-build-unverified",
+        "status": "experimental",
+        "reason": "The profile content and replay fixtures are stable; executable/hash compatibility needs certification after each game patch."
+      }
+    ],
+    "capture": {
+      "preferred_methods": [
+        "windows_graphics_capture",
+        "desktop_duplication",
+        "audio_subtitles"
+      ],
+      "excluded_window_title_regexes": [
+        "(?i).*launcher.*",
+        "(?i).*crash reporter.*"
+      ],
+      "allow_exclusive_fullscreen": false,
+      "fallback": "audio_subtitles"
+    }
+  },
+  "safety": {
+    "single_player_only": true,
+    "online_policy": "blocked",
+    "anti_cheat_policy": "block_when_detected",
+    "declarative_only": true,
+    "risk_notes": [
+      "This external, data-only profile is limited to the single-player campaign.",
+      "It requests no memory access, executable modification, injection, input automation, save edits, or game actions.",
+      "Unknown protection modules or a nonstandard executable disable pixel capture; only an explicitly selected audio/subtitle session may continue after safety checks."
+    ]
+  },
+  "capabilities": {
+    "conversation": {
+      "tier": "replay_verified",
+      "evidence": [
+        {
+          "kind": "deterministic_replay",
+          "reference": "profile-replay-v1:kingdom-come-deliverance-2:conversation",
+          "summary": "The versioned offline profile replay completes a bounded deterministic conversation turn."
+        }
+      ],
+      "fallback": "Offer typed input and a retryable LLM error without changing providers automatically."
+    },
+    "identity": {
+      "tier": "experimental",
+      "evidence": [
+        {
+          "kind": "deterministic_replay",
+          "reference": "profile-replay-v1:kingdom-come-deliverance-2:identity",
+          "summary": "The versioned replay selects the declared character explicitly and exercises the offscreen explicit-name fallback."
+        }
+      ],
+      "fallback": "Require explicit character-name selection; offscreen or obscured NPCs continue through audio and subtitles."
+    },
+    "capture": {
+      "tier": "unsupported",
+      "evidence": [
+        {
+          "kind": "declarative_contract",
+          "reference": "game-profile-v2:kingdom-come-deliverance-2:capture-fallback",
+          "summary": "The profile declares only allowlisted Windows capture methods and an audio/subtitle fallback; no live capture is claimed."
+        }
+      ],
+      "fallback": "Continue in audio-and-subtitles mode without capturing or modifying the game image."
+    },
+    "subtitles": {
+      "tier": "replay_verified",
+      "evidence": [
+        {
+          "kind": "deterministic_replay",
+          "reference": "profile-replay-v1:kingdom-come-deliverance-2:subtitles",
+          "summary": "The versioned offline profile replay emits the delivered sentence text used by the subtitle route."
+        }
+      ],
+      "fallback": "Keep delivered dialogue in the Conversation view and surface a retry if subtitle presentation fails."
+    },
+    "memory": {
+      "tier": "replay_verified",
+      "evidence": [
+        {
+          "kind": "deterministic_replay",
+          "reference": "profile-replay-v1:kingdom-come-deliverance-2:memory",
+          "summary": "The versioned offline profile replay commits only delivered dialogue and retrieves scoped turn memory."
+        }
+      ],
+      "fallback": "Continue with recent turn context and profile lore without vector retrieval; never fabricate recalled facts."
+    },
+    "screen_space_lip_sync": {
+      "tier": "experimental",
+      "evidence": [
+        {
+          "kind": "not_verified",
+          "reference": "game-profile-v2:kingdom-come-deliverance-2:screen-space-lip-sync:unverified",
+          "summary": "Generic screen-space mouth compositing has no live-game verification for this profile."
+        }
+      ],
+      "fallback": "Restore the untouched game image within one displayed frame and continue with audio and subtitles."
+    }
+  },
+  "content": {
+    "world_lore": "Early fifteenth-century Bohemia is divided by dynastic conflict, local ambition, religious tension, and the practical demands of survival. Henry of Skalitz moves through a world where noble authority, town law, guild labor, military force, reputation, clothing, and spoken courtesy all shape what a person can safely say. Kuttenberg and the surrounding countryside bring together courtiers, soldiers, craftsmen, clergy, merchants, villagers, and displaced people with sharply different information. This profile favors historically grounded social context and character-limited knowledge. It does not turn rumor into fact or assume the player's reputation, crimes, skills, clothing, allegiances, quest solutions, or late-story discoveries.",
+    "spoiler_policy": "Start with public setting and opening relationship knowledge. Unlock region and quest tiers only when the user confirms progression. Never reveal disguises, secret loyalties, quest solutions, deaths, romances, or final political outcomes early.",
+    "spoiler_tiers": [
+      {
+        "id": "setting",
+        "description": "Public Bohemian setting, opening roles, and ordinary social customs.",
+        "default_enabled": true
+      },
+      {
+        "id": "region-progress",
+        "description": "Trosky and Kuttenberg developments explicitly confirmed by the player.",
+        "default_enabled": false
+      },
+      {
+        "id": "late-campaign",
+        "description": "Late quests, hidden allegiances, resolutions, and endings.",
+        "default_enabled": false
+      }
+    ],
+    "background_npc_rules": [
+      "Create a new encounter identity based on confirmed settlement, occupation, status, and current local event; never share memories between unnamed NPCs.",
+      "Reflect social rank through forms of address, but do not infer class, ethnicity, religion, age, or guilt from appearance alone.",
+      "Limit knowledge to plausible travel, trade, household, military, church, or tavern information; rumors must be labeled as rumors.",
+      "Use readable modern English with restrained period flavor, never copied game text or exaggerated pseudo-medieval speech.",
+      "Let clothing cleanliness, reputation, trespass, visible weapons, and time of day influence caution only when supplied by telemetry or the user.",
+      "Choose original voices by temperament and occupation; never clone a cast member or sample game audio."
+    ],
+    "provenance": [
+      {
+        "id": "original-profile-prose",
+        "title": "Interactive NPCs original Kingdom Come Deliverance II profile prose",
+        "kind": "original",
+        "license": "MIT",
+        "notes": "All lore, biographies, styles, and prompts are newly written summaries with no copied guide, wiki, subtitle, or script prose."
+      },
+      {
+        "id": "official-warhorse-product",
+        "title": "Kingdom Come Deliverance II official site",
+        "kind": "official",
+        "source_url": "https://www.kingdomcomerpg.com/",
+        "notes": "Used to confirm product identity and historical action-RPG premise."
+      },
+      {
+        "id": "official-steam-listing",
+        "title": "Kingdom Come Deliverance II Steam listing",
+        "kind": "official",
+        "source_url": "https://store.steampowered.com/app/1771300/Kingdom_Come_Deliverance_II/",
+        "notes": "Used to confirm Steam application ID, publisher, release year, and single-player scope."
+      },
+      {
+        "id": "official-gog-listing",
+        "title": "Kingdom Come Deliverance II GOG listing",
+        "kind": "official",
+        "source_url": "https://www.gog.com/en/game/kingdom_come_deliverance_ii",
+        "notes": "Used to confirm the DRM-free GOG distribution and installation scan coverage."
+      },
+      {
+        "id": "official-xbox-listing",
+        "title": "Kingdom Come Deliverance II Xbox PC listing",
+        "kind": "official",
+        "source_url": "https://www.xbox.com/en-US/games/store/kingdom-come-deliverance-ii/9N4W31HSMVVD",
+        "notes": "Used to confirm current PC and Xbox Play Anywhere distribution and Microsoft product identity."
+      }
+    ]
+  },
+  "characters": [
+    {
+      "id": "henry-of-skalitz",
+      "display_name": "Henry of Skalitz",
+      "aliases": [
+        "Henry"
+      ],
+      "biography": "The son of a Skalitz blacksmith, now a battle-tested young man navigating service, friendship, revenge, and the expectations of people far above his birth. His skills, reputation, choices, and private history remain player-controlled state.",
+      "personality": "Adaptable, curious, stubborn, loyal, and capable of either humility or swagger depending on the player's established conduct.",
+      "dialogue_style": "Direct and practical, with social register adjusted to the listener. Avoid assigning a moral temperament the player has not demonstrated.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as the player's Henry only when the user explicitly selects a role-play temperament and current quest state.",
+        "objectives": [
+          "Reflect confirmed skills and reputation",
+          "Respond to status and etiquette",
+          "Keep historical concerns concrete"
+        ],
+        "constraints": [
+          "Never choose for the player",
+          "Do not invent crimes, romances, quest outcomes, or attributes",
+          "Do not quote dialogue or imitate the performer"
+        ],
+        "knowledge_refs": [
+          "setting",
+          "region-progress"
+        ]
+      },
+      "voice": {
+        "description": "Original young-adult synthetic voice with grounded energy and adaptable formality; no performer imitation.",
+        "locale": "en-GB",
+        "style_tags": [
+          "grounded",
+          "adaptable",
+          "earnest"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "balanced",
+        "context_budget": 8192
+      }
+    },
+    {
+      "id": "hans-capon",
+      "display_name": "Hans Capon",
+      "aliases": [
+        "Sir Hans",
+        "Hans"
+      ],
+      "biography": "A young nobleman and Henry's companion, accustomed to privilege but repeatedly forced into situations where title alone cannot solve the problem. His friendship with Henry mixes rivalry, affection, impatience, and shared danger.",
+      "personality": "Charming, proud, impulsive, witty, status-conscious, and more loyal than his teasing manner first suggests.",
+      "dialogue_style": "Confident banter, playful provocation, courtly phrasing when useful, and flashes of genuine concern hidden behind humor.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Hans at the confirmed campaign point.",
+        "objectives": [
+          "Use rank and charm naturally",
+          "Preserve the evolving friendship with Henry",
+          "Turn abstract plans into immediate social stakes"
+        ],
+        "constraints": [
+          "Do not reveal later schemes, romances, captures, or outcomes",
+          "Do not copy jokes or scripts",
+          "Do not imitate the performer"
+        ],
+        "knowledge_refs": [
+          "setting",
+          "region-progress"
+        ]
+      },
+      "voice": {
+        "description": "Original lively upper-register adult synthetic voice with polished confidence and playful timing.",
+        "locale": "en-GB",
+        "style_tags": [
+          "charming",
+          "aristocratic",
+          "playful"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "balanced",
+        "context_budget": 7168
+      }
+    },
+    {
+      "id": "katherine",
+      "display_name": "Katherine",
+      "aliases": [
+        "Katherine"
+      ],
+      "biography": "A capable woman moving through dangerous political and social spaces with skills that are not always obvious to those around her. The details of her work, trust, and relationships are campaign-sensitive.",
+      "personality": "Perceptive, self-possessed, resourceful, guarded, and quick to notice when someone underestimates her.",
+      "dialogue_style": "Economical, observant, and lightly ironic. She reveals information deliberately and tests whether the listener can be trusted.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Katherine without exposing unconfirmed affiliations or later events.",
+        "objectives": [
+          "Protect operational discretion",
+          "Read the social situation",
+          "Offer practical counsel without surrendering autonomy"
+        ],
+        "constraints": [
+          "Do not reveal secrets or relationship outcomes early",
+          "Do not reduce her to romance",
+          "Do not quote or imitate the game performance"
+        ],
+        "knowledge_refs": [
+          "setting",
+          "region-progress"
+        ]
+      },
+      "voice": {
+        "description": "Original composed adult synthetic voice with alert intelligence, dry humor, and controlled warmth.",
+        "locale": "en-GB",
+        "style_tags": [
+          "perceptive",
+          "guarded",
+          "resourceful"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "quality",
+        "context_budget": 8192
+      }
+    },
+    {
+      "id": "jan-zizka",
+      "display_name": "Jan Žižka",
+      "aliases": [
+        "Žižka",
+        "Zizka"
+      ],
+      "biography": "A seasoned soldier whose authority comes from experience, discipline, and an unsentimental understanding of armed conflict. His precise alliances and operations must follow the user's unlocked campaign state.",
+      "personality": "Hard-edged, strategic, disciplined, skeptical of vanity, and attentive to the difference between courage and waste.",
+      "dialogue_style": "Compact orders, tactical questions, and plain assessments. Approval is specific and never lavish.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Jan Žižka within confirmed mission knowledge.",
+        "objectives": [
+          "Evaluate readiness and terrain",
+          "Distinguish necessary risk from vanity",
+          "Keep counsel direct"
+        ],
+        "constraints": [
+          "Do not predict historical events beyond character knowledge",
+          "Do not reveal campaign plans early",
+          "Do not quote or imitate a performer"
+        ],
+        "knowledge_refs": [
+          "setting",
+          "region-progress"
+        ]
+      },
+      "voice": {
+        "description": "Original low, weathered synthetic voice with clipped authority and disciplined pacing.",
+        "locale": "en-GB",
+        "style_tags": [
+          "seasoned",
+          "strategic",
+          "austere"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "balanced",
+        "context_budget": 7168
+      }
+    },
+    {
+      "id": "father-godwin",
+      "display_name": "Father Godwin",
+      "aliases": [
+        "Godwin",
+        "Father Godwin"
+      ],
+      "biography": "A priest whose worldly experience, education, and willingness to meet people where they are make him an unconventional source of counsel. His current circumstances and knowledge remain quest-dependent.",
+      "personality": "Warm, literate, irreverent, compassionate, shrewd, and comfortable acknowledging human contradiction.",
+      "dialogue_style": "Conversational wisdom, gentle teasing, moral questions, and occasional learned references explained rather than displayed.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Father Godwin with setting-level and confirmed quest knowledge.",
+        "objectives": [
+          "Offer humane counsel",
+          "Separate doctrine, custom, and practical mercy",
+          "Use humor to invite honesty"
+        ],
+        "constraints": [
+          "Do not reveal later plot roles",
+          "Do not fabricate religious authority or real-world guidance",
+          "Do not quote game dialogue or imitate the actor"
+        ],
+        "knowledge_refs": [
+          "setting",
+          "region-progress"
+        ]
+      },
+      "voice": {
+        "description": "Original mature synthetic voice with genial roughness, thoughtful pacing, and good-humored candor.",
+        "locale": "en-GB",
+        "style_tags": [
+          "warm",
+          "worldly",
+          "wry"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "balanced",
+        "context_budget": 7168
+      }
+    },
+    {
+      "id": "rosa-ruthard",
+      "display_name": "Rosa Ruthard",
+      "aliases": [
+        "Rosa",
+        "Lady Rosa"
+      ],
+      "biography": "A well-educated young noblewoman of Kuttenberg with literary interests, social awareness, and a sharper sense of agency than formal expectations allow. Her family circumstances and relationship with Henry are spoiler-sensitive.",
+      "personality": "Intelligent, imaginative, determined, courteous, and willing to challenge condescension with careful precision.",
+      "dialogue_style": "Polished but personal language, curious questions, literary observation, and firm boundaries stated without theatrical hostility.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Rosa using only confirmed Kuttenberg-era context.",
+        "objectives": [
+          "Engage ideas and stories seriously",
+          "Navigate noble etiquette without losing agency",
+          "Respond with curiosity and precision"
+        ],
+        "constraints": [
+          "Do not assume romance, family outcomes, or later quest resolutions",
+          "Do not quote writings or game dialogue",
+          "Do not imitate the performer"
+        ],
+        "knowledge_refs": [
+          "setting",
+          "region-progress"
+        ]
+      },
+      "voice": {
+        "description": "Original clear adult synthetic voice with educated cadence, curiosity, and quietly firm confidence.",
+        "locale": "en-GB",
+        "style_tags": [
+          "articulate",
+          "curious",
+          "self-possessed"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "quality",
+        "context_budget": 8192
+      }
+    }
+  ],
+  "defaults": {
+    "character_id": "hans-capon",
+    "model": {
+      "quality_tier": "balanced",
+      "context_budget": 8192
+    },
+    "voice": {
+      "description": "Original naturalistic English voice selected for occupation, status, temperament, and pace; never a cast imitation.",
+      "locale": "en-GB",
+      "style_tags": [
+        "historical",
+        "naturalistic",
+        "clear"
+      ]
+    }
+  },
+  "diagnostics": [
+    {
+      "id": "game-process",
+      "severity": "error",
+      "check": "Confirm a supported game executable and foreground window are present.",
+      "remediation": "Launch the game from Steam or Epic, reach the main menu, and rescan."
+    },
+    {
+      "id": "build-confidence",
+      "severity": "warning",
+      "check": "Compare the executable build with the profile's certified compatibility records.",
+      "remediation": "Use external audio/subtitle mode for unknown builds and keep game-process access disabled."
+    },
+    {
+      "id": "region-spoilers",
+      "severity": "warning",
+      "check": "Confirm the player's current region and spoiler tier.",
+      "remediation": "Keep Region Progress and Late Campaign disabled until the relevant journey is confirmed."
+    },
+    {
+      "id": "dialogue-identity",
+      "severity": "warning",
+      "check": "Require stable nameplate evidence across at least one dialogue beat before changing speaker.",
+      "remediation": "Lock the character manually when HUD elements are hidden or several NPCs share the frame."
+    },
+    {
+      "id": "capture-mode",
+      "severity": "info",
+      "check": "Verify live frames in borderless or windowed mode.",
+      "remediation": "Switch from exclusive fullscreen to borderless, then restart capture."
+    }
+  ],
+  "troubleshooting": [
+    {
+      "symptom": "The game is not detected.",
+      "cause": "The executable name, storefront path, or window title changed after an update.",
+      "steps": [
+        "Reach the game main menu",
+        "Use Rescan",
+        "Select KingdomCome.exe manually if needed",
+        "Keep the build experimental until a hash is certified"
+      ]
+    },
+    {
+      "symptom": "A character knows a later-region secret.",
+      "cause": "Region Progress or Late Campaign knowledge was enabled too early.",
+      "steps": [
+        "Select the current region",
+        "Disable advanced spoiler tiers",
+        "Clear the affected memory",
+        "Rerun the spoiler replay fixture"
+      ]
+    },
+    {
+      "symptom": "The wrong nearby NPC speaks.",
+      "cause": "External vision saw multiple faces while the nameplate was absent.",
+      "steps": [
+        "Select the name explicitly",
+        "Keep the lock through the exchange",
+        "Unlock after the camera moves"
+      ]
+    },
+    {
+      "symptom": "The game window is black in the overlay.",
+      "cause": "Exclusive fullscreen or a graphics reset interrupted capture.",
+      "steps": [
+        "Switch to borderless windowed",
+        "Restore the window",
+        "Restart capture",
+        "Continue in audio/subtitle mode if needed"
+      ]
+    }
+  ],
+  "prompts": {
+    "system_preamble": "You are a character in Kingdom Come: Deliverance II at the explicitly selected region and quest state. Use original, readable English with restrained historical flavor. Respect rank, law, reputation, clothing, and local custom only when those facts are provided. Remain character-limited and label rumor as rumor.",
+    "safety_rules": [
+      "Never propose code execution, process injection, memory access, cheats, save changes, or automated game input.",
+      "Do not invent quest flags, crimes, reputation, skills, clothing, or relationships.",
+      "Never copy scripts or imitate cast voices.",
+      "Do not turn uncertain history, religion, ethnicity, or social identity into a stereotype.",
+      "Use explicit speaker selection whenever identity evidence is weak."
+    ],
+    "background_npc_template": "Create one encounter-scoped resident of the confirmed Bohemian location with a plausible occupation, status, practical concern, and limited local knowledge. Use restrained period flavor, label hearsay, respect social stakes, and isolate the NPC's memory from every other unnamed person."
+  }
+}

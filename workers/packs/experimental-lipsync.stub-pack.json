@@ -1,0 +1,75 @@
+{
+  "schema_version": "npc.worker-pack/v1",
+  "pack_id": "dev.worker.experimental-lipsync",
+  "display_name": "Generic current-frame lip-sync deterministic stub",
+  "development_stub": true,
+  "bundles_third_party": false,
+  "installation_owner": "model_manager",
+  "protocol": {
+    "version": "1.0",
+    "encodings": ["length_delimited_json", "length_delimited_protobuf"],
+    "transports": ["stdio", "supervisor_created_named_pipe"],
+    "max_frame_bytes": 1048576,
+    "network_access": false
+  },
+  "worker": {
+    "id": "worker-experimental-lipsync-stub",
+    "kind": "lip_sync",
+    "engine": "generic-current-frame-mouth-patch-contract"
+  },
+  "capabilities": {
+    "input_modalities": [
+      "opaque_frame_lease",
+      "opaque_audio_lease",
+      "local_encounter_track_selection",
+      "normalized_face_mouth_regions"
+    ],
+    "output_modalities": ["mouth_patch_proposal_metadata"],
+    "compute_backends": ["cpu"],
+    "streaming_output": false,
+    "cancellation": true,
+    "network_access": false,
+    "experimental": true,
+    "modifies_images": false,
+    "emits_inline_pixels": false,
+    "game_specific_adapters": false,
+    "requires_user_selected_pack": true,
+    "screen_space_activation_requires_qualification": true
+  },
+  "resource_estimate": {
+    "idle_ram_mib": 24,
+    "loaded_ram_mib": 32,
+    "peak_ram_mib": 48,
+    "loaded_vram_mib": 0,
+    "peak_vram_mib": 0,
+    "cpu_threads_recommended": 1,
+    "concurrent_requests": 1,
+    "estimate_class": "deterministic_stub_ceiling",
+    "evidence": "Conservative metadata-only fixture-process scheduling ceiling; not a model benchmark."
+  },
+  "development": {
+    "entrypoint": "workers/stubs/worker.py",
+    "default_model_id": "fixture.lipsync.mouth-patch-metadata-v1",
+    "purpose": "orchestration_and_protocol_testing_only"
+  },
+  "production_pack_requirements": {
+    "third_party_payloads_bundled_here": false,
+    "installed_by": "model_manager",
+    "required_artifact_roles": [
+      "signed_worker_binary",
+      "qualified_generic_lipsync_runtime",
+      "verified_model_if_required",
+      "mask_tracking_and_fallback_policy",
+      "license_and_attribution"
+    ],
+    "activation_gates": [
+      "sha256_and_signature",
+      "runtime_abi",
+      "hardware_contention_gate",
+      "freshness_and_cancellation_gate",
+      "visual_quality_gate",
+      "privacy_and_license_review",
+      "self_test"
+    ]
+  }
+}

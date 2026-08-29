@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://npc2.local/schemas/resource-profile.v1.schema.json",
+  "title": "NPC 2.0 deterministic resource profile v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "description", "power", "workload", "resources", "benchmark"],
+  "properties": {
+    "schemaVersion": { "const": "npc.sim.resource-profile.v1" },
+    "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "description": { "type": "string" },
+    "power": {
+      "type": "object",
+      "required": ["mode", "cpuBoostEnabled", "source"],
+      "properties": {
+        "mode": { "enum": ["silent", "balanced", "turbo", "unknown"] },
+        "cpuBoostEnabled": { "type": "boolean" },
+        "source": { "type": "string" }
+      }
+    },
+    "workload": {
+      "type": "object",
+      "required": ["competingAgents", "competingWorkloadLabel"],
+      "properties": {
+        "competingAgents": { "type": "boolean" },
+        "competingWorkloadLabel": { "type": "string" }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "required": ["cpuLogicalCores", "ramMiB", "vramBudgetMiB", "vramFreeMiB", "targetFps"],
+      "properties": {
+        "cpuLogicalCores": { "type": "integer", "minimum": 1 },
+        "ramMiB": { "type": "integer", "minimum": 1 },
+        "vramBudgetMiB": { "type": "integer", "minimum": 1 },
+        "vramFreeMiB": { "type": "integer", "minimum": 0 },
+        "targetFps": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "benchmark": {
+      "type": "object",
+      "required": ["canonical", "reason"],
+      "properties": {
+        "canonical": { "type": "boolean" },
+        "reason": { "type": "string" }
+      }
+    }
+  }
+}

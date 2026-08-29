@@ -1,0 +1,119 @@
+{
+  "schema_version": "npc.lipsync-pack-catalog/v1",
+  "catalog_id": "dev.lipsync.candidates.windows-v1",
+  "display_name": "Windows generic lip-sync candidate development catalog",
+  "development_descriptor": true,
+  "downloadable_catalog": false,
+  "contains_download_locations": false,
+  "contains_model_payloads": false,
+  "network_access": false,
+  "game_specific_adapters": false,
+  "selection_policy": {
+    "user_initiated_only": true,
+    "automatic_selection": false,
+    "automatic_download": false,
+    "explicit_candidate_id_required": true,
+    "installed_verified_pack_required": true,
+    "qualification_required": true,
+    "fallback_chain": []
+  },
+  "candidates": [
+    {
+      "id": "nvidia-ar-sdk-lipsync",
+      "display_name": "NVIDIA AR SDK LipSync",
+      "implementation_kind": "generic_current_frame_audio_conditioned",
+      "status": "conditional_private_access",
+      "source_access": "private_ngc",
+      "supported_platforms": ["windows_x64"],
+      "live_selectable": true,
+      "offline_selectable": false,
+      "requires_private_access": true,
+      "requirements": [
+        "User confirms private NGC access; an ordinary NVIDIA NIM API key is not sufficient.",
+        "A separately installed and verified Windows pack passes local qualification.",
+        "The media broker supplies 16 kHz audio and the required 14 source-frame pre-roll.",
+        "The exact SDK and model licenses are accepted before pack activation."
+      ],
+      "constraints": [
+        "Conditional candidate only; private access and Windows qualification are unresolved for general users.",
+        "No SDK, model, download URL, credential, or resource estimate is included in this descriptor."
+      ]
+    },
+    {
+      "id": "musetalk-1.5",
+      "display_name": "MuseTalk 1.5",
+      "implementation_kind": "generic_current_frame_talking_head",
+      "status": "public_experimental",
+      "source_access": "public_upstream",
+      "supported_platforms": ["windows_x64"],
+      "live_selectable": true,
+      "offline_selectable": true,
+      "requires_private_access": false,
+      "requirements": [
+        "A separately installed and verified pack passes Windows, license, contention, freshness, and visual qualification.",
+        "Output is constrained to a tracked mouth residual bound to the exact current source frame."
+      ],
+      "constraints": [
+        "Experimental candidate; public source availability does not imply live-game qualification.",
+        "No repository, model, download URL, or resource estimate is included in this descriptor."
+      ]
+    },
+    {
+      "id": "tracked-mouth-warp",
+      "display_name": "Tracked mouth-warp baseline",
+      "implementation_kind": "lightweight_current_frame_mouth_warp",
+      "status": "baseline",
+      "source_access": "project_developed",
+      "supported_platforms": ["windows_x64"],
+      "live_selectable": true,
+      "offline_selectable": true,
+      "requires_private_access": false,
+      "requirements": [
+        "A separately installed and verified worker pack passes tracking, freshness, occlusion, and visual qualification.",
+        "The runtime restores the untouched frame whenever confidence, identity, freshness, or cancellation checks fail."
+      ],
+      "constraints": [
+        "Baseline candidate only; inclusion does not claim a quality, latency, storage, RAM, or VRAM result.",
+        "The worker contract contains no model payload and no game-specific adapter behavior."
+      ]
+    },
+    {
+      "id": "ditto",
+      "display_name": "Ditto",
+      "implementation_kind": "generic_talking_head",
+      "status": "deferred",
+      "source_access": "public_upstream",
+      "supported_platforms": ["windows_x64"],
+      "live_selectable": false,
+      "offline_selectable": false,
+      "requires_private_access": false,
+      "requirements": [
+        "Windows-native packaging and a safe non-pickle model path must be demonstrated before reconsideration.",
+        "License, freshness, contention, and current-frame residual qualification remain required."
+      ],
+      "constraints": [
+        "Deferred because the available configuration is Linux-oriented, pickle handling is rejected, and the Windows build is unqualified.",
+        "The candidate cannot be selected or downloaded by this development catalog."
+      ]
+    },
+    {
+      "id": "latentsync",
+      "display_name": "LatentSync",
+      "implementation_kind": "offline_talking_head_render",
+      "status": "offline_only",
+      "source_access": "public_upstream",
+      "supported_platforms": ["windows_x64"],
+      "live_selectable": false,
+      "offline_selectable": true,
+      "requires_private_access": false,
+      "requirements": [
+        "A separately installed and verified pack is explicitly selected for offline rendering only.",
+        "License and offline output provenance checks pass before activation."
+      ],
+      "constraints": [
+        "Not eligible for live conversation or current-frame presentation.",
+        "No repository, model, download URL, or resource estimate is included in this descriptor."
+      ]
+    }
+  ]
+}

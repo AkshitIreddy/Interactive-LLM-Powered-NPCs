@@ -1,0 +1,14 @@
+{
+  "schema_version": "npc.worker-pack/v1",
+  "pack_id": "dev.worker.onnx-vision",
+  "display_name": "ONNX vision deterministic stub",
+  "development_stub": true,
+  "bundles_third_party": false,
+  "installation_owner": "model_manager",
+  "protocol": { "version": "1.0", "encodings": ["length_delimited_json", "length_delimited_protobuf"], "transports": ["stdio", "supervisor_created_named_pipe"], "max_frame_bytes": 1048576, "network_access": false },
+  "worker": { "id": "worker-onnx-vision-stub", "kind": "vision", "engine": "onnx-runtime-compatible-contract" },
+  "capabilities": { "input_modalities": ["d3d_texture_lease", "frame_digest_fixture"], "output_modalities": ["detections", "normalized_boxes", "fixture_track_ids"], "compute_backends": ["cpu", "onnx_runtime", "directml"], "streaming_output": false, "cancellation": true, "network_access": false, "experimental": true, "demographic_inference": false },
+  "resource_estimate": { "idle_ram_mib": 28, "loaded_ram_mib": 44, "peak_ram_mib": 64, "loaded_vram_mib": 0, "peak_vram_mib": 0, "cpu_threads_recommended": 1, "concurrent_requests": 1, "estimate_class": "deterministic_stub_ceiling", "evidence": "Conservative fixture-process scheduling ceiling; not a model benchmark." },
+  "development": { "entrypoint": "workers/stubs/worker.py", "default_model_id": "fixture.vision.onnx-v1", "purpose": "orchestration_and_protocol_testing_only" },
+  "production_pack_requirements": { "third_party_payloads_bundled_here": false, "installed_by": "model_manager", "required_artifact_roles": ["signed_worker_binary", "pinned_onnx_runtime", "verified_detection_model", "preprocessing_metadata", "license_and_attribution"], "activation_gates": ["sha256_and_signature", "runtime_abi", "hardware_compatibility", "privacy_review", "license_review", "self_test"] }
+}

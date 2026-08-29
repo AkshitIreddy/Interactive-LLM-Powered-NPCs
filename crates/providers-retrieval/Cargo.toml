@@ -1,0 +1,25 @@
+[package]
+name = "npc-providers-retrieval"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Provider-neutral embedding and reranking contracts with NVIDIA NIM hosted adapters"
+publish = false
+
+[dependencies]
+async-trait = "0.1.89"
+reqwest = { version = "0.12.23", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.143"
+thiserror = "2.0.16"
+tokio = { version = "1.47.1", features = ["macros", "sync", "time"] }
+tokio-util = { version = "0.7.16", features = ["rt"] }
+url = "2.5.7"
+zeroize = "1.8.1"
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+
+[lints]
+workspace = true

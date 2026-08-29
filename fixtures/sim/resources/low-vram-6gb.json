@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "npc.sim.resource-profile.v1",
+  "id": "low-vram-6gb",
+  "description": "Synthetic constrained GPU envelope used to prove deterministic degradation order.",
+  "power": {
+    "mode": "balanced",
+    "cpuBoostEnabled": true,
+    "source": "fixture"
+  },
+  "workload": {
+    "competingAgents": false,
+    "competingWorkloadLabel": "game-like GPU reservation"
+  },
+  "resources": {
+    "cpuLogicalCores": 12,
+    "ramMiB": 16384,
+    "vramBudgetMiB": 5120,
+    "vramFreeMiB": 1536,
+    "targetFps": 60
+  },
+  "benchmark": {
+    "canonical": false,
+    "reason": "Synthetic fault-injection profile; contains no measured timing."
+  }
+}

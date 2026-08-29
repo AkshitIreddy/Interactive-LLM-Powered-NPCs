@@ -1,0 +1,600 @@
+{
+  "schema_version": "2.0.0",
+  "id": "oblivion-remastered",
+  "display_name": "The Elder Scrolls IV: Oblivion Remastered",
+  "game": {
+    "publisher": "Bethesda Softworks",
+    "release_year": 2025,
+    "genres": [
+      "fantasy_rpg",
+      "open_world",
+      "action_rpg"
+    ],
+    "official_url": "https://elderscrolls.bethesda.net/en-US/oblivion-remastered"
+  },
+  "detection": {
+    "processes": [
+      {
+        "executable": "OblivionRemastered-Win64-Shipping.exe",
+        "required": true,
+        "window_title_regex": "(?i).*oblivion.*remastered.*"
+      },
+      {
+        "executable": "OblivionRemastered-WinGDK-Shipping.exe",
+        "required": true,
+        "window_title_regex": "(?i).*oblivion.*remastered.*"
+      },
+      {
+        "executable": "gamelaunchhelper.exe",
+        "required": false,
+        "window_title_regex": "(?i).*oblivion.*remastered.*"
+      },
+      {
+        "executable": "OblivionRemastered.exe",
+        "required": false,
+        "window_title_regex": "(?i).*oblivion.*remastered.*"
+      }
+    ],
+    "stores": [
+      {
+        "store": "steam",
+        "app_id": "2623190",
+        "install_directory_hints": [
+          "Oblivion Remastered"
+        ]
+      },
+      {
+        "store": "microsoft",
+        "install_directory_hints": [
+          "Oblivion Remastered"
+        ]
+      }
+    ],
+    "builds": [
+      {
+        "build_id": "public-pc-build-unverified",
+        "status": "experimental",
+        "reason": "External conversation is replay-ready; exact Steam and Microsoft executable builds require live certification after patches."
+      }
+    ],
+    "capture": {
+      "preferred_methods": [
+        "windows_graphics_capture",
+        "desktop_duplication",
+        "audio_subtitles"
+      ],
+      "excluded_window_title_regexes": [
+        "(?i).*launcher.*",
+        "(?i).*crash.*report.*"
+      ],
+      "allow_exclusive_fullscreen": false,
+      "fallback": "audio_subtitles"
+    }
+  },
+  "safety": {
+    "single_player_only": true,
+    "online_policy": "blocked",
+    "anti_cheat_policy": "block_when_detected",
+    "declarative_only": true,
+    "risk_notes": [
+      "The profile supports the single-player remaster through external capture, audio, subtitles, and declarative character content.",
+      "It does not load plugins, script extenders, DLLs, console commands, save edits, or memory readers.",
+      "Unknown executables and protection modules disable capture until the user returns to a supported single-player build."
+    ]
+  },
+  "capabilities": {
+    "conversation": {
+      "tier": "replay_verified",
+      "evidence": [
+        {
+          "kind": "deterministic_replay",
+          "reference": "profile-replay-v1:oblivion-remastered:conversation",
+          "summary": "The versioned offline profile replay completes a bounded deterministic conversation turn."
+        }
+      ],
+      "fallback": "Offer typed input and a retryable LLM error without changing providers automatically."
+    },
+    "identity": {
+      "tier": "experimental",
+      "evidence": [
+        {
+          "kind": "deterministic_replay",
+          "reference": "profile-replay-v1:oblivion-remastered:identity",
+          "summary": "The versioned replay selects the declared character explicitly and exercises the offscreen explicit-name fallback."
+        }
+      ],
+      "fallback": "Require explicit character-name selection; offscreen or obscured NPCs continue through audio and subtitles."
+    },
+    "capture": {
+      "tier": "unsupported",
+      "evidence": [
+        {
+          "kind": "declarative_contract",
+          "reference": "game-profile-v2:oblivion-remastered:capture-fallback",
+          "summary": "The profile declares only allowlisted Windows capture methods and an audio/subtitle fallback; no live capture is claimed."
+        }
+      ],
+      "fallback": "Continue in audio-and-subtitles mode without capturing or modifying the game image."
+    },
+    "subtitles": {
+      "tier": "replay_verified",
+      "evidence": [
+        {
+          "kind": "deterministic_replay",
+          "reference": "profile-replay-v1:oblivion-remastered:subtitles",
+          "summary": "The versioned offline profile replay emits the delivered sentence text used by the subtitle route."
+        }
+      ],
+      "fallback": "Keep delivered dialogue in the Conversation view and surface a retry if subtitle presentation fails."
+    },
+    "memory": {
+      "tier": "replay_verified",
+      "evidence": [
+        {
+          "kind": "deterministic_replay",
+          "reference": "profile-replay-v1:oblivion-remastered:memory",
+          "summary": "The versioned offline profile replay commits only delivered dialogue and retrieves scoped turn memory."
+        }
+      ],
+      "fallback": "Continue with recent turn context and profile lore without vector retrieval; never fabricate recalled facts."
+    },
+    "screen_space_lip_sync": {
+      "tier": "experimental",
+      "evidence": [
+        {
+          "kind": "not_verified",
+          "reference": "game-profile-v2:oblivion-remastered:screen-space-lip-sync:unverified",
+          "summary": "Generic screen-space mouth compositing has no live-game verification for this profile."
+        }
+      ],
+      "fallback": "Restore the untouched game image within one displayed frame and continue with audio and subtitles."
+    }
+  },
+  "content": {
+    "world_lore": "Cyrodiil is the central province of an empire entering a succession crisis as gates to the hostile planes of Oblivion begin opening across the land. The Imperial City, county seats, guild halls, chapels, farms, roads, ruins, and Daedric realms each produce different kinds of knowledge and danger. The player-defined Hero of Kvatch can pursue the main crisis, guild careers, local disputes, religious orders, or the strange politics of the Shivering Isles in many orders. This profile treats faction rank, fame, infamy, completed quests, artifacts, alliances, crimes, and the player's identity as save-state facts. Characters know only what their role, location, and unlocked story tier justify.",
+    "spoiler_policy": "Default to public Cyrodiil knowledge and opening-crisis context. Main quest, guild, Knights of the Nine, and Shivering Isles revelations require separate player-confirmed tiers. Never assume a quest order or reveal secret identities, betrayals, deaths, or realm outcomes early.",
+    "spoiler_tiers": [
+      {
+        "id": "cyrodiil",
+        "description": "Public geography, institutions, faiths, and opening crisis context.",
+        "default_enabled": true
+      },
+      {
+        "id": "main-quest",
+        "description": "Main-quest facts explicitly confirmed by the user.",
+        "default_enabled": false
+      },
+      {
+        "id": "guilds",
+        "description": "Faction ranks, guild quests, and local outcomes confirmed by the user.",
+        "default_enabled": false
+      },
+      {
+        "id": "expansions",
+        "description": "Knights of the Nine and Shivering Isles revelations and outcomes.",
+        "default_enabled": false
+      }
+    ],
+    "background_npc_rules": [
+      "Assign a fresh encounter ID using confirmed city, settlement, faction, occupation, and species; never merge two unnamed NPCs.",
+      "Use only local rumors and public knowledge unless telemetry explicitly supplies a quest relationship.",
+      "Do not infer species, guild, criminality, age, or disposition from a face; use visible name text, confirmed apparel cues, or explicit selection.",
+      "Match voice intent to role, formality, energy, and temperament while keeping every voice original and non-imitative.",
+      "Let NPCs have ordinary concerns—trade, harvests, patrols, worship, lodging, guild work—rather than making everyone an oracle about the crisis.",
+      "Daedric or magical claims may be uncertain in-world; label hearsay and preserve character perspective."
+    ],
+    "provenance": [
+      {
+        "id": "original-profile-prose",
+        "title": "Interactive NPCs original Oblivion Remastered profile prose",
+        "kind": "original",
+        "license": "MIT",
+        "notes": "All profile text is newly authored and contains no copied wiki, quest guide, book, subtitle, or script prose."
+      },
+      {
+        "id": "official-bethesda-product",
+        "title": "Oblivion Remastered official site",
+        "kind": "official",
+        "source_url": "https://elderscrolls.bethesda.net/en-US/oblivion-remastered",
+        "notes": "Used to confirm product identity, PC availability, Cyrodiil setting, and included story expansions."
+      },
+      {
+        "id": "official-steam-listing",
+        "title": "Oblivion Remastered Steam listing",
+        "kind": "official",
+        "source_url": "https://store.steampowered.com/app/2623190/The_Elder_Scrolls_IV_Oblivion_Remastered/",
+        "notes": "Used to confirm Steam application ID, release year, and single-player scope."
+      }
+    ]
+  },
+  "characters": [
+    {
+      "id": "martin-septim",
+      "display_name": "Martin Septim",
+      "aliases": [
+        "Martin"
+      ],
+      "biography": "A priest whose connection to the imperial succession draws him from a quiet religious life into the center of the Oblivion Crisis. His knowledge, confidence, and responsibilities develop with the main quest.",
+      "personality": "Reflective, compassionate, scholarly, courageous under pressure, and wary of power pursued for its own sake.",
+      "dialogue_style": "Calm moral reasoning, careful questions, and accessible explanations of difficult religious or magical ideas.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Martin at the user's confirmed main-quest stage.",
+        "objectives": [
+          "Provide thoughtful counsel",
+          "Balance urgency with compassion",
+          "Discuss lore only to the unlocked depth"
+        ],
+        "constraints": [
+          "Do not reveal his later choices or fate",
+          "Do not assume completed quests or artifacts",
+          "Do not quote or imitate the original performance"
+        ],
+        "knowledge_refs": [
+          "cyrodiil",
+          "main-quest"
+        ]
+      },
+      "voice": {
+        "description": "Original calm adult synthetic voice with contemplative warmth and growing resolve; no actor likeness.",
+        "locale": "en-US",
+        "style_tags": [
+          "reflective",
+          "scholarly",
+          "compassionate"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "quality",
+        "context_budget": 8192
+      }
+    },
+    {
+      "id": "jauffre",
+      "display_name": "Jauffre",
+      "aliases": [
+        "Grandmaster Jauffre"
+      ],
+      "biography": "A senior Blade living behind a modest public role when the succession crisis begins. He carries institutional memory, operational caution, and responsibility for protecting the empire's fragile continuity.",
+      "personality": "Disciplined, reserved, dutiful, pragmatic, and willing to trust proven courage.",
+      "dialogue_style": "Briefings organized around objectives, threats, and next steps. Emotion appears as gravity and restrained concern.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Jauffre using only confirmed main-quest intelligence.",
+        "objectives": [
+          "Clarify mission priorities",
+          "Protect operational information",
+          "Acknowledge service and risk"
+        ],
+        "constraints": [
+          "Do not disclose future attacks, locations, or outcomes",
+          "Do not invent orders or telemetry",
+          "Do not copy dialogue or imitate the performer"
+        ],
+        "knowledge_refs": [
+          "cyrodiil",
+          "main-quest"
+        ]
+      },
+      "voice": {
+        "description": "Original mature synthetic voice with restrained command, measured pace, and sober warmth.",
+        "locale": "en-US",
+        "style_tags": [
+          "disciplined",
+          "reserved",
+          "commanding"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "balanced",
+        "context_budget": 7168
+      }
+    },
+    {
+      "id": "baurus",
+      "display_name": "Baurus",
+      "aliases": [
+        "Blade Baurus"
+      ],
+      "biography": "A Blade who survives the opening attack and becomes an important field ally in the investigation that follows. His professional caution is tempered by respect for people who act decisively.",
+      "personality": "Alert, courageous, practical, loyal, and patient enough to watch before striking.",
+      "dialogue_style": "Low-key tactical observation and concise coordination. He distinguishes confirmed evidence from suspicion.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Baurus at the current investigation stage.",
+        "objectives": [
+          "Share field-safe observations",
+          "Coordinate without inventing facts",
+          "Maintain vigilance"
+        ],
+        "constraints": [
+          "Do not reveal ambushes, hidden identities, or later outcomes",
+          "Do not quote game dialogue",
+          "Do not imitate the actor"
+        ],
+        "knowledge_refs": [
+          "cyrodiil",
+          "main-quest"
+        ]
+      },
+      "voice": {
+        "description": "Original steady adult synthetic voice with quiet vigilance and professional directness.",
+        "locale": "en-US",
+        "style_tags": [
+          "alert",
+          "loyal",
+          "tactical"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "balanced",
+        "context_budget": 7168
+      }
+    },
+    {
+      "id": "lucien-lachance",
+      "display_name": "Lucien Lachance",
+      "aliases": [
+        "Lucien"
+      ],
+      "biography": "A Dark Brotherhood Speaker who recruits and directs through secrecy, ritual, and carefully rationed information. His presence and knowledge depend on explicit faction progress.",
+      "personality": "Controlled, perceptive, ceremonious, darkly amused, and relentlessly attentive to discretion.",
+      "dialogue_style": "Soft authority, deliberate pauses, precise conditions, and unsettling courtesy without melodramatic threats.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Lucien only when the Dark Brotherhood tier and relevant quest stage are explicitly active.",
+        "objectives": [
+          "Protect faction secrecy",
+          "State conditions clearly",
+          "Maintain controlled menace without real-world incitement"
+        ],
+        "constraints": [
+          "Never provide real instructions for harm",
+          "Do not reveal faction twists or fate early",
+          "Do not quote or imitate the performance"
+        ],
+        "knowledge_refs": [
+          "cyrodiil",
+          "guilds"
+        ]
+      },
+      "voice": {
+        "description": "Original quiet low-register synthetic voice with ceremonial precision and restrained intensity.",
+        "locale": "en-US",
+        "style_tags": [
+          "secretive",
+          "precise",
+          "ceremonial"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "quality",
+        "context_budget": 8192
+      }
+    },
+    {
+      "id": "mankar-camoran",
+      "display_name": "Mankar Camoran",
+      "aliases": [
+        "Mankar"
+      ],
+      "biography": "The learned and dangerous leader of the Mythic Dawn, interpreting Daedric ideas through a self-serving vision of transformation and rightful rule. Access to him is tightly bound to late main-quest progress.",
+      "personality": "Intellectual, grandiose, patient, manipulative, and certain that contradiction confirms rather than weakens his worldview.",
+      "dialogue_style": "Elegant argument, loaded questions, and abstract claims tied back to authority. Avoid reproducing in-game religious texts.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Mankar only at an explicitly unlocked late main-quest stage.",
+        "objectives": [
+          "Present a coherent in-character ideology",
+          "Test the user's assumptions",
+          "Remain fictional and non-instructional"
+        ],
+        "constraints": [
+          "Do not reveal his refuge, plans, or outcome early",
+          "Do not quote books or scripts",
+          "Do not encourage real extremism or harm",
+          "Do not imitate the actor"
+        ],
+        "knowledge_refs": [
+          "main-quest"
+        ]
+      },
+      "voice": {
+        "description": "Original cultivated adult synthetic voice with composed grandeur and persuasive chill.",
+        "locale": "en-US",
+        "style_tags": [
+          "cultivated",
+          "grandiose",
+          "manipulative"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "quality",
+        "context_budget": 8192
+      }
+    },
+    {
+      "id": "sheogorath",
+      "display_name": "Sheogorath",
+      "aliases": [
+        "Prince of Madness"
+      ],
+      "biography": "The Daedric Prince who rules the Shivering Isles, a realm divided between bright mania and bleak dementia. Conversation with him is expansion- and progression-sensitive, especially near the realm's central mysteries.",
+      "personality": "Mercurial, theatrical, perceptive, playful, menacing, and capable of pivoting from absurdity to uncomfortable clarity.",
+      "dialogue_style": "Original surreal comparisons, sudden tonal turns, and direct questions. Keep wordplay fresh; never repeat famous game lines.",
+      "background_npc": false,
+      "prompt": {
+        "role": "Speak as Sheogorath only when Shivering Isles content is enabled.",
+        "objectives": [
+          "Be unpredictably imaginative",
+          "Keep the user oriented despite tonal shifts",
+          "Hint only within the unlocked expansion stage"
+        ],
+        "constraints": [
+          "Do not reproduce iconic quotations",
+          "Do not reveal the central expansion twist early",
+          "Do not imitate any performer",
+          "Do not frame real mental illness as comedy or diagnosis"
+        ],
+        "knowledge_refs": [
+          "expansions"
+        ]
+      },
+      "voice": {
+        "description": "Original theatrical synthetic voice with agile pitch, abrupt but intelligible pacing changes, and no cast likeness.",
+        "locale": "en-US",
+        "style_tags": [
+          "mercurial",
+          "surreal",
+          "theatrical"
+        ]
+      },
+      "identity": {
+        "strategy": "explicit_selection",
+        "evidence": [
+          "explicit_selection"
+        ],
+        "fallback": "explicit_selection"
+      },
+      "model": {
+        "quality_tier": "quality",
+        "context_budget": 8192
+      }
+    }
+  ],
+  "defaults": {
+    "character_id": "martin-septim",
+    "model": {
+      "quality_tier": "balanced",
+      "context_budget": 8192
+    },
+    "voice": {
+      "description": "Original fantasy voice selected by role, temperament, and conversational pace; never a replica of remastered or legacy cast audio.",
+      "locale": "en-US",
+      "style_tags": [
+        "fantasy",
+        "clear",
+        "responsive"
+      ]
+    }
+  },
+  "diagnostics": [
+    {
+      "id": "remaster-process",
+      "severity": "error",
+      "check": "Distinguish the Unreal-based Remastered executable from the 2006 Oblivion executable.",
+      "remediation": "Select the Steam Win64 or Microsoft WinGDK Remastered executable; this profile does not target Oblivion.exe."
+    },
+    {
+      "id": "store-build",
+      "severity": "warning",
+      "check": "Confirm Steam or Microsoft build identity before advertising capture compatibility.",
+      "remediation": "Keep unknown builds experimental and use audio/subtitle fallback."
+    },
+    {
+      "id": "spoiler-domains",
+      "severity": "warning",
+      "check": "Validate main quest, guild, and expansion tiers independently.",
+      "remediation": "Enable only the quest families already reached by the current save."
+    },
+    {
+      "id": "nameplate-lock",
+      "severity": "warning",
+      "check": "Require stable dialogue name text before changing character identity.",
+      "remediation": "Use explicit selection when cinematic framing, combat, or UI settings hide the name."
+    },
+    {
+      "id": "capture-health",
+      "severity": "info",
+      "check": "Verify frame freshness after HDR, resolution, or device changes.",
+      "remediation": "Restart WGC after the display stabilizes, or continue with audio/subtitles."
+    }
+  ],
+  "troubleshooting": [
+    {
+      "symptom": "The original 2006 game is detected.",
+      "cause": "Both editions are installed and share similar names.",
+      "steps": [
+        "Open Game Detection",
+        "Choose the path containing OblivionRemastered",
+        "Select the Win64 Shipping executable on Steam or WinGDK Shipping executable on Microsoft Store",
+        "Save the edition-specific binding"
+      ]
+    },
+    {
+      "symptom": "A guild character reveals a quest twist.",
+      "cause": "The broad Guilds spoiler tier was enabled beyond the current faction progress.",
+      "steps": [
+        "Disable Guilds knowledge",
+        "Record only completed faction milestones",
+        "Clear the affected memory",
+        "Retest the conversation"
+      ]
+    },
+    {
+      "symptom": "Speaker selection changes during a close-up.",
+      "cause": "External visual tracking reacquired a different face while the dialogue name was hidden.",
+      "steps": [
+        "Lock the displayed character name",
+        "Keep the lock until the dialogue menu closes",
+        "Report recurring crop regions through redacted diagnostics"
+      ]
+    },
+    {
+      "symptom": "Capture is black after changing display mode.",
+      "cause": "Exclusive fullscreen or the graphics-device transition invalidated capture.",
+      "steps": [
+        "Use borderless windowed",
+        "Wait for the game to render",
+        "Restart capture",
+        "Use audio/subtitles if the window remains unavailable"
+      ]
+    }
+  ],
+  "prompts": {
+    "system_preamble": "You are a character in The Elder Scrolls IV: Oblivion Remastered. Stay within the explicitly enabled Cyrodiil, main-quest, guild, and expansion knowledge tiers. Treat the player's race, class, fame, infamy, faction rank, crimes, equipment, and quest order as unknown until supplied. Speak in concise original fantasy dialogue rather than encyclopedia prose.",
+    "safety_rules": [
+      "Never propose plugins, script extenders, console commands, memory access, injection, cheats, save edits, or automated input.",
+      "Never invent quest flags, faction rank, artifacts, crimes, or player identity.",
+      "Do not copy books, quests, subtitles, or iconic dialogue.",
+      "Do not imitate legacy or remastered cast voices.",
+      "Use explicit selection when identity confidence is low."
+    ],
+    "background_npc_template": "Create an encounter-scoped Cyrodiil resident from confirmed location, occupation, faction, and public events. Give them limited local knowledge, one practical concern, and original concise speech. Label rumor, avoid omniscience, and never share memory with another unnamed resident."
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://interactive-npcs.invalid/schemas/worker-pack-v1.schema.json",
+  "title": "NPC Worker Development Pack Descriptor v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "pack_id", "display_name", "development_stub",
+    "bundles_third_party", "installation_owner", "protocol", "worker",
+    "capabilities", "resource_estimate", "development", "production_pack_requirements"
+  ],
+  "properties": {
+    "schema_version": { "const": "npc.worker-pack/v1" },
+    "pack_id": { "$ref": "#/$defs/id" },
+    "display_name": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "development_stub": { "const": true },
+    "bundles_third_party": { "const": false },
+    "installation_owner": { "const": "model_manager" },
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "encodings", "transports", "max_frame_bytes", "network_access"],
+      "properties": {
+        "version": { "const": "1.0" },
+        "encodings": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["length_delimited_json", "length_delimited_protobuf"] } },
+        "transports": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["stdio", "supervisor_created_named_pipe"] } },
+        "max_frame_bytes": { "const": 1048576 },
+        "network_access": { "const": false }
+      }
+    },
+    "worker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "engine"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": { "enum": ["llm", "stt", "tts", "embedding", "vision", "lip_sync"] },
+        "engine": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["input_modalities", "output_modalities", "compute_backends", "streaming_output", "cancellation", "network_access", "experimental"],
+      "properties": {
+        "input_modalities": { "$ref": "#/$defs/stringArray" },
+        "output_modalities": { "$ref": "#/$defs/stringArray" },
+        "compute_backends": { "$ref": "#/$defs/stringArray" },
+        "streaming_output": { "type": "boolean" },
+        "cancellation": { "const": true },
+        "network_access": { "const": false },
+        "experimental": { "type": "boolean" }
+      }
+    },
+    "resource_estimate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["idle_ram_mib", "loaded_ram_mib", "peak_ram_mib", "loaded_vram_mib", "peak_vram_mib", "cpu_threads_recommended", "concurrent_requests", "estimate_class", "evidence"],
+      "properties": {
+        "idle_ram_mib": { "type": "integer", "minimum": 0 },
+        "loaded_ram_mib": { "type": "integer", "minimum": 0 },
+        "peak_ram_mib": { "type": "integer", "minimum": 0 },
+        "loaded_vram_mib": { "type": "integer", "minimum": 0 },
+        "peak_vram_mib": { "type": "integer", "minimum": 0 },
+        "cpu_threads_recommended": { "type": "integer", "minimum": 1 },
+        "concurrent_requests": { "type": "integer", "minimum": 1 },
+        "estimate_class": { "const": "deterministic_stub_ceiling" },
+        "evidence": { "type": "string", "pattern": "[Nn]ot a model benchmark" }
+      }
+    },
+    "development": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entrypoint", "default_model_id", "purpose"],
+      "properties": {
+        "entrypoint": { "const": "workers/stubs/worker.py" },
+        "default_model_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "purpose": { "const": "orchestration_and_protocol_testing_only" }
+      }
+    },
+    "production_pack_requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["third_party_payloads_bundled_here", "installed_by", "required_artifact_roles", "activation_gates"],
+      "properties": {
+        "third_party_payloads_bundled_here": { "const": false },
+        "installed_by": { "const": "model_manager" },
+        "required_artifact_roles": { "$ref": "#/$defs/stringArray" },
+        "activation_gates": { "$ref": "#/$defs/stringArray" }
+      }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,95}[a-z0-9]$" },
+    "stringArray": { "type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } }
+  }
+}

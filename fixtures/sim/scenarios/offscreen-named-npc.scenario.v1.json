@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "npc.sim.scenario.v1",
+  "id": "offscreen-named-npc",
+  "description": "Explicitly named offscreen NPC continues through streamed audio and subtitles without animation.",
+  "seed": 2002,
+  "resourceProfile": "reference-balanced-12gb",
+  "privacy": { "mode": "hybrid", "networkAllowed": true },
+  "providers": { "stt": "mock-local", "llm": "mock-anthropic", "tts": "mock-local" },
+  "turn": {
+    "sessionId": "session-offscreen",
+    "turnId": "turn-014",
+    "npc": { "id": "skyrim-lydia", "name": "Lydia", "visibility": "offscreen" }
+  },
+  "stream": [
+    { "atMs": 60, "source": "stt", "kind": "partial", "payload": { "text": "Lydia, are" } },
+    { "atMs": 190, "source": "stt", "kind": "final", "payload": { "text": "Lydia, are you still there?", "confidence": 0.97 } },
+    { "atMs": 205, "source": "identity", "kind": "resolved", "payload": { "strategy": "explicit_name", "confidence": 1 } },
+    { "atMs": 235, "source": "memory", "kind": "retrieved", "payload": { "episodicCount": 1, "factCount": 2, "latencyMs": 30 } },
+    { "atMs": 295, "source": "llm", "kind": "token", "payload": { "text": "Right", "networkRequest": true, "provider": "mock-anthropic" } },
+    { "atMs": 340, "source": "llm", "kind": "token", "payload": { "text": " behind you." } },
+    { "atMs": 365, "source": "llm", "kind": "sentence", "payload": { "text": "Right behind you." } },
+    { "atMs": 415, "source": "tts", "kind": "audio_chunk", "payload": { "chunkIndex": 0, "sampleCount": 1920, "sampleRateHz": 24000 } },
+    { "atMs": 475, "source": "llm", "kind": "complete", "payload": { "finishReason": "stop", "text": "Right behind you." } },
+    { "atMs": 525, "source": "tts", "kind": "complete", "payload": { "chunks": 1, "deliveredText": "Right behind you." } }
+  ],
+  "faults": [],
+  "expected": {
+    "status": "completed",
+    "traceSha256": "6ad1bc929d87d6ffc2ed6ed0daaaad46261dc3e6e62692141e42c33b499560f5",
+    "firstAudioAtMs": 415,
+    "speechEndToFirstAudioMs": 225,
+    "networkAttempts": 1,
+    "degradationReasons": []
+  }
+}

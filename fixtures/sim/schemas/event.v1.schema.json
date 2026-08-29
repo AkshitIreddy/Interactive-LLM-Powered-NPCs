@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://npc2.local/schemas/event.v1.schema.json",
+  "title": "NPC 2.0 canonical simulation event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "scenarioId", "sequence", "virtualTimeMs", "sessionId", "turnId", "cancellationGeneration", "kind", "source", "stage", "payload"],
+  "properties": {
+    "schemaVersion": { "const": "npc.sim.event.v1" },
+    "scenarioId": { "type": "string" },
+    "sequence": { "type": "integer", "minimum": 0 },
+    "virtualTimeMs": { "type": "integer", "minimum": 0 },
+    "sessionId": { "type": "string" },
+    "turnId": { "type": "string" },
+    "cancellationGeneration": { "type": "integer", "minimum": 0 },
+    "kind": { "type": "string" },
+    "source": { "type": "string" },
+    "stage": { "type": ["string", "null"] },
+    "payload": { "type": "object" }
+  }
+}

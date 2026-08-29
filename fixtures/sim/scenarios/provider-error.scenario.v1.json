@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "npc.sim.scenario.v1",
+  "id": "provider-error",
+  "description": "Retryable hosted LLM failure terminates the turn cleanly before any synthesized audio.",
+  "seed": 2004,
+  "resourceProfile": "reference-balanced-12gb",
+  "privacy": { "mode": "hosted", "networkAllowed": true },
+  "providers": { "stt": "mock-openai", "llm": "mock-gemini", "tts": "mock-deepgram" },
+  "turn": {
+    "sessionId": "session-provider-error",
+    "turnId": "turn-008",
+    "npc": { "id": "bg3-shadowheart", "name": "Shadowheart", "visibility": "visible" }
+  },
+  "stream": [
+    { "atMs": 50, "source": "stt", "kind": "partial", "payload": { "text": "Can we trust", "networkRequest": true, "provider": "mock-openai" } },
+    { "atMs": 180, "source": "stt", "kind": "final", "payload": { "text": "Can we trust this path?", "confidence": 0.95 } },
+    { "atMs": 205, "source": "identity", "kind": "resolved", "payload": { "strategy": "adapter_actor_id", "confidence": 1 } },
+    { "atMs": 240, "source": "memory", "kind": "retrieved", "payload": { "episodicCount": 2, "factCount": 6, "latencyMs": 35 } },
+    { "atMs": 310, "source": "llm", "kind": "token", "payload": { "text": "I", "networkRequest": true, "provider": "mock-gemini" } },
+    { "atMs": 390, "source": "llm", "kind": "token", "payload": { "text": " would—" } },
+    { "atMs": 480, "source": "tts", "kind": "audio_chunk", "payload": { "chunkIndex": 0, "sampleCount": 960, "sampleRateHz": 24000 } }
+  ],
+  "faults": [
+    { "atMs": 400, "target": "llm", "kind": "provider_error", "code": "provider_rate_limited", "retryable": true }
+  ],
+  "expected": {
+    "status": "failed",
+    "traceSha256": "861bfce1fbe643c5dc2b54c0911fa40a6c3a7f98094243cf1fbfa42a28f86eba",
+    "firstAudioAtMs": null,
+    "speechEndToFirstAudioMs": null,
+    "networkAttempts": 2,
+    "degradationReasons": []
+  }
+}

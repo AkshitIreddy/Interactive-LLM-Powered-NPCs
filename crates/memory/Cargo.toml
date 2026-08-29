@@ -1,0 +1,26 @@
+[package]
+name = "npc-memory"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Authoritative SQLite memory store for Interactive LLM Powered NPCs"
+
+[features]
+default = []
+# Enables capability reporting for deployments that load sqlite-vec. Exact cosine
+# search remains available in every build and is always the safe fallback.
+sqlite-vec = []
+
+[dependencies]
+rusqlite = { version = "0.32", features = ["backup", "bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["rt", "sync"] }
+uuid = { version = "1", features = ["serde", "v4"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

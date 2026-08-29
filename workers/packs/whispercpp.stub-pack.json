@@ -1,0 +1,14 @@
+{
+  "schema_version": "npc.worker-pack/v1",
+  "pack_id": "dev.worker.whispercpp",
+  "display_name": "whisper.cpp STT deterministic stub",
+  "development_stub": true,
+  "bundles_third_party": false,
+  "installation_owner": "model_manager",
+  "protocol": { "version": "1.0", "encodings": ["length_delimited_json", "length_delimited_protobuf"], "transports": ["stdio", "supervisor_created_named_pipe"], "max_frame_bytes": 1048576, "network_access": false },
+  "worker": { "id": "worker-whispercpp-stub", "kind": "stt", "engine": "whisper.cpp-compatible-contract" },
+  "capabilities": { "input_modalities": ["pcm_audio_lease", "transcript_fixture"], "output_modalities": ["partial_transcript", "transcript", "word_alignment"], "compute_backends": ["cpu", "cuda", "vulkan"], "streaming_output": true, "cancellation": true, "network_access": false, "experimental": false, "languages": ["und"] },
+  "resource_estimate": { "idle_ram_mib": 28, "loaded_ram_mib": 44, "peak_ram_mib": 60, "loaded_vram_mib": 0, "peak_vram_mib": 0, "cpu_threads_recommended": 1, "concurrent_requests": 1, "estimate_class": "deterministic_stub_ceiling", "evidence": "Conservative fixture-process scheduling ceiling; not a model benchmark." },
+  "development": { "entrypoint": "workers/stubs/worker.py", "default_model_id": "fixture.stt.whispercpp-v1", "purpose": "orchestration_and_protocol_testing_only" },
+  "production_pack_requirements": { "third_party_payloads_bundled_here": false, "installed_by": "model_manager", "required_artifact_roles": ["signed_worker_binary", "pinned_whispercpp_runtime", "verified_ggml_model", "tokenizer_metadata", "license_and_attribution"], "activation_gates": ["sha256_and_signature", "runtime_abi", "hardware_compatibility", "engine_and_model_license_review", "self_test"] }
+}

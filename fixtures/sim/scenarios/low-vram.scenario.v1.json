@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "npc.sim.scenario.v1",
+  "id": "low-vram",
+  "description": "Low available VRAM disables continuous vision and screen-space lip-sync before conversation work.",
+  "seed": 2006,
+  "resourceProfile": "low-vram-6gb",
+  "privacy": { "mode": "fully_local", "networkAllowed": false },
+  "providers": { "stt": "mock-local", "llm": "mock-local", "tts": "mock-local" },
+  "turn": {
+    "sessionId": "session-low-vram",
+    "turnId": "turn-003",
+    "npc": { "id": "generic-quartermaster", "name": "Quartermaster Hale", "visibility": "visible" }
+  },
+  "stream": [
+    { "atMs": 55, "source": "stt", "kind": "partial", "payload": { "text": "Supplies" } },
+    { "atMs": 165, "source": "stt", "kind": "final", "payload": { "text": "Supplies ready?", "confidence": 0.93 } },
+    { "atMs": 195, "source": "identity", "kind": "resolved", "payload": { "strategy": "manual_target", "confidence": 1 } },
+    { "atMs": 225, "source": "memory", "kind": "retrieved", "payload": { "episodicCount": 0, "factCount": 2, "latencyMs": 30 } },
+    { "atMs": 310, "source": "llm", "kind": "token", "payload": { "text": "Packed" } },
+    { "atMs": 355, "source": "llm", "kind": "token", "payload": { "text": " and counted." } },
+    { "atMs": 380, "source": "llm", "kind": "sentence", "payload": { "text": "Packed and counted." } },
+    { "atMs": 450, "source": "tts", "kind": "audio_chunk", "payload": { "chunkIndex": 0, "sampleCount": 1920, "sampleRateHz": 24000 } },
+    { "atMs": 470, "source": "animation", "kind": "viseme", "payload": { "id": "P", "durationMs": 85 } },
+    { "atMs": 540, "source": "llm", "kind": "complete", "payload": { "finishReason": "stop", "text": "Packed and counted." } },
+    { "atMs": 620, "source": "tts", "kind": "complete", "payload": { "chunks": 1, "deliveredText": "Packed and counted." } },
+    { "atMs": 640, "source": "animation", "kind": "complete", "payload": { "visemeCount": 0 } }
+  ],
+  "faults": [
+    { "atMs": 0, "target": "resource", "kind": "low_vram", "code": "vram_budget_unavailable", "retryable": false, "freeVramMiB": 1536, "requiredVramMiB": 3072 }
+  ],
+  "expected": {
+    "status": "degraded",
+    "traceSha256": "adb7bdac2f82bf19b2d8902445398b2428305727216723def82549aff997a623",
+    "firstAudioAtMs": 450,
+    "speechEndToFirstAudioMs": 285,
+    "networkAttempts": 0,
+    "degradationReasons": ["continuous_vision_disabled", "low_vram", "screen_space_lipsync_disabled"]
+  }
+}

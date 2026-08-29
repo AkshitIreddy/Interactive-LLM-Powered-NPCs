@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "npc.sim.scenario.v1",
+  "id": "happy-path",
+  "description": "Hosted streaming turn completes with overlapping LLM, TTS, and visible viseme output.",
+  "seed": 2001,
+  "resourceProfile": "silent-shared-machine",
+  "privacy": { "mode": "hosted", "networkAllowed": true },
+  "providers": { "stt": "mock-deepgram", "llm": "mock-openai", "tts": "mock-cartesia" },
+  "turn": {
+    "sessionId": "session-happy",
+    "turnId": "turn-001",
+    "npc": { "id": "eclipse-harbor-mara", "name": "Mara Venn", "visibility": "visible" }
+  },
+  "stream": [
+    { "atMs": 40, "source": "stt", "kind": "partial", "payload": { "text": "Did the", "confidence": 0.91, "networkRequest": true, "provider": "mock-deepgram" } },
+    { "atMs": 140, "source": "stt", "kind": "partial", "payload": { "text": "Did the ferry arrive", "confidence": 0.95 } },
+    { "atMs": 250, "source": "stt", "kind": "final", "payload": { "text": "Did the ferry arrive?", "confidence": 0.98 } },
+    { "atMs": 275, "source": "identity", "kind": "resolved", "payload": { "strategy": "tracked_actor", "confidence": 0.99 } },
+    { "atMs": 305, "source": "memory", "kind": "retrieved", "payload": { "episodicCount": 2, "factCount": 3, "latencyMs": 30 } },
+    { "atMs": 360, "source": "llm", "kind": "token", "payload": { "text": "Not", "networkRequest": true, "provider": "mock-openai" } },
+    { "atMs": 405, "source": "llm", "kind": "token", "payload": { "text": " yet." } },
+    { "atMs": 430, "source": "llm", "kind": "sentence", "payload": { "text": "Not yet." } },
+    { "atMs": 490, "source": "tts", "kind": "audio_chunk", "payload": { "chunkIndex": 0, "sampleCount": 960, "sampleRateHz": 24000, "networkRequest": true, "provider": "mock-cartesia" } },
+    { "atMs": 500, "source": "animation", "kind": "viseme", "payload": { "id": "N", "durationMs": 80, "confidence": 0.94 } },
+    { "atMs": 535, "source": "llm", "kind": "token", "payload": { "text": " Fog" } },
+    { "atMs": 575, "source": "llm", "kind": "token", "payload": { "text": " held it offshore." } },
+    { "atMs": 600, "source": "llm", "kind": "sentence", "payload": { "text": "Fog held it offshore." } },
+    { "atMs": 625, "source": "tts", "kind": "audio_chunk", "payload": { "chunkIndex": 1, "sampleCount": 1920, "sampleRateHz": 24000 } },
+    { "atMs": 650, "source": "animation", "kind": "viseme", "payload": { "id": "O", "durationMs": 110, "confidence": 0.92 } },
+    { "atMs": 680, "source": "llm", "kind": "complete", "payload": { "finishReason": "stop", "text": "Not yet. Fog held it offshore." } },
+    { "atMs": 735, "source": "tts", "kind": "audio_chunk", "payload": { "chunkIndex": 2, "sampleCount": 1440, "sampleRateHz": 24000 } },
+    { "atMs": 760, "source": "tts", "kind": "complete", "payload": { "chunks": 3, "deliveredText": "Not yet. Fog held it offshore." } },
+    { "atMs": 780, "source": "animation", "kind": "complete", "payload": { "visemeCount": 2 } }
+  ],
+  "faults": [],
+  "expected": {
+    "status": "completed",
+    "traceSha256": "56bb408c4c9f93d8e4d4f185408baebd8e016d08b790c9800d22072ff5051ba6",
+    "firstAudioAtMs": 490,
+    "speechEndToFirstAudioMs": 240,
+    "networkAttempts": 3,
+    "degradationReasons": []
+  }
+}

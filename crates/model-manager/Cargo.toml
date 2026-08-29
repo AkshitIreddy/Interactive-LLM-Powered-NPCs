@@ -1,0 +1,39 @@
+[package]
+name = "model-manager"
+version = "2.0.0-alpha.1"
+edition = "2021"
+license = "MIT"
+description = "Security-focused model pack lifecycle and catalog contracts"
+readme = "README.md"
+
+[features]
+default = []
+test-support = []
+
+[lints]
+workspace = true
+
+[dependencies]
+base64 = "0.22"
+ed25519-dalek = "2.1"
+flate2 = "1"
+fs2 = "0.4"
+futures-util = "0.3"
+getrandom = "0.3"
+hex = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tar = "0.4"
+thiserror = "2"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "rt-multi-thread", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+url = "2"
+walkdir = "2"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem"] }
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+pretty_assertions = "1"
+tempfile = "3"

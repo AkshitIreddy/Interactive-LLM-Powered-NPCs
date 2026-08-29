@@ -1,0 +1,13 @@
+[package]
+name = "interactive-npcs-credential-vault"
+version = "2.0.0-alpha.1"
+edition = "2021"
+license = "MIT"
+description = "Windows Credential Manager-backed provider secret storage"
+
+[dependencies]
+thiserror = "2.0"
+zeroize = "1.8"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Credentials"] }

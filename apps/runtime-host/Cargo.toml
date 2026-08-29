@@ -1,0 +1,59 @@
+[package]
+name = "npc-runtime-host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Trusted runtime process and control endpoint for Interactive LLM Powered NPCs"
+publish = false
+
+[[bin]]
+name = "npc-runtime"
+path = "src/main.rs"
+
+[dependencies]
+async-stream = "0.3"
+async-trait = "0.1"
+clap = { version = "4.5", features = ["derive"] }
+futures-util = "0.3"
+interactive-npcs-credential-vault = { path = "../../crates/credential-vault" }
+interactive-npcs-diagnostics = { path = "../../crates/diagnostics" }
+interactive-npcs-game-discovery = { path = "../../crates/game-discovery" }
+model-manager = { path = "../../crates/model-manager" }
+npc-game-profile = { path = "../../crates/game-profile" }
+npc-memory = { path = "../../crates/memory" }
+npc-protocol = { path = "../../crates/protocol" }
+npc-provider-catalog = { path = "../../crates/provider-catalog" }
+npc-providers-llm = { path = "../../crates/providers-llm" }
+npc-providers-retrieval = { path = "../../crates/providers-retrieval" }
+npc-providers-stt = { path = "../../crates/providers-stt" }
+npc-providers-tts = { path = "../../crates/providers-tts" }
+npc-runtime-core = { path = "../../crates/runtime-core" }
+prost = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Memory",
+  "Win32_System_JobObjects",
+  "Win32_System_Performance",
+  "Win32_System_Pipes",
+  "Win32_System_RemoteDesktop",
+  "Win32_System_Threading",
+] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "npc.sim.resource-profile.v1",
+  "id": "reference-balanced-12gb",
+  "description": "Declared 12 GB reference envelope for deterministic policy simulation, not a live benchmark result.",
+  "power": {
+    "mode": "balanced",
+    "cpuBoostEnabled": true,
+    "source": "fixture"
+  },
+  "workload": {
+    "competingAgents": false,
+    "competingWorkloadLabel": "none"
+  },
+  "resources": {
+    "cpuLogicalCores": 16,
+    "ramMiB": 32768,
+    "vramBudgetMiB": 10240,
+    "vramFreeMiB": 9216,
+    "targetFps": 60
+  },
+  "benchmark": {
+    "canonical": false,
+    "reason": "Synthetic resource-policy fixture; contains no measured timing."
+  }
+}
