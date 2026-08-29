@@ -31,6 +31,8 @@ const MAX_FAILURES: usize = 3;
 const DEBUG_SYNTHETIC_TARGET_BASENAME: &str = "interactive-npcs-synthetic-target.exe";
 #[cfg(debug_assertions)]
 const DEBUG_SYNTHETIC_METADATA_MAX_BYTES: u64 = 32 * 1024;
+#[cfg(debug_assertions)]
+const DEBUG_SYNTHETIC_METADATA_FILE_NAME: &str = "debug-synthetic-replay-target.json";
 
 #[derive(Clone, PartialEq, Message)]
 struct BrokerEnvelope {
@@ -280,10 +282,17 @@ struct BrokerHealth {
 pub struct MediaBrokerLaunchConfig {
     pub executable: PathBuf,
     pub development_fixture_allowed: bool,
+    #[cfg(debug_assertions)]
+    pub debug_synthetic_metadata_path: PathBuf,
 }
 
 impl MediaBrokerLaunchConfig {
-    pub fn from_application(development_fixture_allowed: bool) -> Result<Self, MediaBrokerError> {
+    pub fn from_application(
+        development_fixture_allowed: bool,
+        app_config_directory: &Path,
+    ) -> Result<Self, MediaBrokerError> {
+        #[cfg(not(debug_assertions))]
+        let _ = app_config_directory;
         let executable = std::env::current_exe()
             .map_err(|_| MediaBrokerError::InvalidBundle)?
             .parent()
@@ -292,6 +301,9 @@ impl MediaBrokerLaunchConfig {
         Ok(Self {
             executable,
             development_fixture_allowed,
+            #[cfg(debug_assertions)]
+            debug_synthetic_metadata_path: app_config_directory
+                .join(DEBUG_SYNTHETIC_METADATA_FILE_NAME),
         })
     }
 }
@@ -484,7 +496,7 @@ impl MediaBrokerSupervisor {
     pub async fn debug_select_synthetic_replay_capture_target(
         &self,
     ) -> Result<DebugSyntheticReplayCaptureSnapshot, MediaBrokerError> {
-        let identity = read_default_debug_synthetic_target()?;
+        let identity = read_debug_synthetic_target(&self.config.debug_synthetic_metadata_path)?;
         let _operation = self.debug_synthetic_capture_gate.lock().await;
         {
             let state = self.state.lock().map_err(|_| MediaBrokerError::State)?;
@@ -724,16 +736,14 @@ fn validate_debug_synthetic_target(
 }
 
 #[cfg(debug_assertions)]
-fn default_debug_synthetic_metadata_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../..")
-        .join("artifacts/synthetic-replay/capture-target.json")
-}
-
-#[cfg(debug_assertions)]
-fn read_default_debug_synthetic_target() -> Result<DebugSyntheticTargetIdentity, MediaBrokerError> {
-    let path = default_debug_synthetic_metadata_path();
-    let metadata = std::fs::symlink_metadata(&path)
+fn read_debug_synthetic_target(
+    path: &Path,
+) -> Result<DebugSyntheticTargetIdentity, MediaBrokerError> {
+    if path.file_name().and_then(|value| value.to_str()) != Some(DEBUG_SYNTHETIC_METADATA_FILE_NAME)
+    {
+        return Err(MediaBrokerError::DebugSyntheticMetadataInvalid);
+    }
+    let metadata = std::fs::symlink_metadata(path)
         .map_err(|_| MediaBrokerError::DebugSyntheticMetadataUnavailable)?;
     if !metadata.is_file()
         || metadata.file_type().is_symlink()
@@ -1309,7 +1319,7 @@ pub enum MediaBrokerError {
     #[error("synthetic replay capture target does not match the selected debug process")]
     DebugSyntheticTargetMismatch,
     #[cfg(debug_assertions)]
-    #[error("synthetic replay capture metadata is unavailable at the fixed debug path")]
+    #[error("synthetic replay capture metadata is unavailable in the fixed app-data handoff")]
     DebugSyntheticMetadataUnavailable,
     #[cfg(debug_assertions)]
     #[error("synthetic replay capture metadata is malformed or not ready")]
@@ -1416,6 +1426,18 @@ mod tests {
             )
             .is_err());
         }
+
+        let directory = tempfile::tempdir().expect("metadata directory");
+        let fixed_path = directory.path().join(DEBUG_SYNTHETIC_METADATA_FILE_NAME);
+        std::fs::write(
+            &fixed_path,
+            serde_json::to_vec(&fixture).expect("serialize fixed metadata"),
+        )
+        .expect("write fixed metadata");
+        assert!(read_debug_synthetic_target(&fixed_path).is_ok());
+        assert!(
+            read_debug_synthetic_target(&directory.path().join("capture-target.json")).is_err()
+        );
     }
 
     #[test]
@@ -1441,6 +1463,9 @@ mod tests {
             MediaBrokerLaunchConfig {
                 executable: PathBuf::from("C:/missing/npc-media-broker.exe"),
                 development_fixture_allowed: true,
+                debug_synthetic_metadata_path: PathBuf::from(
+                    "C:/missing/debug-synthetic-replay-target.json",
+                ),
             },
             runtime,
         );

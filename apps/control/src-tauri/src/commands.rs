@@ -77,9 +77,11 @@ impl AppState {
         let runtime = RuntimeRouter::new(
             RuntimeSupervisor::try_new(launch).map_err(|error| error.to_string())?,
         );
-        let media_launch =
-            MediaBrokerLaunchConfig::from_application(cfg!(dev) && cfg!(debug_assertions))
-                .map_err(|error| error.to_string())?;
+        let media_launch = MediaBrokerLaunchConfig::from_application(
+            cfg!(dev) && cfg!(debug_assertions),
+            &config_directory,
+        )
+        .map_err(|error| error.to_string())?;
         let media_broker = MediaBrokerSupervisor::new(media_launch, runtime.supervisor().clone());
         Ok(Self {
             onboarding: Mutex::new(OnboardingCache {

@@ -39,6 +39,9 @@ async fn fixed_broker_authenticates_reports_health_and_shuts_down() {
         MediaBrokerLaunchConfig {
             executable,
             development_fixture_allowed: false,
+            debug_synthetic_metadata_path: app_data
+                .path()
+                .join("debug-synthetic-replay-target.json"),
         },
         parent_job,
     );
