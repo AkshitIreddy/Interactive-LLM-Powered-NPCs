@@ -12,7 +12,16 @@ Run commands from the repository root on Windows PowerShell 5.1+ or PowerShell 7
 .\scripts\dev.ps1 package [-Configuration Debug|Release] [-SkipChecks] [-OutputDirectory <path>]
 ```
 
-The scripts never install global tools. They discover checked-in 2.0 manifests, use pinned workspace commands, and identify missing prerequisites. `setup` restores JavaScript, Rust, optional Python-worker, and native CMake workspaces only when their manifests exist. On Windows, `lint` builds the two ignored project-owned sidecars immediately before nested Tauri Clippy so a clean source archive receives the same external-binary validation as a populated checkout. `package` is Windows x64 only and produces a local NSIS review artifact with SHA-256 hashes; it does not sign or publish it.
+The scripts never install global tools. They discover checked-in 2.0 manifests, use pinned workspace commands, and identify missing prerequisites. `setup` restores JavaScript, Rust, optional Python-worker, and native CMake workspaces only when their manifests exist. On Windows, `lint` builds the two ignored project-owned sidecars immediately before nested Tauri Clippy so a clean source archive receives the same external-binary validation as a populated checkout. The native broker's disposable CMake output uses a repository-keyed short path beneath `%LOCALAPPDATA%\InteractiveNPCs\build\mb`; this leaves Visual Studio FileTracker enough path headroom even when the checkout is deeply nested, while keeping different checkouts and stale source/toolchain caches isolated. `package` is Windows x64 only and produces a local NSIS review artifact with SHA-256 hashes; it does not sign or publish it.
+
+Validate sidecar copying, checkout isolation and the deep-path FileTracker regression with:
+
+```powershell
+.\scripts\test-prepare-sidecars-path.ps1
+.\scripts\test-prepare-sidecars-path.ps1 -BuildNative
+```
+
+The first command is a fast path-contract check. `-BuildNative` additionally places a clean broker source fixture beneath a deliberately deep checkout, then performs a real Visual Studio configure and build using the shortened binary directory.
 
 Security hooks:
 
