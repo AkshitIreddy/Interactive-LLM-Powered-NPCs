@@ -53,6 +53,12 @@ pub fn run() {
             commands::runtime_profile_summaries,
             commands::media_broker_health,
             commands::media_broker_diagnostics,
+            #[cfg(debug_assertions)]
+            commands::debug_select_synthetic_replay_capture_target,
+            #[cfg(debug_assertions)]
+            commands::debug_clear_synthetic_replay_capture_target,
+            #[cfg(debug_assertions)]
+            commands::debug_synthetic_replay_capture_diagnostics,
             provider_loadouts::provider_loadout_snapshot,
             provider_loadouts::create_provider_loadout,
             provider_loadouts::clone_provider_loadout,

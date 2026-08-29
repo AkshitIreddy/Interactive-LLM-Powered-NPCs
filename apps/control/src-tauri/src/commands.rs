@@ -341,6 +341,59 @@ pub async fn media_broker_diagnostics(
         })
 }
 
+#[cfg(debug_assertions)]
+fn map_debug_synthetic_capture_error(error: crate::media_broker::MediaBrokerError) -> CommandError {
+    match error {
+        crate::media_broker::MediaBrokerError::DebugSyntheticTargetInvalid
+        | crate::media_broker::MediaBrokerError::DebugSyntheticTargetMismatch
+        | crate::media_broker::MediaBrokerError::DebugSyntheticMetadataInvalid => {
+            CommandError::InvalidRequest {
+                message: error.to_string(),
+            }
+        }
+        _ => CommandError::Runtime {
+            message: error.to_string(),
+        },
+    }
+}
+
+/// Debug-only control surface used by the task-owned synthetic replay player.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub async fn debug_select_synthetic_replay_capture_target(
+    state: State<'_, AppState>,
+) -> Result<crate::media_broker::DebugSyntheticReplayCaptureSnapshot, CommandError> {
+    state
+        .media_broker
+        .debug_select_synthetic_replay_capture_target()
+        .await
+        .map_err(map_debug_synthetic_capture_error)
+}
+
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub async fn debug_clear_synthetic_replay_capture_target(
+    state: State<'_, AppState>,
+) -> Result<crate::media_broker::DebugSyntheticReplayCaptureSnapshot, CommandError> {
+    state
+        .media_broker
+        .debug_clear_synthetic_replay_capture_target()
+        .await
+        .map_err(map_debug_synthetic_capture_error)
+}
+
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub async fn debug_synthetic_replay_capture_diagnostics(
+    state: State<'_, AppState>,
+) -> Result<crate::media_broker::DebugSyntheticReplayCaptureSnapshot, CommandError> {
+    state
+        .media_broker
+        .debug_synthetic_replay_capture_diagnostics()
+        .await
+        .map_err(map_debug_synthetic_capture_error)
+}
+
 #[tauri::command]
 pub fn provider_credential_status(
     provider_id: Option<String>,
@@ -575,6 +628,7 @@ fn build_bootstrap(state: &AppState) -> BootstrapSnapshot {
     capabilities.insert("shellExecution".into(), false);
     capabilities.insert("screenCapture".into(), false);
     capabilities.insert("microphoneCapture".into(), false);
+    capabilities.insert("debugSyntheticReplayCapture".into(), cfg!(debug_assertions));
 
     BootstrapSnapshot {
         contract_version: CONTROL_CONTRACT_VERSION,
@@ -807,6 +861,10 @@ mod tests {
         assert_eq!(
             snapshot.capabilities.get("generalFilesystemAccess"),
             Some(&false)
+        );
+        assert_eq!(
+            snapshot.capabilities.get("debugSyntheticReplayCapture"),
+            Some(&cfg!(debug_assertions))
         );
         assert!(!snapshot.safety.credential_values_exposed_to_webview);
     }

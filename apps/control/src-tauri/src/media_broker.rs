@@ -1,6 +1,8 @@
 use crate::domain::{MediaBrokerDiagnostics, MediaBrokerHealthSnapshot, RuntimeConnectionState};
 use crate::sidecar_supervisor::RuntimeSupervisor;
 use prost::{Enumeration, Message};
+#[cfg(debug_assertions)]
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -25,6 +27,10 @@ const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
 const FAILURE_WINDOW: Duration = Duration::from_secs(60);
 const MAX_FAILURES: usize = 3;
+#[cfg(debug_assertions)]
+const DEBUG_SYNTHETIC_TARGET_BASENAME: &str = "interactive-npcs-synthetic-target.exe";
+#[cfg(debug_assertions)]
+const DEBUG_SYNTHETIC_METADATA_MAX_BYTES: u64 = 32 * 1024;
 
 #[derive(Clone, PartialEq, Message)]
 struct BrokerEnvelope {
@@ -65,8 +71,56 @@ struct BrokerResponse {
 enum BrokerCommand {
     Unspecified = 0,
     Health = 1,
+    #[cfg(debug_assertions)]
+    SelectTarget = 2,
+    #[cfg(debug_assertions)]
+    ClearTarget = 3,
     Diagnostics = 9,
     Shutdown = 10,
+}
+
+#[cfg(debug_assertions)]
+#[derive(Clone, PartialEq, Message)]
+struct SelectTargetPayload {
+    #[prost(uint64, tag = "1")]
+    native_window: u64,
+    #[prost(uint32, tag = "2")]
+    expected_process_id: u32,
+    #[prost(string, repeated, tag = "3")]
+    allowed_process_names: Vec<String>,
+}
+
+#[cfg(debug_assertions)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DebugSyntheticTargetIdentity {
+    native_window: u64,
+    process_id: u32,
+    executable_basename: String,
+}
+
+#[cfg(debug_assertions)]
+#[derive(Debug, Deserialize)]
+struct DebugSyntheticTargetMetadata {
+    schema_version: u32,
+    fixture_kind: String,
+    state: String,
+    pid: u32,
+    process_id: u32,
+    window_handle: i64,
+    hwnd: i64,
+    executable_basename: String,
+    exe_basename: String,
+    decoded_frames: u64,
+}
+
+#[cfg(debug_assertions)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugSyntheticReplayCaptureSnapshot {
+    pub target_process_id: u32,
+    pub target_window_handle: u64,
+    pub target_executable_basename: String,
+    pub diagnostics: MediaBrokerDiagnostics,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Enumeration)]
@@ -132,14 +186,44 @@ impl BrokerClient {
         decode_diagnostics(&response.payload)
     }
 
+    #[cfg(debug_assertions)]
+    async fn select_debug_synthetic_target(
+        &self,
+        identity: &DebugSyntheticTargetIdentity,
+    ) -> Result<(), MediaBrokerError> {
+        let payload = SelectTargetPayload {
+            native_window: identity.native_window,
+            expected_process_id: identity.process_id,
+            allowed_process_names: vec![identity.executable_basename.clone()],
+        }
+        .encode_to_vec();
+        self.request_with_payload(BrokerCommand::SelectTarget, payload)
+            .await
+            .map(|_| ())
+    }
+
+    #[cfg(debug_assertions)]
+    async fn clear_debug_synthetic_target(&self) -> Result<(), MediaBrokerError> {
+        self.request(BrokerCommand::ClearTarget).await.map(|_| ())
+    }
+
     async fn shutdown(&self) -> Result<(), MediaBrokerError> {
         self.request(BrokerCommand::Shutdown).await.map(|_| ())
     }
 
     async fn request(&self, command: BrokerCommand) -> Result<BrokerResponse, MediaBrokerError> {
+        self.request_with_payload(command, Vec::new()).await
+    }
+
+    async fn request_with_payload(
+        &self,
+        command: BrokerCommand,
+        payload: Vec<u8>,
+    ) -> Result<BrokerResponse, MediaBrokerError> {
         let connection = Arc::clone(&self.0);
-        let task =
-            tauri::async_runtime::spawn_blocking(move || request_blocking(&connection, command));
+        let task = tauri::async_runtime::spawn_blocking(move || {
+            request_blocking(&connection, command, payload)
+        });
         tokio::time::timeout(REQUEST_TIMEOUT, task)
             .await
             .map_err(|_| MediaBrokerError::Timeout)?
@@ -150,7 +234,11 @@ impl BrokerClient {
 fn request_blocking(
     connection: &Mutex<BrokerConnection>,
     command: BrokerCommand,
+    payload: Vec<u8>,
 ) -> Result<BrokerResponse, MediaBrokerError> {
+    if payload.len().saturating_add(4) > MAX_FRAME_BYTES {
+        return Err(MediaBrokerError::Payload);
+    }
     let mut connection = connection.lock().map_err(|_| MediaBrokerError::State)?;
     let sequence = connection.next_sequence;
     connection.next_sequence = connection.next_sequence.saturating_add(1);
@@ -163,7 +251,7 @@ fn request_blocking(
         deadline_qpc: now.saturating_add(frequency.saturating_mul(5)),
         cancellation_generation: connection.cancellation_generation,
         command: command as i32,
-        payload: Vec::new(),
+        payload,
     };
     let body = envelope.encode_to_vec();
     write_frame(&mut connection.stream, &body)?;
@@ -224,6 +312,8 @@ struct BrokerSupervisorState {
     recent_failures: VecDeque<Instant>,
     broker_state: Option<u32>,
     diagnostics: Option<MediaBrokerDiagnostics>,
+    #[cfg(debug_assertions)]
+    debug_synthetic_target: Option<DebugSyntheticTargetIdentity>,
 }
 
 #[derive(Clone)]
@@ -234,6 +324,8 @@ pub struct MediaBrokerSupervisor {
     managed: Arc<tokio::sync::Mutex<Option<ManagedBroker>>>,
     startup_gate: Arc<tokio::sync::Mutex<()>>,
     shutdown_token: CancellationToken,
+    #[cfg(debug_assertions)]
+    debug_synthetic_capture_gate: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl std::fmt::Debug for MediaBrokerSupervisor {
@@ -275,10 +367,14 @@ impl MediaBrokerSupervisor {
                 recent_failures: VecDeque::new(),
                 broker_state: None,
                 diagnostics: None,
+                #[cfg(debug_assertions)]
+                debug_synthetic_target: None,
             })),
             managed: Arc::new(tokio::sync::Mutex::new(None)),
             startup_gate: Arc::new(tokio::sync::Mutex::new(())),
             shutdown_token: CancellationToken::new(),
+            #[cfg(debug_assertions)]
+            debug_synthetic_capture_gate: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -378,6 +474,87 @@ impl MediaBrokerSupervisor {
         Ok(diagnostics)
     }
 
+    /// Selects the task-owned synthetic replay window in debug builds only.
+    ///
+    /// The native broker still performs its complete same-user/session,
+    /// anti-cheat, HWND/PID, and executable-name policy inspection. This
+    /// control-plane gate additionally prevents the debug command from being
+    /// reused to capture an arbitrary game or application.
+    #[cfg(debug_assertions)]
+    pub async fn debug_select_synthetic_replay_capture_target(
+        &self,
+    ) -> Result<DebugSyntheticReplayCaptureSnapshot, MediaBrokerError> {
+        let identity = read_default_debug_synthetic_target()?;
+        let _operation = self.debug_synthetic_capture_gate.lock().await;
+        {
+            let state = self.state.lock().map_err(|_| MediaBrokerError::State)?;
+            if state
+                .debug_synthetic_target
+                .as_ref()
+                .is_some_and(|selected| selected != &identity)
+            {
+                return Err(MediaBrokerError::DebugSyntheticTargetMismatch);
+            }
+        }
+
+        let client = self.ensure_ready().await?;
+        if let Err(error) = client.select_debug_synthetic_target(&identity).await {
+            if let Ok(mut state) = self.state.lock() {
+                state.debug_synthetic_target = None;
+                state.diagnostics = None;
+            }
+            return Err(error);
+        }
+        if let Ok(mut state) = self.state.lock() {
+            state.debug_synthetic_target = Some(identity.clone());
+        }
+        let diagnostics = client.diagnostics().await?;
+        if let Ok(mut state) = self.state.lock() {
+            state.diagnostics = Some(diagnostics.clone());
+        }
+        Ok(debug_synthetic_capture_snapshot(identity, diagnostics))
+    }
+
+    #[cfg(debug_assertions)]
+    pub async fn debug_clear_synthetic_replay_capture_target(
+        &self,
+    ) -> Result<DebugSyntheticReplayCaptureSnapshot, MediaBrokerError> {
+        let _operation = self.debug_synthetic_capture_gate.lock().await;
+        let identity = self.selected_debug_synthetic_target()?;
+        let client = self.ensure_ready().await?;
+        client.clear_debug_synthetic_target().await?;
+        if let Ok(mut state) = self.state.lock() {
+            state.debug_synthetic_target = None;
+            state.diagnostics = None;
+        }
+        let diagnostics = client.diagnostics().await?;
+        if let Ok(mut state) = self.state.lock() {
+            state.diagnostics = Some(diagnostics.clone());
+        }
+        Ok(debug_synthetic_capture_snapshot(identity, diagnostics))
+    }
+
+    #[cfg(debug_assertions)]
+    pub async fn debug_synthetic_replay_capture_diagnostics(
+        &self,
+    ) -> Result<DebugSyntheticReplayCaptureSnapshot, MediaBrokerError> {
+        let _operation = self.debug_synthetic_capture_gate.lock().await;
+        let identity = self.selected_debug_synthetic_target()?;
+        let diagnostics = self.diagnostics().await?;
+        Ok(debug_synthetic_capture_snapshot(identity, diagnostics))
+    }
+
+    #[cfg(debug_assertions)]
+    fn selected_debug_synthetic_target(
+        &self,
+    ) -> Result<DebugSyntheticTargetIdentity, MediaBrokerError> {
+        let state = self.state.lock().map_err(|_| MediaBrokerError::State)?;
+        state
+            .debug_synthetic_target
+            .clone()
+            .ok_or(MediaBrokerError::DebugSyntheticTargetMismatch)
+    }
+
     pub async fn shutdown(&self) {
         self.shutdown_token.cancel();
         self.set_connection(
@@ -471,6 +648,10 @@ impl MediaBrokerSupervisor {
         }
         state.process_id = None;
         state.diagnostics = None;
+        #[cfg(debug_assertions)]
+        {
+            state.debug_synthetic_target = None;
+        }
         if state.recent_failures.len() >= MAX_FAILURES {
             state.connection = RuntimeConnectionState::Quarantined;
             state.detail = "Media broker quarantined after three failures in sixty seconds; runtime conversation remains available with audio/subtitle fallbacks.".into();
@@ -520,6 +701,88 @@ impl MediaBrokerSupervisor {
         if connection != RuntimeConnectionState::Ready {
             state.process_id = None;
         }
+    }
+}
+
+#[cfg(debug_assertions)]
+fn validate_debug_synthetic_target(
+    native_window: u64,
+    process_id: u32,
+    executable_basename: &str,
+) -> Result<DebugSyntheticTargetIdentity, MediaBrokerError> {
+    if native_window == 0 || usize::try_from(native_window).is_err() {
+        return Err(MediaBrokerError::DebugSyntheticTargetInvalid);
+    }
+    if process_id == 0 || executable_basename != DEBUG_SYNTHETIC_TARGET_BASENAME {
+        return Err(MediaBrokerError::DebugSyntheticTargetInvalid);
+    }
+    Ok(DebugSyntheticTargetIdentity {
+        native_window,
+        process_id,
+        executable_basename: executable_basename.into(),
+    })
+}
+
+#[cfg(debug_assertions)]
+fn default_debug_synthetic_metadata_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .join("artifacts/synthetic-replay/capture-target.json")
+}
+
+#[cfg(debug_assertions)]
+fn read_default_debug_synthetic_target() -> Result<DebugSyntheticTargetIdentity, MediaBrokerError> {
+    let path = default_debug_synthetic_metadata_path();
+    let metadata = std::fs::symlink_metadata(&path)
+        .map_err(|_| MediaBrokerError::DebugSyntheticMetadataUnavailable)?;
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.len() == 0
+        || metadata.len() > DEBUG_SYNTHETIC_METADATA_MAX_BYTES
+    {
+        return Err(MediaBrokerError::DebugSyntheticMetadataInvalid);
+    }
+    let bytes = std::fs::read(path).map_err(|_| MediaBrokerError::DebugSyntheticMetadataInvalid)?;
+    if bytes.len() as u64 > DEBUG_SYNTHETIC_METADATA_MAX_BYTES {
+        return Err(MediaBrokerError::DebugSyntheticMetadataInvalid);
+    }
+    decode_debug_synthetic_target_metadata(&bytes)
+}
+
+#[cfg(debug_assertions)]
+fn decode_debug_synthetic_target_metadata(
+    bytes: &[u8],
+) -> Result<DebugSyntheticTargetIdentity, MediaBrokerError> {
+    let metadata: DebugSyntheticTargetMetadata = serde_json::from_slice(bytes)
+        .map_err(|_| MediaBrokerError::DebugSyntheticMetadataInvalid)?;
+    if metadata.schema_version != 1
+        || metadata.fixture_kind != "synthetic-original-video-replay"
+        || metadata.state != "playing"
+        || metadata.decoded_frames == 0
+        || metadata.pid != metadata.process_id
+        || metadata.hwnd != metadata.window_handle
+        || metadata.window_handle <= 0
+        || metadata.exe_basename != metadata.executable_basename
+    {
+        return Err(MediaBrokerError::DebugSyntheticMetadataInvalid);
+    }
+    validate_debug_synthetic_target(
+        metadata.window_handle as u64,
+        metadata.process_id,
+        &metadata.executable_basename,
+    )
+}
+
+#[cfg(debug_assertions)]
+fn debug_synthetic_capture_snapshot(
+    identity: DebugSyntheticTargetIdentity,
+    diagnostics: MediaBrokerDiagnostics,
+) -> DebugSyntheticReplayCaptureSnapshot {
+    DebugSyntheticReplayCaptureSnapshot {
+        target_process_id: identity.process_id,
+        target_window_handle: identity.native_window,
+        target_executable_basename: identity.executable_basename,
+        diagnostics,
     }
 }
 
@@ -1039,6 +1302,18 @@ pub enum MediaBrokerError {
     DevelopmentFixture,
     #[error("media broker supervisor state is unavailable")]
     State,
+    #[cfg(debug_assertions)]
+    #[error("synthetic replay capture target is not the dedicated debug executable")]
+    DebugSyntheticTargetInvalid,
+    #[cfg(debug_assertions)]
+    #[error("synthetic replay capture target does not match the selected debug process")]
+    DebugSyntheticTargetMismatch,
+    #[cfg(debug_assertions)]
+    #[error("synthetic replay capture metadata is unavailable at the fixed debug path")]
+    DebugSyntheticMetadataUnavailable,
+    #[cfg(debug_assertions)]
+    #[error("synthetic replay capture metadata is malformed or not ready")]
+    DebugSyntheticMetadataInvalid,
 }
 
 #[cfg(test)]
@@ -1060,6 +1335,87 @@ mod tests {
         let decoded = BrokerEnvelope::decode(envelope.encode_to_vec().as_slice()).expect("decode");
         assert_eq!(decoded, envelope);
         assert_eq!(decoded.launch_nonce.len(), 32);
+    }
+
+    #[test]
+    fn synthetic_target_payload_matches_native_select_target_contract() {
+        let payload = SelectTargetPayload {
+            native_window: 0x1234,
+            expected_process_id: 77,
+            allowed_process_names: vec![DEBUG_SYNTHETIC_TARGET_BASENAME.into()],
+        };
+        let encoded = payload.encode_to_vec();
+        let decoded = SelectTargetPayload::decode(encoded.as_slice()).expect("decode payload");
+        assert_eq!(decoded, payload);
+        assert_eq!(decoded.allowed_process_names.len(), 1);
+    }
+
+    #[test]
+    fn synthetic_target_gate_accepts_only_the_task_owned_executable() {
+        let accepted =
+            validate_debug_synthetic_target(0x1234, 77, "interactive-npcs-synthetic-target.exe")
+                .expect("dedicated fixture accepted");
+        assert_eq!(accepted.native_window, 0x1234);
+        assert_eq!(accepted.process_id, 77);
+        assert_eq!(
+            accepted.executable_basename,
+            DEBUG_SYNTHETIC_TARGET_BASENAME
+        );
+
+        assert!(validate_debug_synthetic_target(0, 77, DEBUG_SYNTHETIC_TARGET_BASENAME).is_err());
+        assert!(
+            validate_debug_synthetic_target(0x1234, 0, DEBUG_SYNTHETIC_TARGET_BASENAME).is_err()
+        );
+        assert!(validate_debug_synthetic_target(0x1234, 77, "Cyberpunk2077.exe").is_err());
+        assert!(validate_debug_synthetic_target(
+            0x1234,
+            77,
+            "C:\\fixtures\\interactive-npcs-synthetic-target.exe"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn synthetic_metadata_requires_ready_consistent_task_owned_identity() {
+        let fixture = serde_json::json!({
+            "schema_version": 1,
+            "fixture_kind": "synthetic-original-video-replay",
+            "state": "playing",
+            "pid": 77,
+            "process_id": 77,
+            "window_handle": 4660,
+            "hwnd": 4660,
+            "executable_basename": DEBUG_SYNTHETIC_TARGET_BASENAME,
+            "exe_basename": DEBUG_SYNTHETIC_TARGET_BASENAME,
+            "decoded_frames": 3,
+            "untrusted_extra_field": "ignored"
+        });
+        let accepted = decode_debug_synthetic_target_metadata(
+            &serde_json::to_vec(&fixture).expect("serialize metadata"),
+        )
+        .expect("valid task metadata");
+        assert_eq!(accepted.native_window, 4660);
+        assert_eq!(accepted.process_id, 77);
+
+        for (field, replacement) in [
+            ("state", serde_json::json!("ready")),
+            ("decoded_frames", serde_json::json!(0)),
+            ("pid", serde_json::json!(78)),
+            ("hwnd", serde_json::json!(4661)),
+            ("window_handle", serde_json::json!(-1)),
+            ("executable_basename", serde_json::json!("notepad.exe")),
+            (
+                "exe_basename",
+                serde_json::json!("C:\\fixtures\\interactive-npcs-synthetic-target.exe"),
+            ),
+        ] {
+            let mut invalid = fixture.clone();
+            invalid[field] = replacement;
+            assert!(decode_debug_synthetic_target_metadata(
+                &serde_json::to_vec(&invalid).expect("serialize invalid metadata")
+            )
+            .is_err());
+        }
     }
 
     #[test]
