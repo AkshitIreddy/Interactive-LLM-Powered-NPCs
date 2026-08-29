@@ -215,13 +215,21 @@ function Get-PythonInvocation {
 function Invoke-NativeProbe {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
-        [string[]]$ArgumentList = @()
+        [string[]]$ArgumentList = @(),
+        [string]$WorkingDirectory = $script:RepoRoot
     )
 
     $previousErrorActionPreference = $ErrorActionPreference
     $output = @()
     $exitCode = 1
+    $locationPushed = $false
     try {
+        # rustup selects a toolchain from the current directory. Probe from the
+        # same repository root used by the real command so a caller outside the
+        # checkout cannot make the probe see stable while lint sees the pin.
+        Push-Location -LiteralPath $WorkingDirectory
+        $locationPushed = $true
+
         # Windows PowerShell can promote a native process's stderr to a
         # terminating NativeCommandError when the caller uses Stop globally.
         # Probes need the real exit code and bounded output instead.
@@ -235,6 +243,7 @@ function Invoke-NativeProbe {
         $exitCode = 1
     }
     finally {
+        if ($locationPushed) { Pop-Location }
         $ErrorActionPreference = $previousErrorActionPreference
     }
     return @{ ExitCode = $exitCode; Output = $output }
@@ -444,6 +453,20 @@ function Invoke-Dev {
 function Invoke-Tests {
     Assert-Environment
     if ($script:Failures.Count -gt 0) { return }
+
+    $clippyDispatchTest = Join-Path $PSScriptRoot 'test-dev-clippy-dispatch.ps1'
+    if (Test-IsWindows) {
+        Invoke-CheckBlock -Label 'Clippy dispatch regression' -Action {
+            if (-not (Test-Path -LiteralPath $clippyDispatchTest -PathType Leaf)) {
+                throw "Clippy dispatch regression script was not found: $clippyDispatchTest"
+            }
+            Write-Step 'Testing pinned Clippy fallback selection and identity refusal'
+            & $clippyDispatchTest
+            if ($LASTEXITCODE -ne 0) { throw "Clippy dispatch regression exited with code $LASTEXITCODE." }
+        }
+    } else {
+        Write-Skip 'Clippy dispatch regression requires Windows rustup command semantics.'
+    }
 
     $nodeRoot = Get-NodePackageRoot
     $scripts = Get-PackageScriptNames -PackageRoot $nodeRoot

@@ -1,0 +1,193 @@
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version 2.0
+
+if ($env:OS -ne 'Windows_NT') {
+    Write-Host 'SKIP: Clippy dispatch regression requires Windows rustup command semantics.'
+    exit 0
+}
+
+function Assert-True {
+    param(
+        [Parameter(Mandatory = $true)][bool]$Condition,
+        [Parameter(Mandatory = $true)][string]$Message
+    )
+
+    if (-not $Condition) { throw $Message }
+}
+
+function Write-Utf8NoBom {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Content
+    )
+
+    [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+function New-ClippyDispatchFixture {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][bool]$MismatchStableIdentity
+    )
+
+    $repoRoot = Join-Path $Root 'sanitized-tree'
+    $binRoot = Join-Path $Root 'command-shims'
+    $outsideRoot = Join-Path $Root 'caller-outside-repository'
+    foreach ($directory in @(
+            $repoRoot,
+            $binRoot,
+            $outsideRoot,
+            (Join-Path $repoRoot 'scripts'),
+            (Join-Path $repoRoot 'apps/control/src-tauri')
+        )) {
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    }
+
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'dev.ps1') -Destination (Join-Path $repoRoot 'scripts/dev.ps1')
+    Write-Utf8NoBom -Path (Join-Path $repoRoot 'package.json') -Content @'
+{
+  "engines": {
+    "node": "20.20.2"
+  },
+  "scripts": {
+    "typecheck": "fixture",
+    "format:check": "fixture"
+  }
+}
+'@
+    Write-Utf8NoBom -Path (Join-Path $repoRoot 'Cargo.toml') -Content "[workspace]`nmembers = []`n"
+    Write-Utf8NoBom -Path (Join-Path $repoRoot '.pinned-clippy-unavailable') -Content "fixture`n"
+    Write-Utf8NoBom -Path (Join-Path $repoRoot 'apps/control/src-tauri/Cargo.toml') -Content "[package]`nname = 'fixture'`nversion = '0.0.0'`n"
+    Write-Utf8NoBom -Path (Join-Path $repoRoot 'scripts/validate-json.cjs') -Content "process.exit(0);`n"
+    Write-Utf8NoBom -Path (Join-Path $repoRoot 'scripts/test-json-validator.cjs') -Content "process.exit(0);`n"
+    Write-Utf8NoBom -Path (Join-Path $repoRoot 'scripts/check-doc-links.ps1') -Content "exit 0`n"
+
+    $cargoShim = @'
+@echo off
+setlocal
+>>"%NPC_CLIPPY_TEST_LOG%" echo cargo^|%CD%^|%*
+if /I "%~1"=="clippy" goto plain_clippy
+if /I "%~1"=="+stable" goto stable_clippy
+exit /b 0
+
+:plain_clippy
+if /I not "%~2"=="--version" exit /b 0
+if exist ".pinned-clippy-unavailable" goto pinned_unavailable
+echo clippy 0.1.fixture-outside
+exit /b 0
+
+:pinned_unavailable
+echo error: pinned Clippy is unavailable 1>&2
+exit /b 1
+
+:stable_clippy
+echo clippy 0.1.fixture-stable
+exit /b 0
+'@
+    Write-Utf8NoBom -Path (Join-Path $binRoot 'cargo.cmd') -Content $cargoShim
+
+    $stableCommit = if ($MismatchStableIdentity) { 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' } else { 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }
+    $rustcShim = @"
+@echo off
+setlocal
+>>"%NPC_CLIPPY_TEST_LOG%" echo rustc^|%CD%^|%*
+if /I "%1"=="+stable" (
+  echo release: 1.96.1
+  echo commit-hash: $stableCommit
+  exit /b 0
+)
+echo release: 1.96.1
+echo commit-hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+exit /b 0
+"@
+    Write-Utf8NoBom -Path (Join-Path $binRoot 'rustc.cmd') -Content $rustcShim
+
+    foreach ($commandName in @('corepack', 'git', 'node', 'pnpm')) {
+        Write-Utf8NoBom -Path (Join-Path $binRoot "$commandName.cmd") -Content "@echo off`r`nexit /b 0`r`n"
+    }
+
+    return [pscustomobject]@{
+        RepoRoot = $repoRoot
+        BinRoot = $binRoot
+        OutsideRoot = $outsideRoot
+        LogPath = Join-Path $Root 'commands.log'
+    }
+}
+
+function Invoke-ClippyDispatchCase {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][bool]$MismatchStableIdentity
+    )
+
+    $caseRoot = Join-Path ([System.IO.Path]::GetTempPath()) "npc-clippy-dispatch-$Name-$([Guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $caseRoot -Force | Out-Null
+    $fixture = New-ClippyDispatchFixture -Root $caseRoot -MismatchStableIdentity $MismatchStableIdentity
+    $powershellPath = (Get-Command powershell.exe -ErrorAction Stop).Source
+
+    $savedEnvironment = @{
+        LOCALAPPDATA = $env:LOCALAPPDATA
+        PATH = $env:PATH
+        PATHEXT = $env:PATHEXT
+        ProgramFiles = $env:ProgramFiles
+        USERPROFILE = $env:USERPROFILE
+    }
+    try {
+        $env:LOCALAPPDATA = Join-Path $caseRoot 'local-app-data'
+        $env:ProgramFiles = Join-Path $caseRoot 'program-files'
+        $env:USERPROFILE = Join-Path $caseRoot 'user-profile'
+        $env:PATHEXT = '.COM;.EXE;.BAT;.CMD'
+        $env:PATH = $fixture.BinRoot
+        $env:NPC_CLIPPY_TEST_LOG = $fixture.LogPath
+        $env:NPC_CLIPPY_TEST_REPO = $fixture.RepoRoot
+
+        Push-Location -LiteralPath $fixture.OutsideRoot
+        try {
+            $output = @(& $powershellPath -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $fixture.RepoRoot 'scripts/dev.ps1') lint 2>&1)
+            $exitCode = $LASTEXITCODE
+        }
+        finally {
+            Pop-Location
+        }
+
+        $text = ($output | ForEach-Object { [string]$_ }) -join "`n"
+        $calls = if (Test-Path -LiteralPath $fixture.LogPath -PathType Leaf) {
+            @(Get-Content -LiteralPath $fixture.LogPath)
+        } else {
+            @()
+        }
+        $repoPrefix = "cargo|$($fixture.RepoRoot)|"
+
+        Assert-True -Condition ($calls -contains "${repoPrefix}clippy --version") -Message "$Name did not probe plain Clippy from the sanitized repository root. Calls: $($calls -join '; '). Output: $text"
+        Assert-True -Condition (-not ($calls -contains "cargo|$($fixture.OutsideRoot)|clippy --version")) -Message "$Name incorrectly probed Clippy from the caller's directory."
+
+        if ($MismatchStableIdentity) {
+            Assert-True -Condition ($exitCode -ne 0) -Message 'Identity mismatch unexpectedly passed lint.'
+            Assert-True -Condition ($text -match 'not proven identical') -Message "Identity mismatch did not report the safe refusal. Output: $text"
+            Assert-True -Condition (-not ($calls | Where-Object { $_ -like "${repoPrefix}+stable clippy --workspace*" })) -Message 'Identity mismatch executed the unverified stable Clippy fallback.'
+        } else {
+            Assert-True -Condition ($exitCode -eq 0) -Message "Matching identity fixture failed lint with exit $exitCode. Output: $text"
+            Assert-True -Condition ($text -match 'verified \+stable is identical') -Message "Matching identity fixture did not report the verified fallback. Calls: $($calls -join '; '). Output: $text"
+            Assert-True -Condition (@($calls | Where-Object { $_ -like "${repoPrefix}+stable clippy*" }).Count -eq 2) -Message "Matching identity fixture did not run both Clippy gates through +stable. Calls: $($calls -join '; ')"
+            Assert-True -Condition (-not ($calls | Where-Object { $_ -like "${repoPrefix}clippy --workspace*" })) -Message 'Matching identity fixture bypassed the selected +stable invocation.'
+        }
+    }
+    finally {
+        foreach ($name in $savedEnvironment.Keys) {
+            [System.Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name], 'Process')
+        }
+        Remove-Item Env:NPC_CLIPPY_TEST_LOG -ErrorAction SilentlyContinue
+        Remove-Item Env:NPC_CLIPPY_TEST_REPO -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $caseRoot) {
+            Remove-Item -LiteralPath $caseRoot -Recurse -Force
+        }
+    }
+}
+
+Invoke-ClippyDispatchCase -Name 'matching' -MismatchStableIdentity $false
+Invoke-ClippyDispatchCase -Name 'mismatch' -MismatchStableIdentity $true
+Write-Host 'Clippy dispatch regression checks passed.' -ForegroundColor Green
+exit 0
