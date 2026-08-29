@@ -50,7 +50,7 @@ runtimes/
 runtime-data/
 logs/
 crashes/
-diagnostics/
+/diagnostics/
 *.dmp
 *.log
 *.part
