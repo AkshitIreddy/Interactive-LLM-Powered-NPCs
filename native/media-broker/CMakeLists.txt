@@ -95,5 +95,7 @@ if(BUILD_TESTING AND NPC_MEDIA_BROKER_BUILD_TESTS)
             endif()
         endif()
         add_test(NAME npc_media_broker_windows_smoke_tests COMMAND npc_media_broker_windows_smoke_tests)
+        add_test(NAME npc_media_broker_service_protocol_tests
+                 COMMAND npc_media_broker_windows_smoke_tests --service-only)
     endif()
 endif()

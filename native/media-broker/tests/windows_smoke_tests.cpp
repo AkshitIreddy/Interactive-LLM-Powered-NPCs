@@ -237,7 +237,25 @@ void close_child(ChildService& child) {
 
 } // namespace
 
-int main() {
+int main(const int argc, char** argv) {
+    if (argc == 2 && std::string_view{argv[1]} == "--service-only") {
+        wchar_t test_path[32768]{};
+        if (GetModuleFileNameW(nullptr, test_path, ARRAYSIZE(test_path)) == 0) {
+            return EXIT_FAILURE;
+        }
+        const auto service_path =
+            (std::filesystem::path(test_path).parent_path() / L"npc-media-broker.exe").wstring();
+        if (!service_lifecycle_smoke(service_path)) {
+            std::cerr << "authenticated named-pipe service lifecycle smoke failed\n";
+            return EXIT_FAILURE;
+        }
+        std::cout << "authenticated named-pipe service lifecycle smoke passed\n";
+        return EXIT_SUCCESS;
+    }
+    if (argc != 1) {
+        std::cerr << "unsupported smoke-test argument\n";
+        return EXIT_FAILURE;
+    }
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     const HWND window = create_test_window();
     if (!window) {
