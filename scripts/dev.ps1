@@ -697,9 +697,23 @@ function Invoke-Lint {
                 $jsonFiles.Add($jsonFile)
             }
         }
-        $jsonArguments = @($jsonValidator)
-        $jsonArguments += @($jsonFiles | Sort-Object FullName | ForEach-Object { $_.FullName })
-        Invoke-External -FilePath 'node' -ArgumentList $jsonArguments -WorkingDirectory $script:RepoRoot -DisplayArguments "<local JSON parser> <$($jsonFiles.Count) sorted JSON paths>"
+        $jsonPaths = @($jsonFiles | Sort-Object FullName | ForEach-Object { $_.FullName })
+        $jsonManifestPath = Join-Path ([System.IO.Path]::GetTempPath()) "npc-json-paths-$([Guid]::NewGuid().ToString('N')).json"
+        try {
+            $jsonManifest = [ordered]@{
+                version = 1
+                paths = @($jsonPaths)
+            } | ConvertTo-Json -Depth 3 -Compress
+            [System.IO.File]::WriteAllText(
+                $jsonManifestPath,
+                $jsonManifest,
+                (New-Object System.Text.UTF8Encoding($false))
+            )
+            Invoke-External -FilePath 'node' -ArgumentList @($jsonValidator, '--paths-file', $jsonManifestPath) -WorkingDirectory $script:RepoRoot -DisplayArguments "<local JSON parser> --paths-file <temporary manifest with $($jsonFiles.Count) sorted JSON paths>"
+        }
+        finally {
+            Remove-Item -LiteralPath $jsonManifestPath -Force -ErrorAction SilentlyContinue
+        }
         Write-Host "    Validated $($jsonFiles.Count) JSON files." -ForegroundColor DarkGray
     }
 
