@@ -1090,10 +1090,18 @@ async fn run_speech_lane(
                 })
                 .await?;
             emitter.lifecycle(TurnLifecycle::Animating).await?;
-            let receipt = tokio::select! {
-                _ = generation.cancelled() => return Err(SupervisorError::Cancelled),
-                result = audio.play(&identity, sentence_id, speech, generation.cancellation_token()) => result,
-            };
+            // Playback is the cooperative cancellation boundary. The sink must be
+            // allowed to stop its device and report the frames that were actually
+            // heard; racing this future against the same token would drop it before
+            // it could return that partial receipt.
+            let receipt = audio
+                .play(
+                    &identity,
+                    sentence_id,
+                    speech,
+                    generation.cancellation_token(),
+                )
+                .await;
             match receipt {
                 Ok(
                     receipt @ PlaybackReceipt {
@@ -1468,6 +1476,48 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct CancellationAwareAudio {
+        play_started: tokio::sync::Notify,
+        play_calls: std::sync::atomic::AtomicU64,
+        saw_cancellation: std::sync::atomic::AtomicBool,
+        partial_receipts_returned: std::sync::atomic::AtomicU64,
+    }
+
+    #[async_trait]
+    impl AudioSink for CancellationAwareAudio {
+        async fn play(
+            &self,
+            _identity: &TurnIdentity,
+            _sentence_id: u64,
+            _stream: SpeechStream,
+            cancellation: CancellationToken,
+        ) -> Result<PlaybackReceipt, RuntimeDependencyError> {
+            self.play_calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.play_started.notify_one();
+            cancellation.cancelled().await;
+            self.saw_cancellation
+                .store(true, std::sync::atomic::Ordering::Release);
+
+            // A real device sink needs a short cooperative drain to stop playback and
+            // measure what was heard. Keep this pending long enough to prove the
+            // supervisor does not drop the sink future when cancellation fires.
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            self.partial_receipts_returned
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(PlaybackReceipt {
+                audible_frames: 240,
+                duration: Duration::from_millis(10),
+                completed: false,
+            })
+        }
+
+        async fn stop(&self, _identity: &TurnIdentity) -> Result<(), RuntimeDependencyError> {
+            Ok(())
+        }
+    }
+
     fn request(turn_id: &str, transcript: &str) -> TurnRequest {
         TurnRequest {
             session_id: "session-1".into(),
@@ -1650,6 +1700,86 @@ mod tests {
         assert!(audio.stops.load(std::sync::atomic::Ordering::Relaxed) >= 1);
         let commits = memory.commits.lock().await;
         assert_eq!(commits.len(), 1, "cancelled turns must not be committed");
+    }
+
+    #[tokio::test]
+    async fn cancelled_playback_returns_partial_receipt_without_committing_dialogue() {
+        let llm: Arc<dyn LanguageModelProvider> = Arc::new(FakeLlm {
+            descriptor: descriptor(
+                "llm-local",
+                ProviderModality::LanguageModel,
+                ProviderLocation::Local,
+            ),
+            behavior: LlmBehavior::Text("This sentence starts playing before barge-in.".into()),
+        });
+        let memory = Arc::new(FakeMemory::default());
+        let audio = Arc::new(CancellationAwareAudio::default());
+        let dependencies = RuntimeDependencies {
+            providers: ProviderPool {
+                language_models: vec![llm],
+                speech: vec![
+                    Arc::new(FakeTts {
+                        descriptor: descriptor(
+                            "tts-primary",
+                            ProviderModality::Speech,
+                            ProviderLocation::Local,
+                        ),
+                    }),
+                    Arc::new(FakeTts {
+                        descriptor: descriptor(
+                            "tts-fallback",
+                            ProviderModality::Speech,
+                            ProviderLocation::Local,
+                        ),
+                    }),
+                ],
+                ..Default::default()
+            },
+            identity: Arc::new(FakeIdentity),
+            memory: memory.clone(),
+            audio: audio.clone(),
+        };
+        let supervisor = TurnSupervisor::new(SupervisorConfig::default(), dependencies);
+
+        let playback_started = audio.play_started.notified();
+        let turn = supervisor
+            .start_turn(request("turn-cancelled-audio", "Stop."))
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(1), playback_started)
+            .await
+            .expect("audio playback should start");
+        turn.cancel();
+
+        let outcome = tokio::time::timeout(Duration::from_secs(1), turn.outcome())
+            .await
+            .expect("cancelled turn should settle after the sink returns its receipt")
+            .unwrap();
+
+        assert_eq!(outcome.lifecycle, TurnLifecycle::Cancelled);
+        assert!(outcome.delivered.is_empty());
+        assert_eq!(
+            audio
+                .partial_receipts_returned
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "the sink must finish its partial-delivery receipt before cancellation settles"
+        );
+        assert!(
+            audio
+                .saw_cancellation
+                .load(std::sync::atomic::Ordering::Acquire),
+            "the sink must observe the cooperative cancellation token"
+        );
+        assert_eq!(
+            audio.play_calls.load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "cancellation must not retry playback and duplicate the voice"
+        );
+        assert!(
+            memory.commits.lock().await.is_empty(),
+            "cancelled partial dialogue must not be committed"
+        );
     }
 
     #[tokio::test]
