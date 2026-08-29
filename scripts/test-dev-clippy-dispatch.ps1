@@ -48,6 +48,7 @@ function New-ClippyDispatchFixture {
     }
 
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'dev.ps1') -Destination (Join-Path $repoRoot 'scripts/dev.ps1')
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'short-cmake-build-path.ps1') -Destination (Join-Path $repoRoot 'scripts/short-cmake-build-path.ps1')
     Write-Utf8NoBom -Path (Join-Path $repoRoot 'package.json') -Content @'
 {
   "engines": {
