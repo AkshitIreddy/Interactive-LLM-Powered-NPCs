@@ -595,3 +595,50 @@ fn queue_receipt(
         .map(|queue| queue.receipt())
         .map_err(|_| RuntimeDependencyError::Internal("PCM queue lock poisoned".into()))
 }
+
+#[cfg(test)]
+mod tests {
+    use futures_util::stream;
+
+    use super::*;
+
+    #[test]
+    fn rejects_zero_capacity_without_opening_a_device() {
+        let config = DevWasapiConfig {
+            queue_capacity_frames: 0,
+            ..DevWasapiConfig::default()
+        };
+        assert!(matches!(
+            DevWasapiAudioSink::new(config),
+            Err(RuntimeDependencyError::Invalid(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn pre_cancelled_playback_returns_an_exact_empty_receipt() {
+        let sink = DevWasapiAudioSink::new(DevWasapiConfig::default())
+            .expect("default dev sink config should validate");
+        let cancellation = CancellationToken::new();
+        cancellation.cancel();
+        let speech: SpeechStream = Box::pin(stream::empty());
+        let identity = TurnIdentity {
+            session_id: "test-session".into(),
+            turn_id: "test-turn".into(),
+            cancellation_generation: 1,
+        };
+
+        let receipt = sink
+            .play(&identity, 1, speech, cancellation)
+            .await
+            .expect("pre-cancellation should return a partial receipt");
+
+        assert_eq!(
+            receipt,
+            PlaybackReceipt {
+                audible_frames: 0,
+                duration: Duration::ZERO,
+                completed: false,
+            }
+        );
+    }
+}
