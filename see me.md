@@ -29,7 +29,7 @@ described as real spoken/lip-synced application E2E.
   `334000c fix(capture): own WGC texture before frame close`. The product
   broker now owns/copies a D3D texture before a WGC frame closes.
 - Created the fully isolated test root:
-  `C:\Users\akshi\AppData\Local\InteractiveNPCsTests\wav2lip-qualification-20260829T163112Z`
+  `C:\Users\akshi\Desktop\Code Palace\interactive llm\local-app-data\windows-local\InteractiveNPCsTests\wav2lip-qualification-20260829T163112Z`
   with a Python 3.10 venv, pinned dependencies, original synthetic face/video
   inputs, redacted provenance, hardening scripts, and GPU coordination wrappers.
 - Ran the official Wav2Lip path for real: CUDA detected the RTX 4080 and
@@ -49,7 +49,7 @@ described as real spoken/lip-synced application E2E.
 1. The real ONNX runs are now complete, CUDA-gated, and released the shared GPU
    file to `no` after each bounded interval. The accepted **offline** full
    exchange is:
-   `C:\Users\akshi\AppData\Local\InteractiveNPCsTests\wav2lip-qualification-20260829T163112Z\outputs\eclipse-harbor-full-exchange-offline.mp4`.
+   `C:\Users\akshi\Desktop\Code Palace\interactive llm\local-app-data\windows-local\InteractiveNPCsTests\wav2lip-qualification-20260829T163112Z\outputs\eclipse-harbor-full-exchange-offline.mp4`.
    It starts with an explicit typed player question, begins Mara's actual stock
    TTS at 2620 ms, and shows local ONNX mouth motion. It is visibly labeled
    original synthetic/offline/not-live-app-E2E.
@@ -109,7 +109,7 @@ The adversarial ledger for this continuation is
 - The 2.0 local Debug review build was previously packaged through its full
   no-skip gate from the clean local sanitized source and installed into the
   task-owned hands-on location:
-  `C:\Users\akshi\AppData\Local\InteractiveNPCsHandsOnTest\app`.
+  `C:\Users\akshi\Desktop\Code Palace\interactive llm\local-app-data\codex-localcache\InteractiveNPCsHandsOnTest\app`.
 - That previous strict package passed lint, tests, security/history scans,
   license/SBOM checks, installer smoke, authenticated shell-to-runtime/broker
   supervision, 20 profile validation, and a final installed runtime doctor.
