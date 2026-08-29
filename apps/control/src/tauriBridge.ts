@@ -40,6 +40,7 @@ export type NativeSimulationEvent =
       generation: number;
       sequence: number;
       fixtureFirstAudioMs: number | null;
+      runtimeFixtureOnly: boolean;
       deliveredText: string;
     }
   | {
@@ -50,7 +51,8 @@ export type NativeSimulationEvent =
       reason: string;
     };
 
-const hasTauri = () => "__TAURI_INTERNALS__" in window;
+const hasTauri = () =>
+  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 export type NativeConnectionState =
   | "cold"
@@ -63,9 +65,148 @@ export type NativeConnectionState =
   | "shuttingDown"
   | "stopped";
 
+export type NativeOnboardingStep =
+  | "welcome"
+  | "scan"
+  | "execution"
+  | "game"
+  | "providers"
+  | "microphone"
+  | "presence"
+  | "performance"
+  | "simulation"
+  | "ready";
+
+export interface NativePreferenceSnapshot {
+  execution: ExecutionMode;
+  performance:
+    | "competitive"
+    | "fast"
+    | "balanced"
+    | "immersive"
+    | "maximum"
+    | "custom";
+  subtitles: boolean;
+  ptt: boolean;
+  localOnly: boolean;
+  screenPresence: boolean;
+  diagnostics: boolean;
+}
+
+export interface OnboardingSnapshot {
+  schemaVersion: number;
+  completed: boolean;
+  currentStep: NativeOnboardingStep;
+  selectedGameId: string | null;
+  preferences: NativePreferenceSnapshot;
+  updatedAtEpochMs: number;
+}
+
+export interface OnboardingPersistence {
+  health: "healthy" | "firstRun" | "recoveredFromInvalidFile" | "unavailable";
+  detail: string;
+}
+
+export interface SaveOnboardingResult {
+  onboarding: OnboardingSnapshot;
+  persistence: OnboardingPersistence;
+}
+
+export interface NativeProviderCredentialSummary {
+  providerId: string;
+  displayName: string;
+  credentialReference: string | null;
+  status: "present" | "missing" | "notRequired" | "unavailable";
+  detail: string;
+}
+
+export interface NativeGameProfileSummary {
+  id: string;
+  displayName: string;
+  wave: string;
+  safety: "singlePlayerOnly" | "offlineOnly";
+  catalogState: "bundled" | "missingFromBundle";
+  defaultFallback: string;
+}
+
+export interface NativeModelSummary {
+  id: string;
+  displayName: string;
+  purpose: string;
+  execution: string;
+  lifecycle: string;
+  installation: "notInspected" | "userImportRequired" | "catalogOnly";
+  qualificationNote: string | null;
+}
+
+export interface NativeDiagnosticCheck {
+  id: string;
+  status: "passed" | "informational" | "warning";
+  title: string;
+  detail: string;
+  remediation: string | null;
+}
+
+export interface NativeDiagnosticSummary {
+  overall: "readyForSimulation" | "degraded";
+  generatedAtEpochMs: number;
+  measurements: {
+    state: string;
+    reason: string;
+    currentResultsAreReleaseEvidence: boolean;
+  };
+  checks: NativeDiagnosticCheck[];
+}
+
+export interface NativeSafetyBoundary {
+  singlePlayerOnly: boolean;
+  blocksOnlineModes: boolean;
+  blocksDetectedAntiCheat: boolean;
+  silentEgressChangesAllowed: boolean;
+  credentialValuesExposedToWebview: boolean;
+}
+
+export interface NativeDoctorReport {
+  schemaVersion: string;
+  status: string;
+  profileCount: number;
+  providerCount: number;
+  modelCount: number;
+  discoveredInstallationCount: number;
+  discoveryErrorCount: number;
+  vectorBackend: string;
+  hostedProviderContracts: string[];
+  modelManifestExample: string;
+  performanceMeasurementsCaptured: boolean;
+  powerProfileChanged: boolean;
+}
+
+export interface NativeRuntimeProfileSummary {
+  id: string;
+  displayName: string;
+}
+
+export interface NativeMediaBrokerDiagnostics {
+  state: string;
+  captureBackend: string;
+  overlayBackend: string;
+  captureAudio: string;
+  renderAudio: string;
+  targetState: string;
+  deviceGeneration: number;
+  audioDeviceGeneration: number;
+  cancellationGeneration: number;
+  framesReceived: number;
+  framesPresented: number;
+  framesDropped: number;
+  overlaysSuppressed: number;
+}
+
 export interface NativeBootstrapSnapshot {
   contractVersion: number;
   appVersion: string;
+  onboarding?: OnboardingSnapshot;
+  onboardingPersistence?: OnboardingPersistence;
   runtime: {
     state: NativeConnectionState;
     connected: boolean;
@@ -92,6 +233,11 @@ export interface NativeBootstrapSnapshot {
     renderAudioAvailable: boolean;
     detail: string;
   };
+  providers?: NativeProviderCredentialSummary[];
+  gameProfiles?: NativeGameProfileSummary[];
+  models?: NativeModelSummary[];
+  diagnostics?: NativeDiagnosticSummary;
+  safety?: NativeSafetyBoundary;
   capabilities?: Record<string, boolean>;
 }
 
@@ -191,12 +337,22 @@ export function normalizeNativeSimulationEvent(
     case "completed": {
       const deliveredText = field(record, "deliveredText", "delivered_text");
       if (typeof deliveredText !== "string") return null;
+      const runtimeFixtureOnly = field(
+        record,
+        "runtimeFixtureOnly",
+        "runtime_fixture_only",
+      );
       return {
         type: "completed",
         ...identity,
         fixtureFirstAudioMs: finiteNumber(
           field(record, "fixtureFirstAudioMs", "fixture_first_audio_ms"),
         ),
+        // Legacy runtimes omitted this field. Defaulting to fixture-only is the
+        // conservative compatibility behavior: absence must never imply that
+        // live audio was delivered.
+        runtimeFixtureOnly:
+          typeof runtimeFixtureOnly === "boolean" ? runtimeFixtureOnly : true,
         deliveredText,
       };
     }
@@ -320,6 +476,45 @@ export async function loadNativeBootstrapHealth(
   };
 }
 
+/** Persists onboarding in the native app-data store. Browser previews do not write. */
+export async function saveOnboarding(
+  onboarding: OnboardingSnapshot,
+): Promise<SaveOnboardingResult | null> {
+  if (!hasTauri()) return null;
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<SaveOnboardingResult>("save_onboarding", { onboarding });
+}
+
+/** Runs the authenticated runtime's bounded doctor report when native. */
+export async function readRuntimeDoctor(): Promise<NativeDoctorReport | null> {
+  if (!hasTauri()) return null;
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<NativeDoctorReport>("runtime_doctor");
+}
+
+/** Reads the runtime-owned profile catalog; browser previews have no profiles. */
+export async function readRuntimeProfileSummaries(): Promise<
+  NativeRuntimeProfileSummary[]
+> {
+  if (!hasTauri()) return [];
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<NativeRuntimeProfileSummary[]>("runtime_profile_summaries");
+}
+
+/** Reads live broker counters when the authenticated native broker is available. */
+export async function readMediaBrokerDiagnostics(): Promise<NativeMediaBrokerDiagnostics | null> {
+  if (!hasTauri()) return null;
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<NativeMediaBrokerDiagnostics>("media_broker_diagnostics");
+}
+
+/** Rebuilds the control-plane diagnostic summary from current native state. */
+export async function readDiagnosticSummary(): Promise<NativeDiagnosticSummary | null> {
+  if (!hasTauri()) return null;
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<NativeDiagnosticSummary>("diagnostic_summary");
+}
+
 export type SyntheticReplayCaptureAvailability =
   | {
       available: true;
@@ -330,21 +525,7 @@ export type SyntheticReplayCaptureAvailability =
       reason: "browserPreview" | "releaseBuild";
     };
 
-export interface SyntheticReplayCaptureDiagnostics {
-  state: string;
-  captureBackend: string;
-  overlayBackend: string;
-  captureAudio: string;
-  renderAudio: string;
-  targetState: string;
-  deviceGeneration: number;
-  audioDeviceGeneration: number;
-  cancellationGeneration: number;
-  framesReceived: number;
-  framesPresented: number;
-  framesDropped: number;
-  overlaysSuppressed: number;
-}
+export type SyntheticReplayCaptureDiagnostics = NativeMediaBrokerDiagnostics;
 
 export interface SyntheticReplayCaptureResult {
   targetProcessId: number;
@@ -397,9 +578,25 @@ export async function clearSyntheticReplayCaptureTarget(): Promise<SyntheticRepl
   );
 }
 
+export interface DevLiveTtsSelection {
+  providerId: string;
+  modelId: string;
+  voiceId: string;
+  explicitUserAuthorization: true;
+}
+
+export interface StartNativeSimulationOptions {
+  gameProfileId?: string;
+  characterName?: string;
+  characterId?: string;
+  transcript?: string;
+  devLiveTts?: DevLiveTtsSelection;
+}
+
 export async function startNativeSimulation(
   execution: ExecutionMode,
   onEvent: (event: NativeSimulationEvent) => void,
+  options?: StartNativeSimulationOptions,
 ): Promise<boolean> {
   if (!hasTauri()) return false;
   const [{ invoke, Channel }] = await Promise.all([
@@ -413,10 +610,17 @@ export async function startNativeSimulation(
   };
   await invoke("start_simulation", {
     request: {
-      gameProfileId: "eclipse-harbor",
-      characterName: "Mara Venn",
-      transcript: "Did you ever make it to the old lighthouse?",
+      gameProfileId: options?.gameProfileId ?? "eclipse-harbor",
+      characterName: options?.characterName ?? "Mara Venn",
+      ...(options?.characterId === undefined
+        ? {}
+        : { characterId: options.characterId }),
+      transcript:
+        options?.transcript ?? "Did you ever make it to the old lighthouse?",
       executionMode: execution,
+      ...(options?.devLiveTts === undefined
+        ? {}
+        : { devLiveTts: options.devLiveTts }),
     },
     events,
   });

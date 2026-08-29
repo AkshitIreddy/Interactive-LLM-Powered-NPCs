@@ -30,6 +30,7 @@ describe("simulation evidence", () => {
       generation: 4,
       sequence: 5,
       fixtureFirstAudioMs: 811,
+      runtimeFixtureOnly: true,
       deliveredText: "The harbor light is still burning. Follow the seawall.",
     });
 
@@ -58,6 +59,7 @@ describe("simulation evidence", () => {
       generation: 2,
       sequence: 8,
       fixtureFirstAudioMs: 920,
+      runtimeFixtureOnly: true,
       deliveredText: "Delivered once.",
     });
     const stale = applyNativeSimulationEvent(delivered, {

@@ -1,135 +1,71 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { App } from "./App";
 
-describe("Response Console", () => {
-  it("renders the ready command deck and all primary destinations", () => {
+describe("NPC 2.0 product console", () => {
+  beforeEach(() => window.history.replaceState(null, "", "/"));
+
+  it("renders the compact session deck and five owned destinations", async () => {
     render(<App />);
     expect(
-      screen.getByRole("heading", { name: /your worlds are authored/i }),
+      screen.getByRole("heading", { name: "Mara Venn" }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("complementary", { name: "Primary" }),
-    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Session signal rail")).toHaveTextContent(
+      "Eclipse Harbor",
+    );
     for (const label of [
-      "Home",
-      "Games",
-      "Characters",
-      "Conversation",
-      "Presence",
-      "Performance",
-      "Models",
-      "Diagnostics",
-      "Settings",
-      "Help",
+      "01 Session deck",
+      "02 World",
+      "03 Voice & models",
+      "04 Diagnostics",
+      "05 Settings & guide",
     ]) {
-      expect(
-        screen.getByRole("button", { name: new RegExp(`^${label}`) }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
+    expect(await screen.findByText(/Browser preview/i)).toBeInTheDocument();
   });
 
-  it("navigates to the profile library without a reload", async () => {
+  it("maps a saved legacy Characters route to World", () => {
+    window.history.replaceState(null, "", "/?page=characters");
+    render(<App />);
+    expect(screen.getByRole("heading", { name: "World" })).toBeInTheDocument();
+    expect(
+      screen.getByText(/explicit selection in the Eclipse Harbor profile/i),
+    ).toBeInTheDocument();
+  });
+
+  it("navigates without a reload and updates the owned route", async () => {
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: /^Games/ }));
+    await user.click(screen.getByRole("button", { name: /Voice & models/i }));
     expect(
-      screen.getByRole("heading", { name: "Choose a world." }),
+      screen.getByRole("heading", { name: "Voice & models" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Skyrim Special Edition")).toBeInTheDocument();
-    expect(window.location.search).toContain("page=games");
+    expect(window.location.search).toBe("?page=voice");
   });
 
-  it("supports deep-linked page, degraded, contrast, and reduced-motion states", () => {
-    window.history.replaceState(
-      null,
-      "",
-      "/?page=presence&state=degraded&contrast=high&motion=reduce",
-    );
+  it("renders the four-step setup flow on explicit preview", () => {
+    window.history.replaceState(null, "", "/?onboarding=1");
     render(<App />);
     expect(
-      screen.getByRole("heading", { name: "Seen only when useful." }),
+      screen.getByRole("dialog", { name: "Prove the native boundary" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "Simulated audio-and-subtitle fallback",
-    );
-    expect(document.documentElement.dataset.contrast).toBe("high");
-    expect(document.documentElement).toHaveClass("force-reduced-motion");
-  });
-
-  it("supports deterministic optical-light and large-text acceptance routes", () => {
-    window.history.replaceState(null, "", "/?theme=light&largeText=1");
-    render(<App />);
-    expect(document.documentElement.dataset.theme).toBe("light");
-    expect(document.documentElement.dataset.largeText).toBe("true");
-  });
-
-  it("renders the requested onboarding step and preserves privacy language", () => {
-    window.history.replaceState(null, "", "/?onboarding=1&step=2");
-    render(<App />);
-    const onboarding = screen.getByTestId("onboarding");
+    expect(screen.getByText("Step 1 of 4")).toBeInTheDocument();
     expect(
-      within(onboarding).getByRole("heading", {
-        name: "Where should conversations happen?",
-      }),
+      screen.getByText(/Open the native desktop shell for a real check/i),
     ).toBeInTheDocument();
-    expect(
-      within(onboarding).getByText("Cloud use is never automatic"),
-    ).toBeInTheDocument();
-    expect(
-      within(onboarding).getByRole("button", { name: /API first/ }),
-    ).toHaveAttribute("aria-pressed", "true");
-    expect(
-      within(onboarding).getByRole("button", { name: /Hybrid/ }),
-    ).toBeDisabled();
-    expect(
-      within(onboarding).getByRole("button", { name: /Fully local/ }),
-    ).toBeDisabled();
   });
 
-  it("keeps local conversation packs unavailable in API-first setup", () => {
-    window.history.replaceState(null, "", "/?onboarding=1&step=2");
-    render(<App />);
-    expect(screen.getAllByText("No selectable local pack")).toHaveLength(2);
-    expect(document.body).not.toHaveTextContent(
-      "Depends on selected local packs",
-    );
-    expect(document.body).not.toHaveTextContent("6.2 GB local storage");
-    expect(document.body).not.toHaveTextContent("4.8 GB local storage");
-  });
-
-  it("opens command search with Ctrl+K and navigates to a result", async () => {
+  it("does not claim a browser fixture was delivered", async () => {
     const user = userEvent.setup();
     render(<App />);
-    await user.keyboard("{Control>}k{/Control}");
-    const dialog = screen.getByRole("dialog", { name: "Find anything" });
-    await user.type(
-      within(dialog).getByPlaceholderText(/go to a page/i),
-      "diagnostics",
-    );
-    await user.click(
-      within(dialog).getByRole("button", { name: /Open Diagnostics/ }),
+    await user.click(screen.getByRole("button", { name: /Run spoken turn/i }));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      /Native desktop runtime is required/i,
     );
     expect(
-      screen.getByRole("heading", { name: "Illustrative diagnostic fixture." }),
+      screen.getByText("No delivered turn in this session"),
     ).toBeInTheDocument();
-  });
-
-  it("runs the deterministic Response Spine sequence and stops cleanly", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    render(<App />);
-    await user.click(
-      screen.getByRole("button", { name: "Run a private simulation" }),
-    );
-    expect(screen.getByLabelText("Response pipeline")).toHaveClass("is-live");
-    expect(screen.getByText("Simulation fixture active")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "End simulation" }));
-    expect(screen.getByLabelText("Response pipeline")).not.toHaveClass(
-      "is-live",
-    );
-    expect(screen.getByRole("status")).toHaveTextContent(/simulation ended/i);
-    vi.useRealTimers();
   });
 });

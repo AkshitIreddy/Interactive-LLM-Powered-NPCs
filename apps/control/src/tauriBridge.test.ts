@@ -1,10 +1,40 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   loadNativeBootstrapHealth,
   normalizeNativeSimulationEvent,
+  readDiagnosticSummary,
+  readMediaBrokerDiagnostics,
+  readRuntimeDoctor,
+  readRuntimeProfileSummaries,
+  saveOnboarding,
+  startNativeSimulation,
   syntheticReplayCaptureAvailability,
   type NativeBootstrapSnapshot,
+  type OnboardingSnapshot,
 } from "./tauriBridge";
+
+const tauriMocks = vi.hoisted(() => ({
+  invoke: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: tauriMocks.invoke,
+  Channel: class {
+    onmessage?: (message: unknown) => void;
+  },
+}));
+
+const enableTauri = () =>
+  Object.defineProperty(window, "__TAURI_INTERNALS__", {
+    configurable: true,
+    value: {},
+  });
+
+afterEach(() => {
+  tauriMocks.invoke.mockReset();
+  delete (window as Window & { __TAURI_INTERNALS__?: unknown })
+    .__TAURI_INTERNALS__;
+});
 
 const snapshot = (
   runtimeConnected: boolean,
@@ -58,6 +88,7 @@ describe("Tauri bridge normalization", () => {
       generation: 3,
       sequence: 9,
       fixtureFirstAudioMs: 1310,
+      runtimeFixtureOnly: true,
       deliveredText: "Native runtime reply.",
     });
   });
@@ -72,8 +103,27 @@ describe("Tauri bridge normalization", () => {
     });
 
     expect(event?.type).toBe("completed");
-    if (event?.type === "completed")
+    if (event?.type === "completed") {
       expect(event.fixtureFirstAudioMs).toBeNull();
+      expect(event.runtimeFixtureOnly).toBe(true);
+    }
+  });
+
+  it("preserves explicit live-audio evidence on current completion events", () => {
+    expect(
+      normalizeNativeSimulationEvent({
+        type: "completed",
+        simulationId: "native-live-14",
+        generation: 4,
+        sequence: 12,
+        fixtureFirstAudioMs: 287,
+        runtimeFixtureOnly: false,
+        deliveredText: "Live audio reached the device.",
+      }),
+    ).toMatchObject({
+      type: "completed",
+      runtimeFixtureOnly: false,
+    });
   });
 
   it("retries a startup snapshot and returns authenticated connections", async () => {
@@ -161,10 +211,7 @@ describe("Tauri bridge normalization", () => {
   });
 
   it("exposes the exact capture command only with native debug capability", () => {
-    Object.defineProperty(window, "__TAURI_INTERNALS__", {
-      configurable: true,
-      value: {},
-    });
+    enableTauri();
     expect(syntheticReplayCaptureAvailability(false)).toEqual({
       available: false,
       reason: "releaseBuild",
@@ -173,7 +220,122 @@ describe("Tauri bridge normalization", () => {
       available: true,
       commandName: "debug_select_synthetic_replay_capture_target",
     });
-    delete (window as Window & { __TAURI_INTERNALS__?: unknown })
-      .__TAURI_INTERNALS__;
+  });
+});
+
+describe("Tauri command bridge", () => {
+  const onboarding: OnboardingSnapshot = {
+    schemaVersion: 1,
+    completed: false,
+    currentStep: "game",
+    selectedGameId: "eclipse-harbor",
+    preferences: {
+      execution: "hybrid",
+      performance: "balanced",
+      subtitles: true,
+      ptt: true,
+      localOnly: false,
+      screenPresence: false,
+      diagnostics: true,
+    },
+    updatedAtEpochMs: 0,
+  };
+
+  it("keeps native-only setup and diagnostics calls inert in browser preview", async () => {
+    await expect(saveOnboarding(onboarding)).resolves.toBeNull();
+    await expect(readRuntimeDoctor()).resolves.toBeNull();
+    await expect(readRuntimeProfileSummaries()).resolves.toEqual([]);
+    await expect(readMediaBrokerDiagnostics()).resolves.toBeNull();
+    await expect(readDiagnosticSummary()).resolves.toBeNull();
+    expect(tauriMocks.invoke).not.toHaveBeenCalled();
+  });
+
+  it("passes onboarding through the narrow native persistence command", async () => {
+    enableTauri();
+    const saved = {
+      onboarding: { ...onboarding, updatedAtEpochMs: 42 },
+      persistence: { health: "healthy" as const, detail: "Saved." },
+    };
+    tauriMocks.invoke.mockResolvedValueOnce(saved);
+
+    await expect(saveOnboarding(onboarding)).resolves.toEqual(saved);
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("save_onboarding", {
+      onboarding,
+    });
+  });
+
+  it("invokes each current native evidence command without invented arguments", async () => {
+    enableTauri();
+    tauriMocks.invoke
+      .mockResolvedValueOnce({ status: "ready" })
+      .mockResolvedValueOnce([
+        { id: "eclipse-harbor", displayName: "Eclipse Harbor" },
+      ])
+      .mockResolvedValueOnce({ state: "ready" })
+      .mockResolvedValueOnce({ overall: "readyForSimulation" });
+
+    await readRuntimeDoctor();
+    await readRuntimeProfileSummaries();
+    await readMediaBrokerDiagnostics();
+    await readDiagnosticSummary();
+
+    expect(tauriMocks.invoke.mock.calls.map(([command]) => command)).toEqual([
+      "runtime_doctor",
+      "runtime_profile_summaries",
+      "media_broker_diagnostics",
+      "diagnostic_summary",
+    ]);
+  });
+
+  it("preserves simulation defaults when no selection is supplied", async () => {
+    enableTauri();
+    tauriMocks.invoke.mockResolvedValueOnce({});
+
+    await expect(startNativeSimulation("hybrid", vi.fn())).resolves.toBe(true);
+
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("start_simulation", {
+      request: {
+        gameProfileId: "eclipse-harbor",
+        characterName: "Mara Venn",
+        transcript: "Did you ever make it to the old lighthouse?",
+        executionMode: "hybrid",
+      },
+      events: expect.anything(),
+    });
+  });
+
+  it("passes selected identity, transcript, and explicitly authorized live TTS", async () => {
+    enableTauri();
+    tauriMocks.invoke.mockResolvedValueOnce({});
+
+    await startNativeSimulation("cloud", vi.fn(), {
+      gameProfileId: "synthetic-replay",
+      characterName: "Mara Venn",
+      characterId: "mara-venn",
+      transcript: "Can you hear this live route?",
+      devLiveTts: {
+        providerId: "elevenlabs",
+        modelId: "eleven_flash_v2_5",
+        voiceId: "EXAVITQu4vr4xnSDxMaL",
+        explicitUserAuthorization: true,
+      },
+    });
+
+    expect(tauriMocks.invoke).toHaveBeenCalledWith("start_simulation", {
+      request: {
+        gameProfileId: "synthetic-replay",
+        characterName: "Mara Venn",
+        characterId: "mara-venn",
+        transcript: "Can you hear this live route?",
+        executionMode: "cloud",
+        devLiveTts: {
+          providerId: "elevenlabs",
+          modelId: "eleven_flash_v2_5",
+          voiceId: "EXAVITQu4vr4xnSDxMaL",
+          explicitUserAuthorization: true,
+        },
+      },
+      events: expect.anything(),
+    });
   });
 });

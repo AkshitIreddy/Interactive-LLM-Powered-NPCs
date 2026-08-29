@@ -8,6 +8,10 @@ const bridge = vi.hoisted(() => ({
   start: vi.fn(),
   cancel: vi.fn(),
   loadBootstrap: vi.fn(),
+  saveOnboarding: vi.fn(),
+  doctor: vi.fn(),
+  broker: vi.fn(),
+  diagnostics: vi.fn(),
 }));
 
 vi.mock("./tauriBridge", () => ({
@@ -15,23 +19,42 @@ vi.mock("./tauriBridge", () => ({
   startNativeSimulation: bridge.start,
   cancelNativeSimulation: bridge.cancel,
   loadNativeBootstrapHealth: bridge.loadBootstrap,
+  saveOnboarding: bridge.saveOnboarding,
+  readRuntimeDoctor: bridge.doctor,
+  readMediaBrokerDiagnostics: bridge.broker,
+  readDiagnosticSummary: bridge.diagnostics,
   syntheticReplayCaptureAvailability: () => ({
-    available: false,
-    reason: "releaseBuild",
+    available: true,
+    commandName: "debug_select",
   }),
   runSyntheticReplayCapture: vi.fn(),
-  readSyntheticReplayCaptureDiagnostics: vi.fn(),
-  clearSyntheticReplayCaptureTarget: vi.fn(),
 }));
 
 import { App } from "./App";
 
+const preferences = {
+  execution: "cloud" as const,
+  performance: "balanced" as const,
+  subtitles: true,
+  ptt: true,
+  localOnly: false,
+  screenPresence: false,
+  diagnostics: true,
+};
 const authenticatedBootstrap = {
   kind: "snapshot" as const,
   attempts: 2,
   snapshot: {
     contractVersion: 1,
     appVersion: "2.0.0-test",
+    onboarding: {
+      schemaVersion: 1,
+      completed: true,
+      currentStep: "ready" as const,
+      selectedGameId: "eclipse-harbor",
+      preferences,
+      updatedAtEpochMs: 1,
+    },
     runtime: {
       state: "ready" as const,
       connected: true,
@@ -58,154 +81,137 @@ const authenticatedBootstrap = {
       renderAudioAvailable: true,
       detail: "Authenticated broker ready.",
     },
+    providers: [
+      {
+        providerId: "elevenlabs",
+        displayName: "ElevenLabs",
+        credentialReference: "vault-ref",
+        status: "present" as const,
+        detail: "Credential reference present.",
+      },
+    ],
     capabilities: { debugSyntheticReplayCapture: true },
   },
 };
 
-describe("native simulation evidence in the control UI", () => {
+describe("native evidence in the product console", () => {
   beforeEach(() => {
+    window.history.replaceState(null, "", "/");
     bridge.callback = null;
     bridge.cancel.mockReset().mockResolvedValue(true);
     bridge.loadBootstrap.mockReset().mockResolvedValue(authenticatedBootstrap);
+    bridge.saveOnboarding.mockReset().mockResolvedValue(null);
+    bridge.doctor.mockReset().mockResolvedValue({
+      status: "ready",
+      profileCount: 1,
+      providerCount: 1,
+      modelCount: 0,
+    });
+    bridge.broker.mockReset().mockResolvedValue({
+      framesReceived: 42,
+      framesDropped: 0,
+      deviceGeneration: 3,
+    });
+    bridge.diagnostics.mockReset().mockResolvedValue({
+      overall: "readyForSimulation",
+      generatedAtEpochMs: 1,
+      measurements: {
+        state: "unmeasured",
+        reason: "Controlled benchmark only",
+        currentResultsAreReleaseEvidence: false,
+      },
+      checks: [],
+    });
     bridge.start.mockReset().mockImplementation(async (_execution, onEvent) => {
       bridge.callback = onEvent;
       onEvent({
         type: "started",
-        simulationId: "native-ui-1",
+        simulationId: "native-1",
         generation: 7,
         sequence: 1,
-        measurementBasis: "trustedRuntimeFixture",
+        measurementBasis: "controlledBenchmark",
       });
       onEvent({
         type: "sentenceReady",
-        simulationId: "native-ui-1",
+        simulationId: "native-1",
         generation: 7,
         sequence: 5,
-        text: "The runtime returned this sentence-ready clause.",
+        text: "The runtime returned a sentence-ready clause.",
       });
       return true;
     });
   });
 
-  it("shows authenticated bootstrap health and native sentence text on Home", async () => {
-    const user = userEvent.setup();
+  it("shows authenticated health and explicit live-call authorization", async () => {
     render(<App />);
-
     expect(
       await screen.findByText("Runtime and media broker authenticated"),
     ).toBeInTheDocument();
     expect(
-      screen.getByTestId("synthetic-replay-capture-control"),
-    ).toBeInTheDocument();
-    await user.click(
-      screen.getByRole("button", { name: "Run a private simulation" }),
-    );
-
-    expect(screen.getByLabelText("Response pipeline")).toHaveTextContent(
-      "NATIVE RUNTIME TURN · FIXTURE INPUT",
-    );
-    expect(
-      screen.getAllByText("The runtime returned this sentence-ready clause."),
-    ).not.toHaveLength(0);
-    expect(document.body).toHaveTextContent("NATIVE RUNTIME · SENTENCE READY");
-    expect(document.body).not.toHaveTextContent("virtual first audio NaN");
+      screen.getByRole("checkbox", {
+        name: /Authorize one live stock-voice call/i,
+      }),
+    ).toBeEnabled();
   });
 
-  it("carries delivered native text into Conversation without relabeling it as browser fixture", async () => {
-    const user = userEvent.setup();
-    render(<App />);
-    await user.click(
-      screen.getByRole("button", { name: "Run a private simulation" }),
-    );
-    act(() => {
-      bridge.callback?.({
-        type: "completed",
-        simulationId: "native-ui-1",
-        generation: 7,
-        sequence: 8,
-        fixtureFirstAudioMs: null,
-        deliveredText: "Delivered by the native runtime event channel.",
-      });
-    });
-    await user.click(screen.getByRole("button", { name: /^Conversation/ }));
-
-    expect(
-      screen.getByText("Delivered by the native runtime event channel."),
-    ).toBeInTheDocument();
-    expect(screen.getAllByText("NATIVE RUNTIME · DELIVERED")).not.toHaveLength(
-      0,
-    );
-    expect(
-      screen.getByText(
-        "Dialogue below is sourced from the desktop runtime event channel.",
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByText("No audio timing event yet")).toBeInTheDocument();
-  });
-
-  it("keeps a completed native fixture turn visible until the next turn is cancelled", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    render(<App />);
-    await user.click(
-      screen.getByRole("button", { name: "Run a private simulation" }),
-    );
-
-    act(() => {
-      bridge.callback?.({
-        type: "completed",
-        simulationId: "native-ui-1",
-        generation: 7,
-        sequence: 8,
-        fixtureFirstAudioMs: null,
-        deliveredText: "Delivered fixture text remains visible on Home.",
-      });
-      vi.advanceTimersByTime(901);
-    });
-
-    const pipeline = screen.getByLabelText("Response pipeline");
-    expect(pipeline).not.toHaveClass("is-live");
-    expect(pipeline).toHaveTextContent(
-      "NATIVE RUNTIME TURN · DELIVERED FIXTURE",
-    );
-    expect(pipeline).toHaveTextContent("Delivered · 7/7");
-    expect(pipeline).not.toHaveTextContent("NO RUNTIME TURN");
-    expect(
-      screen.getAllByText("Delivered fixture text remains visible on Home."),
-    ).not.toHaveLength(0);
-    expect(
-      screen.getByRole("button", { name: "Run a private simulation" }),
-    ).toBeInTheDocument();
-
-    await user.click(
-      screen.getByRole("button", { name: "Run a private simulation" }),
-    );
-    expect(pipeline).toHaveTextContent("NATIVE RUNTIME TURN · FIXTURE INPUT");
-    expect(pipeline).not.toHaveTextContent(
-      "NATIVE RUNTIME TURN · DELIVERED FIXTURE",
-    );
-    expect(document.body).not.toHaveTextContent(
-      "Delivered fixture text remains visible on Home.",
-    );
-
-    await user.click(screen.getByRole("button", { name: "End simulation" }));
-    expect(pipeline).toHaveTextContent("RESPONSE SPINE · NO LIVE TURN");
-    expect(pipeline).not.toHaveTextContent("DELIVERED FIXTURE");
-    vi.useRealTimers();
-  });
-
-  it("shows native runtime and broker rows in Diagnostics", async () => {
+  it("commits completed fixture text without calling it spoken audio", async () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
-    await user.click(screen.getByRole("button", { name: /^Diagnostics/ }));
-
+    await user.click(screen.getByRole("button", { name: /Run spoken turn/i }));
+    act(() =>
+      bridge.callback?.({
+        type: "completed",
+        simulationId: "native-1",
+        generation: 7,
+        sequence: 8,
+        fixtureFirstAudioMs: null,
+        runtimeFixtureOnly: true,
+        deliveredText: "Delivered by the runtime fixture.",
+      }),
+    );
     expect(
-      screen.getByRole("heading", { name: "Desktop runtime health." }),
+      screen.getByText("Delivered by the runtime fixture."),
     ).toBeInTheDocument();
-    expect(screen.getByText("NATIVE PROCESS HEALTH")).toBeInTheDocument();
     expect(
-      screen.getAllByText(/Authenticated · ready · protocol 1/),
-    ).toHaveLength(2);
+      screen.getByText(/no audible delivery claimed/i),
+    ).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(
+      "Live provider audio delivered",
+    );
+  });
+
+  it("passes the bounded live route only after explicit authorization", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const authorization = await screen.findByRole("checkbox", {
+      name: /Authorize one live stock-voice call/i,
+    });
+    await user.click(authorization);
+    await user.click(screen.getByRole("button", { name: /Run spoken turn/i }));
+    expect(bridge.start).toHaveBeenCalledWith(
+      "cloud",
+      expect.any(Function),
+      expect.objectContaining({
+        devLiveTts: expect.objectContaining({
+          providerId: "elevenlabs",
+          explicitUserAuthorization: true,
+        }),
+      }),
+    );
+  });
+
+  it("refreshes native diagnostic commands instead of fixtures", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByText("Runtime and media broker authenticated");
+    await user.click(screen.getByRole("button", { name: /Diagnostics/i }));
+    await user.click(
+      screen.getByRole("button", { name: "Refresh native checks" }),
+    );
+    expect(await screen.findByText("42")).toBeInTheDocument();
+    expect(bridge.doctor).toHaveBeenCalledOnce();
+    expect(bridge.broker).toHaveBeenCalledOnce();
+    expect(bridge.diagnostics).toHaveBeenCalledOnce();
   });
 });
