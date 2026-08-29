@@ -39,7 +39,7 @@ export type NativeSimulationEvent =
       simulationId: string;
       generation: number;
       sequence: number;
-      fixtureFirstAudioMs: number;
+      fixtureFirstAudioMs: number | null;
       deliveredText: string;
     }
   | {
@@ -52,6 +52,300 @@ export type NativeSimulationEvent =
 
 const hasTauri = () => "__TAURI_INTERNALS__" in window;
 
+export type NativeConnectionState =
+  | "cold"
+  | "starting"
+  | "ready"
+  | "restartBackoff"
+  | "quarantined"
+  | "developmentFixture"
+  | "unavailable"
+  | "shuttingDown"
+  | "stopped";
+
+export interface NativeBootstrapSnapshot {
+  contractVersion: number;
+  appVersion: string;
+  runtime: {
+    state: NativeConnectionState;
+    connected: boolean;
+    backend: "deterministicFixture" | "nativeRuntime";
+    processId: number | null;
+    restartCount: number;
+    recentFailureCount: number;
+    protocolVersion: string | null;
+    fixtureOnly: boolean;
+    detail: string;
+  };
+  mediaBroker: {
+    state: NativeConnectionState;
+    connected: boolean;
+    processId: number | null;
+    restartCount: number;
+    recentFailureCount: number;
+    protocolVersion: number | null;
+    fixtureOnly: boolean;
+    brokerState: string | null;
+    captureAvailable: boolean;
+    overlayAvailable: boolean;
+    captureAudioAvailable: boolean;
+    renderAudioAvailable: boolean;
+    detail: string;
+  };
+  capabilities?: Record<string, boolean>;
+}
+
+export type NativeBootstrapHealth =
+  | { kind: "loading"; attempts: 0 }
+  | { kind: "browserPreview"; attempts: 0 }
+  | {
+      kind: "snapshot";
+      attempts: number;
+      snapshot: NativeBootstrapSnapshot;
+    }
+  | { kind: "unavailable"; attempts: number; detail: string };
+
+export const LOADING_NATIVE_BOOTSTRAP: NativeBootstrapHealth = {
+  kind: "loading",
+  attempts: 0,
+};
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : null;
+
+const field = (
+  record: Record<string, unknown>,
+  camelCase: string,
+  snakeCase: string,
+) => record[camelCase] ?? record[snakeCase];
+
+const finiteNumber = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : null;
+
+/** Normalizes both current snake-case enum fields and future camel-case wire fields. */
+export function normalizeNativeSimulationEvent(
+  value: unknown,
+): NativeSimulationEvent | null {
+  const record = asRecord(value);
+  if (!record || typeof record.type !== "string") return null;
+  const simulationId = field(record, "simulationId", "simulation_id");
+  const generation = finiteNumber(record.generation);
+  const sequence = finiteNumber(record.sequence);
+  if (
+    typeof simulationId !== "string" ||
+    generation === null ||
+    sequence === null
+  )
+    return null;
+  const identity = { simulationId, generation, sequence };
+
+  switch (record.type) {
+    case "started": {
+      const measurementBasis = field(
+        record,
+        "measurementBasis",
+        "measurement_basis",
+      );
+      if (
+        measurementBasis !== "deterministicFixture" &&
+        measurementBasis !== "trustedRuntimeFixture" &&
+        measurementBasis !== "controlledBenchmark"
+      )
+        return null;
+      return { type: "started", ...identity, measurementBasis };
+    }
+    case "stageStarted": {
+      const stage = record.stage as StageId;
+      const estimatedDurationMs = finiteNumber(
+        field(record, "estimatedDurationMs", "estimated_duration_ms"),
+      );
+      if (!isStageId(stage) || estimatedDurationMs === null) return null;
+      return {
+        type: "stageStarted",
+        ...identity,
+        stage,
+        estimatedDurationMs,
+      };
+    }
+    case "stageCompleted": {
+      const stage = record.stage as StageId;
+      const fixtureElapsedMs = finiteNumber(
+        field(record, "fixtureElapsedMs", "fixture_elapsed_ms"),
+      );
+      if (!isStageId(stage) || fixtureElapsedMs === null) return null;
+      return {
+        type: "stageCompleted",
+        ...identity,
+        stage,
+        fixtureElapsedMs,
+      };
+    }
+    case "sentenceReady":
+      return typeof record.text === "string"
+        ? { type: "sentenceReady", ...identity, text: record.text }
+        : null;
+    case "completed": {
+      const deliveredText = field(record, "deliveredText", "delivered_text");
+      if (typeof deliveredText !== "string") return null;
+      return {
+        type: "completed",
+        ...identity,
+        fixtureFirstAudioMs: finiteNumber(
+          field(record, "fixtureFirstAudioMs", "fixture_first_audio_ms"),
+        ),
+        deliveredText,
+      };
+    }
+    case "cancelled":
+      return typeof record.reason === "string"
+        ? { type: "cancelled", ...identity, reason: record.reason }
+        : null;
+    default:
+      return null;
+  }
+}
+
+const isStageId = (value: string): value is StageId =>
+  [
+    "listening",
+    "transcribing",
+    "identifying",
+    "remembering",
+    "responding",
+    "voicing",
+    "animating",
+  ].includes(value);
+
+const sleep = (durationMs: number) =>
+  new Promise<void>((resolve) => window.setTimeout(resolve, durationMs));
+
+export async function loadNativeBootstrapHealth(
+  options: {
+    maxAttempts?: number;
+    initialDelayMs?: number;
+    sleep?: (durationMs: number) => Promise<void>;
+  } = {},
+  invokeBootstrap?: () => Promise<NativeBootstrapSnapshot>,
+): Promise<NativeBootstrapHealth> {
+  if (!invokeBootstrap && !hasTauri())
+    return { kind: "browserPreview", attempts: 0 };
+
+  const maxAttempts = Math.max(1, options.maxAttempts ?? 5);
+  const initialDelayMs = Math.max(0, options.initialDelayMs ?? 120);
+  const wait = options.sleep ?? sleep;
+  const invokeSnapshot =
+    invokeBootstrap ??
+    (async () => {
+      const { invoke } = await import("@tauri-apps/api/core");
+      return invoke<NativeBootstrapSnapshot>("bootstrap_snapshot");
+    });
+  let lastSnapshot: NativeBootstrapSnapshot | null = null;
+  let lastError = "Native bootstrap did not return a snapshot.";
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const snapshot = await invokeSnapshot();
+      lastSnapshot = snapshot;
+      if (snapshot.runtime.connected && snapshot.mediaBroker.connected)
+        return { kind: "snapshot", attempts: attempt, snapshot };
+      lastError = [snapshot.runtime.detail, snapshot.mediaBroker.detail]
+        .filter(Boolean)
+        .join(" ");
+    } catch (error) {
+      lastError =
+        error instanceof Error ? error.message : "Unknown bootstrap failure";
+    }
+
+    if (attempt < maxAttempts)
+      await wait(Math.min(initialDelayMs * 2 ** (attempt - 1), 1_000));
+  }
+
+  if (lastSnapshot)
+    return { kind: "snapshot", attempts: maxAttempts, snapshot: lastSnapshot };
+  return { kind: "unavailable", attempts: maxAttempts, detail: lastError };
+}
+
+export type SyntheticReplayCaptureAvailability =
+  | {
+      available: true;
+      commandName: string;
+    }
+  | {
+      available: false;
+      reason: "browserPreview" | "releaseBuild";
+    };
+
+export interface SyntheticReplayCaptureDiagnostics {
+  state: string;
+  captureBackend: string;
+  overlayBackend: string;
+  captureAudio: string;
+  renderAudio: string;
+  targetState: string;
+  deviceGeneration: number;
+  audioDeviceGeneration: number;
+  cancellationGeneration: number;
+  framesReceived: number;
+  framesPresented: number;
+  framesDropped: number;
+  overlaysSuppressed: number;
+}
+
+export interface SyntheticReplayCaptureResult {
+  targetProcessId: number;
+  targetWindowHandle: number;
+  targetExecutableBasename: string;
+  diagnostics: SyntheticReplayCaptureDiagnostics;
+}
+
+/**
+ * The bootstrap capability comes from Rust's `cfg(debug_assertions)` build.
+ * Release builds never advertise or render this control surface.
+ */
+export function syntheticReplayCaptureAvailability(
+  debugCapabilityEnabled = false,
+): SyntheticReplayCaptureAvailability {
+  if (!hasTauri()) return { available: false, reason: "browserPreview" };
+  if (!debugCapabilityEnabled)
+    return { available: false, reason: "releaseBuild" };
+  return {
+    available: true,
+    commandName: "debug_select_synthetic_replay_capture_target",
+  };
+}
+
+export async function runSyntheticReplayCapture(
+  availability = syntheticReplayCaptureAvailability(),
+): Promise<SyntheticReplayCaptureResult> {
+  if (!availability.available) {
+    throw new Error(
+      availability.reason === "browserPreview"
+        ? "Synthetic replay capture requires the native desktop shell."
+        : "Synthetic replay capture is unavailable in release builds.",
+    );
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<SyntheticReplayCaptureResult>(availability.commandName);
+}
+
+export async function readSyntheticReplayCaptureDiagnostics(): Promise<SyntheticReplayCaptureResult> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<SyntheticReplayCaptureResult>(
+    "debug_synthetic_replay_capture_diagnostics",
+  );
+}
+
+export async function clearSyntheticReplayCaptureTarget(): Promise<SyntheticReplayCaptureResult> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<SyntheticReplayCaptureResult>(
+    "debug_clear_synthetic_replay_capture_target",
+  );
+}
+
 export async function startNativeSimulation(
   execution: ExecutionMode,
   onEvent: (event: NativeSimulationEvent) => void,
@@ -60,8 +354,11 @@ export async function startNativeSimulation(
   const [{ invoke, Channel }] = await Promise.all([
     import("@tauri-apps/api/core"),
   ]);
-  const events = new Channel<NativeSimulationEvent>();
-  events.onmessage = onEvent;
+  const events = new Channel<unknown>();
+  events.onmessage = (wireEvent) => {
+    const event = normalizeNativeSimulationEvent(wireEvent);
+    if (event) onEvent(event);
+  };
   await invoke("start_simulation", {
     request: {
       gameProfileId: "eclipse-harbor",

@@ -6,9 +6,23 @@ import { NAV_ITEMS, RESPONSE_STAGES } from "./data";
 import { Icon } from "./icons";
 import type { AppPreferences, DemoState, PageId, StageId } from "./types";
 import { ActionButton, IconButton, StatusPill } from "./components";
-import { cancelNativeSimulation, startNativeSimulation } from "./tauriBridge";
+import {
+  cancelNativeSimulation,
+  loadNativeBootstrapHealth,
+  LOADING_NATIVE_BOOTSTRAP,
+  startNativeSimulation,
+  type NativeBootstrapHealth,
+} from "./tauriBridge";
 import { ThemeSpecimen } from "./ThemeSpecimen";
 import { useExperimentalControllerNavigation } from "./controllerNavigation";
+import {
+  applyNativeSimulationEvent,
+  awaitingNativeEvidence,
+  browserFixtureEvidence,
+  EMPTY_SIMULATION_EVIDENCE,
+  nativeCompletionNotice,
+  type SimulationEvidence,
+} from "./simulationEvidence";
 
 const isPage = (value: string | null): value is PageId =>
   Boolean(value && NAV_ITEMS.some((item) => item.id === value));
@@ -54,7 +68,17 @@ function ResponseConsoleApp() {
   );
   const [isSimulating, setIsSimulating] = useState(demoState === "active");
   const [toast, setToast] = useState<string | null>(null);
+  const [simulationEvidence, setSimulationEvidence] =
+    useState<SimulationEvidence>(() =>
+      demoState === "active"
+        ? browserFixtureEvidence()
+        : EMPTY_SIMULATION_EVIDENCE,
+    );
+  const [nativeBootstrap, setNativeBootstrap] = useState<NativeBootstrapHealth>(
+    LOADING_NATIVE_BOOTSTRAP,
+  );
   const simulationTimer = useRef<number | null>(null);
+  const completionTimer = useRef<number | null>(null);
   const nativeSimulation = useRef(false);
   const [preferences, setPreferences] = useState<AppPreferences>({
     execution: "cloud",
@@ -107,9 +131,27 @@ function ResponseConsoleApp() {
     () => () => {
       if (simulationTimer.current)
         window.clearInterval(simulationTimer.current);
+      if (completionTimer.current) window.clearTimeout(completionTimer.current);
     },
     [],
   );
+
+  useEffect(() => {
+    let current = true;
+    loadNativeBootstrapHealth().then((health) => {
+      if (current) setNativeBootstrap(health);
+    });
+    return () => {
+      current = false;
+    };
+  }, []);
+
+  const runtimeConnected =
+    nativeBootstrap.kind === "snapshot" &&
+    nativeBootstrap.snapshot.runtime.connected;
+  const brokerConnected =
+    nativeBootstrap.kind === "snapshot" &&
+    nativeBootstrap.snapshot.mediaBroker.connected;
 
   const selectPage = (nextPage: PageId) => {
     setPage(nextPage);
@@ -127,19 +169,31 @@ function ResponseConsoleApp() {
       if (simulationTimer.current)
         window.clearInterval(simulationTimer.current);
       simulationTimer.current = null;
+      if (completionTimer.current) window.clearTimeout(completionTimer.current);
+      completionTimer.current = null;
       setIsSimulating(false);
       setActiveStageIndex(-1);
       setDemoState("ready");
+      setSimulationEvidence((evidence) => ({
+        ...evidence,
+        phase: "cancelled",
+      }));
       setToast("Illustrative simulation ended. No conversation was saved.");
       return;
     }
     setIsSimulating(true);
+    if (completionTimer.current) window.clearTimeout(completionTimer.current);
+    completionTimer.current = null;
     setDemoState("active");
     setActiveStageIndex(0);
+    setSimulationEvidence(awaitingNativeEvidence());
     setToast("Private Eclipse Harbor simulation started.");
     const startedNatively = await startNativeSimulation(
       preferences.execution,
       (event) => {
+        setSimulationEvidence((evidence) =>
+          applyNativeSimulationEvent(evidence, event),
+        );
         if (event.type === "stageStarted")
           setActiveStageIndex(
             RESPONSE_STAGES.findIndex((stage) => stage.id === event.stage),
@@ -147,17 +201,19 @@ function ResponseConsoleApp() {
         if (event.type === "completed") {
           nativeSimulation.current = false;
           setActiveStageIndex(RESPONSE_STAGES.length - 1);
-          window.setTimeout(() => {
+          completionTimer.current = window.setTimeout(() => {
             setIsSimulating(false);
             setDemoState("ready");
             setActiveStageIndex(-1);
-            setToast(
-              `Illustrative simulation complete · virtual first audio ${(event.fixtureFirstAudioMs / 1000).toFixed(2)} s`,
-            );
+            setToast(nativeCompletionNotice(event.fixtureFirstAudioMs));
+            completionTimer.current = null;
           }, 900);
         }
         if (event.type === "cancelled") {
           nativeSimulation.current = false;
+          if (completionTimer.current)
+            window.clearTimeout(completionTimer.current);
+          completionTimer.current = null;
           setIsSimulating(false);
           setDemoState("ready");
           setActiveStageIndex(-1);
@@ -168,6 +224,7 @@ function ResponseConsoleApp() {
       nativeSimulation.current = true;
       return;
     }
+    setSimulationEvidence(browserFixtureEvidence());
     let index = 0;
     simulationTimer.current = window.setInterval(() => {
       index += 1;
@@ -176,13 +233,15 @@ function ResponseConsoleApp() {
           window.clearInterval(simulationTimer.current);
         simulationTimer.current = null;
         setActiveStageIndex(RESPONSE_STAGES.length - 1);
-        window.setTimeout(() => {
+        completionTimer.current = window.setTimeout(() => {
           setIsSimulating(false);
           setDemoState("ready");
           setActiveStageIndex(-1);
+          setSimulationEvidence(browserFixtureEvidence("delivered"));
           setToast(
             "Illustrative simulation complete · virtual first audio 1.31 s",
           );
+          completionTimer.current = null;
         }, 1200);
         return;
       }
@@ -242,12 +301,20 @@ function ResponseConsoleApp() {
               <strong>
                 {isSimulating
                   ? "Simulation fixture active"
-                  : "Runtime status unavailable"}
+                  : runtimeConnected && brokerConnected
+                    ? "Runtime + broker authenticated"
+                    : nativeBootstrap.kind === "loading"
+                      ? "Checking native runtime"
+                      : "Runtime connection incomplete"}
               </strong>
               <span>
                 {isSimulating
                   ? "Eclipse Harbor · simulated"
-                  : "No live snapshot returned"}
+                  : runtimeConnected && brokerConnected
+                    ? `Protocol ${nativeBootstrap.kind === "snapshot" ? (nativeBootstrap.snapshot.runtime.protocolVersion ?? "connected") : "connected"}`
+                    : nativeBootstrap.kind === "browserPreview"
+                      ? "Browser preview · no desktop bridge"
+                      : "See Diagnostics for native health"}
               </span>
             </div>
           </div>
@@ -293,14 +360,24 @@ function ResponseConsoleApp() {
             <i />
             <strong>
               {isSimulating
-                ? "Live simulation"
+                ? simulationEvidence.source === "nativeRuntime"
+                  ? "Native runtime simulation"
+                  : simulationEvidence.source === "awaitingNative"
+                    ? "Connecting to runtime"
+                    : "Browser simulation"
                 : demoState === "degraded"
                   ? "Degraded safely"
                   : demoState === "error"
                     ? "Recovering"
-                    : "No runtime snapshot"}
+                    : runtimeConnected && brokerConnected
+                      ? "Runtime authenticated"
+                      : "No runtime snapshot"}
             </strong>
-            <b className="fixture-badge">ILLUSTRATIVE FIXTURE</b>
+            <b className="fixture-badge">
+              {simulationEvidence.source === "nativeRuntime"
+                ? "NATIVE EVENT EVIDENCE"
+                : "ILLUSTRATIVE FIXTURE"}
+            </b>
           </div>
           <div className="topbar__actions">
             <button
@@ -330,6 +407,7 @@ function ResponseConsoleApp() {
           activeStage={activeStage}
           isSimulating={isSimulating}
           state={demoState}
+          simulationEvidence={simulationEvidence}
         />
         <main id="main-content" tabIndex={-1}>
           <CurrentPage
@@ -340,6 +418,11 @@ function ResponseConsoleApp() {
             activeStage={activeStage}
             isSimulating={isSimulating}
             startSimulation={startSimulation}
+            simulationEvidence={simulationEvidence}
+            nativeBootstrap={nativeBootstrap}
+            showSyntheticReplayCaptureTest={
+              params.get("syntheticReplayTest") === "1"
+            }
           />
         </main>
       </div>
@@ -387,10 +470,12 @@ function ResponseSpine({
   activeStage,
   isSimulating,
   state,
+  simulationEvidence,
 }: {
   activeStage: StageId | null;
   isSimulating: boolean;
   state: DemoState;
+  simulationEvidence: SimulationEvidence;
 }) {
   const activeIndex = RESPONSE_STAGES.findIndex(
     (stage) => stage.id === activeStage,
@@ -406,7 +491,11 @@ function ResponseSpine({
         <div>
           <span>
             {isSimulating
-              ? "SIMULATED TURN · FIXTURE"
+              ? simulationEvidence.source === "nativeRuntime"
+                ? "NATIVE RUNTIME TURN · FIXTURE INPUT"
+                : simulationEvidence.source === "awaitingNative"
+                  ? "CONNECTING TO NATIVE RUNTIME"
+                  : "SIMULATED TURN · BROWSER FIXTURE"
               : "RESPONSE SPINE · NO LIVE TURN"}
           </span>
           <strong>
@@ -442,17 +531,25 @@ function ResponseSpine({
                 className="response-spine__stage-status"
                 title={
                   isSimulating
-                    ? "Illustrative simulation timing"
+                    ? simulationEvidence.source === "nativeRuntime"
+                      ? "Stage event returned by the native runtime"
+                      : "Illustrative browser simulation timing"
                     : "Illustrative preview · no live measurement"
                 }
               >
                 {!isSimulating
                   ? "PREVIEW"
                   : index < activeIndex
-                    ? `SIM ${stage.fixtureDuration} ms`
+                    ? simulationEvidence.source === "nativeRuntime"
+                      ? "NATIVE EVENT"
+                      : `SIM ${stage.fixtureDuration} ms`
                     : index === activeIndex
-                      ? "SIM ACTIVE"
-                      : "SIM NEXT"}
+                      ? simulationEvidence.source === "nativeRuntime"
+                        ? "NATIVE ACTIVE"
+                        : "SIM ACTIVE"
+                      : simulationEvidence.source === "nativeRuntime"
+                        ? "AWAITING EVENT"
+                        : "SIM NEXT"}
               </small>
             </div>
             {index < RESPONSE_STAGES.length - 1 && <b />}
@@ -465,7 +562,13 @@ function ResponseSpine({
           : "No live stage · —"}
       </div>
       <div className="response-spine__total">
-        <span>{isSimulating ? "SIM FIXTURE" : "NO LIVE TURN"}</span>
+        <span>
+          {isSimulating
+            ? simulationEvidence.source === "nativeRuntime"
+              ? "NATIVE EVENTS"
+              : "SIM FIXTURE"
+            : "NO LIVE TURN"}
+        </span>
         <strong>
           {isSimulating ? `${Math.max(0, activeIndex + 1)} / 7` : "—"}
         </strong>

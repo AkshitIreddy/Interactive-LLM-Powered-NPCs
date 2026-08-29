@@ -52,7 +52,7 @@ describe("P0 honesty boundaries", () => {
     window.history.replaceState(null, "", "/?page=home&state=active");
     render(<App />);
     expect(screen.getByLabelText("Response pipeline")).toHaveTextContent(
-      "SIMULATED TURN · FIXTURE",
+      "SIMULATED TURN · BROWSER FIXTURE",
     );
     expect(screen.getByLabelText("Response pipeline")).toHaveTextContent(
       "SIM 412 ms",

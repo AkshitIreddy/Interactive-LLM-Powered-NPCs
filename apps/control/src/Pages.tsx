@@ -23,6 +23,16 @@ import {
   Toggle,
 } from "./components";
 import { ProviderSettings } from "./ProviderSettings";
+import { SyntheticReplayCaptureControl } from "./SyntheticReplayCaptureControl";
+import {
+  syntheticReplayCaptureAvailability,
+  type NativeBootstrapHealth,
+} from "./tauriBridge";
+import {
+  simulationEvidenceLabel,
+  visibleSimulationText,
+  type SimulationEvidence,
+} from "./simulationEvidence";
 
 interface PageProps {
   page: PageId;
@@ -32,6 +42,9 @@ interface PageProps {
   activeStage: StageId | null;
   isSimulating: boolean;
   startSimulation: () => void;
+  simulationEvidence: SimulationEvidence;
+  nativeBootstrap: NativeBootstrapHealth;
+  showSyntheticReplayCaptureTest: boolean;
 }
 
 export function CurrentPage(props: PageProps) {
@@ -46,12 +59,7 @@ export function CurrentPage(props: PageProps) {
       case "characters":
         return <CharactersPage />;
       case "conversation":
-        return (
-          <ConversationPage
-            preferences={props.preferences}
-            updatePreferences={props.updatePreferences}
-          />
-        );
+        return <ConversationPage {...props} />;
       case "presence":
         return (
           <PresencePage
@@ -69,7 +77,12 @@ export function CurrentPage(props: PageProps) {
       case "models":
         return <ModelsPage />;
       case "diagnostics":
-        return <DiagnosticsPage state={props.state} />;
+        return (
+          <DiagnosticsPage
+            state={props.state}
+            nativeBootstrap={props.nativeBootstrap}
+          />
+        );
       case "settings":
         return (
           <SettingsPage
@@ -130,21 +143,75 @@ function StateBanner({
   );
 }
 
-function HomePage({ state, isSimulating, startSimulation }: PageProps) {
+function HomePage({
+  state,
+  isSimulating,
+  startSimulation,
+  simulationEvidence,
+  nativeBootstrap,
+  showSyntheticReplayCaptureTest,
+}: PageProps) {
   const active = isSimulating || state === "active";
+  const nativeEvidence = simulationEvidence.source === "nativeRuntime";
+  const runtimeText = visibleSimulationText(simulationEvidence);
+  const evidenceLabel = simulationEvidenceLabel(simulationEvidence);
+  const nativeSnapshot =
+    nativeBootstrap.kind === "snapshot" ? nativeBootstrap.snapshot : null;
+  const desktopAuthenticated = Boolean(
+    nativeSnapshot?.runtime.connected && nativeSnapshot.mediaBroker.connected,
+  );
+  const debugCaptureEnabled =
+    nativeSnapshot?.capabilities?.debugSyntheticReplayCapture === true;
   return (
     <div className="page page--home">
+      <section
+        className={`native-health-strip ${desktopAuthenticated ? "is-authenticated" : ""}`}
+        aria-label="Native desktop health"
+        aria-live="polite"
+      >
+        <span className="native-health-strip__signal" />
+        <div>
+          <span>DESKTOP CONTROL PATH</span>
+          <strong>
+            {desktopAuthenticated
+              ? "Runtime and media broker authenticated"
+              : nativeBootstrap.kind === "loading"
+                ? "Checking the native runtime…"
+                : nativeBootstrap.kind === "browserPreview"
+                  ? "Browser preview · native health unavailable"
+                  : nativeBootstrap.kind === "unavailable"
+                    ? "Native bootstrap unavailable"
+                    : "Native connection incomplete"}
+          </strong>
+        </div>
+        <small>
+          {nativeSnapshot
+            ? `Runtime ${nativeSnapshot.runtime.state} · broker ${nativeSnapshot.mediaBroker.state} · attempt ${nativeBootstrap.attempts}`
+            : nativeBootstrap.kind === "unavailable"
+              ? nativeBootstrap.detail
+              : "No authenticated process claim is shown until the desktop bridge responds."}
+        </small>
+      </section>
       <section className={`command-deck ${active ? "is-live" : ""}`}>
         <div className="command-deck__copy">
           <div className="eyebrow">
             {active
-              ? "SIMULATED CONVERSATION · FIXTURE"
+              ? nativeEvidence
+                ? "NATIVE RUNTIME EVENTS · DETERMINISTIC FIXTURE INPUT"
+                : simulationEvidence.source === "awaitingNative"
+                  ? "CONNECTING TO NATIVE RUNTIME"
+                  : "BROWSER-ONLY SIMULATION · FIXTURE"
               : "AUTHORED CATALOG · RUNTIME UNVERIFIED"}
           </div>
           <h1>
             {active ? (
               <>
-                Mara is <em>answering.</em>
+                Mara is{" "}
+                <em>
+                  {nativeEvidence
+                    ? "answering through native events."
+                    : "answering."}
+                </em>
               </>
             ) : (
               <>
@@ -156,7 +223,9 @@ function HomePage({ state, isSimulating, startSimulation }: PageProps) {
           </h1>
           <p>
             {active
-              ? "Eclipse Harbor · simulated character · local pipeline"
+              ? nativeEvidence
+                ? "Eclipse Harbor fixture crossed the native Tauri bridge. This is runtime event evidence, not live-game certification."
+                : "Eclipse Harbor · browser-authored timing preview · no native event evidence yet"
               : "No live game, model pack, capture source, or certified capability has been reported by the runtime."}
           </p>
           <div className="command-actions">
@@ -194,8 +263,11 @@ function HomePage({ state, isSimulating, startSimulation }: PageProps) {
           <div className="scene-transcript">
             {active ? (
               <>
-                <span>NPC · MARA VENN</span>“The eastern lock is clear. I’ll
-                keep the lantern on for you.”
+                <span>{evidenceLabel} · MARA VENN</span>
+                {runtimeText ??
+                  (nativeEvidence
+                    ? "Waiting for a sentence-ready event from the native runtime…"
+                    : "The eastern lock is clear. I’ll keep the lantern on for you.")}
               </>
             ) : (
               <>
@@ -205,11 +277,28 @@ function HomePage({ state, isSimulating, startSimulation }: PageProps) {
             )}
           </div>
           <div className="scene-readout">
-            <span>{active ? "SIM VOICE  00:03.8" : "NO LIVE TURN"}</span>
-            <span>{active ? "FIXTURE ROUTE" : "CATALOG ONLY"}</span>
+            <span>
+              {active
+                ? nativeEvidence
+                  ? `EVENT SEQ ${Math.max(0, simulationEvidence.sequence)}`
+                  : "BROWSER CLOCK"
+                : "NO LIVE TURN"}
+            </span>
+            <span>
+              {active
+                ? nativeEvidence
+                  ? "NATIVE BRIDGE"
+                  : "BROWSER FIXTURE"
+                : "CATALOG ONLY"}
+            </span>
           </div>
         </div>
       </section>
+      {showSyntheticReplayCaptureTest && debugCaptureEnabled && (
+        <SyntheticReplayCaptureControl
+          availability={syntheticReplayCaptureAvailability(true)}
+        />
+      )}
       <section className="home-strip">
         <div>
           <span className="home-strip__label">ACTIVE PROFILE</span>
@@ -226,11 +315,17 @@ function HomePage({ state, isSimulating, startSimulation }: PageProps) {
             </span>
             <div>
               <strong>
-                {active ? "Eclipse Harbor fixture" : "No live game reported"}
+                {active
+                  ? nativeEvidence
+                    ? "Eclipse Harbor · native event fixture"
+                    : "Eclipse Harbor · browser fixture"
+                  : "No live game reported"}
               </strong>
               <small>
                 {active
-                  ? "Private simulation · authored fixture"
+                  ? nativeEvidence
+                    ? "Authenticated desktop runtime event path"
+                    : "Illustrative UI path · no native evidence"
                   : "Authored profiles are not detection evidence"}
               </small>
             </div>
@@ -261,7 +356,11 @@ function HomePage({ state, isSimulating, startSimulation }: PageProps) {
       <div className="home-grid">
         <section className="instrument-panel conversation-preview">
           <SectionTitle
-            eyebrow="SIMULATED SIGNAL"
+            eyebrow={
+              nativeEvidence
+                ? "NATIVE RUNTIME SIGNAL"
+                : "BROWSER FIXTURE SIGNAL"
+            }
             title="Conversation memory"
             action={
               <button className="inline-link">
@@ -274,16 +373,27 @@ function HomePage({ state, isSimulating, startSimulation }: PageProps) {
             <p>Did you ever make it to the old lighthouse?</p>
           </div>
           <div className="dialogue-line dialogue-line--npc">
-            <span>MARA VENN · ILLUSTRATIVE FIRST AUDIO 1.31 S</span>
+            <span>
+              MARA VENN ·{" "}
+              {nativeEvidence ? evidenceLabel : "BROWSER FIXTURE TEXT"}
+            </span>
             <p>
-              Not yet. The eastern lock jammed again—but I remembered what you
-              said about the service tunnel.
+              {runtimeText ??
+                "Not yet. The eastern lock jammed again—but I remembered what you said about the service tunnel."}
             </p>
             <div className="memory-tags">
               <span>
-                <Icon name="check" size={12} /> Used 2 fixture memories
+                <Icon name="check" size={12} />
+                {nativeEvidence
+                  ? "Text returned through the native bridge"
+                  : "Used 2 browser fixture memories"}
               </span>
-              <span>Illustrative timing · 1.31 s</span>
+              <span>
+                {nativeEvidence &&
+                simulationEvidence.fixtureFirstAudioMs != null
+                  ? `Runtime fixture first-audio field · ${simulationEvidence.fixtureFirstAudioMs} ms`
+                  : "Illustrative browser timing · 1.31 s"}
+              </span>
             </div>
           </div>
         </section>
@@ -632,9 +742,16 @@ function CharactersPage() {
 function ConversationPage({
   preferences,
   updatePreferences,
-}: Pick<PageProps, "preferences" | "updatePreferences">) {
+  simulationEvidence,
+}: Pick<
+  PageProps,
+  "preferences" | "updatePreferences" | "simulationEvidence"
+>) {
   const [text, setText] = useState("");
   const [showDetails, setShowDetails] = useState(false);
+  const nativeEvidence = simulationEvidence.source === "nativeRuntime";
+  const runtimeText = visibleSimulationText(simulationEvidence);
+  const evidenceLabel = simulationEvidenceLabel(simulationEvidence);
   return (
     <div className="page">
       <PageHero
@@ -665,7 +782,9 @@ function ConversationPage({
               <span>{session}</span>
               <small>
                 {index === 0
-                  ? "Mara Venn · 6 turns"
+                  ? nativeEvidence
+                    ? "Mara Venn · native event evidence"
+                    : "Mara Venn · browser fixture"
                   : index === 1
                     ? "Jackie Welles · 12 turns"
                     : index === 2
@@ -680,13 +799,40 @@ function ConversationPage({
           </button>
         </aside>
         <section className="conversation-ledger">
+          <div
+            className={`runtime-evidence-banner ${nativeEvidence ? "is-native" : "is-fixture"}`}
+            role="status"
+          >
+            <Icon name={nativeEvidence ? "check" : "warning"} />
+            <div>
+              <span>{evidenceLabel}</span>
+              <strong>
+                {nativeEvidence
+                  ? "Dialogue below is sourced from the desktop runtime event channel."
+                  : "Dialogue below is authored browser fixture content, not runtime output."}
+              </strong>
+            </div>
+          </div>
           <header>
             <div>
-              <span className="eyebrow">ECLIPSE HARBOR · SIMULATION</span>
+              <span className="eyebrow">
+                ECLIPSE HARBOR ·{" "}
+                {nativeEvidence ? "NATIVE EVENT FIXTURE" : "BROWSER FIXTURE"}
+              </span>
               <h2>Mara Venn</h2>
-              <p>Today, 3:38–3:44 PM · Hybrid route</p>
+              <p>
+                {nativeEvidence
+                  ? `Runtime simulation ${simulationEvidence.simulationId ?? "pending ID"} · event ${Math.max(0, simulationEvidence.sequence)}`
+                  : "Illustrative session · no native event returned"}
+              </p>
             </div>
-            <StatusPill tone="ok">Delivered</StatusPill>
+            <StatusPill tone={nativeEvidence ? "ok" : "warn"}>
+              {nativeEvidence
+                ? simulationEvidence.phase === "delivered"
+                  ? "Native delivered"
+                  : "Native event"
+                : "Browser fixture"}
+            </StatusPill>
           </header>
           <div className="turn">
             <div className="turn__meta">
@@ -695,8 +841,8 @@ function ConversationPage({
             </div>
             <p>Did you ever make it to the old lighthouse?</p>
             <div className="turn__trace">
-              <span>SIM transcript fixture · 286 ms</span>
-              <span>92% stable endpoint</span>
+              <span>AUTHORED FIXTURE INPUT · NOT LIVE STT</span>
+              <span>Deterministic test prompt</span>
             </div>
           </div>
           <div className="turn turn--npc">
@@ -705,15 +851,23 @@ function ConversationPage({
               <time>3:41:10 PM</time>
             </div>
             <p>
-              The eastern lock jammed again, so not yet. But I remembered what
-              you said about the service tunnel. If the tide stays low, I can
-              try it before dark.
+              {runtimeText ??
+                "The eastern lock jammed again, so not yet. But I remembered what you said about the service tunnel. If the tide stays low, I can try it before dark."}
             </p>
             <div className="turn__trace">
               <span>
-                <Icon name="headphones" /> SIM first-audio fixture · 1.31 s
+                <Icon name={nativeEvidence ? "check" : "headphones"} />
+                {nativeEvidence
+                  ? evidenceLabel
+                  : "BROWSER first-audio fixture · 1.31 s"}
               </span>
-              <span>4.2 s delivered</span>
+              <span>
+                {nativeEvidence
+                  ? simulationEvidence.fixtureFirstAudioMs != null
+                    ? `${simulationEvidence.fixtureFirstAudioMs} ms runtime fixture field`
+                    : "No audio timing event yet"
+                  : "Illustrative duration · 4.2 s"}
+              </span>
               <button onClick={() => setShowDetails(!showDetails)}>
                 {showDetails ? "Hide trace" : "View trace"}{" "}
                 <Icon name="chevron" />
@@ -727,11 +881,19 @@ function ConversationPage({
                 </div>
                 <div>
                   <span>REPLY</span>
-                  <strong>SIM 478 ms to first fixture clause</strong>
+                  <strong>
+                    {nativeEvidence
+                      ? `Native event sequence ${Math.max(0, simulationEvidence.sequence)}`
+                      : "BROWSER SIM 478 ms fixture"}
+                  </strong>
                 </div>
                 <div>
                   <span>VOICE</span>
-                  <strong>Kokoro · local CPU</strong>
+                  <strong>
+                    {nativeEvidence
+                      ? "Not proven by the text event"
+                      : "Illustrative Kokoro route"}
+                  </strong>
                 </div>
                 <div>
                   <span>EFFECTS</span>
@@ -1405,9 +1567,48 @@ function ModelsPage() {
   );
 }
 
-function DiagnosticsPage({ state }: { state: DemoState }) {
-  const checks =
-    state === "error"
+function DiagnosticsPage({
+  state,
+  nativeBootstrap,
+}: {
+  state: DemoState;
+  nativeBootstrap: NativeBootstrapHealth;
+}) {
+  const snapshot =
+    nativeBootstrap.kind === "snapshot" ? nativeBootstrap.snapshot : null;
+  const authenticated = Boolean(
+    snapshot?.runtime.connected && snapshot.mediaBroker.connected,
+  );
+  const checks = snapshot
+    ? [
+        ["Control application", "Native bootstrap returned", "ok"],
+        [
+          "Runtime coordinator",
+          snapshot.runtime.connected
+            ? `Authenticated · ${snapshot.runtime.state} · protocol ${snapshot.runtime.protocolVersion ?? "unknown"}`
+            : snapshot.runtime.detail,
+          snapshot.runtime.connected ? "ok" : "warn",
+        ],
+        [
+          "Media broker",
+          snapshot.mediaBroker.connected
+            ? `Authenticated · ${snapshot.mediaBroker.state} · protocol ${snapshot.mediaBroker.protocolVersion ?? "unknown"}`
+            : snapshot.mediaBroker.detail,
+          snapshot.mediaBroker.connected ? "ok" : "warn",
+        ],
+        ["Speech recognition", "Provider not connected", "warn"],
+        ["Language model", "Provider not connected", "warn"],
+        ["Voice synthesis", "Provider not connected", "warn"],
+        [
+          "Game capture",
+          snapshot.mediaBroker.captureAvailable
+            ? "Native capture capability available"
+            : "No live capture capability",
+          snapshot.mediaBroker.captureAvailable ? "ok" : "warn",
+        ],
+        ["Memory database", "No live database check requested", "warn"],
+      ]
+    : state === "error"
       ? [
           ["Control application", "Fixture modeled", "ok"],
           ["Runtime coordinator", "Fixture restarting", "warn"],
@@ -1433,11 +1634,17 @@ function DiagnosticsPage({ state }: { state: DemoState }) {
       <PageHero
         eyebrow="DIAGNOSTICS"
         title={
-          state === "error"
-            ? "Simulated worker recovery."
-            : "Illustrative diagnostic fixture."
+          snapshot
+            ? "Desktop runtime health."
+            : state === "error"
+              ? "Simulated worker recovery."
+              : "Illustrative diagnostic fixture."
         }
-        description="Readable checks first, detailed traces when you need them. Logs stay local unless you explicitly export a redacted bundle."
+        description={
+          snapshot
+            ? "Runtime and broker rows below come from the native bootstrap snapshot. Provider and game checks remain explicit placeholders until their own live probes run."
+            : "Readable checks first, detailed traces when you need them. Logs stay local unless you explicitly export a redacted bundle."
+        }
         actions={
           <>
             <ActionButton icon="refresh">Run all checks</ActionButton>
@@ -1475,11 +1682,23 @@ function DiagnosticsPage({ state }: { state: DemoState }) {
       <div className="diagnostics-grid">
         <section className="instrument-panel system-checks">
           <SectionTitle
-            eyebrow="SIMULATED PROCESS HEALTH"
-            title="Fixture systems"
+            eyebrow={
+              snapshot ? "NATIVE PROCESS HEALTH" : "SIMULATED PROCESS HEALTH"
+            }
+            title={snapshot ? "Desktop sidecars" : "Fixture systems"}
             action={
-              <StatusPill tone={state === "error" ? "warn" : "ok"}>
-                {state === "error" ? "1 simulated recovery" : "No live checks"}
+              <StatusPill
+                tone={
+                  authenticated ? "ok" : state === "error" ? "warn" : "neutral"
+                }
+              >
+                {authenticated
+                  ? "Authenticated"
+                  : snapshot
+                    ? "Connection incomplete"
+                    : nativeBootstrap.kind === "loading"
+                      ? "Checking runtime"
+                      : "No live checks"}
               </StatusPill>
             }
           />
