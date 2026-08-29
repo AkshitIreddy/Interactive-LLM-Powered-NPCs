@@ -148,6 +148,10 @@ void append_ring(std::vector<std::byte>& output, const SharedPcmRing* ring) {
     } else if (std::holds_alternative<ipc::ShutdownCommand>(command)) {
         shutdown = true;
     }
+    // Target selection, clearing, and cancellation invalidate in-flight visual
+    // work. Return the post-command generation so an authenticated controller
+    // can issue its next envelope without guessing how the broker advanced it.
+    response.cancellation_generation = broker.diagnostics().cancellation_generation;
     return response;
 }
 #endif

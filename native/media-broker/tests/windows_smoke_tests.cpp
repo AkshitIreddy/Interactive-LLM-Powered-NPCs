@@ -19,6 +19,7 @@
 #include <span>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -27,11 +28,13 @@ using Microsoft::WRL::ComPtr;
 using namespace npc::media;
 using namespace npc::media::windows;
 
+COLORREF target_color = RGB(18, 92, 112);
+
 LRESULT CALLBACK test_window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     if (message == WM_PAINT) {
         PAINTSTRUCT paint{};
         const HDC dc = BeginPaint(window, &paint);
-        const HBRUSH brush = CreateSolidBrush(RGB(18, 92, 112));
+        const HBRUSH brush = CreateSolidBrush(target_color);
         FillRect(dc, &paint.rcPaint, brush);
         DeleteObject(brush);
         EndPaint(window, &paint);
@@ -97,6 +100,48 @@ void pump_messages() {
     return pipe_read(pipe, response) ? ipc::decode_response(response) : std::nullopt;
 }
 
+template <typename T>
+[[nodiscard]] std::optional<T> read_little(const std::span<const std::byte> payload,
+                                           const std::size_t offset) {
+    static_assert(std::is_unsigned_v<T>);
+    if (offset > payload.size() || payload.size() - offset < sizeof(T)) return std::nullopt;
+    T value{};
+    for (std::size_t index = 0; index < sizeof(T); ++index) {
+        value |= static_cast<T>(std::to_integer<std::uint8_t>(payload[offset + index])) << (index * 8U);
+    }
+    return value;
+}
+
+struct CaptureDiagnosticsEvidence {
+    BrokerState state{BrokerState::stopped};
+    CaptureBackend capture_backend{CaptureBackend::none};
+    TargetState target_state{TargetState::none};
+    std::uint64_t frames_received{};
+    std::uint64_t frames_presented{};
+};
+
+[[nodiscard]] std::optional<CaptureDiagnosticsEvidence> decode_capture_evidence(
+    const std::span<const std::byte> payload) {
+    const auto state = read_little<std::uint32_t>(payload, 0);
+    const auto capture_backend = read_little<std::uint32_t>(payload, 4);
+    const auto target_state = read_little<std::uint32_t>(payload, 20);
+    const auto frames_received = read_little<std::uint64_t>(payload, 48);
+    const auto frames_presented = read_little<std::uint64_t>(payload, 56);
+    if (!state || !capture_backend || !target_state || !frames_received || !frames_presented ||
+        *state > static_cast<std::uint32_t>(BrokerState::failed) ||
+        *capture_backend > static_cast<std::uint32_t>(CaptureBackend::desktop_duplication) ||
+        *target_state > static_cast<std::uint32_t>(TargetState::closed)) {
+        return std::nullopt;
+    }
+    return CaptureDiagnosticsEvidence{
+        static_cast<BrokerState>(*state),
+        static_cast<CaptureBackend>(*capture_backend),
+        static_cast<TargetState>(*target_state),
+        *frames_received,
+        *frames_presented,
+    };
+}
+
 struct ChildService {
     PROCESS_INFORMATION process{};
     HANDLE job{};
@@ -155,7 +200,7 @@ void close_child(ChildService& child) {
     child = {};
 }
 
-[[nodiscard]] bool service_lifecycle_smoke(const std::wstring& executable) {
+[[nodiscard]] bool service_lifecycle_smoke(const std::wstring& executable, const HWND target_window) {
     {
         STARTUPINFOW startup{sizeof(startup)};
         PROCESS_INFORMATION malformed{};
@@ -186,8 +231,91 @@ void close_child(ChildService& child) {
     request.deadline_qpc = qpc_now() + frequency * 2;
     const auto health = transact(child.pipe, request);
     if (!health || health->status != ipc::StatusCode::ok) { close_child(child); return false; }
-    const auto shutdown_payload = ipc::encode_command(ipc::CommandKind::shutdown, ipc::ShutdownCommand{});
+
+    const auto inspected = inspect_target(target_window, GetCurrentProcessId());
+    const auto select_payload = ipc::encode_command(
+        ipc::CommandKind::select_target,
+        ipc::SelectTargetCommand{reinterpret_cast<std::uintptr_t>(target_window),
+                                 GetCurrentProcessId(),
+                                 {inspected.process_name}});
     request.sequence = 3;
+    request.deadline_qpc = qpc_now() + frequency * 2;
+    request.command = ipc::CommandKind::select_target;
+    request.payload = *select_payload;
+    const auto selected = transact(child.pipe, request);
+    if (!selected || selected->status != ipc::StatusCode::ok ||
+        selected->cancellation_generation <= request.cancellation_generation) {
+        close_child(child);
+        return false;
+    }
+    request.cancellation_generation = selected->cancellation_generation;
+
+    const auto diagnostics_payload = ipc::encode_command(ipc::CommandKind::diagnostics,
+                                                         ipc::DiagnosticsCommand{});
+    std::optional<CaptureDiagnosticsEvidence> capture_evidence;
+    const auto capture_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+    while (std::chrono::steady_clock::now() < capture_deadline) {
+        target_color = target_color == RGB(18, 92, 112) ? RGB(116, 34, 72) : RGB(18, 92, 112);
+        InvalidateRect(target_window, nullptr, FALSE);
+        UpdateWindow(target_window);
+        pump_messages();
+        ++request.sequence;
+        request.deadline_qpc = qpc_now() + frequency * 2;
+        request.command = ipc::CommandKind::diagnostics;
+        request.payload = *diagnostics_payload;
+        const auto diagnostics = transact(child.pipe, request);
+        if (!diagnostics || diagnostics->status != ipc::StatusCode::ok) {
+            close_child(child);
+            return false;
+        }
+        capture_evidence = decode_capture_evidence(diagnostics->payload);
+        if (capture_evidence && capture_evidence->state == BrokerState::capturing_primary &&
+            capture_evidence->capture_backend == CaptureBackend::windows_graphics_capture &&
+            capture_evidence->target_state == TargetState::selected &&
+            capture_evidence->frames_received >= 2 && capture_evidence->frames_presented >= 1) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    if (!capture_evidence || capture_evidence->state != BrokerState::capturing_primary ||
+        capture_evidence->capture_backend != CaptureBackend::windows_graphics_capture ||
+        capture_evidence->target_state != TargetState::selected ||
+        capture_evidence->frames_received < 2 || capture_evidence->frames_presented < 1) {
+        close_child(child);
+        return false;
+    }
+
+    const auto clear_payload = ipc::encode_command(ipc::CommandKind::clear_target,
+                                                   ipc::ClearTargetCommand{});
+    ++request.sequence;
+    request.deadline_qpc = qpc_now() + frequency * 2;
+    request.command = ipc::CommandKind::clear_target;
+    request.payload = *clear_payload;
+    const auto cleared = transact(child.pipe, request);
+    if (!cleared || cleared->status != ipc::StatusCode::ok ||
+        cleared->cancellation_generation <= request.cancellation_generation) {
+        close_child(child);
+        return false;
+    }
+    request.cancellation_generation = cleared->cancellation_generation;
+
+    ++request.sequence;
+    request.deadline_qpc = qpc_now() + frequency * 2;
+    request.command = ipc::CommandKind::diagnostics;
+    request.payload = *diagnostics_payload;
+    const auto after_clear = transact(child.pipe, request);
+    const auto cleared_evidence = after_clear ? decode_capture_evidence(after_clear->payload) : std::nullopt;
+    if (!after_clear || after_clear->status != ipc::StatusCode::ok || !cleared_evidence ||
+        cleared_evidence->state != BrokerState::awaiting_target ||
+        cleared_evidence->capture_backend != CaptureBackend::none ||
+        cleared_evidence->target_state != TargetState::none ||
+        cleared_evidence->frames_received != capture_evidence->frames_received) {
+        close_child(child);
+        return false;
+    }
+
+    const auto shutdown_payload = ipc::encode_command(ipc::CommandKind::shutdown, ipc::ShutdownCommand{});
+    ++request.sequence;
     request.deadline_qpc = qpc_now() + frequency * 2;
     request.command = ipc::CommandKind::shutdown;
     request.payload = *shutdown_payload;
@@ -196,6 +324,9 @@ void close_child(ChildService& child) {
                         WaitForSingleObject(child.process.hProcess, 5000) == WAIT_OBJECT_0;
     close_child(child);
     if (!exited) return false;
+    std::cout << "authenticated SelectTarget observed " << capture_evidence->frames_received
+              << " WGC frames (" << capture_evidence->frames_presented
+              << " presented); ClearTarget stopped capture\n";
 
     auto disconnect_value = launch_service(executable, 2);
     if (!disconnect_value) return false;
@@ -239,13 +370,22 @@ void close_child(ChildService& child) {
 
 int main(const int argc, char** argv) {
     if (argc == 2 && std::string_view{argv[1]} == "--service-only") {
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        const HWND target_window = create_test_window();
+        if (!target_window) {
+            std::cerr << "failed to create service protocol WGC target window\n";
+            return EXIT_FAILURE;
+        }
         wchar_t test_path[32768]{};
         if (GetModuleFileNameW(nullptr, test_path, ARRAYSIZE(test_path)) == 0) {
+            DestroyWindow(target_window);
             return EXIT_FAILURE;
         }
         const auto service_path =
             (std::filesystem::path(test_path).parent_path() / L"npc-media-broker.exe").wstring();
-        if (!service_lifecycle_smoke(service_path)) {
+        const bool passed = service_lifecycle_smoke(service_path, target_window);
+        DestroyWindow(target_window);
+        if (!passed) {
             std::cerr << "authenticated named-pipe service lifecycle smoke failed\n";
             return EXIT_FAILURE;
         }
@@ -313,6 +453,7 @@ int main(const int argc, char** argv) {
     }
 
     const auto initial_size = captured->size_px;
+    const auto initial_sequence = captured->sequence;
     SetWindowPos(window, nullptr, 100, 100, 800, 450, SWP_NOACTIVATE | SWP_NOZORDER);
     InvalidateRect(window, nullptr, TRUE);
     std::optional<OwnedCaptureFrame> resized;
@@ -326,8 +467,8 @@ int main(const int argc, char** argv) {
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    if (!resized) {
-        std::cerr << "WGC frame pool did not recover from target resize\n";
+    if (!resized || resized->sequence <= initial_sequence) {
+        std::cerr << "WGC frame pool did not recover with an advancing frame sequence\n";
         capture.stop();
         DestroyWindow(window);
         return EXIT_FAILURE;
@@ -385,11 +526,15 @@ int main(const int argc, char** argv) {
     audio.stop();
     capture.stop();
     overlay.stop();
-    DestroyWindow(window);
     wchar_t test_path[32768]{};
-    if (GetModuleFileNameW(nullptr, test_path, ARRAYSIZE(test_path)) == 0) return EXIT_FAILURE;
+    if (GetModuleFileNameW(nullptr, test_path, ARRAYSIZE(test_path)) == 0) {
+        DestroyWindow(window);
+        return EXIT_FAILURE;
+    }
     const auto service_path = (std::filesystem::path(test_path).parent_path() / L"npc-media-broker.exe").wstring();
-    if (!service_lifecycle_smoke(service_path)) {
+    const bool service_passed = service_lifecycle_smoke(service_path, window);
+    DestroyWindow(window);
+    if (!service_passed) {
         std::cerr << "authenticated named-pipe service lifecycle smoke failed\n";
         return EXIT_FAILURE;
     }
