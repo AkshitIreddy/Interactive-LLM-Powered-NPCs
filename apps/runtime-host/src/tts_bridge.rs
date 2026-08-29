@@ -11,7 +11,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use interactive_npcs_credential_vault::{CredentialVault, VaultError};
+use interactive_npcs_credential_vault::{CredentialVault, SecretValue, VaultError};
 use npc_providers_tts::{
     AudioFormat, CredentialResolveError, HostedTtsProviderId, PcmChunk, PcmEncoding,
     ProviderCredentialResolver, SemanticClausePolicy, SensitiveString, SessionIdentity,
@@ -540,11 +540,19 @@ impl ProviderCredentialResolver for VaultTtsCredentialResolver {
             .vault
             .get(ELEVENLABS_CREDENTIAL_TARGET)
             .map_err(map_vault_error)?;
-        let value = std::str::from_utf8(secret.expose())
-            .map_err(|_| CredentialResolveError::Unavailable)?
-            .to_owned();
-        Ok(SensitiveString::new(value))
+        sensitive_utf8_from_vault(secret)
     }
+}
+
+fn sensitive_utf8_from_vault(
+    secret: SecretValue,
+) -> Result<SensitiveString, CredentialResolveError> {
+    let value =
+        std::str::from_utf8(secret.expose()).map_err(|_| CredentialResolveError::Unavailable)?;
+    // Copy directly into the provider's zeroizing container. No ordinary
+    // heap-owned String exists in the trusted bridge, and the consumed vault
+    // value zeroizes its original bytes when this function returns.
+    Ok(SensitiveString::new(value))
 }
 
 fn map_vault_error(error: VaultError) -> CredentialResolveError {
@@ -1011,6 +1019,15 @@ mod tests {
         assert_eq!(
             *vault.reads.lock().expect("vault mutex poisoned"),
             vec![ELEVENLABS_CREDENTIAL_TARGET.to_owned()]
+        );
+    }
+
+    #[test]
+    fn vault_secret_conversion_rejects_non_utf8_without_a_displayable_copy() {
+        let secret = SecretValue::new(vec![0xff, 0xfe]).expect("non-empty fixture secret");
+        assert_eq!(
+            sensitive_utf8_from_vault(secret),
+            Err(CredentialResolveError::Unavailable)
         );
     }
 
