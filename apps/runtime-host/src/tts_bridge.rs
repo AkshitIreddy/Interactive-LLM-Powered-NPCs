@@ -4,7 +4,11 @@
 //! runtime sentence. This keeps cancellation and delivery accounting scoped to
 //! one sentence and prevents provider state from leaking into a later sentence.
 
-use std::{collections::VecDeque, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    sync::Arc,
+    time::Duration,
+};
 
 use async_trait::async_trait;
 use interactive_npcs_credential_vault::{CredentialVault, VaultError};
@@ -15,8 +19,8 @@ use npc_providers_tts::{
 };
 use npc_runtime_core::{
     AlignmentEvent, AudioChunk, DataClass, ProviderDescriptor, ProviderError, ProviderErrorKind,
-    ProviderModality, SpeechRequest, SpeechStream, SpeechStreamItem, TtsProvider, TtsSession,
-    TurnIdentity,
+    ProviderLocation, ProviderModality, SpeechRequest, SpeechStream, SpeechStreamItem, TtsProvider,
+    TtsSession, TurnIdentity,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -54,11 +58,17 @@ impl RuntimeTtsBridgeConfig {
         if self.descriptor.modality != ProviderModality::Speech {
             return Err(BridgeConfigError::WrongModality);
         }
-        if !self
-            .descriptor
-            .transmitted_data
-            .contains(&DataClass::Transcript)
-        {
+        match &self.descriptor.location {
+            ProviderLocation::Cloud { service } if service == provider_id.as_str() => {}
+            ProviderLocation::Cloud { .. } => return Err(BridgeConfigError::CloudServiceMismatch),
+            ProviderLocation::Local | ProviderLocation::ExternalLocalServer => {
+                return Err(BridgeConfigError::HostedProviderMarkedLocal);
+            }
+        }
+        if !self.descriptor.may_retain_data {
+            return Err(BridgeConfigError::RetentionNotDeclared);
+        }
+        if self.descriptor.transmitted_data.as_slice() != [DataClass::Transcript] {
             return Err(BridgeConfigError::TranscriptEgressNotDeclared);
         }
         if self.voice_intent_id.trim().is_empty() || self.voice_intent_id.len() > 128 {
@@ -82,7 +92,13 @@ pub enum BridgeConfigError {
     ProviderIdMismatch,
     #[error("provider descriptor modality must be speech")]
     WrongModality,
-    #[error("cloud speech descriptor must declare transcript egress")]
+    #[error("hosted TTS provider cannot be described as local")]
+    HostedProviderMarkedLocal,
+    #[error("cloud service id does not match the hosted TTS provider")]
+    CloudServiceMismatch,
+    #[error("hosted TTS descriptor must conservatively declare possible retention")]
+    RetentionNotDeclared,
+    #[error("hosted TTS descriptor must declare transcript-only egress")]
     TranscriptEgressNotDeclared,
     #[error("voice intent id is invalid")]
     InvalidVoiceIntent,
@@ -100,10 +116,55 @@ pub struct RuntimeTtsBridge {
 impl RuntimeTtsBridge {
     pub fn new(
         upstream: Arc<dyn StreamingTtsProvider>,
-        config: RuntimeTtsBridgeConfig,
+        mut config: RuntimeTtsBridgeConfig,
     ) -> Result<Self, BridgeConfigError> {
         config.validate(upstream.id())?;
+        config.descriptor = canonical_descriptor(upstream.as_ref());
         Ok(Self { upstream, config })
+    }
+}
+
+fn canonical_descriptor(provider: &dyn StreamingTtsProvider) -> ProviderDescriptor {
+    let provider_id = provider.id();
+    let capabilities = provider.capabilities();
+    ProviderDescriptor {
+        id: provider_id.as_str().to_owned(),
+        display_name: match provider_id {
+            HostedTtsProviderId::Cartesia => "Cartesia",
+            HostedTtsProviderId::ElevenLabs => "ElevenLabs",
+            HostedTtsProviderId::Inworld => "Inworld",
+            HostedTtsProviderId::Deepgram => "Deepgram",
+            HostedTtsProviderId::NvidiaNimMagpie => "NVIDIA NIM Magpie",
+        }
+        .to_owned(),
+        modality: ProviderModality::Speech,
+        location: ProviderLocation::Cloud {
+            service: provider_id.as_str().to_owned(),
+        },
+        // The runtime must conservatively route hosted providers as retaining.
+        // More permissive policy requires a separately reviewed privacy contract.
+        may_retain_data: true,
+        transmitted_data: vec![DataClass::Transcript],
+        capabilities: BTreeMap::from([
+            (
+                "streaming_input".to_owned(),
+                capabilities.streaming_input.to_string(),
+            ),
+            (
+                "streaming_pcm".to_owned(),
+                capabilities.streaming_pcm.to_string(),
+            ),
+            ("alignment".to_owned(), capabilities.alignment.to_string()),
+            (
+                "visemes_or_phonemes".to_owned(),
+                capabilities.visemes_or_phonemes.to_string(),
+            ),
+            (
+                "cancellation".to_owned(),
+                capabilities.cancellation.to_string(),
+            ),
+            ("usage".to_owned(), capabilities.usage.to_string()),
+        ]),
     }
 }
 
@@ -510,14 +571,12 @@ mod tests {
         },
     };
 
+    use super::*;
     use futures_util::StreamExt;
     use interactive_npcs_credential_vault::{SecretValue, VaultError};
     use npc_providers_tts::{
         ProviderCapabilities, PushOutcome, SessionState, TtsEvent, WordAlignment,
     };
-    use npc_runtime_core::{ProviderLocation, ProviderModality};
-
-    use super::*;
 
     #[derive(Clone)]
     struct FakeSessionPlan {
@@ -921,7 +980,7 @@ mod tests {
     }
 
     #[test]
-    fn bridge_rejects_non_pcm_and_undeclared_transcript_egress() {
+    fn bridge_rejects_non_pcm_and_noncanonical_hosted_policy_metadata() {
         let state = Arc::new(FakeProviderState {
             plans: Mutex::new(VecDeque::new()),
             requests: Mutex::new(Vec::new()),
@@ -936,12 +995,62 @@ mod tests {
             Err(BridgeConfigError::UnsupportedOutput)
         ));
 
-        let mut descriptor = descriptor();
-        descriptor.transmitted_data.clear();
-        let config = RuntimeTtsBridgeConfig::dev_elevenlabs_stock(descriptor);
+        let mut no_egress = descriptor();
+        no_egress.transmitted_data.clear();
+        let config = RuntimeTtsBridgeConfig::dev_elevenlabs_stock(no_egress);
         assert!(matches!(
             RuntimeTtsBridge::new(upstream, config),
             Err(BridgeConfigError::TranscriptEgressNotDeclared)
         ));
+
+        let state = Arc::new(FakeProviderState {
+            plans: Mutex::new(VecDeque::new()),
+            requests: Mutex::new(Vec::new()),
+            starts: AtomicUsize::new(0),
+            cancels: AtomicUsize::new(0),
+        });
+        let upstream: Arc<dyn StreamingTtsProvider> = Arc::new(FakeProvider { state });
+        let mut local_descriptor = descriptor();
+        local_descriptor.location = ProviderLocation::Local;
+        assert!(matches!(
+            RuntimeTtsBridge::new(
+                Arc::clone(&upstream),
+                RuntimeTtsBridgeConfig::dev_elevenlabs_stock(local_descriptor),
+            ),
+            Err(BridgeConfigError::HostedProviderMarkedLocal)
+        ));
+
+        let mut no_retention = descriptor();
+        no_retention.may_retain_data = false;
+        assert!(matches!(
+            RuntimeTtsBridge::new(
+                upstream,
+                RuntimeTtsBridgeConfig::dev_elevenlabs_stock(no_retention),
+            ),
+            Err(BridgeConfigError::RetentionNotDeclared)
+        ));
+    }
+
+    #[test]
+    fn bridge_stores_a_canonical_cloud_descriptor() {
+        let (bridge, _) = fake_bridge([]);
+        let descriptor = bridge.descriptor();
+        assert_eq!(descriptor.id, "elevenlabs");
+        assert_eq!(descriptor.display_name, "ElevenLabs");
+        assert_eq!(
+            descriptor.location,
+            ProviderLocation::Cloud {
+                service: "elevenlabs".to_owned()
+            }
+        );
+        assert!(descriptor.may_retain_data);
+        assert_eq!(descriptor.transmitted_data, vec![DataClass::Transcript]);
+        assert_eq!(
+            descriptor
+                .capabilities
+                .get("streaming_pcm")
+                .map(String::as_str),
+            Some("true")
+        );
     }
 }
