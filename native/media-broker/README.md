@@ -12,8 +12,8 @@ This directory is the native media boundary for Interactive LLM Powered NPCs 2.0
 - Global PTT press/release sensing with `GetAsyncKeyState`, which requires neither foreground focus nor a keyboard hook and does not consume the game's key.
 - Physical-pixel geometry for negative desktop origins, per-monitor DPI, monitor clipping, full-output capture crops, and HDR-to-overlay tone-map intent.
 - A single-slot latest-frame mailbox. Producers never wait for rendering or inference; unread stale frames are overwritten and counted.
-- Generation-based cancellation and strict source-frame matching for late inference output.
-- Confidence, visibility, occlusion, and staleness gates. Any uncertainty presents no residual patch, leaving the live game unobscured within the next presentation opportunity.
+- Generation-based cancellation plus strict source-frame, graphics-epoch, and source-capture-time matching for late inference output.
+- Finite confidence, visibility, occlusion, age, texture-presence, and residual-bound gates. A patch wider than 45%, taller than 35%, or covering more than 12% of the captured frame is rejected before platform presentation; full-frame replacement cannot pass the broker policy. Any uncertainty immediately suppresses a prior residual and presents the untouched game on the next frame.
 - Deterministic simulation and dependency-free tests usable on Linux/macOS CI.
 - A persistent control service that refuses to launch without an exact parent PID, 256-bit launch nonce, valid session identifier, and inherited Job Object. It monitors the parent, polls media continuously, and exits after authenticated shutdown, parent death, or pipe disconnect.
 - A one-client, local-only Windows named pipe with a current-user DACL, `PIPE_REJECT_REMOTE_CLIENTS`, exact parent-PID verification, 64 KiB frame limit, and a bounded request queue. The versioned protobuf-wire-compatible envelope authenticates nonce/session and validates monotonic sequence, QPC deadline, cancellation generation, command kind, and payload size.
@@ -38,7 +38,7 @@ On Windows, CTest additionally creates and resizes a real HWND, receives WGC fra
 
 The parent runtime owns session and turn truth. The broker owns media-device generations and presentation truth. Platform callbacks must be serialized onto the broker loop; incoming PCM and GPU resources are transported by separate bounded IPC rings/handles rather than copied through the control UI.
 
-On device loss the broker clears stale frame/patch mailboxes, increments the graphics generation, recreates the device, and reselects primary capture. Repeated primary failures select Desktop Duplication; protected content or low tracking confidence degrades to audio/subtitles without retaining a copied or frozen game frame.
+On device loss the broker clears stale frame/patch mailboxes, increments the graphics generation, recreates the device, and reselects primary capture. Patch and occlusion messages carry that generation, their exact source-frame sequence, and QPC-derived source timing; a recycled sequence from a prior epoch cannot be presented. Repeated primary failures select Desktop Duplication; protected content or low tracking confidence degrades to audio/subtitles without retaining a copied or frozen game frame.
 
 ## Deliberate limitations and remaining gates
 

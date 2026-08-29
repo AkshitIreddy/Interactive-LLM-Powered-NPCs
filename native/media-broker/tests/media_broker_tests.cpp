@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <span>
 #include <string_view>
@@ -235,9 +236,9 @@ void test_latest_frame_and_high_confidence_patch_are_presented() {
     const auto now = std::chrono::steady_clock::now();
     simulation->emit_frame({1, 0, now, {1920, 1080}, ColorSpace::sdr_srgb, 1, false, false});
     simulation->emit_frame({2, 0, now, {1920, 1080}, ColorSpace::sdr_srgb, 2, false, false});
-    broker.submit_occlusion_evidence({0.98, 0.97, 0.94, false, now});
+    broker.submit_occlusion_evidence({0.98, 0.97, 0.94, false, now, 2, 0});
     broker.submit_patch({2, broker.diagnostics().cancellation_generation,
-                         {0.42, 0.56, 0.58, 0.70}, 0.96, now, 99});
+                         {0.42, 0.56, 0.58, 0.70}, 0.96, now, 99, 0, now});
     broker.tick(now + std::chrono::milliseconds(1));
 
     CHECK(decision == CompositingDecision::patch);
@@ -245,6 +246,150 @@ void test_latest_frame_and_high_confidence_patch_are_presented() {
     CHECK(simulation->counters().pristine_presentations == 0);
     CHECK(broker.diagnostics().frames_received == 2);
     CHECK(broker.diagnostics().frames_dropped == 1);
+}
+
+void test_residual_guard_rejects_unsafe_async_output_and_clears_prior_patch() {
+    auto platform = std::make_unique<SimulatedMediaPlatform>();
+    auto* simulation = platform.get();
+    CompositingDecision decision{CompositingDecision::no_frame};
+    MediaBroker broker(std::move(platform), {},
+                       {.on_compositing_decision = [&](const CompositingDecision value) { decision = value; }});
+    CHECK(broker.start());
+    CHECK(broker.select_target(safe_target()));
+    simulation->emit_target(TargetState::selected, standard_geometry());
+
+    const auto generation = broker.diagnostics().cancellation_generation;
+    const auto epoch = broker.diagnostics().device_generation;
+    const auto base = std::chrono::steady_clock::now();
+
+    const auto present_valid = [&](const std::uint64_t sequence, const MonotonicTime at) {
+        simulation->emit_frame({sequence, epoch, at, {1920, 1080}, ColorSpace::sdr_srgb,
+                                static_cast<std::uintptr_t>(sequence), false, false});
+        broker.submit_occlusion_evidence({0.99, 0.99, 0.99, false, at, sequence, epoch});
+        broker.submit_patch({sequence, generation, {0.42, 0.56, 0.58, 0.70},
+                             0.99, at, 1000 + sequence, epoch, at});
+        broker.tick(at + std::chrono::milliseconds(1));
+        CHECK(decision == CompositingDecision::patch);
+        CHECK(simulation->residual_visible());
+    };
+
+    const auto reject = [&](const std::uint64_t sequence,
+                            const MonotonicTime captured_at,
+                            OcclusionEvidence evidence,
+                            MouthPatch patch,
+                            const MonotonicTime tick_at,
+                            const CompositingDecision expected) {
+        simulation->emit_frame({sequence, epoch, captured_at, {1920, 1080}, ColorSpace::sdr_srgb,
+                                static_cast<std::uintptr_t>(sequence), false, false});
+        broker.submit_occlusion_evidence(std::move(evidence));
+        broker.submit_patch(std::move(patch));
+        broker.tick(tick_at);
+        CHECK(decision == expected);
+        CHECK(!simulation->residual_visible());
+    };
+
+    present_valid(20, base);
+
+    auto at = base + std::chrono::milliseconds(10);
+    reject(21, at,
+           {0.99, 0.99, 0.99, false, at, 21, epoch},
+           {21, generation, {0.0, 0.0, 1.0, 1.0}, 0.99, at, 1021, epoch, at},
+           at + std::chrono::milliseconds(1), CompositingDecision::pristine_unsafe_bounds);
+
+    at += std::chrono::milliseconds(10);
+    reject(22, at,
+           {0.99, 0.99, 0.99, false, at, 22, epoch},
+           {22, generation, {0.42, 0.56, 0.58, 0.70}, 0.99, at, 1022, epoch + 1, at},
+           at + std::chrono::milliseconds(1), CompositingDecision::pristine_wrong_epoch);
+
+    at += std::chrono::milliseconds(10);
+    reject(23, at,
+           {0.99, 0.99, 0.99, false, at, 23, epoch},
+           {23, generation, {0.42, 0.56, 0.58, 0.70}, 0.99, at, 1023, epoch,
+            at - std::chrono::milliseconds(10)},
+           at + std::chrono::milliseconds(1), CompositingDecision::pristine_wrong_source_time);
+
+    at += std::chrono::milliseconds(10);
+    reject(24, at,
+           {0.99, 0.99, 0.99, false, at, 24, epoch},
+           {24, generation, {0.42, 0.56, 0.58, 0.70}, 0.99,
+            at + std::chrono::milliseconds(81), 1024, epoch, at},
+           at + std::chrono::milliseconds(82), CompositingDecision::pristine_wrong_source_time);
+
+    at += std::chrono::milliseconds(100);
+    reject(25, at,
+           {0.99, 0.99, 0.99, false, at, 25, epoch},
+           {25, generation, {0.42, 0.56, 0.58, 0.70},
+            std::numeric_limits<double>::quiet_NaN(), at, 1025, epoch, at},
+           at + std::chrono::milliseconds(1), CompositingDecision::pristine_low_confidence);
+
+    at += std::chrono::milliseconds(10);
+    reject(26, at,
+           {0.99, 0.99, 0.99, false, at, 26, epoch},
+           {26, generation, {0.42, 0.56, 0.58, 0.70}, 0.99, at, 0, epoch, at},
+           at + std::chrono::milliseconds(1), CompositingDecision::pristine_missing_texture);
+
+    at += std::chrono::milliseconds(10);
+    reject(27, at,
+           {0.99, 0.99, 0.99, false, at, 26, epoch},
+           {27, generation, {0.42, 0.56, 0.58, 0.70}, 0.99, at, 1027, epoch, at},
+           at + std::chrono::milliseconds(1), CompositingDecision::pristine_wrong_frame);
+
+    CHECK(simulation->counters().patch_presentations == 1);
+    CHECK(simulation->counters().pristine_presentations == 7);
+    CHECK(broker.diagnostics().patches_received == 8);
+    CHECK(broker.diagnostics().patches_presented == 1);
+    CHECK(broker.diagnostics().patches_rejected == 7);
+
+    at += std::chrono::milliseconds(10);
+    present_valid(28, at);
+    broker.cancel_generation(generation + 1);
+    CHECK(!simulation->residual_visible());
+    CHECK(simulation->counters().residual_suppressions > 0);
+}
+
+void test_residual_safety_ceiling_cannot_be_disabled_by_configuration() {
+    BrokerPolicy policy;
+    policy.timing.frame_stale_after = std::chrono::seconds(10);
+    policy.timing.patch_stale_after = std::chrono::seconds(10);
+    policy.timing.evidence_stale_after = std::chrono::seconds(10);
+    policy.timing.maximum_source_to_patch_latency = std::chrono::seconds(10);
+    policy.occlusion = {0.0, 0.0, 0.0, 0.0};
+    policy.residual_bounds = {1.0, 1.0, 1.0};
+
+    auto platform = std::make_unique<SimulatedMediaPlatform>();
+    auto* simulation = platform.get();
+    CompositingDecision decision{CompositingDecision::no_frame};
+    MediaBroker broker(std::move(platform), policy,
+                       {.on_compositing_decision = [&](const CompositingDecision value) { decision = value; }});
+    CHECK(broker.start());
+    CHECK(broker.select_target(safe_target()));
+    simulation->emit_target(TargetState::selected, standard_geometry());
+
+    const auto epoch = broker.diagnostics().device_generation;
+    const auto generation = broker.diagnostics().cancellation_generation;
+    auto at = std::chrono::steady_clock::now();
+    simulation->emit_frame({31, epoch, at, {1920, 1080}, ColorSpace::sdr_srgb, 31, false, false});
+    broker.submit_occlusion_evidence({0.99, 0.99, 0.99, false, at, 31, epoch});
+    broker.submit_patch({31, generation, {0.0, 0.0, 1.0, 1.0}, 0.99, at, 31, epoch, at});
+    broker.tick(at + std::chrono::milliseconds(1));
+    CHECK(decision == CompositingDecision::pristine_unsafe_bounds);
+
+    at += std::chrono::milliseconds(10);
+    simulation->emit_frame({32, epoch, at, {1920, 1080}, ColorSpace::sdr_srgb, 32, false, false});
+    broker.submit_occlusion_evidence({0.5, 0.5, 0.5, false, at, 32, epoch});
+    broker.submit_patch({32, generation, {0.42, 0.56, 0.58, 0.70}, 0.5, at, 32, epoch, at});
+    broker.tick(at + std::chrono::milliseconds(1));
+    CHECK(decision == CompositingDecision::pristine_low_confidence);
+
+    at += std::chrono::milliseconds(10);
+    simulation->emit_frame({33, epoch, at, {1920, 1080}, ColorSpace::sdr_srgb, 33, false, false});
+    broker.submit_occlusion_evidence({0.99, 0.99, 0.99, false, at, 33, epoch});
+    broker.submit_patch({33, generation, {0.42, 0.56, 0.58, 0.70}, 0.99, at, 33, epoch, at});
+    broker.tick(at + std::chrono::milliseconds(101));
+    CHECK(decision == CompositingDecision::pristine_stale_frame);
+    CHECK(simulation->counters().patch_presentations == 0);
+    CHECK(!simulation->residual_visible());
 }
 
 void test_occlusion_and_staleness_fail_open_to_pristine_game() {
@@ -259,18 +404,18 @@ void test_occlusion_and_staleness_fail_open_to_pristine_game() {
 
     const auto now = std::chrono::steady_clock::now();
     simulation->emit_frame({7, 0, now, {1920, 1080}, ColorSpace::sdr_srgb, 1, false, false});
-    broker.submit_occlusion_evidence({0.99, 0.99, 0.99, true, now});
+    broker.submit_occlusion_evidence({0.99, 0.99, 0.99, true, now, 7, 0});
     broker.submit_patch({7, broker.diagnostics().cancellation_generation,
-                         {0.4, 0.5, 0.6, 0.7}, 0.99, now, 88});
+                         {0.4, 0.5, 0.6, 0.7}, 0.99, now, 88, 0, now});
     broker.tick(now + std::chrono::milliseconds(1));
     CHECK(decision == CompositingDecision::pristine_occluded);
     CHECK(simulation->counters().pristine_presentations == 1);
     CHECK(simulation->counters().patch_presentations == 0);
 
     simulation->emit_frame({8, 0, now, {1920, 1080}, ColorSpace::sdr_srgb, 2, false, false});
-    broker.submit_occlusion_evidence({0.99, 0.99, 0.99, false, now});
+    broker.submit_occlusion_evidence({0.99, 0.99, 0.99, false, now, 8, 0});
     broker.submit_patch({8, broker.diagnostics().cancellation_generation,
-                         {0.4, 0.5, 0.6, 0.7}, 0.99, now, 89});
+                         {0.4, 0.5, 0.6, 0.7}, 0.99, now, 89, 0, now});
     broker.tick(now + std::chrono::milliseconds(500));
     CHECK(decision == CompositingDecision::pristine_stale_frame);
     CHECK(simulation->counters().pristine_presentations == 2);
@@ -290,8 +435,8 @@ void test_late_generation_is_never_composited() {
 
     const auto now = std::chrono::steady_clock::now();
     simulation->emit_frame({9, 0, now, {1920, 1080}, ColorSpace::sdr_srgb, 3, false, false});
-    broker.submit_occlusion_evidence({0.99, 0.99, 0.99, false, now});
-    broker.submit_patch({9, old_generation, {0.4, 0.5, 0.6, 0.7}, 0.99, now, 90});
+    broker.submit_occlusion_evidence({0.99, 0.99, 0.99, false, now, 9, 0});
+    broker.submit_patch({9, old_generation, {0.4, 0.5, 0.6, 0.7}, 0.99, now, 90, 0, now});
     broker.tick(now + std::chrono::milliseconds(1));
     CHECK(decision == CompositingDecision::pristine_wrong_generation);
     CHECK(simulation->counters().pristine_presentations == 1);
@@ -359,18 +504,27 @@ void test_ipc_codec_is_deterministic_and_typed() {
     CHECK(!decode_frame_size(oversized));
 
     const Command patch = SubmitPatchCommand{12, 3, 0.4, 0.5, 0.6, 0.7, 0.92, 8500,
-        SharedTextureDescriptor{99, 100, 1, 2, 256, 128, 87}};
+        SharedTextureDescriptor{99, 100, 1, 2, 256, 128, 87}, 0, 8400};
     const auto encoded_patch = encode_command(CommandKind::submit_patch, patch);
     const auto decoded_patch = encoded_patch ? decode_command(CommandKind::submit_patch, *encoded_patch) : std::nullopt;
     CHECK(decoded_patch && std::holds_alternative<SubmitPatchCommand>(*decoded_patch));
     CHECK(std::get<SubmitPatchCommand>(*decoded_patch).shared_texture->width == 256);
+    CHECK(std::get<SubmitPatchCommand>(*decoded_patch).source_device_generation == 0);
+    CHECK(std::get<SubmitPatchCommand>(*decoded_patch).source_frame_qpc == 8400);
+
+    const Command invalid_patch_time = SubmitPatchCommand{
+        12, 3, 0.4, 0.5, 0.6, 0.7, 0.92, 8300,
+        SharedTextureDescriptor{99, 100, 1, 2, 256, 128, 87}, 0, 8400};
+    const auto encoded_invalid_patch = encode_command(CommandKind::submit_patch, invalid_patch_time);
+    CHECK(encoded_invalid_patch &&
+          !decode_command(CommandKind::submit_patch, *encoded_invalid_patch).has_value());
 
     const std::vector<std::pair<CommandKind, Command>> typed_commands{
         {CommandKind::health, HealthCommand{}},
         {CommandKind::clear_target, ClearTargetCommand{}},
         {CommandKind::configure_ptt, ConfigurePttCommand{0x77}},
         {CommandKind::audio_status, AudioStatusCommand{}},
-        {CommandKind::submit_occlusion, SubmitOcclusionCommand{0.9, 0.91, 0.92, false, 8000}},
+        {CommandKind::submit_occlusion, SubmitOcclusionCommand{0.9, 0.91, 0.92, false, 8000, 11, 0}},
         {CommandKind::cancel, CancelCommand{4}},
         {CommandKind::diagnostics, DiagnosticsCommand{}},
         {CommandKind::shutdown, ShutdownCommand{}},
@@ -513,6 +667,8 @@ int main() {
     test_audio_device_loss_recreates_rings_and_generation();
     test_primary_capture_falls_back_without_hooking();
     test_latest_frame_and_high_confidence_patch_are_presented();
+    test_residual_guard_rejects_unsafe_async_output_and_clears_prior_patch();
+    test_residual_safety_ceiling_cannot_be_disabled_by_configuration();
     test_occlusion_and_staleness_fail_open_to_pristine_game();
     test_late_generation_is_never_composited();
     test_device_loss_recreates_generation_and_capture();

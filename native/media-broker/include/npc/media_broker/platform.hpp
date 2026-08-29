@@ -37,6 +37,10 @@ public:
     [[nodiscard]] virtual bool recreate_audio_clients(Failure& failure) = 0;
     [[nodiscard]] virtual SharedPcmRing* capture_pcm_ring() noexcept = 0;
     [[nodiscard]] virtual SharedPcmRing* render_pcm_ring() noexcept = 0;
+    // Immediately removes any previously visible residual without retaining a
+    // game frame. Cancellation and malformed asynchronous output use this
+    // fail-open path.
+    virtual void suppress_residual() noexcept = 0;
     virtual void present_pristine(const FrameDescriptor& frame, const OverlayGeometry& geometry) = 0;
     virtual void present_patch(const FrameDescriptor& frame,
                                const MouthPatch& patch,
@@ -54,6 +58,7 @@ public:
         std::uint64_t patch_presentations{};
         std::uint64_t graphics_recreates{};
         std::uint64_t audio_recreates{};
+        std::uint64_t residual_suppressions{};
     };
 
     SimulatedMediaPlatform();
@@ -75,6 +80,7 @@ public:
     [[nodiscard]] bool recreate_audio_clients(Failure& failure) override;
     [[nodiscard]] SharedPcmRing* capture_pcm_ring() noexcept override;
     [[nodiscard]] SharedPcmRing* render_pcm_ring() noexcept override;
+    void suppress_residual() noexcept override;
     void present_pristine(const FrameDescriptor& frame, const OverlayGeometry& geometry) override;
     void present_patch(const FrameDescriptor& frame,
                        const MouthPatch& patch,
@@ -91,6 +97,7 @@ public:
     void set_target_valid(bool valid);
     [[nodiscard]] CaptureBackend active_capture() const noexcept;
     [[nodiscard]] const Counters& counters() const noexcept;
+    [[nodiscard]] bool residual_visible() const noexcept;
 
 private:
     struct Impl;

@@ -18,6 +18,7 @@ struct SimulatedMediaPlatform::Impl {
     bool target_valid{true};
     bool audio_initialized{};
     bool overlay_active{};
+    bool residual_visible{};
     bool hotkey_registered{};
     std::map<CaptureBackend, Failure> capture_failures;
     std::optional<Failure> graphics_recreate_failure;
@@ -67,7 +68,10 @@ bool SimulatedMediaPlatform::start_overlay(const TargetGeometry& geometry, Failu
     return true;
 }
 
-void SimulatedMediaPlatform::stop_overlay() noexcept { impl_->overlay_active = false; }
+void SimulatedMediaPlatform::stop_overlay() noexcept {
+    impl_->overlay_active = false;
+    impl_->residual_visible = false;
+}
 
 bool SimulatedMediaPlatform::initialize_audio(Failure&) {
     impl_->audio_initialized = true;
@@ -108,8 +112,14 @@ bool SimulatedMediaPlatform::recreate_audio_clients(Failure&) {
 SharedPcmRing* SimulatedMediaPlatform::capture_pcm_ring() noexcept { return &impl_->capture_ring; }
 SharedPcmRing* SimulatedMediaPlatform::render_pcm_ring() noexcept { return &impl_->render_ring; }
 
+void SimulatedMediaPlatform::suppress_residual() noexcept {
+    ++impl_->counters.residual_suppressions;
+    impl_->residual_visible = false;
+}
+
 void SimulatedMediaPlatform::present_pristine(const FrameDescriptor&, const OverlayGeometry&) {
     ++impl_->counters.pristine_presentations;
+    impl_->residual_visible = false;
 }
 
 void SimulatedMediaPlatform::present_patch(const FrameDescriptor&,
@@ -117,6 +127,7 @@ void SimulatedMediaPlatform::present_patch(const FrameDescriptor&,
                                            const RectI,
                                            const OverlayGeometry&) {
     ++impl_->counters.patch_presentations;
+    impl_->residual_visible = true;
 }
 
 void SimulatedMediaPlatform::poll() {}
@@ -156,5 +167,6 @@ void SimulatedMediaPlatform::fail_next_graphics_recreate(Failure failure) {
 void SimulatedMediaPlatform::set_target_valid(const bool valid) { impl_->target_valid = valid; }
 CaptureBackend SimulatedMediaPlatform::active_capture() const noexcept { return impl_->active_capture; }
 const SimulatedMediaPlatform::Counters& SimulatedMediaPlatform::counters() const noexcept { return impl_->counters; }
+bool SimulatedMediaPlatform::residual_visible() const noexcept { return impl_->residual_visible; }
 
 } // namespace npc::media

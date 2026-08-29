@@ -70,6 +70,8 @@ message SubmitOcclusion {
   double visibility_ratio = 3;
   bool mouth_occluded = 4;
   uint64 measured_qpc = 5;
+  uint64 source_frame_sequence = 6;
+  uint64 source_device_generation = 7;
 }
 
 message SharedTextureDescriptor {
@@ -92,6 +94,8 @@ message SubmitPatch {
   double confidence = 7;
   uint64 produced_qpc = 8;
   optional SharedTextureDescriptor shared_texture = 9;
+  uint64 source_device_generation = 10;
+  uint64 source_frame_qpc = 11;
 }
 
 message Cancel { uint64 new_generation = 1; }

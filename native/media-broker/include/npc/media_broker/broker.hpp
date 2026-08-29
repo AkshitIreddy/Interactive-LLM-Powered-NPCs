@@ -18,7 +18,11 @@ enum class CompositingDecision {
     pristine_low_confidence,
     pristine_occluded,
     pristine_wrong_generation,
+    pristine_wrong_epoch,
     pristine_wrong_frame,
+    pristine_wrong_source_time,
+    pristine_unsafe_bounds,
+    pristine_missing_texture,
     patch,
 };
 

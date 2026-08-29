@@ -247,8 +247,12 @@ public:
     SharedPcmRing* capture_pcm_ring() noexcept override { return audio_.capture_ring(); }
     SharedPcmRing* render_pcm_ring() noexcept override { return audio_.render_ring(); }
 
-    void present_pristine(const FrameDescriptor&, const OverlayGeometry&) override {
+    void suppress_residual() noexcept override {
         residual_overlay_.hide();
+    }
+
+    void present_pristine(const FrameDescriptor&, const OverlayGeometry&) override {
+        suppress_residual();
     }
 
     void present_patch(const FrameDescriptor&,

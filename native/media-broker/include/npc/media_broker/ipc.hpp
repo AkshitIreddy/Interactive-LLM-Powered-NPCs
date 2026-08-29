@@ -92,6 +92,8 @@ struct SubmitOcclusionCommand {
     double visibility_ratio{};
     bool mouth_occluded{};
     std::uint64_t measured_qpc{};
+    std::uint64_t source_frame_sequence{};
+    std::uint64_t source_device_generation{};
 };
 
 struct SubmitPatchCommand {
@@ -104,6 +106,8 @@ struct SubmitPatchCommand {
     double confidence{};
     std::uint64_t produced_qpc{};
     std::optional<SharedTextureDescriptor> shared_texture;
+    std::uint64_t source_device_generation{};
+    std::uint64_t source_frame_qpc{};
 };
 
 using Command = std::variant<HealthCommand,

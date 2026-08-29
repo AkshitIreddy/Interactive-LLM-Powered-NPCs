@@ -1,11 +1,21 @@
 #include "npc/media_broker/broker.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace npc::media {
 
 namespace {
+
+constexpr auto hard_frame_stale_after = std::chrono::milliseconds{100};
+constexpr auto hard_patch_stale_after = std::chrono::milliseconds{80};
+constexpr auto hard_evidence_stale_after = std::chrono::milliseconds{120};
+constexpr auto hard_source_to_patch_latency = std::chrono::milliseconds{80};
+constexpr auto hard_source_timestamp_tolerance = std::chrono::milliseconds{2};
+constexpr double hard_maximum_residual_width = 0.45;
+constexpr double hard_maximum_residual_height = 0.35;
+constexpr double hard_maximum_residual_area = 0.12;
 
 template <typename Rep, typename Period>
 [[nodiscard]] bool older_than(const MonotonicTime value,
@@ -19,6 +29,45 @@ template <typename Rep, typename Period>
     const auto shift = std::min<std::uint32_t>(failure_count > 0 ? failure_count - 1 : 0, 10);
     const auto factor = static_cast<std::int64_t>(1ULL << shift);
     return std::min(policy.recovery_initial_backoff * factor, policy.recovery_max_backoff);
+}
+
+[[nodiscard]] bool unit_confidence(const double value) noexcept {
+    return std::isfinite(value) && value >= 0.0 && value <= 1.0;
+}
+
+[[nodiscard]] bool meets_confidence(const double value,
+                                    const double configured_minimum,
+                                    const double hard_minimum) noexcept {
+    return unit_confidence(value) && unit_confidence(configured_minimum) &&
+           value >= std::max(configured_minimum, hard_minimum);
+}
+
+template <typename DurationType>
+[[nodiscard]] DurationType strict_limit(const DurationType configured,
+                                        const DurationType hard_limit) noexcept {
+    return configured < DurationType::zero() ? DurationType::zero()
+                                             : std::min(configured, hard_limit);
+}
+
+[[nodiscard]] bool residual_bounds_safe(const RectF bounds,
+                                        const ResidualBoundsPolicy& policy) noexcept {
+    if (!std::isfinite(policy.maximum_width) || !std::isfinite(policy.maximum_height) ||
+        !std::isfinite(policy.maximum_area) || policy.maximum_width <= 0.0 ||
+        policy.maximum_height <= 0.0 || policy.maximum_area <= 0.0) {
+        return false;
+    }
+    const auto maximum_width = std::min(policy.maximum_width, hard_maximum_residual_width);
+    const auto maximum_height = std::min(policy.maximum_height, hard_maximum_residual_height);
+    const auto maximum_area = std::min(policy.maximum_area, hard_maximum_residual_area);
+    return normalized_rect_valid(bounds) &&
+           bounds.width() <= maximum_width &&
+           bounds.height() <= maximum_height &&
+           bounds.width() * bounds.height() <= maximum_area;
+}
+
+[[nodiscard]] Duration absolute_delta(const MonotonicTime left,
+                                      const MonotonicTime right) noexcept {
+    return left >= right ? left - right : right - left;
 }
 
 } // namespace
@@ -158,11 +207,32 @@ void MediaBroker::clear_target() noexcept {
 }
 
 void MediaBroker::submit_patch(MouthPatch patch) {
+    ++diagnostics_.patches_received;
+    const bool source_timing_invalid =
+        patch.produced_at < patch.source_frame_captured_at ||
+        patch.produced_at - patch.source_frame_captured_at >
+            strict_limit(policy_.timing.maximum_source_to_patch_latency,
+                         hard_source_to_patch_latency);
+    if (patch.cancellation_generation != diagnostics_.cancellation_generation ||
+        patch.source_device_generation != diagnostics_.device_generation ||
+        source_timing_invalid || patch.native_texture == 0 ||
+        !unit_confidence(patch.confidence) ||
+        !residual_bounds_safe(patch.normalized_bounds, policy_.residual_bounds)) {
+        // Do not let a previously accepted residual remain visible while an
+        // unsafe newer result waits for the next capture frame.
+        platform_->suppress_residual();
+    }
     const auto result = patches_.push(std::move(patch));
     (void)result;
 }
 
 void MediaBroker::submit_occlusion_evidence(OcclusionEvidence evidence) {
+    if (!unit_confidence(evidence.face_confidence) ||
+        !unit_confidence(evidence.landmark_confidence) ||
+        !unit_confidence(evidence.visibility_ratio) ||
+        evidence.source_device_generation != diagnostics_.device_generation) {
+        platform_->suppress_residual();
+    }
     occlusion_evidence_ = std::move(evidence);
 }
 
@@ -172,6 +242,7 @@ void MediaBroker::cancel_generation(const std::uint64_t new_generation) noexcept
     if (auto* render = platform_->render_pcm_ring()) {
         render->clear();
     }
+    platform_->suppress_residual();
     ++diagnostics_.overlays_suppressed;
     publish();
 }
@@ -188,21 +259,27 @@ void MediaBroker::tick(const MonotonicTime now) {
         return;
     }
     auto patch = patches_.take_latest();
-    const auto decision = decide_compositing(*frame, patch, now);
+    auto decision = decide_compositing(*frame, patch, now);
     if (decision == CompositingDecision::patch && patch) {
         const auto patch_bounds = map_normalized_source_rect(patch->normalized_bounds, *overlay_geometry_);
         if (patch_bounds) {
             platform_->present_patch(*frame, *patch, *patch_bounds, *overlay_geometry_);
             ++diagnostics_.frames_presented;
+            ++diagnostics_.patches_presented;
         } else {
+            decision = CompositingDecision::pristine_unsafe_bounds;
             platform_->present_pristine(*frame, *overlay_geometry_);
             ++diagnostics_.frames_presented;
             ++diagnostics_.overlays_suppressed;
+            ++diagnostics_.patches_rejected;
         }
     } else {
         platform_->present_pristine(*frame, *overlay_geometry_);
         ++diagnostics_.frames_presented;
         ++diagnostics_.overlays_suppressed;
+        if (patch) {
+            ++diagnostics_.patches_rejected;
+        }
     }
     if (sink_.on_compositing_decision) {
         sink_.on_compositing_decision(decision);
@@ -418,7 +495,8 @@ bool MediaBroker::activate_capture(const CaptureBackend backend) {
 CompositingDecision MediaBroker::decide_compositing(const FrameDescriptor& frame,
                                                      const std::optional<MouthPatch>& patch,
                                                      const MonotonicTime now) const noexcept {
-    if (older_than(frame.captured_at, now, policy_.timing.frame_stale_after)) {
+    if (older_than(frame.captured_at, now,
+                   strict_limit(policy_.timing.frame_stale_after, hard_frame_stale_after))) {
         return CompositingDecision::pristine_stale_frame;
     }
     if (frame.content_occluded || frame.protected_content) {
@@ -430,25 +508,54 @@ CompositingDecision MediaBroker::decide_compositing(const FrameDescriptor& frame
     if (patch->cancellation_generation != diagnostics_.cancellation_generation) {
         return CompositingDecision::pristine_wrong_generation;
     }
+    if (patch->source_device_generation != frame.device_generation ||
+        patch->source_device_generation != diagnostics_.device_generation) {
+        return CompositingDecision::pristine_wrong_epoch;
+    }
     if (patch->source_frame_sequence != frame.sequence) {
         return CompositingDecision::pristine_wrong_frame;
     }
-    if (older_than(patch->produced_at, now, policy_.timing.patch_stale_after)) {
+    if (absolute_delta(patch->source_frame_captured_at, frame.captured_at) >
+            strict_limit(policy_.timing.source_timestamp_tolerance,
+                         hard_source_timestamp_tolerance) ||
+        patch->produced_at < patch->source_frame_captured_at ||
+        patch->produced_at - patch->source_frame_captured_at >
+            strict_limit(policy_.timing.maximum_source_to_patch_latency,
+                         hard_source_to_patch_latency)) {
+        return CompositingDecision::pristine_wrong_source_time;
+    }
+    if (older_than(patch->produced_at, now,
+                   strict_limit(policy_.timing.patch_stale_after, hard_patch_stale_after))) {
         return CompositingDecision::pristine_stale_patch;
     }
     if (!occlusion_evidence_ ||
-        older_than(occlusion_evidence_->measured_at, now, policy_.timing.evidence_stale_after)) {
+        older_than(occlusion_evidence_->measured_at, now,
+                   strict_limit(policy_.timing.evidence_stale_after,
+                                hard_evidence_stale_after))) {
         return CompositingDecision::pristine_stale_evidence;
     }
     if (occlusion_evidence_->mouth_region_occluded) {
         return CompositingDecision::pristine_occluded;
     }
-    if (patch->confidence < policy_.occlusion.minimum_patch_confidence ||
-        occlusion_evidence_->face_confidence < policy_.occlusion.minimum_face_confidence ||
-        occlusion_evidence_->landmark_confidence < policy_.occlusion.minimum_landmark_confidence ||
-        occlusion_evidence_->visibility_ratio < policy_.occlusion.minimum_visibility_ratio ||
-        !normalized_rect_valid(patch->normalized_bounds)) {
+    if (occlusion_evidence_->source_device_generation != frame.device_generation ||
+        occlusion_evidence_->source_frame_sequence != frame.sequence) {
+        return CompositingDecision::pristine_wrong_frame;
+    }
+    if (!meets_confidence(patch->confidence,
+                          policy_.occlusion.minimum_patch_confidence, 0.82) ||
+        !meets_confidence(occlusion_evidence_->face_confidence,
+                          policy_.occlusion.minimum_face_confidence, 0.78) ||
+        !meets_confidence(occlusion_evidence_->landmark_confidence,
+                          policy_.occlusion.minimum_landmark_confidence, 0.82) ||
+        !meets_confidence(occlusion_evidence_->visibility_ratio,
+                          policy_.occlusion.minimum_visibility_ratio, 0.72)) {
         return CompositingDecision::pristine_low_confidence;
+    }
+    if (!residual_bounds_safe(patch->normalized_bounds, policy_.residual_bounds)) {
+        return CompositingDecision::pristine_unsafe_bounds;
+    }
+    if (patch->native_texture == 0) {
+        return CompositingDecision::pristine_missing_texture;
     }
     return CompositingDecision::patch;
 }
@@ -516,7 +623,11 @@ std::string_view to_string(const CompositingDecision decision) noexcept {
     case CompositingDecision::pristine_low_confidence: return "pristine_low_confidence";
     case CompositingDecision::pristine_occluded: return "pristine_occluded";
     case CompositingDecision::pristine_wrong_generation: return "pristine_wrong_generation";
+    case CompositingDecision::pristine_wrong_epoch: return "pristine_wrong_epoch";
     case CompositingDecision::pristine_wrong_frame: return "pristine_wrong_frame";
+    case CompositingDecision::pristine_wrong_source_time: return "pristine_wrong_source_time";
+    case CompositingDecision::pristine_unsafe_bounds: return "pristine_unsafe_bounds";
+    case CompositingDecision::pristine_missing_texture: return "pristine_missing_texture";
     case CompositingDecision::patch: return "patch";
     }
     return "unknown";

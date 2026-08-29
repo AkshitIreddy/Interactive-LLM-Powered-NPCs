@@ -47,6 +47,9 @@ void append_little(std::vector<std::byte>& output, T value) {
     append_little(result, value.frames_presented);
     append_little(result, value.frames_dropped);
     append_little(result, value.overlays_suppressed);
+    append_little(result, value.patches_received);
+    append_little(result, value.patches_presented);
+    append_little(result, value.patches_rejected);
     return result;
 }
 
@@ -128,7 +131,9 @@ void append_ring(std::vector<std::byte>& output, const SharedPcmRing* ring) {
         const auto now = std::chrono::steady_clock::now();
         broker.submit_occlusion_evidence({occlusion->face_confidence, occlusion->landmark_confidence,
                                           occlusion->visibility_ratio, occlusion->mouth_occluded,
-                                          qpc_to_monotonic(occlusion->measured_qpc, now_qpc, frequency, now)});
+                                          qpc_to_monotonic(occlusion->measured_qpc, now_qpc, frequency, now),
+                                          occlusion->source_frame_sequence,
+                                          occlusion->source_device_generation});
     } else if (std::holds_alternative<ipc::SubmitPatchCommand>(command)) {
         response.status = ipc::StatusCode::capability_unavailable;
     } else if (const auto* cancel = std::get_if<ipc::CancelCommand>(&command)) {

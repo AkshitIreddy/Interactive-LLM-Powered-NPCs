@@ -173,6 +173,9 @@ struct OcclusionEvidence {
     double visibility_ratio{};
     bool mouth_region_occluded{};
     MonotonicTime measured_at{};
+    // Bind tracking evidence to one captured frame in one graphics epoch.
+    std::uint64_t source_frame_sequence{};
+    std::uint64_t source_device_generation{};
 };
 
 struct MouthPatch {
@@ -182,6 +185,10 @@ struct MouthPatch {
     double confidence{};
     MonotonicTime produced_at{};
     std::uintptr_t native_texture{};
+    // Sequence values can restart after capture recreation. The graphics epoch
+    // and original capture time prevent stale output from matching by accident.
+    std::uint64_t source_device_generation{};
+    MonotonicTime source_frame_captured_at{};
 };
 
 struct Failure {
@@ -195,6 +202,8 @@ struct TimingPolicy {
     std::chrono::milliseconds frame_stale_after{100};
     std::chrono::milliseconds patch_stale_after{80};
     std::chrono::milliseconds evidence_stale_after{120};
+    std::chrono::milliseconds maximum_source_to_patch_latency{80};
+    std::chrono::milliseconds source_timestamp_tolerance{2};
     std::chrono::milliseconds recovery_initial_backoff{50};
     std::chrono::milliseconds recovery_max_backoff{2000};
     std::uint32_t max_same_backend_retries{2};
@@ -207,9 +216,17 @@ struct OcclusionPolicy {
     double minimum_patch_confidence{0.82};
 };
 
+struct ResidualBoundsPolicy {
+    // A residual is a local mouth edit, never a replacement face or frame.
+    double maximum_width{0.45};
+    double maximum_height{0.35};
+    double maximum_area{0.12};
+};
+
 struct BrokerPolicy {
     TimingPolicy timing;
     OcclusionPolicy occlusion;
+    ResidualBoundsPolicy residual_bounds;
     bool permit_desktop_duplication_fallback{true};
     bool permit_audio_only_fallback{true};
 };
@@ -229,6 +246,9 @@ struct Diagnostics {
     std::uint64_t frames_presented{};
     std::uint64_t frames_dropped{};
     std::uint64_t overlays_suppressed{};
+    std::uint64_t patches_received{};
+    std::uint64_t patches_presented{};
+    std::uint64_t patches_rejected{};
     std::uint32_t consecutive_failures{};
     std::optional<Failure> last_failure;
 };

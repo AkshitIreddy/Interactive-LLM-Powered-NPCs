@@ -364,7 +364,10 @@ std::optional<std::vector<std::byte>> encode_command(const CommandKind kind, con
         const auto* value = std::get_if<SubmitOcclusionCommand>(&command); if (!value) return std::nullopt;
         writer.double_field(1, value->face_confidence); writer.double_field(2, value->landmark_confidence);
         writer.double_field(3, value->visibility_ratio); writer.varint_field(4, value->mouth_occluded ? 1 : 0);
-        writer.varint_field(5, value->measured_qpc); break;
+        writer.varint_field(5, value->measured_qpc);
+        writer.varint_field(6, value->source_frame_sequence);
+        writer.varint_field(7, value->source_device_generation);
+        break;
     }
     case CommandKind::submit_patch: {
         const auto* value = std::get_if<SubmitPatchCommand>(&command); if (!value) return std::nullopt;
@@ -373,6 +376,8 @@ std::optional<std::vector<std::byte>> encode_command(const CommandKind kind, con
         writer.double_field(5, value->right); writer.double_field(6, value->bottom);
         writer.double_field(7, value->confidence); writer.varint_field(8, value->produced_qpc);
         if (value->shared_texture) { const auto nested = encode_texture(*value->shared_texture); writer.bytes_field(9, nested); }
+        writer.varint_field(10, value->source_device_generation);
+        writer.varint_field(11, value->source_frame_qpc);
         break;
     }
     }
@@ -408,29 +413,38 @@ std::optional<Command> decode_command(const CommandKind kind, const std::span<co
         return reader.good() && result.new_generation > 0 ? std::optional<Command>{result} : std::nullopt;
     }
     case CommandKind::submit_occlusion: {
-        SubmitOcclusionCommand result; while (const auto field = reader.next()) {
+        SubmitOcclusionCommand result;
+        bool source_epoch_seen{};
+        while (const auto field = reader.next()) {
             if (field->number == 1) { auto v = reader.read_double(*field); if (!v) return std::nullopt; result.face_confidence = *v; }
             else if (field->number == 2) { auto v = reader.read_double(*field); if (!v) return std::nullopt; result.landmark_confidence = *v; }
             else if (field->number == 3) { auto v = reader.read_double(*field); if (!v) return std::nullopt; result.visibility_ratio = *v; }
             else if (field->number == 4) { std::uint32_t v{}; if (!read_varint_as(reader, *field, v) || v > 1) return std::nullopt; result.mouth_occluded = v != 0; }
             else if (field->number == 5) { if (!read_varint_as(reader, *field, result.measured_qpc)) return std::nullopt; }
+            else if (field->number == 6) { if (!read_varint_as(reader, *field, result.source_frame_sequence)) return std::nullopt; }
+            else if (field->number == 7) { if (!read_varint_as(reader, *field, result.source_device_generation)) return std::nullopt; source_epoch_seen = true; }
             else if (!reader.skip(*field)) return std::nullopt;
         }
         return reader.good() && unit_value(result.face_confidence) &&
                        unit_value(result.landmark_confidence) && unit_value(result.visibility_ratio) &&
-                       result.measured_qpc > 0
+                       result.measured_qpc > 0 && result.source_frame_sequence > 0 && source_epoch_seen
                    ? std::optional<Command>{result} : std::nullopt;
     }
     case CommandKind::submit_patch: {
-        SubmitPatchCommand result; while (const auto field = reader.next()) {
+        SubmitPatchCommand result;
+        bool source_epoch_seen{};
+        while (const auto field = reader.next()) {
             if (field->number == 1) { if (!read_varint_as(reader, *field, result.source_frame_sequence)) return std::nullopt; }
             else if (field->number == 2) { if (!read_varint_as(reader, *field, result.cancellation_generation)) return std::nullopt; }
             else if (field->number >= 3 && field->number <= 7) { auto v = reader.read_double(*field); if (!v) return std::nullopt; double* slots[]{&result.left,&result.top,&result.right,&result.bottom,&result.confidence}; *slots[field->number - 3] = *v; }
             else if (field->number == 8) { if (!read_varint_as(reader, *field, result.produced_qpc)) return std::nullopt; }
             else if (field->number == 9) { auto nested = reader.read_bytes(*field); if (!nested) return std::nullopt; result.shared_texture = decode_texture(*nested); if (!result.shared_texture) return std::nullopt; }
+            else if (field->number == 10) { if (!read_varint_as(reader, *field, result.source_device_generation)) return std::nullopt; source_epoch_seen = true; }
+            else if (field->number == 11) { if (!read_varint_as(reader, *field, result.source_frame_qpc)) return std::nullopt; }
             else if (!reader.skip(*field)) return std::nullopt;
         }
-        return reader.good() && result.source_frame_sequence > 0 && result.produced_qpc > 0 &&
+        return reader.good() && source_epoch_seen && result.source_frame_sequence > 0 && result.produced_qpc > 0 &&
+                       result.source_frame_qpc > 0 && result.produced_qpc >= result.source_frame_qpc &&
                        unit_value(result.left) && unit_value(result.top) && unit_value(result.right) &&
                        unit_value(result.bottom) && result.right > result.left && result.bottom > result.top &&
                        unit_value(result.confidence)
