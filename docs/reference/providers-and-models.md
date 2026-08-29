@@ -65,7 +65,7 @@ and [API Trial Terms](https://assets.ngc.nvidia.com/products/api-catalog/legal/N
 | Candidate | Policy |
 | --- | --- |
 | Tracked viseme/mouth-warp | Low-resource generic baseline; no model availability claim and still requires rendered tracking/quality evidence |
-| MuseTalk 1.5 | Public experimental comparator; blocked pending exact weights/dependencies/license, Windows, size/VRAM, latency, quality, and game-impact review |
+| MuseTalk 1.5 | Public experimental comparator; an attested standalone Windows run produced 39 frames for 1.579 s of synthetic stock-voice audio, but its ~102 s batch-path wall time fails live-latency admission. It remains blocked pending a persistent runner, exact license/security review, quality, and game-impact evidence. |
 | NVIDIA AR SDK LipSync/private NGC package | Conditional candidate; a normal NIM API key does not unlock it. Private access, Windows/Ada path, image + 16 kHz mono input, region/tracking, fixed 14-frame pre-roll, license, size/VRAM, quality, and impact must be qualified |
 | Ditto | Deferred until leading candidates and the baseline are resolved |
 | LatentSync | Offline comparison only; rejected as a live-game route |

@@ -31,6 +31,7 @@ These checks passed against the 2026-08-29 development tree:
 | Native | PASS | Media broker CTest 2/2 and the game-load harness inert/dry-run path. No live capture, display matrix, GPU contention, or performance claim. |
 | Security and supply chain | PASS | Current-tree secret scan, strict license/provenance validation, and deterministic complete CycloneDX SBOM generation. Reachable history remains separately blocked by the historical `apikeys.json` filename. |
 | Local installer smoke | PASS | The unsigned Debug `unchecked-development-package` passed authenticated runtime/media-broker health, protected AppData ACLs, direct child topology, parent-death cleanup, normal uninstall, and file/shortcut/registry residue checks. Doctor was degraded only because Debug permits the intentionally unsigned development catalog. One active display made secondary-display placement a correct no-op. |
+| Standalone MuseTalk qualification | PASS (scoped) | A disposable, attested MuseTalk 1.5 Windows harness used an original synthetic portrait and real stock-voice API WAV to produce a 1.579 s H.264/AAC MP4 (39 frames). It is not app E2E, not a redistributable pack, and its ~102 s end-to-end batch-path wall time fails live lip-sync admission. Evidence: `artifacts/real-weight-qualification/standalone-real-weight-qualification-report.md`. |
 
 The staged test installer and its manifest are under
 `artifacts/test-app/<UTC timestamp>/`; the redacted smoke result is
@@ -46,8 +47,10 @@ not immutable release evidence.
   pack runner, exact model-pack qualification and license evidence, and signing/
   update infrastructure are not provisioned.
 - No optional generic lip-sync pack has passed model quality, Windows runtime,
-  storage/RAM/VRAM, latency, game-impact, GPU-contention, license, and self-test
-  qualification. No model is bundled or selectable as a production pack.
+  storage/RAM/VRAM, live latency, game-impact, GPU-contention, license, and
+  self-test qualification. A standalone MuseTalk 1.5 run is functional but is
+  explicitly disqualified by its ~102 s batch-path wall time for 1.579 s of
+  synthetic input. No model is bundled or selectable as a production pack.
 - Clean Windows 10/11 VM installation, live-game capture/identity/lip-sync,
   performance/latency/WER/soak, monitor/DPI/HDR/display-mode, accessibility, and
   offline deny-all-network acceptance remain incomplete.
