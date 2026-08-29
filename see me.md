@@ -1,4 +1,297 @@
-# See me — paused handoff
+# See me — mandatory product rework handoff
+
+## Current directive — re-evaluate and rebuild the product experience
+
+This section is the current source of truth and supersedes the incremental UI
+and fixture TODOs lower in this file. The user reviewed the installed app and
+found that the present 2.0 work is too text-heavy, visually weak, and often
+non-functional. Do not continue polishing the existing pages one card at a
+time. Review the entire product, the current implementation, and the useful
+behavior of version 1, then rebuild the information architecture and vertical
+slice around functions that actually work.
+
+The target is a high-quality Windows-only application for talking to visible
+NPCs in safely capturable single-player games. A screen, control, metric, game,
+character, memory, or capability appears only when it is backed by real data or
+a clearly operable setup action. Explanatory prose supports a function; it does
+not substitute for one.
+
+### Mandatory review before further implementation
+
+1. Read this entire file, including the historical implementation evidence
+   below. Treat older completion claims as evidence to recheck, not proof that
+   the product experience is acceptable.
+2. Inspect every current page and trace every button, toggle, card, metric,
+   list, and status to its data source, persistence path, native command, and
+   tested outcome. Classify each as working, fixture-only, inert, misleading,
+   or missing.
+3. Read `apps/control/src/Pages.tsx`, `App.tsx`, `Onboarding.tsx`, `data.ts`,
+   `ProviderSettings.tsx`, `ProviderLoadoutEditor.tsx`, and the Tauri/runtime
+   bridge before redesigning the UI. Current visual density is not the only
+   problem; many surfaces are hard-coded presentation fixtures.
+4. Review the immutable v1 baseline `503ef3b64a921b6a11efa9e3e0432a0c3de3b619`
+   through `git show` and the safe summaries in `docs/legacy/`. Do not execute
+   the notebooks/generators, deserialize the face/Chroma pickles, load old
+   credentials, or run model-generated `temp.py`.
+5. Produce a current-screen functional audit, a v1 behavior comparison, a new
+   information architecture, and an implementation/acceptance map before
+   resuming broad UI construction. Every retained page must have a checkable
+   job and a real empty/loading/error/ready state.
+6. Build one coherent real vertical slice before restoring breadth:
+   first-run onboarding → detect/select the synthetic game → select the current
+   game-scoped character → select/test provider models and stock voice → run a
+   real spoken turn → show subtitles/diagnostics based on measured events.
+
+Completion criterion: a reviewer can launch the installed app on a clean local
+test state and complete that vertical slice without a terminal, query-string
+flags, file editing, or interpreting fixture prose.
+
+## User-observed defects that must all remain tracked
+
+- Opening the test app also opens a terminal/console window. Explorer launch
+  must produce only the intended GUI; runtime and broker children remain hidden
+  and write structured logs instead of owning visible consoles.
+- The Home hero is oversized. Its tagline and huge line breaks stretch the
+  page, waste the first viewport, and make the text harder to read. Replace it
+  with a compact command surface whose primary state, game, character, PTT and
+  start action are legible at a glance.
+- The overall UI needs a complete high-quality overhaul. The requested
+  direction is cyberpunk-game-inspired: strong hierarchy, controlled neon,
+  dense but readable instrumentation, deliberate typography and motion, not a
+  giant marketing landing page. Use original/open-licensed assets and design;
+  do not copy Cyberpunk 2077 UI art or proprietary fonts.
+- Authored profiles appear empty and do not work. Opening a profile must show
+  the actual runtime profile data, detection/build status, supported
+  characters, lore/content readiness, capabilities, fallback, and actionable
+  troubleshooting. A card saying “authored package” is not a profile viewer.
+- Characters is half-built. Characters from unrelated games are mixed in one
+  global list; search, add, edit, preview, memory and relationship controls are
+  inert or fixture copy. The page must be scoped to the selected game/profile,
+  and selecting a character must drive real identity, prompt, voice, memory and
+  provider configuration.
+- Conversation contains invented sessions and speculative relationship/quest
+  material. The app cannot claim a current quest, save state, relationship
+  event or remembered action unless a verified game signal/profile adapter or
+  delivered-turn record supplied it. Show only actually delivered dialogue and
+  explicitly sourced context; otherwise show a useful empty state.
+- The standalone synthetic game was not detected by the app during the user's
+  test. Fix and verify the complete installed-app flow, not only video decode:
+  launch `local-app-data\test-game\interactive-npcs-synthetic-target.exe`,
+  publish matching PID/HWND metadata, surface the target in the app, select it,
+  validate it in the native broker, and show advancing captured frames.
+- In-game subtitles need to feel native to the selected game: correct safe-area
+  placement, readable foreground depth, speaker labeling, outlines/shadows,
+  collision avoidance, DPI/HDR handling and game-appropriate typography.
+  Provide multiple open-licensed font/style presets plus Windows fallbacks;
+  record each font's license and test non-Latin/RTL/fallback behavior.
+- The current screen-space mouth-motion story is incomplete. The system must
+  first determine which tracked on-screen actor the player is addressing and
+  lock that identity over time. It must never animate a face selected from
+  memory alone or whichever detection scores highest for one frame.
+- Models is mostly prose about optional lip-sync candidates. It does not expose
+  the actual model/provider workflow the user expects: choose, configure and
+  test LLM, STT, TTS, stock voice, embeddings and optional local lip-sync;
+  create named loadouts; change global/game/character overrides; see cost,
+  privacy, latency, language, license and hardware fit; install/remove local
+  packs where applicable.
+- Diagnostics currently mixes a few native states with simulated checks and a
+  fake timeline. It must run real bounded checks, explain failures in plain
+  language, offer safe actions, reveal exact evidence provenance, and export a
+  genuinely redacted bundle.
+- Performance currently presents words and illustrative values rather than a
+  useful tool. It must measure this PC, label unmeasured fields, compare presets,
+  expose CPU/GPU/VRAM/RAM/frame impact/latency, explain degradation decisions,
+  and provide repeatable benchmark actions.
+- Onboarding does not appear on normal first launch. `App.tsx` currently opens
+  it only when `?onboarding=1` is present. Persist a real first-run completion
+  state, launch onboarding automatically when incomplete, and provide a clear
+  rerun/reset action.
+- Settings and Help need full rework. Several settings sections are generated
+  by `SettingsPlaceholder` and toggles do nothing. Help search and quick actions
+  must open real local guides or run real checks. Remove controls whose runtime
+  behavior does not exist.
+- Audit all screens, including Presence and every dialog/toast/command palette.
+  The app currently contains many sentences describing intended architecture;
+  the new UI must expose meaningful state and actions rather than architecture
+  prose.
+
+## Current implementation facts explaining the defects
+
+- `Pages.tsx` imports `GAME_PROFILES`, `CHARACTERS`, and `MODEL_PACKS` directly
+  from `data.ts`. These are presentation fixtures, not the runtime's complete
+  profile/model state.
+- `GAME_PROFILES` is generated from short static seeds. “Open authored profile”
+  has no working profile-detail navigation/action.
+- `CHARACTERS` is one hard-coded cross-game array. Character detail text,
+  relationship thread and several actions are fixed/inert.
+- Conversation session names and older turn counts are hard-coded. Any quest,
+  relationship or remembered-action language on that surface is not live game
+  evidence.
+- `ModelsPage` is driven by three static candidate packs; provider/loadout
+  functionality lives elsewhere and is not presented as one usable model
+  workflow.
+- Performance and Diagnostics contain simulated timings/health rows. The UI
+  often labels them as fixtures, but the volume of fixture prose still makes
+  the surfaces noisy and unhelpful.
+- Audio, overlay, storage and updates settings fall through to
+  `SettingsPlaceholder`; many toggles use `onChange={() => undefined}`.
+- Onboarding defaults to closed unless the URL contains `onboarding=1`.
+- The Home hero is a large `command-deck` with multi-line dynamic taglines and
+  substantial fixture disclaimers before the useful controls.
+
+These are root causes. A theme change alone will not fix them.
+
+## Screen-by-screen product contract
+
+| Surface | Required job | Acceptance evidence |
+| --- | --- | --- |
+| Onboarding | Configure a usable first run: hardware/privacy scan, execution mode, installed/synthetic game, provider models/voice, microphone/PTT, subtitle style, optional vision/lip-sync, test turn | Appears automatically on clean state; progress persists; final real simulation succeeds or reports one actionable blocker |
+| Home | Start/stop the selected game session and show compact real state | First viewport shows selected game/character, capture/provider/audio readiness, PTT and one primary action; no oversized tagline |
+| Games | Detect installations and manage real `GameProfileV2` packages | Scan works; profile opens; details come from runtime profile data; manual EXE and synthetic target paths work |
+| Characters | Manage characters inside the selected game only | Game filter is mandatory; known-character reference/identity/voice/prompt data is inspectable; no cross-game global fixture list |
+| Conversation | Show delivered dialogue and user-controlled memory | Empty state on fresh DB; only delivered turns appear; source/save/character scope is visible; unsupported quest facts never appear |
+| Presence | Configure target identity, tracking, subtitles and optional visual response | Live target/track confidence and fallback are visible; every toggle changes a real runtime setting |
+| Performance | Measure and tune the current machine | Run benchmark button produces timestamped CPU/GPU/VRAM/RAM/latency/frame-impact evidence; fixture numbers are absent |
+| Models | Configure provider modalities, voices, loadouts and optional local packs | User can change/test LLM, STT, TTS, stock voice, embeddings and lip-sync; changes persist with global/game/character inheritance |
+| Diagnostics | Diagnose actual app/runtime/broker/provider/capture/audio/model state | Checks execute; timestamps/provenance are visible; failures offer safe retry/open-log/repair actions; simulated timeline removed |
+| Settings | Persist all supported global defaults and overrides | No placeholder sections or inert toggles; device/font/overlay/storage/privacy/update controls have tests and consequences |
+| Help | Guide real tasks and troubleshooting | Search opens real local docs; microphone, diagnostics, privacy and setup actions navigate/run correctly |
+
+Any screen that cannot meet its job should be merged into a working surface or
+removed until its subsystem exists.
+
+## Known-character identity — preserve the v1 intent, replace the method
+
+Version 1 did have an important behavior that 2.0 has not yet made concrete:
+after detecting a face, it searched each character image directory with
+DeepFace/Facenet512 and used the match to choose the character-specific prompt,
+voice and memory. Relevant safe evidence is in
+`docs/legacy/v1-pipeline.md`, `feature-disposition.md`, and the immutable audited
+revision. Review the exact old code through `git show`; do not run it or open
+`representations_facenet512.pkl`.
+
+The replacement must be an optional, user-local, provenance-aware identity
+pipeline:
+
+1. Capture the selected game HWND through WGC and detect all faces/heads in the
+   current frame with a benchmarked efficient detector.
+2. Maintain temporal actor tracks across frames/occlusion. Give each track a
+   sticky actor ID; one weak frame cannot switch identity.
+3. Determine the addressed actor from multiple signals: selected/manual target,
+   screen position and persistence, dialogue/subtitle/name-tag OCR where
+   available, speaking/turn timing, and face embedding similarity.
+4. For known characters, compare a track against a game-scoped reference set
+   using a modern pinned ONNX/native face embedding model. Compute embeddings
+   from licensed, original, or user-private reference images; store versioned
+   tensor data in the app database/model namespace, never pickle.
+5. Use calibrated per-game thresholds, multi-frame consensus, margin from the
+   second-best identity and a confidence lock. Ambiguity keeps the existing
+   selected character or asks the user; it never silently chooses another face.
+6. Bind prompt, lore, voice and memory only after the actor identity is locked.
+   When the actor is occluded/offscreen, continue the selected identity through
+   audio/subtitles until explicit evidence changes it.
+7. Benchmark candidate detector/embedding/tracker combinations on the synthetic
+   replay plus legally sourced per-game/user-local reference sets. Measure
+   latency, VRAM, reacquisition, false match and identity-switch rates before
+   selecting defaults.
+
+This preserves the useful v1 database-recognition idea while removing its
+single-frame search, unstable thresholds, unsafe pickles and serialized disk
+pipeline.
+
+## Unknown/background NPC identity — deterministic without demographic guesses
+
+The user asked to revisit v1's unknown-NPC flow, which inferred gender, age,
+race and ethnicity from a face and used those guesses to choose a name and
+voice. The v1 audit shows why that was unreliable and privacy-sensitive. Do not
+restore demographic classifiers or claim protected traits from pixels.
+
+Meet the actual product need with a game-scoped background NPC system:
+
+- Assign a stable encounter ID to the tracked unknown actor and preserve it
+  across occlusion/reacquisition and repeated nearby encounters.
+- Select from a curated, data-only background-NPC archetype/name/voice library
+  owned by that game profile. Use reliable context such as game, locale,
+  district/faction/settlement metadata supplied by the profile or user—not
+  inferred race/ethnicity/age/gender.
+- Seed name, persona and provider-neutral voice traits deterministically from
+  the encounter ID so the same actor does not change on every frame/turn.
+- Permit manual correction, naming and voice override. Keep a neutral unnamed
+  identity when context is insufficient.
+- Keep background encounters isolated from named-character memory and from one
+  another; record expiry/merge rules explicitly.
+
+## Subtitles and screen-space mouth motion
+
+Subtitles and mouth motion consume the same selected actor track but remain
+independent capabilities.
+
+- Subtitle profiles define open-licensed font family/fallback, weight, size,
+  outline, shadow/backplate, speaker label, alignment, animation, safe region,
+  HDR color and DPI scaling. Ship several original genre presets and allow
+  game/profile/character overrides. Verify fonts and licenses in notices/SBOM.
+- Placement uses the tracked actor/head anchor when confident, clamps to a
+  readable foreground safe area, avoids HUD/dialogue regions, and falls back to
+  a stable bottom-center game-style layout when the actor is offscreen or the
+  anchor is unreliable.
+- Mouth motion begins only after the addressed actor is locked. The visual
+  worker receives the exact actor ID, frame ID, timestamp, mouth ROI and audio
+  timing. It returns a bounded residual for that same frame/track.
+- The compositor applies only a feathered mouth region to a presentation copy
+  of the newest compatible frame. Low confidence, stale output, occlusion,
+  identity mismatch or budget pressure restores the untouched frame within one
+  refresh. Memory text never selects or drives a face.
+- The current offline ONNX/Wav2Lip evidence proves only that mouth shapes can
+  change on a synthetic still; its soft/waxy lower face fails production visual
+  quality and it is not a pack candidate.
+
+## Synthetic game and terminal acceptance
+
+The packaged test target is
+`local-app-data\test-game\interactive-npcs-synthetic-target.exe`. It is a
+double-clickable Windows GUI executable with sibling video/FFmpeg. It publishes
+the exact executable basename, PID, HWND, decoded-frame count and title expected
+by the debug control path.
+
+Required end-to-end test:
+
+1. Launch the target from Explorer; no terminal appears.
+2. Launch `interactive-npcs-control.exe`; no terminal appears for the shell,
+   runtime, broker or helper processes.
+3. On first run, onboarding appears and offers the synthetic game.
+4. Selecting it validates the exact PID/HWND/executable through the broker,
+   starts WGC, and shows advancing frame diagnostics.
+5. Closing/relaunching, stale metadata, wrong executable, mismatched PID/HWND,
+   protected/anti-cheat state and target loss all produce explicit safe states.
+
+Investigate the console problem at the PE/process-launch boundary. Verify the
+Windows subsystem of the control/runtime/broker executables and child process
+creation flags. GUI launch must use the Windows GUI subsystem or hidden child
+creation as appropriate; stdout/stderr go to bounded app-owned log files.
+
+## Rework order and release gate
+
+1. Functional audit and rendered audit of every current screen/state.
+2. Legacy behavior review and modern identity/subtitle architecture decision.
+3. New information architecture and compact cyberpunk visual specimen at
+   normal, narrow, 150% and 200% scaling.
+4. Real onboarding plus synthetic-game detection vertical slice.
+5. Runtime-backed Games, game-scoped Characters and delivered-only
+   Conversation.
+6. Functional provider/model/loadout/voice workflow.
+7. Measured Diagnostics and Performance, then real Settings and Help.
+8. Actor identity/tracking, subtitle style system and optional mouth residual.
+9. Installed-app Playwright/native interaction testing, framebuffer review,
+   real provider/audio tests, failure/cancellation tests and clean-state rerun.
+
+For every page, capture and inspect 4–6 readable close-ups plus the full frame.
+Exercise every visible control. A green DOM/unit test does not pass visual or
+functional acceptance. Do not prepare another installer as the user-review
+candidate until the vertical slice works and every remaining fixture or inert
+control is either removed or visibly quarantined in an explicit developer
+evidence area.
+
+## Historical checkpoint material
 
 Paused at the user’s request on 2026-08-29. Do not push, publish, tag, upload,
 activate an updater, use provider credentials, download models, or change the
