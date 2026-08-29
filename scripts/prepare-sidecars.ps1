@@ -12,6 +12,26 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $destination = Join-Path $repoRoot 'apps/control/src-tauri/binaries'
 $cargoProfile = if ($Configuration -eq 'Debug') { 'debug' } else { 'release' }
 $nativeBuild = Join-Path $repoRoot 'artifacts/media-broker-build'
+$nativeCache = Join-Path $nativeBuild 'CMakeCache.txt'
+
+function Get-CMakeCacheEntry {
+    param(
+        [Parameter(Mandatory = $true)][string]$CachePath,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    $escapedName = [regex]::Escape($Name)
+    $match = Select-String -LiteralPath $CachePath -Pattern "^$escapedName(?::[^=]+)?=(.*)$" |
+        Select-Object -First 1
+    if ($null -eq $match) { return $null }
+    return $match.Matches[0].Groups[1].Value
+}
+
+function Normalize-ComparablePath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    return $Path.Replace('/', '\').TrimEnd('\')
+}
 
 if (-not $SkipBuild) {
     Push-Location $repoRoot
@@ -21,11 +41,34 @@ if (-not $SkipBuild) {
         & cargo @cargoArguments
         if ($LASTEXITCODE -ne 0) { throw 'Runtime host build failed.' }
 
-        if (-not (Test-Path -LiteralPath (Join-Path $nativeBuild 'CMakeCache.txt'))) {
-            & cmake -S native/media-broker -B $nativeBuild -G 'Visual Studio 17 2022' -A x64
+        $cmakeExecutable = (Get-Command cmake -CommandType Application -ErrorAction Stop |
+            Select-Object -First 1).Source
+        $needsNativeConfigure = -not (Test-Path -LiteralPath $nativeCache -PathType Leaf)
+        if (-not $needsNativeConfigure) {
+            $cachedCmake = Get-CMakeCacheEntry -CachePath $nativeCache -Name 'CMAKE_COMMAND'
+            $cachedGenerator = Get-CMakeCacheEntry -CachePath $nativeCache -Name 'CMAKE_GENERATOR'
+            $cachedPlatform = Get-CMakeCacheEntry -CachePath $nativeCache -Name 'CMAKE_GENERATOR_PLATFORM'
+            $compatibleCache =
+                -not [string]::IsNullOrWhiteSpace($cachedCmake) -and
+                ([string]::Equals(
+                    (Normalize-ComparablePath $cachedCmake),
+                    (Normalize-ComparablePath $cmakeExecutable),
+                    [System.StringComparison]::OrdinalIgnoreCase
+                )) -and
+                $cachedGenerator -eq 'Visual Studio 17 2022' -and
+                $cachedPlatform -eq 'x64'
+            if (-not $compatibleCache) {
+                Write-Host 'Refreshing the disposable media-broker build cache because its CMake toolchain changed.' -ForegroundColor Yellow
+                Remove-Item -LiteralPath $nativeBuild -Recurse -Force
+                $needsNativeConfigure = $true
+            }
+        }
+
+        if ($needsNativeConfigure) {
+            & $cmakeExecutable -S native/media-broker -B $nativeBuild -G 'Visual Studio 17 2022' -A x64
             if ($LASTEXITCODE -ne 0) { throw 'Media broker configuration failed.' }
         }
-        & cmake --build $nativeBuild --config $Configuration --parallel 4
+        & $cmakeExecutable --build $nativeBuild --config $Configuration --parallel 4
         if ($LASTEXITCODE -ne 0) { throw 'Media broker build failed.' }
     }
     finally {
