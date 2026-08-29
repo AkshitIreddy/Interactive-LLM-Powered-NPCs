@@ -593,8 +593,15 @@ export function ProviderLoadoutEditor() {
                         }
                       >
                         {provider.models.map((option) => (
-                          <option key={option.id} value={option.id}>
+                          <option
+                            key={option.id}
+                            value={option.id}
+                            disabled={option.selectable === false}
+                          >
                             {option.name}
+                            {option.selectable === false
+                              ? " · qualification pending"
+                              : ""}
                           </option>
                         ))}
                       </select>

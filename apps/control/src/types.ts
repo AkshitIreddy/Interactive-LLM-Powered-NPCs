@@ -57,9 +57,11 @@ export interface GameProfile {
 export interface ModelPack {
   id: string;
   name: string;
+  lane: "Performance" | "High Fidelity" | "Offline comparator";
   purpose: "Speech in" | "Thinking" | "Voice out" | "Memory" | "Presence";
   size: string;
   fit: string;
+  admission: "Fits" | "CPU-only" | "Conflicts" | "Unverified";
   state: "candidate";
   license: string;
   availability:
@@ -71,6 +73,7 @@ export interface ModelPack {
   access: string;
   latency: string;
   decision: string;
+  output: string;
 }
 
 export interface AppPreferences {

@@ -85,21 +85,20 @@ describe("provider and model loadouts", () => {
     );
   });
 
-  it("can save a desired lip-sync engine without claiming it is downloadable", async () => {
-    const user = userEvent.setup();
+  it("keeps unqualified lip-sync research paths unavailable", () => {
     render(<ProviderLoadoutEditor />);
 
-    await user.selectOptions(
-      screen.getByLabelText("Optional lip-sync provider"),
-      "local-visual-worker",
-    );
-    await user.selectOptions(
-      screen.getByLabelText("Optional lip-sync model"),
-      "musetalk",
+    expect(
+      screen.getByRole("option", {
+        name: /Local visual worker · qualification pending/,
+      }),
+    ).toBeDisabled();
+    expect(screen.getByLabelText("Optional lip-sync provider")).toHaveValue(
+      "disabled",
     );
     expect(screen.getByLabelText("Optional lip-sync model")).toHaveValue(
-      "musetalk",
+      "disabled",
     );
-    expect(screen.getByText(/No pack is downloadable yet/)).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("Download pack");
   });
 });

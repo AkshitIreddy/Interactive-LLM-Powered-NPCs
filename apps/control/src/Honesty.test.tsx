@@ -30,23 +30,18 @@ describe("P0 honesty boundaries", () => {
     render(<App />);
     expect(screen.getByText(/API first/)).toBeInTheDocument();
     expect(screen.getByText(/no local model required/)).toBeInTheDocument();
-    expect(
-      screen.getByText(/Unsigned development catalog/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Current frame wins/)).toBeInTheDocument();
+    expect(screen.getByText("Audio2Face-3D regression")).toBeInTheDocument();
     expect(screen.getByText("NVIDIA AR SDK LipSync")).toBeInTheDocument();
     expect(screen.getByText("MuseTalk 1.5")).toBeInTheDocument();
     expect(
-      screen.getByText("Lightweight tracked viseme warp"),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Ditto 0.4 TensorRT")).toBeInTheDocument();
-    expect(screen.getByText("LatentSync 1.5")).toBeInTheDocument();
-    expect(screen.getAllByText(/no qualified manifest/i)).toHaveLength(5);
-    expect(
-      screen.getAllByRole("button", { name: "Pack unavailable" }),
-    ).toHaveLength(5);
-    expect(
-      screen.getAllByRole("button", { name: "Pack unavailable" })[0],
+      screen.getByRole("button", { name: "No qualified visual packs" }),
     ).toBeDisabled();
+    expect(
+      screen.getByText("No visual route is selectable or installed."),
+    ).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("Mark desired");
+    expect(document.body).not.toHaveTextContent("Pack unavailable");
     expect(document.body).not.toHaveTextContent("Moonshine Medium");
     expect(document.body).not.toHaveTextContent("llama.cpp");
     expect(document.body).not.toHaveTextContent("signatures current");
@@ -114,10 +109,33 @@ describe("P0 honesty boundaries", () => {
     expect(screen.getByText("Screen-space mouth motion")).toBeInTheDocument();
     expect(screen.getByText(/Optional experiment/)).toBeInTheDocument();
     expect(
+      screen.getByRole("heading", { name: "The game frame stays in charge." }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Mouth residual only")).toBeInTheDocument();
+    expect(screen.getByText("FAIL OPEN")).toBeInTheDocument();
+    expect(
+      screen.getByText(/show the untouched game on the next displayed frame/i),
+    ).toBeInTheDocument();
+    expect(
       screen.getByRole("switch", { name: /Keep presentation external/ }),
     ).toBeDisabled();
     expect(document.body).not.toHaveTextContent("Native game rig");
     expect(document.body).not.toHaveTextContent("exact-build adapter");
+  });
+
+  it("explains local resource admission without claiming a live fit", () => {
+    window.history.replaceState(null, "", "/?page=performance");
+    render(<App />);
+
+    expect(
+      screen.getByRole("heading", { name: "Measure before a model loads." }),
+    ).toBeInTheDocument();
+    for (const state of ["Fits", "CPU-only", "Conflicts", "Unverified"]) {
+      expect(screen.getByText(state)).toBeInTheDocument();
+    }
+    expect(
+      screen.getByText(/never silently loaded or moved to cloud/i),
+    ).toBeInTheDocument();
   });
 
   it("does not offer an unprovisioned local model during simulated recovery", () => {

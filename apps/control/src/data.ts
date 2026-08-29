@@ -348,79 +348,60 @@ export const CHARACTERS = [
 
 export const MODEL_PACKS: ModelPack[] = [
   {
+    id: "a2f3d-regression",
+    name: "Audio2Face-3D regression",
+    lane: "Performance",
+    purpose: "Presence",
+    size: "Manifest not provisioned",
+    fit: "Low-latency coefficient candidate",
+    admission: "Unverified",
+    state: "candidate",
+    license: "NVIDIA SDK and model terms · review required",
+    availability: "baseline",
+    access: "Research candidate only; no reviewed Windows pack exists",
+    latency:
+      "Streaming coefficients are promising; this PC under game load is unmeasured",
+    decision:
+      "Map jaw and lip coefficients onto a tracked lower-mouth mesh over the newest game frame.",
+    output: "Mouth and jaw coefficients → tiny 2D residual",
+  },
+  {
     id: "nvidia-ar-lipsync",
     name: "NVIDIA AR SDK LipSync",
+    lane: "High Fidelity",
     purpose: "Presence",
     size: "Manifest not provisioned",
     fit: "Windows RTX candidate · 14-frame pre-roll",
+    admission: "Unverified",
     state: "candidate",
     license: "NVIDIA model terms · review required",
     availability: "conditional",
-    access: "Private NGC access; a standard NVIDIA API key does not unlock it",
+    access:
+      "Private NGC access required; a standard NVIDIA API key does not unlock it",
     latency:
-      "Vendor path is streaming, but fixed visual look-ahead needs qualification",
+      "Streaming vendor path; visual look-ahead and 12 GB contention remain unqualified",
     decision:
-      "First conditional candidate if access and the 12 GB contention gate pass.",
+      "Derive a strict mouth-only difference from synchronized live frames, never replace the full face.",
+    output: "Same-frame video result → clipped mouth residual",
   },
   {
     id: "musetalk",
     name: "MuseTalk 1.5",
+    lane: "Offline comparator",
     purpose: "Presence",
     size: "Manifest not provisioned",
-    fit: "Public experimental GPU candidate",
+    fit: "Blocked for interactive use",
+    admission: "Conflicts",
     state: "candidate",
     license: "Model + dependency review",
-    availability: "experimental",
-    access:
-      "Public upstream artifacts; exact transitive licenses still need review",
-    latency:
-      "Prepared-avatar claims do not prove live, changing game-frame throughput",
-    decision:
-      "Best public generative comparison for steady or cinematic faces.",
-  },
-  {
-    id: "mouth-warp",
-    name: "Lightweight tracked viseme warp",
-    purpose: "Presence",
-    size: "Manifest not provisioned",
-    fit: "Low-resource Windows baseline",
-    state: "candidate",
-    license: "Apache-2.0 components · pack review",
-    availability: "baseline",
-    access: "Planned native/ONNX path with no generative model requirement",
-    latency: "Fully streaming and cancellable; prioritizes game performance",
-    decision:
-      "Degradation baseline; less photorealistic but the broadest likely fit.",
-  },
-  {
-    id: "ditto",
-    name: "Ditto 0.4 TensorRT",
-    purpose: "Presence",
-    size: "Manifest not provisioned",
-    fit: "Windows runner not qualified",
-    state: "candidate",
-    license: "Apache-2.0 code · dependency review",
-    availability: "deferred",
-    access:
-      "Current reference path is Linux/A100-oriented and needs safe Windows packaging",
-    latency:
-      "Online pipeline is promising; full-head output needs mouth-residual validation",
-    decision:
-      "Deferred until Windows plugins, safe configs, and resource gates pass.",
-  },
-  {
-    id: "latentsync",
-    name: "LatentSync 1.5",
-    purpose: "Presence",
-    size: "Manifest not provisioned",
-    fit: "Offline-quality only · 8 GB minimum upstream VRAM",
-    state: "candidate",
-    license: "Apache-2.0 code · model review",
     availability: "offline",
-    access: "Public research pipeline; no live-game pack planned",
-    latency: "Batch diffusion conflicts with interactive conversation latency",
+    access:
+      "Public research artifacts; retained only as an isolated quality comparator",
+    latency:
+      "Measured 102 s to render 1.58 s of speech in the standalone qualification",
     decision:
-      "Reference-quality comparison only; never offered as a live route.",
+      "Do not display its video in a live game. It may inform offline mouth-atlas experiments only.",
+    output: "Offline talking-head video · never a live route",
   },
 ];
 

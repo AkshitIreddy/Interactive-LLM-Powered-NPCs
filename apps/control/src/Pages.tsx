@@ -2,7 +2,13 @@ import { useMemo, useState } from "react";
 import { Button } from "react-aria-components";
 import { CHARACTERS, GAME_PROFILES, MODEL_PACKS } from "./data";
 import { Icon } from "./icons";
-import type { AppPreferences, DemoState, PageId, StageId } from "./types";
+import type {
+  AppPreferences,
+  DemoState,
+  ModelPack,
+  PageId,
+  StageId,
+} from "./types";
 import {
   ActionButton,
   Disclosure,
@@ -860,6 +866,57 @@ function PresencePage({
           </div>
         </div>
       </div>
+      <section
+        className="frame-continuity"
+        aria-labelledby="frame-continuity-title"
+      >
+        <div className="frame-continuity__header">
+          <div>
+            <span className="eyebrow">CURRENT-FRAME CONTRACT</span>
+            <h2 id="frame-continuity-title">The game frame stays in charge.</h2>
+          </div>
+          <p>
+            A visual model may propose mouth motion. It never owns the face,
+            pauses capture, or replaces the full frame.
+          </p>
+        </div>
+        <div className="frame-continuity__rail">
+          <div className="continuity-node continuity-node--source">
+            <span>01 · LIVE</span>
+            <strong>Newest game frame</strong>
+            <small>Immutable source</small>
+          </div>
+          <i aria-hidden="true" />
+          <div className="continuity-node">
+            <span>02 · TRACK</span>
+            <strong>Lower-mouth anchor</strong>
+            <small>Current actor + pose</small>
+          </div>
+          <i aria-hidden="true" />
+          <div className="continuity-node continuity-node--residual">
+            <span>03 · PROPOSE</span>
+            <strong>Mouth residual only</strong>
+            <small>No full-face pixels</small>
+          </div>
+          <i aria-hidden="true" />
+          <div className="continuity-node continuity-node--display">
+            <span>04 · DISPLAY</span>
+            <strong>Composite if fresh</strong>
+            <small>Strict mask + frame age</small>
+          </div>
+        </div>
+        <div className="fail-open-rule">
+          <span className="fail-open-rule__mark">
+            <Icon name="shield" size={19} />
+            FAIL OPEN
+          </span>
+          <strong>Uncertain, occluded, stale, or wrong actor?</strong>
+          <p>
+            Drop the residual and show the untouched game on the next displayed
+            frame. Voice and subtitles continue.
+          </p>
+        </div>
+      </section>
       <div className="settings-sections">
         <section className="settings-sheet">
           <SectionTitle eyebrow="GAME AWARENESS" title="What can be observed" />
@@ -1001,6 +1058,38 @@ function PerformancePage({
           </div>
         </div>
       </div>
+      <section className="admission-console" aria-labelledby="admission-title">
+        <div className="admission-console__copy">
+          <span className="eyebrow">LOCAL RESOURCE ADMISSION</span>
+          <h2 id="admission-title">Measure before a model loads.</h2>
+          <p>
+            Admission uses live game headroom and the selected performance
+            reserve. An installed-but-cold alternative is never silently loaded
+            or moved to cloud.
+          </p>
+        </div>
+        <div
+          className="admission-console__states"
+          aria-label="Admission states"
+        >
+          <AdmissionState
+            value="Fits"
+            detail="Verified inside the game reserve"
+          />
+          <AdmissionState
+            value="CPU-only"
+            detail="Verified without a GPU lease"
+          />
+          <AdmissionState
+            value="Conflicts"
+            detail="Would consume protected headroom"
+          />
+          <AdmissionState
+            value="Unverified"
+            detail="Manifest or live measurement missing"
+          />
+        </div>
+      </section>
       <section className="mode-selector">
         <div className="mode-selector__head">
           <div>
@@ -1146,6 +1235,29 @@ function PerformancePage({
   );
 }
 
+function AdmissionState({
+  value,
+  detail,
+}: {
+  value: ModelPack["admission"];
+  detail: string;
+}) {
+  const tone =
+    value === "Fits"
+      ? "ok"
+      : value === "CPU-only"
+        ? "teal"
+        : value === "Conflicts"
+          ? "danger"
+          : "neutral";
+  return (
+    <div className={`admission-state admission-state--${value.toLowerCase()}`}>
+      <StatusPill tone={tone}>{value}</StatusPill>
+      <small>{detail}</small>
+    </div>
+  );
+}
+
 function WaterfallRow({
   label,
   start,
@@ -1175,24 +1287,15 @@ function WaterfallRow({
 
 function ModelsPage() {
   const models = MODEL_PACKS;
-  const [desiredPack, setDesiredPack] = useState(() =>
-    window.localStorage.getItem("npc2.desired-lipsync-pack"),
-  );
-  const chooseDesiredPack = (modelId: string) => {
-    const next = desiredPack === modelId ? null : modelId;
-    setDesiredPack(next);
-    if (next) window.localStorage.setItem("npc2.desired-lipsync-pack", next);
-    else window.localStorage.removeItem("npc2.desired-lipsync-pack");
-  };
   return (
     <div className="page">
       <PageHero
         eyebrow="MODEL MANAGER"
-        title="Optional visual model packs."
-        description="The baseline is API-first and needs no local model. Only user-selected generic screen-space lip-sync candidates appear here; nothing downloads automatically."
+        title="Local motion is still research."
+        description="The product remains API-first. These three generic visual paths are comparison lanes—not installed packs, selectable routes, or download offers."
         actions={
           <ActionButton icon="download" variant="outline" isDisabled>
-            Downloads open after qualification
+            No qualified visual packs
           </ActionButton>
         }
       />
@@ -1214,111 +1317,80 @@ function ModelsPage() {
           <small>LLM, STT, and TTS use explicitly selected API routes.</small>
         </div>
         <div>
-          <span>SECURITY</span>
+          <span>VISUAL SAFETY</span>
           <strong>
-            Unsigned development catalog <Icon name="warning" size={19} />
+            Current frame wins <Icon name="shield" size={19} />
           </strong>
-          <small>Trust metadata not provisioned · not release-ready</small>
-          <button>View provenance</button>
+          <small>Every proposed residual is disposable and fail-open.</small>
         </div>
       </div>
-      <div className="model-table">
-        <div className="model-table__head">
-          <span>OPTIONAL VISUAL PACK</span>
-          <span>WINDOWS / LATENCY</span>
-          <span>ACCESS</span>
-          <span>STATE</span>
-          <span />
-        </div>
-        {models.map((model) => (
-          <div
-            className={`model-row model-row--${model.state} ${desiredPack === model.id ? "is-desired" : ""}`}
-            key={model.id}
-          >
-            <div className="model-name">
-              <span
-                className={`model-icon model-icon--${model.purpose.toLowerCase().replace(" ", "-")}`}
-              >
-                <Icon
-                  name={
-                    model.purpose === "Speech in"
-                      ? "mic"
-                      : model.purpose === "Thinking"
-                        ? "spark"
-                        : model.purpose === "Voice out"
-                          ? "headphones"
-                          : model.purpose === "Memory"
-                            ? "conversation"
-                            : "presence"
-                  }
-                />
-              </span>
-              <div>
-                <strong>{model.name}</strong>
-                <small>{model.decision}</small>
-              </div>
-            </div>
-            <span>
-              <strong>{model.fit}</strong>
-              <small>{model.latency}</small>
-            </span>
-            <span>
-              <strong>{model.access}</strong>
-              <small>{model.license}</small>
-            </span>
-            <div className="model-state">
-              <StatusPill
-                tone={
-                  model.availability === "baseline"
-                    ? "teal"
-                    : model.availability === "offline"
-                      ? "purple"
-                      : "neutral"
-                }
-              >
-                {model.availability === "conditional"
-                  ? "Conditional · private access"
-                  : model.availability === "experimental"
-                    ? "Experimental"
-                    : model.availability === "baseline"
-                      ? "Low-resource baseline"
-                      : model.availability === "deferred"
-                        ? "Deferred"
-                        : "Offline only"}
-              </StatusPill>
-              <small>Not installed · no qualified manifest</small>
-            </div>
-            <div className="model-actions">
-              <button
-                className={`model-desire ${desiredPack === model.id ? "is-selected" : ""}`}
-                onClick={() => chooseDesiredPack(model.id)}
-                aria-pressed={desiredPack === model.id}
-              >
-                {desiredPack === model.id ? (
-                  <Icon name="check" size={15} />
-                ) : null}
-                {desiredPack === model.id ? "Desired" : "Mark desired"}
-              </button>
-              <ActionButton variant="outline" icon="download" isDisabled>
-                Pack unavailable
-              </ActionButton>
-            </div>
+      <section
+        className="visual-research model-table"
+        aria-labelledby="visual-research-title"
+      >
+        <div className="visual-research__heading">
+          <div>
+            <span className="eyebrow">THREE-LANE QUALIFICATION</span>
+            <h2 id="visual-research-title">
+              From motion signal to mouth residual.
+            </h2>
           </div>
-        ))}
-      </div>
-      <div className="desired-pack-note" role="status">
-        <Icon name={desiredPack ? "check" : "help"} size={18} />
-        <div>
-          <strong>
-            {desiredPack
-              ? `${models.find((model) => model.id === desiredPack)?.name} is your desired candidate.`
-              : "No optional lip-sync candidate selected."}
-          </strong>
           <p>
-            This preference does not download, install, or activate anything. A
-            download control appears only after immutable artifacts, hashes,
-            signatures, license review, a self-test, and Windows 12 GB
-            contention results exist.
+            None of these paths can be selected. A route appears only after
+            license, artifact, Windows, latency, quality, and game-contention
+            gates pass.
+          </p>
+        </div>
+        <div className="visual-research__grid">
+          {models.map((model) => (
+            <article
+              className={`research-path research-path--${model.id}`}
+              key={model.id}
+            >
+              <header>
+                <div className="research-path__index">
+                  {String(models.indexOf(model) + 1).padStart(2, "0")}
+                </div>
+                <div>
+                  <span>{model.lane}</span>
+                  <strong>{model.name}</strong>
+                </div>
+                <AdmissionState value={model.admission} detail={model.fit} />
+              </header>
+              <p className="research-path__decision">{model.decision}</p>
+              <dl>
+                <div>
+                  <dt>OUTPUT CONTRACT</dt>
+                  <dd>{model.output}</dd>
+                </div>
+                <div>
+                  <dt>LATENCY EVIDENCE</dt>
+                  <dd>{model.latency}</dd>
+                </div>
+                <div>
+                  <dt>ACCESS</dt>
+                  <dd>{model.access}</dd>
+                </div>
+              </dl>
+              <footer>
+                <span>
+                  <Icon name="shield" size={15} /> Research path · not installed
+                </span>
+                <small>{model.license}</small>
+              </footer>
+            </article>
+          ))}
+        </div>
+      </section>
+      <div className="visual-pack-boundary" role="note">
+        <Icon name="help" size={18} />
+        <div>
+          <strong>No visual route is selectable or installed.</strong>
+          <p>
+            Qualification does not trigger a download. A future pack requires an
+            explicit user choice after immutable artifacts, hashes, signatures,
+            license review, a self-test, and Windows game-load contention
+            results exist.
           </p>
         </div>
       </div>
