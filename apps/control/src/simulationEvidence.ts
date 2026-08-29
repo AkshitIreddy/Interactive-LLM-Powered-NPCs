@@ -123,6 +123,12 @@ export function visibleSimulationText(
   return evidence.deliveredText ?? evidence.sentenceReadyText;
 }
 
+export function isRetainedDeliveredNativeTurn(
+  evidence: SimulationEvidence,
+): boolean {
+  return evidence.source === "nativeRuntime" && evidence.phase === "delivered";
+}
+
 export function simulationEvidenceLabel(evidence: SimulationEvidence): string {
   if (evidence.source === "nativeRuntime") {
     if (evidence.phase === "delivered") return "NATIVE RUNTIME · DELIVERED";

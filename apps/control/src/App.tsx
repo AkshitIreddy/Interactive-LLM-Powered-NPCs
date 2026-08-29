@@ -20,6 +20,7 @@ import {
   awaitingNativeEvidence,
   browserFixtureEvidence,
   EMPTY_SIMULATION_EVIDENCE,
+  isRetainedDeliveredNativeTurn,
   nativeCompletionNotice,
   type SimulationEvidence,
 } from "./simulationEvidence";
@@ -170,6 +171,8 @@ function ResponseConsoleApp() {
   const brokerConnected =
     nativeBootstrap.kind === "snapshot" &&
     nativeBootstrap.snapshot.mediaBroker.connected;
+  const retainedDeliveredNativeTurn =
+    isRetainedDeliveredNativeTurn(simulationEvidence);
 
   const selectPage = (nextPage: PageId) => {
     setPage(nextPage);
@@ -383,13 +386,15 @@ function ResponseConsoleApp() {
                   : simulationEvidence.source === "awaitingNative"
                     ? "Connecting to runtime"
                     : "Browser simulation"
-                : demoState === "degraded"
-                  ? "Degraded safely"
-                  : demoState === "error"
-                    ? "Recovering"
-                    : runtimeConnected && brokerConnected
-                      ? "Runtime authenticated"
-                      : "No runtime snapshot"}
+                : retainedDeliveredNativeTurn
+                  ? "Native fixture delivered"
+                  : demoState === "degraded"
+                    ? "Degraded safely"
+                    : demoState === "error"
+                      ? "Recovering"
+                      : runtimeConnected && brokerConnected
+                        ? "Runtime authenticated"
+                        : "No runtime snapshot"}
             </strong>
             <b className="fixture-badge">
               {simulationEvidence.source === "nativeRuntime"
@@ -495,6 +500,11 @@ function ResponseSpine({
   const activeIndex = RESPONSE_STAGES.findIndex(
     (stage) => stage.id === activeStage,
   );
+  const retainedDeliveredTurn =
+    isRetainedDeliveredNativeTurn(simulationEvidence);
+  const visibleStageIndex = retainedDeliveredTurn
+    ? RESPONSE_STAGES.length
+    : activeIndex;
   return (
     <section
       className={`response-spine ${isSimulating ? "is-live" : ""} response-spine--${state}`}
@@ -511,16 +521,20 @@ function ResponseSpine({
                 : simulationEvidence.source === "awaitingNative"
                   ? "CONNECTING TO NATIVE RUNTIME"
                   : "SIMULATED TURN · BROWSER FIXTURE"
-              : "RESPONSE SPINE · NO LIVE TURN"}
+              : retainedDeliveredTurn
+                ? "NATIVE RUNTIME TURN · DELIVERED FIXTURE"
+                : "RESPONSE SPINE · NO LIVE TURN"}
           </span>
           <strong>
             {isSimulating
               ? (RESPONSE_STAGES[activeIndex]?.label ?? "Starting")
-              : state === "degraded"
-                ? "Simulated audio fallback"
-                : state === "error"
-                  ? "Simulated recovery state"
-                  : "No runtime turn reported"}
+              : retainedDeliveredTurn
+                ? "Delivered deterministic fixture"
+                : state === "degraded"
+                  ? "Simulated audio fallback"
+                  : state === "error"
+                    ? "Simulated recovery state"
+                    : "No runtime turn reported"}
           </strong>
         </div>
       </div>
@@ -531,40 +545,48 @@ function ResponseSpine({
             className={
               index === activeIndex
                 ? "is-active"
-                : index < activeIndex
+                : index < visibleStageIndex
                   ? "is-complete"
                   : ""
             }
             aria-current={index === activeIndex ? "step" : undefined}
           >
             <span className="stage-node">
-              {index < activeIndex ? <Icon name="check" size={11} /> : <i />}
+              {index < visibleStageIndex ? (
+                <Icon name="check" size={11} />
+              ) : (
+                <i />
+              )}
             </span>
             <div>
               <strong>{stage.label}</strong>
               <small
                 className="response-spine__stage-status"
                 title={
-                  isSimulating
-                    ? simulationEvidence.source === "nativeRuntime"
-                      ? "Stage event returned by the native runtime"
-                      : "Illustrative browser simulation timing"
-                    : "Illustrative preview · no live measurement"
+                  retainedDeliveredTurn
+                    ? "Completed stage returned by the native deterministic fixture"
+                    : isSimulating
+                      ? simulationEvidence.source === "nativeRuntime"
+                        ? "Stage event returned by the native runtime"
+                        : "Illustrative browser simulation timing"
+                      : "Illustrative preview · no live measurement"
                 }
               >
-                {!isSimulating
-                  ? "PREVIEW"
-                  : index < activeIndex
-                    ? simulationEvidence.source === "nativeRuntime"
-                      ? "NATIVE EVENT"
-                      : `SIM ${stage.fixtureDuration} ms`
-                    : index === activeIndex
+                {retainedDeliveredTurn
+                  ? "NATIVE DELIVERED"
+                  : !isSimulating
+                    ? "PREVIEW"
+                    : index < activeIndex
                       ? simulationEvidence.source === "nativeRuntime"
-                        ? "NATIVE ACTIVE"
-                        : "SIM ACTIVE"
-                      : simulationEvidence.source === "nativeRuntime"
-                        ? "AWAITING EVENT"
-                        : "SIM NEXT"}
+                        ? "NATIVE EVENT"
+                        : `SIM ${stage.fixtureDuration} ms`
+                      : index === activeIndex
+                        ? simulationEvidence.source === "nativeRuntime"
+                          ? "NATIVE ACTIVE"
+                          : "SIM ACTIVE"
+                        : simulationEvidence.source === "nativeRuntime"
+                          ? "AWAITING EVENT"
+                          : "SIM NEXT"}
               </small>
             </div>
             {index < RESPONSE_STAGES.length - 1 && <b />}
@@ -574,7 +596,9 @@ function ResponseSpine({
       <div className="response-spine__compact-stage">
         {isSimulating
           ? `${RESPONSE_STAGES[activeIndex]?.label ?? "Starting fixture"} · ${Math.max(0, activeIndex + 1)}/7`
-          : "No live stage · —"}
+          : retainedDeliveredTurn
+            ? `Delivered · ${RESPONSE_STAGES.length}/${RESPONSE_STAGES.length}`
+            : "No live stage · —"}
       </div>
       <div className="response-spine__total">
         <span>
@@ -582,10 +606,16 @@ function ResponseSpine({
             ? simulationEvidence.source === "nativeRuntime"
               ? "NATIVE EVENTS"
               : "SIM FIXTURE"
-            : "NO LIVE TURN"}
+            : retainedDeliveredTurn
+              ? "DELIVERED FIXTURE"
+              : "NO LIVE TURN"}
         </span>
         <strong>
-          {isSimulating ? `${Math.max(0, activeIndex + 1)} / 7` : "—"}
+          {isSimulating
+            ? `${Math.max(0, activeIndex + 1)} / 7`
+            : retainedDeliveredTurn
+              ? `${RESPONSE_STAGES.length} / ${RESPONSE_STAGES.length}`
+              : "—"}
         </strong>
       </div>
     </section>

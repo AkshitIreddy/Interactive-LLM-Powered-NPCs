@@ -30,6 +30,7 @@ import {
 } from "./tauriBridge";
 import {
   simulationEvidenceLabel,
+  isRetainedDeliveredNativeTurn,
   visibleSimulationText,
   type SimulationEvidence,
 } from "./simulationEvidence";
@@ -150,6 +151,9 @@ function HomePage({
   nativeBootstrap,
 }: PageProps) {
   const active = isSimulating || state === "active";
+  const retainedDeliveredTurn =
+    isRetainedDeliveredNativeTurn(simulationEvidence);
+  const turnVisible = active || retainedDeliveredTurn;
   const nativeEvidence = simulationEvidence.source === "nativeRuntime";
   const runtimeText = visibleSimulationText(simulationEvidence);
   const evidenceLabel = simulationEvidenceLabel(simulationEvidence);
@@ -193,16 +197,22 @@ function HomePage({
       <section className={`command-deck ${active ? "is-live" : ""}`}>
         <div className="command-deck__copy">
           <div className="eyebrow">
-            {active
-              ? nativeEvidence
-                ? "NATIVE RUNTIME EVENTS · DETERMINISTIC FIXTURE INPUT"
-                : simulationEvidence.source === "awaitingNative"
-                  ? "CONNECTING TO NATIVE RUNTIME"
-                  : "BROWSER-ONLY SIMULATION · FIXTURE"
-              : "AUTHORED CATALOG · RUNTIME UNVERIFIED"}
+            {retainedDeliveredTurn
+              ? "NATIVE RUNTIME · DELIVERED DETERMINISTIC FIXTURE"
+              : active
+                ? nativeEvidence
+                  ? "NATIVE RUNTIME EVENTS · DETERMINISTIC FIXTURE INPUT"
+                  : simulationEvidence.source === "awaitingNative"
+                    ? "CONNECTING TO NATIVE RUNTIME"
+                    : "BROWSER-ONLY SIMULATION · FIXTURE"
+                : "AUTHORED CATALOG · RUNTIME UNVERIFIED"}
           </div>
           <h1>
-            {active ? (
+            {retainedDeliveredTurn ? (
+              <>
+                Mara <em>answered through native events.</em>
+              </>
+            ) : active ? (
               <>
                 Mara is{" "}
                 <em>
@@ -220,11 +230,13 @@ function HomePage({
             )}
           </h1>
           <p>
-            {active
-              ? nativeEvidence
-                ? "Eclipse Harbor fixture crossed the native Tauri bridge. This is runtime event evidence, not live-game certification."
-                : "Eclipse Harbor · browser-authored timing preview · no native event evidence yet"
-              : "No live game, model pack, capture source, or certified capability has been reported by the runtime."}
+            {retainedDeliveredTurn
+              ? "Delivered Eclipse Harbor fixture text is retained from the authenticated native event channel. This is not live-game, model, voice, or lip-sync evidence."
+              : active
+                ? nativeEvidence
+                  ? "Eclipse Harbor fixture crossed the native Tauri bridge. This is runtime event evidence, not live-game certification."
+                  : "Eclipse Harbor · browser-authored timing preview · no native event evidence yet"
+                : "No live game, model pack, capture source, or certified capability has been reported by the runtime."}
           </p>
           <div className="command-actions">
             <ActionButton
@@ -241,8 +253,10 @@ function HomePage({
         <div
           className="command-deck__scene"
           aria-label={
-            active
-              ? "Active Eclipse Harbor simulation"
+            turnVisible
+              ? retainedDeliveredTurn
+                ? "Delivered Eclipse Harbor native fixture turn"
+                : "Active Eclipse Harbor simulation"
               : "Ready signal visualization"
           }
         >
@@ -259,7 +273,7 @@ function HomePage({
             <i />
           </div>
           <div className="scene-transcript">
-            {active ? (
+            {turnVisible ? (
               <>
                 <span>{evidenceLabel} · MARA VENN</span>
                 {runtimeText ??
@@ -276,14 +290,14 @@ function HomePage({
           </div>
           <div className="scene-readout">
             <span>
-              {active
+              {turnVisible
                 ? nativeEvidence
                   ? `EVENT SEQ ${Math.max(0, simulationEvidence.sequence)}`
                   : "BROWSER CLOCK"
                 : "NO LIVE TURN"}
             </span>
             <span>
-              {active
+              {turnVisible
                 ? nativeEvidence
                   ? "NATIVE BRIDGE"
                   : "BROWSER FIXTURE"
@@ -305,22 +319,22 @@ function HomePage({
               className="game-monogram"
               style={
                 {
-                  "--game-accent": active ? "#63d6c3" : "#e4c966",
+                  "--game-accent": turnVisible ? "#63d6c3" : "#e4c966",
                 } as React.CSSProperties
               }
             >
-              {active ? "EH" : "—"}
+              {turnVisible ? "EH" : "—"}
             </span>
             <div>
               <strong>
-                {active
+                {turnVisible
                   ? nativeEvidence
                     ? "Eclipse Harbor · native event fixture"
                     : "Eclipse Harbor · browser fixture"
                   : "No live game reported"}
               </strong>
               <small>
-                {active
+                {turnVisible
                   ? nativeEvidence
                     ? "Authenticated desktop runtime event path"
                     : "Illustrative UI path · no native evidence"

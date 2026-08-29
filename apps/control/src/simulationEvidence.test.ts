@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyNativeSimulationEvent,
   awaitingNativeEvidence,
+  isRetainedDeliveredNativeTurn,
   nativeCompletionNotice,
   simulationEvidenceLabel,
   visibleSimulationText,
@@ -46,6 +47,8 @@ describe("simulation evidence", () => {
       "The harbor light is still burning. Follow the seawall.",
     );
     expect(delivered.fixtureFirstAudioMs).toBe(811);
+    expect(isRetainedDeliveredNativeTurn(delivered)).toBe(true);
+    expect(isRetainedDeliveredNativeTurn(sentence)).toBe(false);
   });
 
   it("ignores replayed or reordered events for the same native turn", () => {

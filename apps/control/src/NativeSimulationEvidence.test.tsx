@@ -143,6 +143,57 @@ describe("native simulation evidence in the control UI", () => {
     expect(screen.getByText("No audio timing event yet")).toBeInTheDocument();
   });
 
+  it("keeps a completed native fixture turn visible until the next turn is cancelled", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<App />);
+    await user.click(
+      screen.getByRole("button", { name: "Run a private simulation" }),
+    );
+
+    act(() => {
+      bridge.callback?.({
+        type: "completed",
+        simulationId: "native-ui-1",
+        generation: 7,
+        sequence: 8,
+        fixtureFirstAudioMs: null,
+        deliveredText: "Delivered fixture text remains visible on Home.",
+      });
+      vi.advanceTimersByTime(901);
+    });
+
+    const pipeline = screen.getByLabelText("Response pipeline");
+    expect(pipeline).not.toHaveClass("is-live");
+    expect(pipeline).toHaveTextContent(
+      "NATIVE RUNTIME TURN · DELIVERED FIXTURE",
+    );
+    expect(pipeline).toHaveTextContent("Delivered · 7/7");
+    expect(pipeline).not.toHaveTextContent("NO RUNTIME TURN");
+    expect(
+      screen.getAllByText("Delivered fixture text remains visible on Home."),
+    ).not.toHaveLength(0);
+    expect(
+      screen.getByRole("button", { name: "Run a private simulation" }),
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "Run a private simulation" }),
+    );
+    expect(pipeline).toHaveTextContent("NATIVE RUNTIME TURN · FIXTURE INPUT");
+    expect(pipeline).not.toHaveTextContent(
+      "NATIVE RUNTIME TURN · DELIVERED FIXTURE",
+    );
+    expect(document.body).not.toHaveTextContent(
+      "Delivered fixture text remains visible on Home.",
+    );
+
+    await user.click(screen.getByRole("button", { name: "End simulation" }));
+    expect(pipeline).toHaveTextContent("RESPONSE SPINE · NO LIVE TURN");
+    expect(pipeline).not.toHaveTextContent("DELIVERED FIXTURE");
+    vi.useRealTimers();
+  });
+
   it("shows native runtime and broker rows in Diagnostics", async () => {
     const user = userEvent.setup();
     render(<App />);
