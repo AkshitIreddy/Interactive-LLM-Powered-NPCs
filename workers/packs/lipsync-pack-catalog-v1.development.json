@@ -19,6 +19,27 @@
   },
   "candidates": [
     {
+      "id": "audio2face-3d-regression-v2.3",
+      "display_name": "Audio2Face-3D regression v2.3 residual driver",
+      "implementation_kind": "audio_to_coefficients_for_current_frame_mouth_residual",
+      "status": "deferred",
+      "source_access": "public_upstream",
+      "supported_platforms": ["windows_x64"],
+      "live_selectable": false,
+      "offline_selectable": false,
+      "requires_private_access": false,
+      "requirements": [
+        "A separately installed and verified pack must qualify the exact SDK, regression model, licenses, Windows runtime, and GPU contention envelope.",
+        "A project-owned mapper must convert coefficients into an npc.mouth-residual/v1 output bound to current landmarks, track epoch, and source frame.",
+        "End-to-end qualification must demonstrate fail-open identity, occlusion, mask, confidence, cancellation, and one-frame staleness behavior."
+      ],
+      "constraints": [
+        "Unqualified and unselectable: this entry is candidate metadata, not a bundled model, runtime, default, download, or performance claim.",
+        "Audio-to-coefficient output does not itself generate screen-space pixels and cannot replace a captured frame.",
+        "Static-avatar or native-rig demonstrations do not establish generic moving-game suitability."
+      ]
+    },
+    {
       "id": "nvidia-ar-sdk-lipsync",
       "display_name": "NVIDIA AR SDK LipSync",
       "implementation_kind": "generic_current_frame_audio_conditioned",

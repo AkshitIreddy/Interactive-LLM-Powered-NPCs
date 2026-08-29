@@ -16,7 +16,14 @@ WORKERS = Path(__file__).resolve().parents[1]
 STUBS = WORKERS / "stubs"
 sys.path.insert(0, str(STUBS))
 
-from contract import ContractError, Descriptor  # noqa: E402
+from contract import (  # noqa: E402
+    MOUTH_RESIDUAL_CONTRACT_VERSION,
+    MOUTH_RESIDUAL_FAIL_OPEN_REASONS,
+    ContractError,
+    Descriptor,
+    MouthResidualProposalV1,
+    MouthResidualRequestV1,
+)
 from framing import (  # noqa: E402
     MAX_FRAME_BYTES,
     EndOfStream,
@@ -31,17 +38,21 @@ from lipsync_catalog import LipSyncPackCatalog  # noqa: E402
 
 def lip_sync_payload(*, generation: int = 0) -> dict[str, Any]:
     return {
+        "contract_version": MOUTH_RESIDUAL_CONTRACT_VERSION,
         "frame_lease_id": "frame-lease-000042",
         "audio_lease_id": "audio-lease-000017",
         "frame_lease_expires_qpc": 1_300_000,
         "audio_lease_expires_qpc": 1_300_000,
         "selected_encounter_id": "encounter-local-7",
         "selected_track_id": "track-local-2",
+        "track_epoch": 3,
         "source_frame_sequence": 42,
         "source_capture_qpc": 1_000_000,
         "qpc_frequency_hz": 1_000_000,
         "face_region_normalized": {"x": 0.25, "y": 0.15, "width": 0.4, "height": 0.6},
-        "mouth_region_normalized": {"x": 0.38, "y": 0.55, "width": 0.14, "height": 0.1},
+        "landmark_bounds_normalized": {"x": 0.29, "y": 0.21, "width": 0.32, "height": 0.48},
+        "mouth_mask_bounds_normalized": {"x": 0.38, "y": 0.55, "width": 0.14, "height": 0.1},
+        "tracking_confidence": 0.94,
         "presentation_deadline_qpc": 1_200_000,
         "cancellation_generation": generation,
     }
@@ -226,6 +237,18 @@ class DescriptorTests(unittest.TestCase):
             lip_sync_schema["properties"]["selection_policy"]["properties"]["automatic_download"]["const"],
             False,
         )
+        residual_schema = json.loads(
+            (WORKERS / "protocol" / "mouth-residual-v1.schema.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(residual_schema["$defs"]["request"]["properties"]["contract_version"]["const"], MOUTH_RESIDUAL_CONTRACT_VERSION)
+        constraints = residual_schema["$defs"]["residualConstraints"]["properties"]
+        self.assertFalse(constraints["full_frame_replacement"]["const"])
+        self.assertFalse(constraints["static_avatar_source"]["const"])
+        self.assertEqual(residual_schema["$defs"]["freshness"]["properties"]["maximum_displayed_frames"]["const"], 1)
+        self.assertEqual(
+            set(residual_schema["$defs"]["failOpenReason"]["enum"]),
+            MOUTH_RESIDUAL_FAIL_OPEN_REASONS,
+        )
         proto = (WORKERS / "protocol" / "worker-control-v1.proto").read_text(encoding="utf-8")
         for contract in (
             "RequestEnvelopeV1",
@@ -234,6 +257,8 @@ class DescriptorTests(unittest.TestCase):
             "ResourceEstimateV1",
             "GenericLipSyncRequestV1",
             "MouthPatchProposalV1",
+            "MouthResidualFailOpenV1",
+            "MouthResidualConstraintsV1",
         ):
             self.assertIn(f"message {contract}", proto)
         pack_notes = (WORKERS / "packs" / "README.md").read_text(encoding="utf-8")
@@ -365,16 +390,24 @@ class ModalityTests(unittest.TestCase):
             self.assertEqual(proposal["source_frame_sequence"], 42)
             self.assertEqual(proposal["source_capture_qpc"], 1_000_000)
             self.assertEqual(proposal["cancellation_generation"], 0)
+            self.assertEqual(proposal["contract_version"], MOUTH_RESIDUAL_CONTRACT_VERSION)
             self.assertEqual(proposal["frame_lease_id"], "frame-lease-000042")
             self.assertEqual(proposal["audio_lease_id"], "audio-lease-000017")
             self.assertEqual(proposal["selected_encounter_id"], "encounter-local-7")
             self.assertEqual(proposal["selected_track_id"], "track-local-2")
+            self.assertEqual(proposal["track_epoch"], 3)
+            self.assertEqual(
+                proposal["landmark_bounds_normalized"],
+                {"x": 0.29, "y": 0.21, "width": 0.32, "height": 0.48},
+            )
             self.assertEqual(
                 proposal["mask_bounds_normalized"],
                 {"x": 0.38, "y": 0.55, "width": 0.14, "height": 0.1},
             )
-            self.assertGreaterEqual(proposal["confidence"], 0.0)
-            self.assertLessEqual(proposal["confidence"], 1.0)
+            self.assertEqual(proposal["tracking_confidence"], 0.94)
+            self.assertGreaterEqual(proposal["residual_confidence"], 0.0)
+            self.assertLessEqual(proposal["residual_confidence"], 1.0)
+            self.assertEqual(proposal["output_semantics"], "additive_rgba_mouth_residual")
             self.assertTrue(proposal["no_pixels_inline"])
             self.assertTrue(proposal["metadata_only"])
             self.assertFalse(proposal["presentable"])
@@ -382,8 +415,24 @@ class ModalityTests(unittest.TestCase):
             self.assertIsNone(proposal["patch_lease_id"])
             self.assertTrue(proposal["freshness"]["requires_exact_source_frame_sequence"])
             self.assertTrue(proposal["freshness"]["discard_if_source_advanced"])
+            self.assertTrue(proposal["freshness"]["discard_if_track_epoch_changed"])
             self.assertTrue(proposal["freshness"]["discard_if_generation_changed"])
             self.assertTrue(proposal["freshness"]["restore_unmodified_on_rejection"])
+            self.assertEqual(proposal["freshness"]["valid_source_frame_sequence"], 42)
+            self.assertEqual(proposal["freshness"]["discard_at_or_after_frame_sequence"], 43)
+            self.assertEqual(proposal["freshness"]["maximum_source_frame_advance"], 0)
+            self.assertEqual(proposal["freshness"]["maximum_displayed_frames"], 1)
+            self.assertEqual(proposal["fail_open"], {"use_unmodified_source_frame": True, "reasons": ["metadata_only_stub"]})
+            self.assertEqual(
+                proposal["residual_constraints"],
+                {
+                    "full_frame_replacement": False,
+                    "static_avatar_source": False,
+                    "base_frame_mutation": False,
+                    "alpha_outside_mask_zero": True,
+                    "mask_must_remain_inside_landmarks": True,
+                },
+            )
             serialized = json.dumps(proposal, sort_keys=True)
             for forbidden in ("image_b64", "audio_b64", "frame_path", "audio_path"):
                 self.assertNotIn(forbidden, serialized)
@@ -402,8 +451,14 @@ class ModalityTests(unittest.TestCase):
         path["frame_lease_id"] = "C:\\captured\\frame.png"
         invalid_payloads.append(path)
         outside = lip_sync_payload()
-        outside["mouth_region_normalized"] = {"x": 0.1, "y": 0.1, "width": 0.1, "height": 0.1}
+        outside["mouth_mask_bounds_normalized"] = {"x": 0.1, "y": 0.1, "width": 0.1, "height": 0.1}
         invalid_payloads.append(outside)
+        replacement = lip_sync_payload()
+        replacement["full_frame_replacement"] = True
+        invalid_payloads.append(replacement)
+        static_avatar = lip_sync_payload()
+        static_avatar["avatar_image_lease_id"] = "avatar-static-1"
+        invalid_payloads.append(static_avatar)
 
         for payload in invalid_payloads:
             with self.subTest(payload=payload):
@@ -435,6 +490,46 @@ class ModalityTests(unittest.TestCase):
                     self.assertEqual(terminal["error"]["code"], code)
                 finally:
                     worker.close()
+
+    def test_mouth_residual_type_rejects_missing_epoch_confidence_and_bad_containment(self) -> None:
+        valid = lip_sync_payload()
+        parsed = MouthResidualRequestV1.parse(valid)
+        self.assertEqual((parsed.selected_track_id, parsed.track_epoch), ("track-local-2", 3))
+
+        invalid_payloads = []
+        missing_epoch = lip_sync_payload()
+        del missing_epoch["track_epoch"]
+        invalid_payloads.append(missing_epoch)
+        bad_confidence = lip_sync_payload()
+        bad_confidence["tracking_confidence"] = 1.01
+        invalid_payloads.append(bad_confidence)
+        bad_landmarks = lip_sync_payload()
+        bad_landmarks["landmark_bounds_normalized"] = {"x": 0.1, "y": 0.1, "width": 0.8, "height": 0.8}
+        invalid_payloads.append(bad_landmarks)
+        wrong_version = lip_sync_payload()
+        wrong_version["contract_version"] = "npc.mouth-residual/v2"
+        invalid_payloads.append(wrong_version)
+
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload):
+                with self.assertRaises(ContractError):
+                    MouthResidualRequestV1.parse(payload)
+
+        with self.assertRaises(ContractError):
+            MouthResidualProposalV1(
+                request=parsed,
+                residual_confidence=0.9,
+                fail_open_reasons=("unsupported_reason",),
+            )
+        with self.assertRaises(ContractError):
+            MouthResidualProposalV1(
+                request=parsed,
+                residual_confidence=0.9,
+                fail_open_reasons=("metadata_only_stub",),
+                patch_lease_id="residual-lease-1",
+                presentable=True,
+                metadata_only=True,
+            )
 
     def test_generic_lipsync_obeys_cancel_barrier_and_rebinds_new_generation(self) -> None:
         worker = WorkerProcess("experimental-lipsync.stub-pack.json")
@@ -484,7 +579,14 @@ class LipSyncCatalogTests(unittest.TestCase):
         self.assertEqual(raw["selection_policy"]["fallback_chain"], [])
         self.assertEqual(
             {entry["id"] for entry in raw["candidates"]},
-            {"nvidia-ar-sdk-lipsync", "musetalk-1.5", "tracked-mouth-warp", "ditto", "latentsync"},
+            {
+                "audio2face-3d-regression-v2.3",
+                "nvidia-ar-sdk-lipsync",
+                "musetalk-1.5",
+                "tracked-mouth-warp",
+                "ditto",
+                "latentsync",
+            },
         )
         serialized = json.dumps(raw).lower()
         self.assertNotIn("https://", serialized)
@@ -531,6 +633,10 @@ class LipSyncCatalogTests(unittest.TestCase):
             "nvidia-ar-sdk-lipsync", mode="live", private_access_confirmed=True, **common
         )
         self.assertTrue(nvidia_with_access.eligible)
+        audio2face = self.catalog.selection_eligibility(
+            "audio2face-3d-regression-v2.3", mode="live", **common
+        )
+        self.assertIn("live_selection_not_allowed", audio2face.reasons)
         self.assertIn(
             "live_selection_not_allowed",
             self.catalog.selection_eligibility("ditto", mode="live", **common).reasons,

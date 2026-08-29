@@ -31,6 +31,7 @@ The mapping is an interface expectation, not permission to redistribute an engin
 
 The list records only current status and activation requirements:
 
+- Audio2Face-3D regression v2.3 is recorded only as an unqualified, unselectable coefficient-driver candidate. A separate mapper would have to produce a current-frame `npc.mouth-residual/v1` output; native-rig or static-avatar demonstrations are not evidence of generic moving-game suitability.
 - NVIDIA AR SDK LipSync is conditional/private NGC access, not something an ordinary NIM API key unlocks. Its contract requires 16 kHz audio and 14 source frames of pre-roll. It remains selectable only after the user confirms access and a separately installed Windows pack is verified and qualified.
 - MuseTalk 1.5 is a public experimental candidate, not a claim of live-game readiness.
 - The tracked mouth-warp option is the lightweight baseline and has the same exact-frame, tracking, occlusion, freshness, and visual gates.

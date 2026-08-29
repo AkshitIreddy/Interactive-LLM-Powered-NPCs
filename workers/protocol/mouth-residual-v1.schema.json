@@ -1,0 +1,229 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://interactive-npcs.invalid/schemas/mouth-residual-v1.schema.json",
+  "title": "Generic Current-Frame Mouth Residual Contract v1",
+  "description": "Control-plane metadata for a mouth-only residual over a tracked live frame. Full-frame replacement and static-avatar inputs are forbidden.",
+  "oneOf": [
+    { "$ref": "#/$defs/request" },
+    { "$ref": "#/$defs/proposal" }
+  ],
+  "$defs": {
+    "opaqueId": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,126}[A-Za-z0-9]$"
+    },
+    "uint63": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9223372036854775807
+    },
+    "positiveUint63": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9223372036854775807
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "normalizedRegion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "number", "minimum": 0, "maximum": 1 },
+        "y": { "type": "number", "minimum": 0, "maximum": 1 },
+        "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+      }
+    },
+    "failOpenReason": {
+      "enum": [
+        "metadata_only_stub",
+        "low_confidence",
+        "track_mismatch",
+        "track_epoch_mismatch",
+        "source_frame_advanced",
+        "cancellation_generation_changed",
+        "presentation_deadline_expired",
+        "media_lease_expired",
+        "landmarks_invalid",
+        "mask_out_of_bounds",
+        "occluded",
+        "residual_unavailable",
+        "worker_error"
+      ]
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "frame_lease_id",
+        "audio_lease_id",
+        "frame_lease_expires_qpc",
+        "audio_lease_expires_qpc",
+        "selected_encounter_id",
+        "selected_track_id",
+        "track_epoch",
+        "source_frame_sequence",
+        "source_capture_qpc",
+        "qpc_frequency_hz",
+        "face_region_normalized",
+        "landmark_bounds_normalized",
+        "mouth_mask_bounds_normalized",
+        "tracking_confidence",
+        "presentation_deadline_qpc",
+        "cancellation_generation"
+      ],
+      "properties": {
+        "contract_version": { "const": "npc.mouth-residual/v1" },
+        "frame_lease_id": { "$ref": "#/$defs/opaqueId" },
+        "audio_lease_id": { "$ref": "#/$defs/opaqueId" },
+        "frame_lease_expires_qpc": { "$ref": "#/$defs/positiveUint63" },
+        "audio_lease_expires_qpc": { "$ref": "#/$defs/positiveUint63" },
+        "selected_encounter_id": { "$ref": "#/$defs/opaqueId" },
+        "selected_track_id": { "$ref": "#/$defs/opaqueId" },
+        "track_epoch": { "$ref": "#/$defs/uint63" },
+        "source_frame_sequence": { "$ref": "#/$defs/positiveUint63" },
+        "source_capture_qpc": { "$ref": "#/$defs/positiveUint63" },
+        "qpc_frequency_hz": { "$ref": "#/$defs/positiveUint63" },
+        "face_region_normalized": { "$ref": "#/$defs/normalizedRegion" },
+        "landmark_bounds_normalized": { "$ref": "#/$defs/normalizedRegion" },
+        "mouth_mask_bounds_normalized": { "$ref": "#/$defs/normalizedRegion" },
+        "tracking_confidence": { "$ref": "#/$defs/confidence" },
+        "presentation_deadline_qpc": { "$ref": "#/$defs/positiveUint63" },
+        "cancellation_generation": { "$ref": "#/$defs/uint63" }
+      }
+    },
+    "freshness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "presentation_deadline_qpc",
+        "frame_lease_expires_qpc",
+        "audio_lease_expires_qpc",
+        "valid_source_frame_sequence",
+        "discard_at_or_after_frame_sequence",
+        "maximum_source_frame_advance",
+        "maximum_displayed_frames",
+        "requires_exact_source_frame_sequence",
+        "discard_if_source_advanced",
+        "discard_if_track_epoch_changed",
+        "discard_if_generation_changed",
+        "restore_unmodified_on_rejection"
+      ],
+      "properties": {
+        "presentation_deadline_qpc": { "$ref": "#/$defs/positiveUint63" },
+        "frame_lease_expires_qpc": { "$ref": "#/$defs/positiveUint63" },
+        "audio_lease_expires_qpc": { "$ref": "#/$defs/positiveUint63" },
+        "valid_source_frame_sequence": { "$ref": "#/$defs/positiveUint63" },
+        "discard_at_or_after_frame_sequence": { "$ref": "#/$defs/positiveUint63" },
+        "maximum_source_frame_advance": { "const": 0 },
+        "maximum_displayed_frames": { "const": 1 },
+        "requires_exact_source_frame_sequence": { "const": true },
+        "discard_if_source_advanced": { "const": true },
+        "discard_if_track_epoch_changed": { "const": true },
+        "discard_if_generation_changed": { "const": true },
+        "restore_unmodified_on_rejection": { "const": true }
+      }
+    },
+    "failOpen": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["use_unmodified_source_frame", "reasons"],
+      "properties": {
+        "use_unmodified_source_frame": { "const": true },
+        "reasons": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 13,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/failOpenReason" }
+        }
+      }
+    },
+    "residualConstraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "full_frame_replacement",
+        "static_avatar_source",
+        "base_frame_mutation",
+        "alpha_outside_mask_zero",
+        "mask_must_remain_inside_landmarks"
+      ],
+      "properties": {
+        "full_frame_replacement": { "const": false },
+        "static_avatar_source": { "const": false },
+        "base_frame_mutation": { "const": false },
+        "alpha_outside_mask_zero": { "const": true },
+        "mask_must_remain_inside_landmarks": { "const": true }
+      }
+    },
+    "proposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "proposal_kind",
+        "output_semantics",
+        "frame_lease_id",
+        "audio_lease_id",
+        "selected_encounter_id",
+        "selected_track_id",
+        "track_epoch",
+        "source_frame_sequence",
+        "source_capture_qpc",
+        "qpc_frequency_hz",
+        "cancellation_generation",
+        "tracking_confidence",
+        "residual_confidence",
+        "landmark_bounds_normalized",
+        "mask_bounds_normalized",
+        "freshness",
+        "fail_open",
+        "residual_constraints",
+        "patch_lease_id",
+        "presentable",
+        "metadata_only",
+        "no_pixels_inline",
+        "image_modified",
+        "deterministic"
+      ],
+      "properties": {
+        "contract_version": { "const": "npc.mouth-residual/v1" },
+        "proposal_kind": { "const": "external_current_frame_mouth_residual" },
+        "output_semantics": { "const": "additive_rgba_mouth_residual" },
+        "frame_lease_id": { "$ref": "#/$defs/opaqueId" },
+        "audio_lease_id": { "$ref": "#/$defs/opaqueId" },
+        "selected_encounter_id": { "$ref": "#/$defs/opaqueId" },
+        "selected_track_id": { "$ref": "#/$defs/opaqueId" },
+        "track_epoch": { "$ref": "#/$defs/uint63" },
+        "source_frame_sequence": { "$ref": "#/$defs/positiveUint63" },
+        "source_capture_qpc": { "$ref": "#/$defs/positiveUint63" },
+        "qpc_frequency_hz": { "$ref": "#/$defs/positiveUint63" },
+        "cancellation_generation": { "$ref": "#/$defs/uint63" },
+        "tracking_confidence": { "$ref": "#/$defs/confidence" },
+        "residual_confidence": { "$ref": "#/$defs/confidence" },
+        "landmark_bounds_normalized": { "$ref": "#/$defs/normalizedRegion" },
+        "mask_bounds_normalized": { "$ref": "#/$defs/normalizedRegion" },
+        "freshness": { "$ref": "#/$defs/freshness" },
+        "fail_open": { "$ref": "#/$defs/failOpen" },
+        "residual_constraints": { "$ref": "#/$defs/residualConstraints" },
+        "patch_lease_id": {
+          "description": "Opaque out-of-band residual lease, or null for metadata-only proposals.",
+          "oneOf": [{ "$ref": "#/$defs/opaqueId" }, { "type": "null" }]
+        },
+        "presentable": { "type": "boolean" },
+        "metadata_only": { "type": "boolean" },
+        "no_pixels_inline": { "const": true },
+        "image_modified": { "const": false },
+        "deterministic": { "type": "boolean" }
+      }
+    }
+  }
+}

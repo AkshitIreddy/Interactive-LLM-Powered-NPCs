@@ -80,17 +80,21 @@ message ResourceEstimateV1 {
 // supervisor identities, not paths, URLs, OS handles, or encoded media. Frame
 // and audio content remain on the runtime-owned out-of-band media plane.
 message GenericLipSyncRequestV1 {
+  string contract_version = 17; // Must equal npc.mouth-residual/v1.
   string frame_lease_id = 1;
   string audio_lease_id = 2;
   uint64 frame_lease_expires_qpc = 3;
   uint64 audio_lease_expires_qpc = 4;
   string selected_encounter_id = 5;
   string selected_track_id = 6;
+  uint64 track_epoch = 14;
   uint64 source_frame_sequence = 7;
   uint64 source_capture_qpc = 8;
   uint64 qpc_frequency_hz = 9;
   NormalizedRegionV1 face_region_normalized = 10;
-  NormalizedRegionV1 mouth_region_normalized = 11;
+  NormalizedRegionV1 mouth_mask_bounds_normalized = 11;
+  NormalizedRegionV1 landmark_bounds_normalized = 15;
+  double tracking_confidence = 16;
   uint64 presentation_deadline_qpc = 12;
   uint64 cancellation_generation = 13;
 }
@@ -110,6 +114,41 @@ message MouthPatchFreshnessV1 {
   bool discard_if_source_advanced = 5;
   bool discard_if_generation_changed = 6;
   bool restore_unmodified_on_rejection = 7;
+  uint64 valid_source_frame_sequence = 8;
+  uint64 discard_at_or_after_frame_sequence = 9;
+  uint32 maximum_source_frame_advance = 10; // Contract v1 requires zero.
+  uint32 maximum_displayed_frames = 11; // Contract v1 requires one.
+  bool discard_if_track_epoch_changed = 12;
+}
+
+enum MouthResidualFailOpenReasonV1 {
+  MOUTH_RESIDUAL_FAIL_OPEN_REASON_UNSPECIFIED = 0;
+  MOUTH_RESIDUAL_FAIL_OPEN_REASON_METADATA_ONLY_STUB = 1;
+  MOUTH_RESIDUAL_FAIL_OPEN_REASON_LOW_CONFIDENCE = 2;
+  MOUTH_RESIDUAL_FAIL_OPEN_REASON_TRACK_MISMATCH = 3;
+  MOUTH_RESIDUAL_FAIL_OPEN_REASON_TRACK_EPOCH_MISMATCH = 4;
+  MOUTH_RESIDUAL_FAIL_OPEN_REASON_SOURCE_FRAME_ADVANCED = 5;
+  MOUTH_RESIDUAL_FAIL_OPEN_REASON_CANCELLATION_GENERATION_CHANGED = 6;
+  MOUTH_RESIDUAL_FAIL_OPEN_REASON_PRESENTATION_DEADLINE_EXPIRED = 7;
+  MOUTH_RESIDUAL_FAIL_OPEN_REASON_MEDIA_LEASE_EXPIRED = 8;
+  MOUTH_RESIDUAL_FAIL_OPEN_REASON_LANDMARKS_INVALID = 9;
+  MOUTH_RESIDUAL_FAIL_OPEN_REASON_MASK_OUT_OF_BOUNDS = 10;
+  MOUTH_RESIDUAL_FAIL_OPEN_REASON_OCCLUDED = 11;
+  MOUTH_RESIDUAL_FAIL_OPEN_REASON_RESIDUAL_UNAVAILABLE = 12;
+  MOUTH_RESIDUAL_FAIL_OPEN_REASON_WORKER_ERROR = 13;
+}
+
+message MouthResidualFailOpenV1 {
+  bool use_unmodified_source_frame = 1; // Contract v1 requires true.
+  repeated MouthResidualFailOpenReasonV1 reasons = 2;
+}
+
+message MouthResidualConstraintsV1 {
+  bool full_frame_replacement = 1; // Contract v1 requires false.
+  bool static_avatar_source = 2; // Contract v1 requires false.
+  bool base_frame_mutation = 3; // Contract v1 requires false.
+  bool alpha_outside_mask_zero = 4; // Contract v1 requires true.
+  bool mask_must_remain_inside_landmarks = 5; // Contract v1 requires true.
 }
 
 // Metadata describing a proposed mouth residual. A production worker may name
@@ -117,21 +156,29 @@ message MouthPatchFreshnessV1 {
 // path, URL, or handle bytes are legal inline in this message. The deterministic
 // stub omits patch_lease_id and sets presentable=false and metadata_only=true.
 message MouthPatchProposalV1 {
+  string contract_version = 24; // Must equal npc.mouth-residual/v1.
   string proposal_kind = 1;
+  string output_semantics = 25; // additive_rgba_mouth_residual only.
   string frame_lease_id = 2;
   string audio_lease_id = 3;
   string selected_encounter_id = 4;
   string selected_track_id = 5;
+  uint64 track_epoch = 19;
   uint64 source_frame_sequence = 6;
   uint64 source_capture_qpc = 7;
   uint64 qpc_frequency_hz = 8;
   uint64 cancellation_generation = 9;
-  double confidence = 10;
+  double residual_confidence = 10;
+  double tracking_confidence = 20;
+  NormalizedRegionV1 landmark_bounds_normalized = 21;
   NormalizedRegionV1 mask_bounds_normalized = 11;
   MouthPatchFreshnessV1 freshness = 12;
+  MouthResidualFailOpenV1 fail_open = 22;
+  MouthResidualConstraintsV1 residual_constraints = 23;
   string patch_lease_id = 13;
   bool presentable = 14;
   bool metadata_only = 15;
   bool no_pixels_inline = 16;
   bool image_modified = 17;
+  bool deterministic = 18;
 }

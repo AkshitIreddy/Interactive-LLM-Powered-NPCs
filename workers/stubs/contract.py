@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 PROTOCOL_VERSION = "1.0"
+MOUTH_RESIDUAL_CONTRACT_VERSION = "npc.mouth-residual/v1"
 MAX_TEXT_BYTES = 262_144
 MAX_INLINE_BINARY_BYTES = 524_288
 MAX_BATCH_ENTRIES = 256
@@ -22,6 +23,24 @@ OPERATIONS = frozenset(
 KINDS = frozenset({"llm", "stt", "tts", "embedding", "vision", "lip_sync"})
 _ID = re.compile(r"^[a-z0-9][a-z0-9._-]{1,95}[a-z0-9]$")
 _OPAQUE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,126}[A-Za-z0-9]$")
+
+MOUTH_RESIDUAL_FAIL_OPEN_REASONS = frozenset(
+    {
+        "metadata_only_stub",
+        "low_confidence",
+        "track_mismatch",
+        "track_epoch_mismatch",
+        "source_frame_advanced",
+        "cancellation_generation_changed",
+        "presentation_deadline_expired",
+        "media_lease_expired",
+        "landmarks_invalid",
+        "mask_out_of_bounds",
+        "occluded",
+        "residual_unavailable",
+        "worker_error",
+    }
+)
 
 
 class ContractError(Exception):
@@ -63,6 +82,15 @@ def validate_generation(value: Any, name: str = "cancellation_generation") -> in
         return _nonnegative_int(value, name)
     except ContractError as exc:
         raise ContractError("invalid_payload", exc.message) from exc
+
+
+def validate_confidence(value: Any, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ContractError("invalid_payload", f"{name} must be a finite number")
+    parsed = float(value)
+    if not 0.0 <= parsed <= 1.0:
+        raise ContractError("invalid_payload", f"{name} must be between 0 and 1")
+    return round(parsed, 8)
 
 
 def validate_opaque_id(value: Any, name: str) -> str:
@@ -111,6 +139,190 @@ def validate_contained_region(
         or inner["y"] + inner["height"] > outer["y"] + outer["height"] + epsilon
     ):
         raise ContractError("invalid_payload", f"{inner_name} must be contained by {outer_name}")
+
+
+@dataclass(frozen=True, slots=True)
+class MouthResidualRequestV1:
+    """Strict control-plane metadata for a residual over one live source frame.
+
+    Media stays in runtime-owned leases. This type deliberately has no field for
+    an avatar image, full replacement frame, pixels, path, URL, or raw handle.
+    """
+
+    frame_lease_id: str
+    audio_lease_id: str
+    frame_lease_expires_qpc: int
+    audio_lease_expires_qpc: int
+    selected_encounter_id: str
+    selected_track_id: str
+    track_epoch: int
+    source_frame_sequence: int
+    source_capture_qpc: int
+    qpc_frequency_hz: int
+    face_region_normalized: dict[str, float]
+    landmark_bounds_normalized: dict[str, float]
+    mouth_mask_bounds_normalized: dict[str, float]
+    tracking_confidence: float
+    presentation_deadline_qpc: int
+    cancellation_generation: int
+
+    @classmethod
+    def parse(cls, payload: Any, *, allow_fixture_delay: bool = False) -> "MouthResidualRequestV1":
+        if not isinstance(payload, dict):
+            raise ContractError("invalid_payload", "mouth-residual payload must be an object")
+        allowed = {
+            "contract_version",
+            "frame_lease_id",
+            "audio_lease_id",
+            "frame_lease_expires_qpc",
+            "audio_lease_expires_qpc",
+            "selected_encounter_id",
+            "selected_track_id",
+            "track_epoch",
+            "source_frame_sequence",
+            "source_capture_qpc",
+            "qpc_frequency_hz",
+            "face_region_normalized",
+            "landmark_bounds_normalized",
+            "mouth_mask_bounds_normalized",
+            "tracking_confidence",
+            "presentation_deadline_qpc",
+            "cancellation_generation",
+        }
+        if allow_fixture_delay:
+            allowed.add("fixture_event_delay_ms")
+        unknown = sorted(set(payload) - allowed)
+        if unknown:
+            raise ContractError(
+                "invalid_payload",
+                "mouth-residual payload contains unsupported or inline media fields",
+                details={"fields": unknown[:16]},
+            )
+        if payload.get("contract_version") != MOUTH_RESIDUAL_CONTRACT_VERSION:
+            raise ContractError("invalid_payload", "unsupported mouth-residual contract version")
+
+        frame_lease_id = validate_opaque_id(payload.get("frame_lease_id"), "frame_lease_id")
+        audio_lease_id = validate_opaque_id(payload.get("audio_lease_id"), "audio_lease_id")
+        encounter_id = validate_opaque_id(payload.get("selected_encounter_id"), "selected_encounter_id")
+        track_id = validate_opaque_id(payload.get("selected_track_id"), "selected_track_id")
+        track_epoch = validate_generation(payload.get("track_epoch"), "track_epoch")
+        frame_sequence = validate_positive_int(payload.get("source_frame_sequence"), "source_frame_sequence")
+        capture_qpc = validate_positive_int(payload.get("source_capture_qpc"), "source_capture_qpc")
+        qpc_frequency = validate_positive_int(payload.get("qpc_frequency_hz"), "qpc_frequency_hz")
+        deadline = validate_positive_int(payload.get("presentation_deadline_qpc"), "presentation_deadline_qpc")
+        frame_expiry = validate_positive_int(payload.get("frame_lease_expires_qpc"), "frame_lease_expires_qpc")
+        audio_expiry = validate_positive_int(payload.get("audio_lease_expires_qpc"), "audio_lease_expires_qpc")
+        generation = validate_generation(payload.get("cancellation_generation"))
+        confidence = validate_confidence(payload.get("tracking_confidence"), "tracking_confidence")
+        face = validate_normalized_region(payload.get("face_region_normalized"), "face_region_normalized")
+        landmarks = validate_normalized_region(
+            payload.get("landmark_bounds_normalized"), "landmark_bounds_normalized"
+        )
+        mask = validate_normalized_region(
+            payload.get("mouth_mask_bounds_normalized"), "mouth_mask_bounds_normalized"
+        )
+        validate_contained_region(landmarks, face, "landmark_bounds_normalized", "face_region_normalized")
+        validate_contained_region(mask, landmarks, "mouth_mask_bounds_normalized", "landmark_bounds_normalized")
+        if deadline <= capture_qpc:
+            raise ContractError("stale_source_frame", "presentation deadline must follow source capture time")
+        if frame_expiry < deadline or audio_expiry < deadline:
+            raise ContractError("stale_media_lease", "frame and audio leases must remain valid through presentation")
+        return cls(
+            frame_lease_id,
+            audio_lease_id,
+            frame_expiry,
+            audio_expiry,
+            encounter_id,
+            track_id,
+            track_epoch,
+            frame_sequence,
+            capture_qpc,
+            qpc_frequency,
+            face,
+            landmarks,
+            mask,
+            confidence,
+            deadline,
+            generation,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class MouthResidualProposalV1:
+    """A mouth-only proposal whose rejection always reveals the live frame."""
+
+    request: MouthResidualRequestV1
+    residual_confidence: float
+    fail_open_reasons: tuple[str, ...]
+    patch_lease_id: str | None = None
+    presentable: bool = False
+    metadata_only: bool = True
+    deterministic: bool = False
+
+    def __post_init__(self) -> None:
+        validate_confidence(self.residual_confidence, "residual_confidence")
+        if not self.fail_open_reasons or any(
+            reason not in MOUTH_RESIDUAL_FAIL_OPEN_REASONS for reason in self.fail_open_reasons
+        ):
+            raise ContractError("invalid_payload", "mouth-residual fail-open reason is unsupported")
+        if len(set(self.fail_open_reasons)) != len(self.fail_open_reasons):
+            raise ContractError("invalid_payload", "mouth-residual fail-open reasons must be unique")
+        if self.patch_lease_id is not None:
+            validate_opaque_id(self.patch_lease_id, "patch_lease_id")
+        if self.metadata_only and (self.patch_lease_id is not None or self.presentable):
+            raise ContractError("invalid_payload", "metadata-only mouth residuals cannot be presentable or leased")
+
+    def to_payload(self) -> dict[str, Any]:
+        request = self.request
+        return {
+            "contract_version": MOUTH_RESIDUAL_CONTRACT_VERSION,
+            "proposal_kind": "external_current_frame_mouth_residual",
+            "output_semantics": "additive_rgba_mouth_residual",
+            "frame_lease_id": request.frame_lease_id,
+            "audio_lease_id": request.audio_lease_id,
+            "selected_encounter_id": request.selected_encounter_id,
+            "selected_track_id": request.selected_track_id,
+            "track_epoch": request.track_epoch,
+            "source_frame_sequence": request.source_frame_sequence,
+            "source_capture_qpc": request.source_capture_qpc,
+            "qpc_frequency_hz": request.qpc_frequency_hz,
+            "cancellation_generation": request.cancellation_generation,
+            "tracking_confidence": request.tracking_confidence,
+            "residual_confidence": round(self.residual_confidence, 8),
+            "landmark_bounds_normalized": request.landmark_bounds_normalized,
+            "mask_bounds_normalized": request.mouth_mask_bounds_normalized,
+            "freshness": {
+                "presentation_deadline_qpc": request.presentation_deadline_qpc,
+                "frame_lease_expires_qpc": request.frame_lease_expires_qpc,
+                "audio_lease_expires_qpc": request.audio_lease_expires_qpc,
+                "valid_source_frame_sequence": request.source_frame_sequence,
+                "discard_at_or_after_frame_sequence": request.source_frame_sequence + 1,
+                "maximum_source_frame_advance": 0,
+                "maximum_displayed_frames": 1,
+                "requires_exact_source_frame_sequence": True,
+                "discard_if_source_advanced": True,
+                "discard_if_track_epoch_changed": True,
+                "discard_if_generation_changed": True,
+                "restore_unmodified_on_rejection": True,
+            },
+            "fail_open": {
+                "use_unmodified_source_frame": True,
+                "reasons": list(self.fail_open_reasons),
+            },
+            "residual_constraints": {
+                "full_frame_replacement": False,
+                "static_avatar_source": False,
+                "base_frame_mutation": False,
+                "alpha_outside_mask_zero": True,
+                "mask_must_remain_inside_landmarks": True,
+            },
+            "patch_lease_id": self.patch_lease_id,
+            "presentable": self.presentable,
+            "metadata_only": self.metadata_only,
+            "no_pixels_inline": True,
+            "image_modified": False,
+            "deterministic": self.deterministic,
+        }
 
 
 @dataclass(frozen=True, slots=True)

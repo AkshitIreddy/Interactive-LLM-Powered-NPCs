@@ -1,0 +1,409 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://interactive-npcs.invalid/schemas/lipsync-qualification-plan-v1.schema.json",
+  "title": "Audio2Face-3D Mark qualification plan v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "plan_id",
+    "candidate_id",
+    "display_name",
+    "descriptor_kind",
+    "selection",
+    "source_identity",
+    "io_contract",
+    "residual_mapper_contract",
+    "expected_environment",
+    "resource_admission",
+    "measurement_plan",
+    "activation_gates"
+  ],
+  "properties": {
+    "schema_version": { "const": "npc.lipsync-qualification-plan/v1" },
+    "plan_id": { "const": "qualify.audio2face-3d-regression-v2.3-mark.windows-x64" },
+    "candidate_id": { "const": "audio2face-3d-regression-v2.3" },
+    "display_name": { "const": "Audio2Face-3D regression v2.3 Mark Windows qualification" },
+    "descriptor_kind": { "const": "non_downloadable_qualification_plan" },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contains_download_locations",
+        "contains_model_payloads",
+        "automatic_download",
+        "default_candidate",
+        "live_selectable",
+        "offline_selectable",
+        "activation_state"
+      ],
+      "properties": {
+        "contains_download_locations": { "const": false },
+        "contains_model_payloads": { "const": false },
+        "automatic_download": { "const": false },
+        "default_candidate": { "const": false },
+        "live_selectable": { "const": false },
+        "offline_selectable": { "const": false },
+        "activation_state": { "const": "blocked_pending_qualification" }
+      }
+    },
+    "source_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "publisher",
+        "model_family",
+        "model_variant",
+        "model_version",
+        "model_revision",
+        "revision_kind",
+        "access",
+        "sdk_source_revision_policy",
+        "model_license",
+        "sdk_license",
+        "license_qualification"
+      ],
+      "properties": {
+        "publisher": { "const": "NVIDIA" },
+        "model_family": { "const": "Audio2Face-3D" },
+        "model_variant": { "const": "Mark" },
+        "model_version": { "const": "2.3" },
+        "model_revision": { "const": "5451728e07378df93b04523279e134a9993ae71b" },
+        "revision_kind": { "const": "immutable_git_commit" },
+        "access": { "const": "public_ungated" },
+        "sdk_source_revision_policy": { "const": "exact_commit_required_before_build" },
+        "model_license": { "const": "NVIDIA Open Model License" },
+        "sdk_license": { "const": "MIT" },
+        "license_qualification": { "const": "pending_exact_text_and_redistribution_review" }
+      }
+    },
+    "io_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input", "output"],
+      "properties": {
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["modality", "sample_rate_hz", "channels", "sample_format", "streaming"],
+          "properties": {
+            "modality": { "const": "speech_pcm" },
+            "sample_rate_hz": { "const": 16000 },
+            "channels": { "const": 1 },
+            "sample_format": { "const": "signed_16_bit_little_endian" },
+            "streaming": { "const": true }
+          }
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "modality",
+            "coefficient_namespace",
+            "coefficient_cadence_hz",
+            "source_timestamp_basis",
+            "delivery_timestamp_basis",
+            "sequence_policy",
+            "non_finite_policy"
+          ],
+          "properties": {
+            "modality": { "const": "timestamped_arkit_blendshape_coefficients" },
+            "coefficient_namespace": { "const": "arkit_52" },
+            "coefficient_cadence_hz": { "const": 60 },
+            "source_timestamp_basis": { "const": "source_audio_sample_index" },
+            "delivery_timestamp_basis": { "const": "query_performance_counter" },
+            "sequence_policy": { "const": "strictly_monotonic" },
+            "non_finite_policy": { "const": "reject_frame_and_fail_open" }
+          }
+        }
+      }
+    },
+    "residual_mapper_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "output_contract",
+        "mouth_coefficient_allowlist",
+        "non_mouth_coefficient_policy",
+        "full_frame_replacement",
+        "static_avatar_source",
+        "base_frame_mutation",
+        "alpha_outside_mask_zero",
+        "mask_must_remain_inside_landmarks",
+        "maximum_source_frame_advance",
+        "maximum_displayed_frames",
+        "fail_open_to_unmodified_frame",
+        "required_bindings"
+      ],
+      "properties": {
+        "output_contract": { "const": "npc.mouth-residual/v1" },
+        "mouth_coefficient_allowlist": {
+          "type": "array",
+          "minItems": 28,
+          "maxItems": 28,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/mouthCoefficient" }
+        },
+        "non_mouth_coefficient_policy": { "const": "discard" },
+        "full_frame_replacement": { "const": false },
+        "static_avatar_source": { "const": false },
+        "base_frame_mutation": { "const": false },
+        "alpha_outside_mask_zero": { "const": true },
+        "mask_must_remain_inside_landmarks": { "const": true },
+        "maximum_source_frame_advance": { "const": 0 },
+        "maximum_displayed_frames": { "const": 1 },
+        "fail_open_to_unmodified_frame": { "const": true },
+        "required_bindings": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "frame_lease_id",
+              "source_frame_sequence",
+              "selected_encounter_id",
+              "selected_track_id",
+              "track_epoch",
+              "landmark_bounds_normalized",
+              "mouth_mask_bounds_normalized",
+              "cancellation_generation"
+            ]
+          }
+        }
+      }
+    },
+    "expected_environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "platforms",
+        "architecture",
+        "build_configuration",
+        "compiler",
+        "cuda",
+        "tensorrt",
+        "gpu",
+        "minimum_system_ram_mib",
+        "minimum_free_storage_mib",
+        "runtime_network_access",
+        "qualification_power_profiles"
+      ],
+      "properties": {
+        "platforms": {
+          "const": ["windows_10_22h2_x64", "windows_11_x64"]
+        },
+        "architecture": { "const": "x86_64" },
+        "build_configuration": { "const": "release" },
+        "compiler": { "const": "msvc_visual_studio_2022" },
+        "cuda": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["minimum", "maximum_exclusive", "reference"],
+          "properties": {
+            "minimum": { "const": "12.8.0" },
+            "maximum_exclusive": { "const": "13.0.0" },
+            "reference": { "const": "12.9.0" }
+          }
+        },
+        "tensorrt": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["minimum", "maximum_exclusive", "reference"],
+          "properties": {
+            "minimum": { "const": "10.13.0" },
+            "maximum_exclusive": { "const": "11.0.0" },
+            "reference": { "const": "10.13.0" }
+          }
+        },
+        "gpu": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["vendor", "minimum_compute_capability", "reference_target", "lower_memory_gate"],
+          "properties": {
+            "vendor": { "const": "nvidia" },
+            "minimum_compute_capability": { "const": "7.5" },
+            "reference_target": { "const": "rtx_4080_laptop_12_gib" },
+            "lower_memory_gate": { "const": "separate_6_gib_and_8_gib_measurement_required" }
+          }
+        },
+        "minimum_system_ram_mib": { "const": 8192 },
+        "minimum_free_storage_mib": { "const": 10240 },
+        "runtime_network_access": { "const": false },
+        "qualification_power_profiles": {
+          "const": ["silent_cpu_boost_disabled", "balanced"]
+        }
+      }
+    },
+    "resource_admission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "budget_source",
+        "local_visual_gpu_lease",
+        "co_resident_local_models",
+        "safety_margin_mib",
+        "required_peak_statistic",
+        "admission_formula",
+        "on_rejection"
+      ],
+      "properties": {
+        "budget_source": { "const": "dxgi_query_video_memory_info" },
+        "local_visual_gpu_lease": { "const": "exclusive" },
+        "co_resident_local_models": { "const": "not_permitted_during_initial_qualification" },
+        "safety_margin_mib": { "const": 512 },
+        "required_peak_statistic": { "const": "measured_vram_p99_mib" },
+        "admission_formula": {
+          "const": "budget_mib-current_usage_mib-configured_game_reserve_mib-safety_margin_mib>=measured_vram_p99_mib"
+        },
+        "on_rejection": { "const": "remain_unselectable_without_cloud_fallback" }
+      }
+    },
+    "measurement_plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "observations", "workload", "required_record_fields", "acceptance_thresholds"],
+      "properties": {
+        "status": { "const": "not_measured" },
+        "observations": { "type": "object", "maxProperties": 0 },
+        "workload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "warmup_frames",
+            "minimum_measured_frames",
+            "soak_minutes",
+            "coefficient_cadence_hz",
+            "capture_fixture",
+            "audio_fixture",
+            "stress_events"
+          ],
+          "properties": {
+            "warmup_frames": { "const": 600 },
+            "minimum_measured_frames": { "const": 18000 },
+            "soak_minutes": { "const": 30 },
+            "coefficient_cadence_hz": { "const": 60 },
+            "capture_fixture": { "const": "original_or_licensed_moving_game_face_replay_with_pose_and_occlusion" },
+            "audio_fixture": { "const": "hash_attested_speech_pcm_with_phoneme_and_silence_coverage" },
+            "stress_events": {
+              "const": [
+                "barge_in_cancellation",
+                "track_epoch_change",
+                "face_occlusion",
+                "source_frame_advance",
+                "device_loss",
+                "gpu_budget_pressure"
+              ]
+            }
+          }
+        },
+        "required_record_fields": {
+          "type": "array",
+          "minItems": 14,
+          "maxItems": 14,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "sdk_commit",
+              "model_revision",
+              "worker_commit",
+              "benchmark_revision",
+              "measurement_utc",
+              "windows_build",
+              "gpu_name",
+              "gpu_driver",
+              "cuda_version",
+              "tensorrt_version",
+              "power_profile",
+              "dxgi_budget_mib",
+              "configured_game_reserve_mib",
+              "fixture_hashes"
+            ]
+          }
+        },
+        "acceptance_thresholds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "coefficient_compute_ms_p95_max",
+            "first_coefficient_ms_p95_max",
+            "audio_to_residual_ready_ms_p95_max",
+            "residual_composite_ms_p95_max",
+            "audio_visual_onset_skew_abs_ms_p95_max",
+            "average_game_fps_loss_percent_max",
+            "one_percent_low_fps_loss_percent_max",
+            "deadline_miss_percent_max",
+            "outside_mask_changed_pixel_percent_max",
+            "stale_or_wrong_track_presentations_max",
+            "restore_unmodified_within_displayed_frames_max",
+            "crashes_or_orphan_workers_max"
+          ],
+          "properties": {
+            "coefficient_compute_ms_p95_max": { "const": 16.6 },
+            "first_coefficient_ms_p95_max": { "const": 100 },
+            "audio_to_residual_ready_ms_p95_max": { "const": 50 },
+            "residual_composite_ms_p95_max": { "const": 0.5 },
+            "audio_visual_onset_skew_abs_ms_p95_max": { "const": 80 },
+            "average_game_fps_loss_percent_max": { "const": 3 },
+            "one_percent_low_fps_loss_percent_max": { "const": 5 },
+            "deadline_miss_percent_max": { "const": 0.1 },
+            "outside_mask_changed_pixel_percent_max": { "const": 0.1 },
+            "stale_or_wrong_track_presentations_max": { "const": 0 },
+            "restore_unmodified_within_displayed_frames_max": { "const": 1 },
+            "crashes_or_orphan_workers_max": { "const": 0 }
+          }
+        }
+      }
+    },
+    "activation_gates": {
+      "const": [
+        "exact_sdk_commit_pinned",
+        "artifact_hashes_and_sizes_recorded",
+        "tensor_rt_engine_built_for_qualified_gpu",
+        "cuda_tensor_rt_abi_match",
+        "exact_license_text_reviewed",
+        "worker_sandbox_and_no_egress_verified",
+        "timestamped_arkit_coefficient_conformance",
+        "strict_mouth_residual_conformance",
+        "dxgi_resource_admission_passed",
+        "latency_and_frame_impact_thresholds_passed",
+        "occlusion_identity_freshness_and_cancellation_passed",
+        "thirty_minute_soak_passed"
+      ]
+    }
+  },
+  "$defs": {
+    "mouthCoefficient": {
+      "enum": [
+        "jawForward",
+        "jawLeft",
+        "jawOpen",
+        "jawRight",
+        "mouthClose",
+        "mouthDimpleLeft",
+        "mouthDimpleRight",
+        "mouthFrownLeft",
+        "mouthFrownRight",
+        "mouthFunnel",
+        "mouthLeft",
+        "mouthLowerDownLeft",
+        "mouthLowerDownRight",
+        "mouthPressLeft",
+        "mouthPressRight",
+        "mouthPucker",
+        "mouthRight",
+        "mouthRollLower",
+        "mouthRollUpper",
+        "mouthShrugLower",
+        "mouthShrugUpper",
+        "mouthSmileLeft",
+        "mouthSmileRight",
+        "mouthStretchLeft",
+        "mouthStretchRight",
+        "mouthUpperUpLeft",
+        "mouthUpperUpRight",
+        "tongueOut"
+      ]
+    }
+  }
+}

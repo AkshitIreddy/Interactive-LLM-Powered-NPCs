@@ -95,7 +95,7 @@ Requests with a lower generation receive `stale_generation`. Requests with a hig
 | `inline_result_too_large` | The result needs an out-of-band shared-memory lease. |
 | `event_limit_exceeded` | A faulty adapter exceeded its bounded stream budget. |
 | `generation_mismatch` | A generic lip-sync payload was not bound to its request envelope generation. |
-| `stale_source_frame` / `stale_media_lease` | A generic lip-sync proposal cannot remain valid through its presentation deadline. |
+| `stale_source_frame` / `stale_media_lease` | A current-frame residual cannot remain valid through its presentation deadline. |
 | `inference_failed` / `internal_error` | Sanitized adapter failure. Consult local structured diagnostics by correlation ID. |
 
 ## Deterministic stub payloads
@@ -107,33 +107,39 @@ The stubs intentionally consume fixture-like metadata rather than pretending to 
 - TTS: `text`, optional `sample_rate_hz`; emits bounded base64 PCM16 `audio_chunk`, `alignment`, and `tts_result`.
 - Embedding: `texts`; emits normalized deterministic vectors.
 - Vision: `frame_digest` and optional `labels`; emits deterministic detections derived from the digest.
-- Lip-sync: opaque expiring frame/audio lease IDs, selected local encounter/track IDs, source frame sequence/capture QPC, QPC frequency, normalized face/mouth regions, presentation deadline, and the matching cancellation generation. It emits deterministic `mouth_patch_proposal` metadata and a result. It never receives inline media, emits pixels, or edits images.
+- Lip-sync: `npc.mouth-residual/v1` metadata with opaque expiring frame/audio lease IDs, selected local encounter/track ID and track epoch, source frame sequence/capture QPC, QPC frequency, normalized face/landmark/mouth-mask bounds, tracking confidence, presentation deadline, and the matching cancellation generation. It emits deterministic `mouth_patch_proposal` metadata and a result. It never receives inline media, emits pixels, or edits images.
 
 These results exist only for orchestration and UI simulation. They are not suitable for quality, latency, WER, FPS, or resource benchmarks.
 
 ## Generic current-frame lip-sync
 
+`mouth-residual-v1.schema.json` is the normative JSON shape. This is a **live current-frame residual** contract, not a talking-head or static-avatar contract. A conforming worker may output only an alpha-bearing mouth residual for composition over the identified live source frame. It must not return a replacement frame, synthesized head, cached avatar frame, or any claim that static-avatar performance predicts moving-game performance. The untouched captured frame remains authoritative.
+
 The required development JSON payload is:
 
 ```json
 {
+  "contract_version": "npc.mouth-residual/v1",
   "frame_lease_id": "frame-lease-000042",
   "audio_lease_id": "audio-lease-000017",
   "frame_lease_expires_qpc": 1300000,
   "audio_lease_expires_qpc": 1300000,
   "selected_encounter_id": "encounter-local-7",
   "selected_track_id": "track-local-2",
+  "track_epoch": 3,
   "source_frame_sequence": 42,
   "source_capture_qpc": 1000000,
   "qpc_frequency_hz": 1000000,
   "face_region_normalized": { "x": 0.25, "y": 0.15, "width": 0.4, "height": 0.6 },
-  "mouth_region_normalized": { "x": 0.38, "y": 0.55, "width": 0.14, "height": 0.1 },
+  "landmark_bounds_normalized": { "x": 0.29, "y": 0.21, "width": 0.32, "height": 0.48 },
+  "mouth_mask_bounds_normalized": { "x": 0.38, "y": 0.55, "width": 0.14, "height": 0.1 },
+  "tracking_confidence": 0.94,
   "presentation_deadline_qpc": 1200000,
   "cancellation_generation": 0
 }
 ```
 
-All QPC values come from the supervisor's single clock domain. The presentation deadline must be later than capture and no later than either lease expiry. The mouth region must be inside the face region and both must be inside the normalized frame. `cancellation_generation` must equal the envelope generation.
+All QPC values come from the supervisor's single clock domain. The presentation deadline must be later than capture and no later than either lease expiry. Landmark bounds must be inside the tracked face; the mouth mask must be inside the landmark bounds; all three must be inside the normalized frame. `track_epoch` changes whenever the tracker loses/reacquires or rebinds an identity, even if its opaque track ID string is reused. `cancellation_generation` must equal the envelope generation.
 
 Unknown fields are rejected. In particular, fields such as `image`, `image_b64`, `pixels`, `audio`, `audio_b64`, `frame_path`, `audio_path`, `url`, or a raw shared handle cannot enter the JSON control plane. Production transports can associate an opaque lease ID with a bounded shared-memory or D3D resource inside the already authenticated supervisor/media channel.
 
@@ -141,7 +147,9 @@ The deterministic proposal is deliberately non-presentable:
 
 - `patch_lease_id` is `null`, `metadata_only` is true, and `image_modified` is false;
 - `no_pixels_inline` is true;
-- the exact source frame sequence, capture QPC, track, encounter, and cancellation generation are repeated;
-- freshness requires exact-frame presentation, discard on source/generation advance, and restoration of the untouched game frame on rejection.
+- the exact source frame sequence, capture QPC, track ID/epoch, encounter, landmark/mask bounds, confidence, and cancellation generation are repeated;
+- freshness names `valid_source_frame_sequence`, sets `discard_at_or_after_frame_sequence` to source + 1, permits zero source-frame advance, and permits at most one displayed frame;
+- source-frame, track-epoch, deadline, lease, generation, landmark, mask, occlusion, and confidence failures all fail open to the untouched game frame;
+- residual constraints set `full_frame_replacement`, `static_avatar_source`, and `base_frame_mutation` to false and require zero alpha outside the mouth mask.
 
-A production worker may provide an opaque `patch_lease_id` only through a separately qualified contract implementation. The compositor must still reject a late, stale, cancelled, mismatched, low-confidence, occluded, or identity-switched proposal without displaying it.
+A production worker may provide an opaque `patch_lease_id` only through a separately qualified contract implementation. That lease may contain only the declared mouth residual; a full-sized allocation does not grant permission to replace the frame. The compositor must reject a late, one-frame-stale, cancelled, mismatched, low-confidence, occluded, identity-switched, or out-of-bounds proposal and present the untouched current frame. Failure of the optional visual path never pauses conversation, audio, or subtitles.

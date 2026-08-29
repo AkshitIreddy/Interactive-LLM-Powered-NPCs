@@ -22,15 +22,22 @@
       "opaque_frame_lease",
       "opaque_audio_lease",
       "local_encounter_track_selection",
-      "normalized_face_mouth_regions"
+      "track_epoch",
+      "normalized_face_landmark_mouth_mask_bounds",
+      "tracking_confidence",
+      "npc.mouth-residual/v1"
     ],
-    "output_modalities": ["mouth_patch_proposal_metadata"],
+    "output_modalities": ["additive_rgba_mouth_residual_proposal_metadata"],
     "compute_backends": ["cpu"],
     "streaming_output": false,
     "cancellation": true,
     "network_access": false,
     "experimental": true,
     "modifies_images": false,
+    "full_frame_replacement": false,
+    "static_avatar_source": false,
+    "fail_open_to_unmodified_frame": true,
+    "maximum_displayed_frames_per_proposal": 1,
     "emits_inline_pixels": false,
     "game_specific_adapters": false,
     "requires_user_selected_pack": true,
@@ -49,7 +56,7 @@
   },
   "development": {
     "entrypoint": "workers/stubs/worker.py",
-    "default_model_id": "fixture.lipsync.mouth-patch-metadata-v1",
+    "default_model_id": "fixture.lipsync.current-frame-mouth-residual-v1",
     "purpose": "orchestration_and_protocol_testing_only"
   },
   "production_pack_requirements": {
@@ -67,6 +74,8 @@
       "runtime_abi",
       "hardware_contention_gate",
       "freshness_and_cancellation_gate",
+      "track_epoch_and_mask_bounds_gate",
+      "residual_only_no_full_frame_gate",
       "visual_quality_gate",
       "privacy_and_license_review",
       "self_test"

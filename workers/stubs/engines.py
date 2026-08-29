@@ -14,11 +14,9 @@ try:  # Supports direct execution and package imports in test harnesses.
     from .contract import (
         ContractError,
         MAX_EMBEDDING_DIMENSIONS,
-        validate_contained_region,
-        validate_generation,
-        validate_normalized_region,
-        validate_opaque_id,
-        validate_positive_int,
+        MOUTH_RESIDUAL_CONTRACT_VERSION,
+        MouthResidualProposalV1,
+        MouthResidualRequestV1,
         validate_string_list,
         validate_text,
     )
@@ -26,11 +24,9 @@ except ImportError:
     from contract import (
         ContractError,
         MAX_EMBEDDING_DIMENSIONS,
-        validate_contained_region,
-        validate_generation,
-        validate_normalized_region,
-        validate_opaque_id,
-        validate_positive_int,
+        MOUTH_RESIDUAL_CONTRACT_VERSION,
+        MouthResidualProposalV1,
+        MouthResidualRequestV1,
         validate_string_list,
         validate_text,
     )
@@ -210,102 +206,48 @@ def vision(payload: dict[str, Any], cancelled: Cancelled) -> Iterator[Event]:
 
 
 def lip_sync(payload: dict[str, Any], cancelled: Cancelled) -> Iterator[Event]:
-    allowed = {
-        "frame_lease_id",
-        "audio_lease_id",
-        "frame_lease_expires_qpc",
-        "audio_lease_expires_qpc",
-        "selected_encounter_id",
-        "selected_track_id",
-        "source_frame_sequence",
-        "source_capture_qpc",
-        "qpc_frequency_hz",
-        "face_region_normalized",
-        "mouth_region_normalized",
-        "presentation_deadline_qpc",
-        "cancellation_generation",
-        "fixture_event_delay_ms",
-    }
-    unknown = sorted(set(payload) - allowed)
-    if unknown:
-        raise ContractError(
-            "invalid_payload",
-            "generic lip-sync payload contains unsupported or inline media fields",
-            details={"fields": unknown[:16]},
-        )
-
-    frame_lease_id = validate_opaque_id(payload.get("frame_lease_id"), "frame_lease_id")
-    audio_lease_id = validate_opaque_id(payload.get("audio_lease_id"), "audio_lease_id")
-    encounter_id = validate_opaque_id(payload.get("selected_encounter_id"), "selected_encounter_id")
-    track_id = validate_opaque_id(payload.get("selected_track_id"), "selected_track_id")
-    frame_sequence = validate_positive_int(payload.get("source_frame_sequence"), "source_frame_sequence")
-    capture_qpc = validate_positive_int(payload.get("source_capture_qpc"), "source_capture_qpc")
-    qpc_frequency = validate_positive_int(payload.get("qpc_frequency_hz"), "qpc_frequency_hz")
-    presentation_deadline = validate_positive_int(
-        payload.get("presentation_deadline_qpc"), "presentation_deadline_qpc"
-    )
-    frame_expiry = validate_positive_int(payload.get("frame_lease_expires_qpc"), "frame_lease_expires_qpc")
-    audio_expiry = validate_positive_int(payload.get("audio_lease_expires_qpc"), "audio_lease_expires_qpc")
-    generation = validate_generation(payload.get("cancellation_generation"))
-    face = validate_normalized_region(payload.get("face_region_normalized"), "face_region_normalized")
-    mouth = validate_normalized_region(payload.get("mouth_region_normalized"), "mouth_region_normalized")
-    validate_contained_region(mouth, face, "mouth_region_normalized", "face_region_normalized")
-
-    if presentation_deadline <= capture_qpc:
-        raise ContractError("stale_source_frame", "presentation deadline must follow source capture time")
-    if frame_expiry < presentation_deadline or audio_expiry < presentation_deadline:
-        raise ContractError("stale_media_lease", "frame and audio leases must remain valid through presentation")
+    request = MouthResidualRequestV1.parse(payload, allow_fixture_delay=True)
     if cancelled():
         return
 
     digest_source = "\0".join(
         (
-            frame_lease_id,
-            audio_lease_id,
-            encounter_id,
-            track_id,
-            str(frame_sequence),
-            str(capture_qpc),
-            str(generation),
-            ",".join(str(mouth[field]) for field in ("x", "y", "width", "height")),
+            request.frame_lease_id,
+            request.audio_lease_id,
+            request.selected_encounter_id,
+            request.selected_track_id,
+            str(request.track_epoch),
+            str(request.source_frame_sequence),
+            str(request.source_capture_qpc),
+            str(request.cancellation_generation),
+            ",".join(
+                str(request.mouth_mask_bounds_normalized[field]) for field in ("x", "y", "width", "height")
+            ),
         )
     )
-    confidence = round(0.8 + (_stable_digest("mouth-patch", digest_source)[0] % 16) / 100, 4)
-    yield "mouth_patch_proposal", {
-        "proposal_kind": "external_current_frame_mouth_residual",
-        "frame_lease_id": frame_lease_id,
-        "audio_lease_id": audio_lease_id,
-        "selected_encounter_id": encounter_id,
-        "selected_track_id": track_id,
-        "source_frame_sequence": frame_sequence,
-        "source_capture_qpc": capture_qpc,
-        "qpc_frequency_hz": qpc_frequency,
-        "cancellation_generation": generation,
-        "confidence": confidence,
-        "mask_bounds_normalized": mouth,
-        "freshness": {
-            "presentation_deadline_qpc": presentation_deadline,
-            "frame_lease_expires_qpc": frame_expiry,
-            "audio_lease_expires_qpc": audio_expiry,
-            "requires_exact_source_frame_sequence": True,
-            "discard_if_source_advanced": True,
-            "discard_if_generation_changed": True,
-            "restore_unmodified_on_rejection": True,
-        },
-        "patch_lease_id": None,
-        "presentable": False,
-        "metadata_only": True,
-        "no_pixels_inline": True,
-        "image_modified": False,
-        "deterministic": True,
-    }
+    residual_confidence = round(
+        min(request.tracking_confidence, 0.8 + (_stable_digest("mouth-residual", digest_source)[0] % 16) / 100),
+        4,
+    )
+    proposal = MouthResidualProposalV1(
+        request=request,
+        residual_confidence=residual_confidence,
+        fail_open_reasons=("metadata_only_stub",),
+        deterministic=True,
+    )
+    yield "mouth_patch_proposal", proposal.to_payload()
     yield "lip_sync_result", {
-        "mode": "external_current_frame_metadata_only",
-        "source_frame_sequence": frame_sequence,
-        "cancellation_generation": generation,
+        "contract_version": MOUTH_RESIDUAL_CONTRACT_VERSION,
+        "mode": "external_current_frame_residual_metadata_only",
+        "source_frame_sequence": request.source_frame_sequence,
+        "track_epoch": request.track_epoch,
+        "cancellation_generation": request.cancellation_generation,
         "proposal_presentable": False,
+        "fail_open_reason": "metadata_only_stub",
         "no_pixels_inline": True,
         "image_modified": False,
+        "full_frame_replacement": False,
+        "static_avatar_source": False,
         "experimental": True,
         "deterministic": True,
     }
