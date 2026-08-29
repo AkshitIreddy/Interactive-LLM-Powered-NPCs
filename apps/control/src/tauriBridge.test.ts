@@ -89,7 +89,7 @@ describe("Tauri bridge normalization", () => {
     );
 
     expect(invoke).toHaveBeenCalledTimes(2);
-    expect(wait).toHaveBeenCalledWith(25);
+    expect(wait).toHaveBeenCalledWith(25, undefined);
     expect(result.kind).toBe("snapshot");
     if (result.kind === "snapshot") {
       expect(result.attempts).toBe(2);
@@ -112,6 +112,52 @@ describe("Tauri bridge normalization", () => {
     expect(result.kind).toBe("snapshot");
     if (result.kind === "snapshot")
       expect(result.snapshot.mediaBroker.connected).toBe(false);
+  });
+
+  it("keeps polling beyond the old fifth attempt until startup becomes ready", async () => {
+    let invocation = 0;
+    const invoke = vi.fn(async () => {
+      invocation += 1;
+      return invocation < 8 ? snapshot(false, false) : snapshot(true, true);
+    });
+    const progress: number[] = [];
+
+    const result = await loadNativeBootstrapHealth(
+      {
+        maxAttempts: 12,
+        maxElapsedMs: 20_000,
+        initialDelayMs: 0,
+        sleep: async () => undefined,
+        onProgress: (health) => progress.push(health.attempts),
+      },
+      invoke,
+    );
+
+    expect(invoke).toHaveBeenCalledTimes(8);
+    expect(progress).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(result.kind).toBe("snapshot");
+    if (result.kind === "snapshot") {
+      expect(result.attempts).toBe(8);
+      expect(result.snapshot.runtime.connected).toBe(true);
+      expect(result.snapshot.mediaBroker.connected).toBe(true);
+    }
+  });
+
+  it("cancels startup polling without publishing a stale final result", async () => {
+    const controller = new AbortController();
+    const invoke = vi.fn().mockResolvedValue(snapshot(false, false));
+
+    await expect(
+      loadNativeBootstrapHealth(
+        {
+          maxAttempts: 30,
+          signal: controller.signal,
+          sleep: async () => controller.abort(),
+        },
+        invoke,
+      ),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(invoke).toHaveBeenCalledTimes(1);
   });
 
   it("exposes the exact capture command only with native debug capability", () => {

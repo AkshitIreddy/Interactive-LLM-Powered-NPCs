@@ -137,12 +137,30 @@ function ResponseConsoleApp() {
   );
 
   useEffect(() => {
-    let current = true;
-    loadNativeBootstrapHealth().then((health) => {
-      if (current) setNativeBootstrap(health);
-    });
+    const controller = new AbortController();
+    loadNativeBootstrapHealth({
+      maxElapsedMs: 20_000,
+      signal: controller.signal,
+      onProgress: (health) => {
+        if (!controller.signal.aborted) setNativeBootstrap(health);
+      },
+    })
+      .then((health) => {
+        if (!controller.signal.aborted) setNativeBootstrap(health);
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setNativeBootstrap({
+          kind: "unavailable",
+          attempts: 0,
+          detail:
+            error instanceof Error
+              ? error.message
+              : "Native bootstrap polling failed.",
+        });
+      });
     return () => {
-      current = false;
+      controller.abort();
     };
   }, []);
 

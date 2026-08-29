@@ -220,23 +220,50 @@ const isStageId = (value: string): value is StageId =>
     "animating",
   ].includes(value);
 
-const sleep = (durationMs: number) =>
-  new Promise<void>((resolve) => window.setTimeout(resolve, durationMs));
+const abortError = () => {
+  const error = new Error("Native bootstrap polling was cancelled.");
+  error.name = "AbortError";
+  return error;
+};
+
+const sleep = (durationMs: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortError());
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      signal?.removeEventListener("abort", cancel);
+      resolve();
+    }, durationMs);
+    const cancel = () => {
+      window.clearTimeout(timer);
+      reject(abortError());
+    };
+    signal?.addEventListener("abort", cancel, { once: true });
+  });
 
 export async function loadNativeBootstrapHealth(
   options: {
     maxAttempts?: number;
     initialDelayMs?: number;
-    sleep?: (durationMs: number) => Promise<void>;
+    maxElapsedMs?: number;
+    signal?: AbortSignal;
+    sleep?: (durationMs: number, signal?: AbortSignal) => Promise<void>;
+    now?: () => number;
+    onProgress?: (health: NativeBootstrapHealth) => void;
   } = {},
   invokeBootstrap?: () => Promise<NativeBootstrapSnapshot>,
 ): Promise<NativeBootstrapHealth> {
   if (!invokeBootstrap && !hasTauri())
     return { kind: "browserPreview", attempts: 0 };
 
-  const maxAttempts = Math.max(1, options.maxAttempts ?? 5);
+  const maxAttempts = Math.max(1, options.maxAttempts ?? 30);
   const initialDelayMs = Math.max(0, options.initialDelayMs ?? 120);
+  const maxElapsedMs = Math.max(0, options.maxElapsedMs ?? 20_000);
   const wait = options.sleep ?? sleep;
+  const now = options.now ?? Date.now;
+  const startedAt = now();
   const invokeSnapshot =
     invokeBootstrap ??
     (async () => {
@@ -245,28 +272,52 @@ export async function loadNativeBootstrapHealth(
     });
   let lastSnapshot: NativeBootstrapSnapshot | null = null;
   let lastError = "Native bootstrap did not return a snapshot.";
+  let attemptsPerformed = 0;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    if (options.signal?.aborted) throw abortError();
+    attemptsPerformed = attempt;
     try {
       const snapshot = await invokeSnapshot();
+      if (options.signal?.aborted) throw abortError();
       lastSnapshot = snapshot;
+      const health: NativeBootstrapHealth = {
+        kind: "snapshot",
+        attempts: attempt,
+        snapshot,
+      };
+      options.onProgress?.(health);
       if (snapshot.runtime.connected && snapshot.mediaBroker.connected)
-        return { kind: "snapshot", attempts: attempt, snapshot };
+        return health;
       lastError = [snapshot.runtime.detail, snapshot.mediaBroker.detail]
         .filter(Boolean)
         .join(" ");
     } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw error;
       lastError =
         error instanceof Error ? error.message : "Unknown bootstrap failure";
     }
 
-    if (attempt < maxAttempts)
-      await wait(Math.min(initialDelayMs * 2 ** (attempt - 1), 1_000));
+    const elapsedMs = now() - startedAt;
+    if (attempt >= maxAttempts || elapsedMs >= maxElapsedMs) break;
+    const remainingMs = maxElapsedMs - elapsedMs;
+    await wait(
+      Math.min(initialDelayMs * 2 ** (attempt - 1), 1_000, remainingMs),
+      options.signal,
+    );
   }
 
   if (lastSnapshot)
-    return { kind: "snapshot", attempts: maxAttempts, snapshot: lastSnapshot };
-  return { kind: "unavailable", attempts: maxAttempts, detail: lastError };
+    return {
+      kind: "snapshot",
+      attempts: attemptsPerformed,
+      snapshot: lastSnapshot,
+    };
+  return {
+    kind: "unavailable",
+    attempts: attemptsPerformed,
+    detail: lastError,
+  };
 }
 
 export type SyntheticReplayCaptureAvailability =
