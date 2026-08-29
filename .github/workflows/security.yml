@@ -1,0 +1,73 @@
+name: Security and provenance
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repository-boundary:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Use Node.js 20.20.2
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20.20.2'
+
+      - name: Use locked workspace tools when present
+        shell: pwsh
+        run: |
+          if (Test-Path package.json) {
+            corepack enable
+            corepack install
+          }
+          if (Test-Path rust-toolchain.toml) {
+            rustup show
+          }
+
+      - name: Reject committed credentials
+        shell: pwsh
+        run: ./scripts/security/scan-secrets.ps1 -IncludeUntracked
+
+      - name: Test offline security generators and fixture repositories
+        shell: pwsh
+        run: python -m unittest discover -s scripts/security/tests -v
+
+      - name: Check strict lock licenses and model provenance
+        shell: pwsh
+        run: ./scripts/security/check-licenses.ps1 -Strict
+
+      - name: Generate complete deterministic CycloneDX inventory
+        shell: pwsh
+        run: ./scripts/security/generate-sbom.ps1 -Strict -OutputDirectory artifacts/sbom
+
+      - name: Record source identity evidence
+        shell: pwsh
+        run: python ./scripts/security/generate_source_evidence.py --root . --out artifacts/source-evidence.json
+
+      - name: Validate packaging policy is non-publishing
+        shell: pwsh
+        run: |
+          $policy = Get-Content packaging/security/release-policy.json -Raw | ConvertFrom-Json
+          if ($policy.allow_publication -ne $false) { throw 'Publication must remain disabled.' }
+          if ($policy.allow_update_feed_activation -ne $false) { throw 'Updater activation must remain disabled.' }
+          if ($policy.require_reachable_history_secret_scan -ne $true -or $policy.require_all_dependency_locks -ne $true) {
+            throw 'Strict history and complete-lock gates must remain enabled.'
+          }
+          $feed = Get-Content packaging/updater/local-feed.example.json -Raw | ConvertFrom-Json
+          if ($feed.enabled -ne $false -or @($feed.endpoints).Count -ne 0) {
+            throw 'The local update-feed placeholder must remain inert.'
+          }

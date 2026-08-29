@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://interactive-npcs.invalid/schemas/model-pack-manifest-v1.json",
+  "title": "ModelPackManifestV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "pack_id",
+    "revision",
+    "display_name",
+    "description",
+    "source_project",
+    "source_revision",
+    "capability",
+    "artifacts",
+    "runtime",
+    "hardware",
+    "resources",
+    "license",
+    "self_test"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema": { "const": "npc.model-pack/v1" },
+    "pack_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{1,94}[a-z0-9]$" },
+    "revision": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "display_name": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "description": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "source_project": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "source_revision": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "scope"],
+      "properties": {
+        "kind": { "enum": ["language_model", "speech_recognition", "speech_synthesis", "embedding", "vision", "lip_sync", "animation", "other"] },
+        "scope": { "enum": ["generic", "game_specific"] }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "source_urls", "size_bytes", "sha256", "destination"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "kind": { "enum": ["archive", "file"] },
+          "source_urls": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": { "type": "string", "format": "uri", "pattern": "^https://" }
+          },
+          "size_bytes": { "type": "integer", "minimum": 1 },
+          "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
+          "destination": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runtime", "abi", "minimum_runtime_revision", "supported_platforms", "supported_architectures"],
+      "properties": {
+        "runtime": { "type": "string", "minLength": 1 },
+        "abi": { "type": "string", "minLength": 1 },
+        "minimum_runtime_revision": { "type": ["string", "null"] },
+        "supported_platforms": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["windows10", "windows11"] } },
+        "supported_architectures": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "const": "x86_64" } }
+      }
+    },
+    "hardware": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum_ram_bytes", "recommended_ram_bytes", "minimum_vram_bytes", "recommended_vram_bytes", "minimum_cpu_threads", "accelerators", "required_cpu_features"],
+      "properties": {
+        "minimum_ram_bytes": { "type": "integer", "minimum": 0 },
+        "recommended_ram_bytes": { "type": "integer", "minimum": 0 },
+        "minimum_vram_bytes": { "type": ["integer", "null"], "minimum": 0 },
+        "recommended_vram_bytes": { "type": ["integer", "null"], "minimum": 0 },
+        "minimum_cpu_threads": { "type": "integer", "minimum": 1 },
+        "accelerators": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["cpu", "cuda", "direct_ml", "vulkan"] } },
+        "required_cpu_features": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["storage_bytes", "peak_install_bytes", "measured_ram_bytes", "measured_vram_bytes", "measured_load_millis", "benchmark_hardware", "quality_tier", "languages"],
+      "properties": {
+        "storage_bytes": { "type": "integer", "minimum": 1 },
+        "peak_install_bytes": { "type": "integer", "minimum": 1 },
+        "measured_ram_bytes": { "type": ["integer", "null"], "minimum": 0 },
+        "measured_vram_bytes": { "type": ["integer", "null"], "minimum": 0 },
+        "measured_load_millis": { "type": ["integer", "null"], "minimum": 0 },
+        "benchmark_hardware": { "type": ["string", "null"] },
+        "quality_tier": { "enum": ["fast", "balanced", "quality", "experimental"] },
+        "languages": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } }
+      }
+    },
+    "license": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["spdx_expression", "license_name", "license_url", "attribution", "redistributable", "commercial_use", "derivative_use", "acceptance_required", "notices"],
+      "properties": {
+        "spdx_expression": { "type": ["string", "null"] },
+        "license_name": { "type": "string", "minLength": 1 },
+        "license_url": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "attribution": { "type": "string", "minLength": 1 },
+        "redistributable": { "type": "boolean" },
+        "commercial_use": { "$ref": "#/$defs/licensePermission" },
+        "derivative_use": { "$ref": "#/$defs/licensePermission" },
+        "acceptance_required": { "type": "boolean" },
+        "notices": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "self_test": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "suite_revision", "allowed_runtime_backends", "input_fixture", "expected_output_sha256", "timeout_millis"],
+      "properties": {
+        "kind": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "suite_revision": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "allowed_runtime_backends": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        },
+        "input_fixture": { "type": "string", "minLength": 1 },
+        "expected_output_sha256": { "type": ["string", "null"], "pattern": "^[a-fA-F0-9]{64}$" },
+        "timeout_millis": { "type": "integer", "minimum": 100, "maximum": 300000 }
+      }
+    }
+  },
+  "$defs": {
+    "licensePermission": { "enum": ["allowed", "prohibited", "restricted", "unknown"] }
+  }
+}

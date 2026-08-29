@@ -1,0 +1,84 @@
+{
+  "$schema": "./model-pack-manifest.schema.json",
+  "schema": "npc.model-pack/v1",
+  "pack_id": "example-generic-lip-sync",
+  "revision": "0.0.0-example",
+  "display_name": "Non-installable generic lip-sync example",
+  "description": "Shape-only generic lip-sync fixture used to validate the ModelPackManifestV1 boundary.",
+  "source_project": "https://example.invalid/model-source",
+  "source_revision": "0000000-example-only",
+  "capability": {
+    "kind": "lip_sync",
+    "scope": "generic"
+  },
+  "artifacts": [
+    {
+      "id": "example-model-file",
+      "kind": "file",
+      "source_urls": [
+        "https://example.invalid/model.example"
+      ],
+      "size_bytes": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "destination": "model/model.example"
+    }
+  ],
+  "runtime": {
+    "runtime": "example-runtime",
+    "abi": "example-only",
+    "minimum_runtime_revision": null,
+    "supported_platforms": [
+      "windows10",
+      "windows11"
+    ],
+    "supported_architectures": [
+      "x86_64"
+    ]
+  },
+  "hardware": {
+    "minimum_ram_bytes": 1,
+    "recommended_ram_bytes": 1,
+    "minimum_vram_bytes": null,
+    "recommended_vram_bytes": null,
+    "minimum_cpu_threads": 1,
+    "accelerators": [
+      "cpu"
+    ],
+    "required_cpu_features": []
+  },
+  "resources": {
+    "storage_bytes": 1,
+    "peak_install_bytes": 2,
+    "measured_ram_bytes": null,
+    "measured_vram_bytes": null,
+    "measured_load_millis": null,
+    "benchmark_hardware": null,
+    "quality_tier": "experimental",
+    "languages": [
+      "en"
+    ]
+  },
+  "license": {
+    "spdx_expression": "LicenseRef-Example-Only",
+    "license_name": "Example only",
+    "license_url": "https://example.invalid/license",
+    "attribution": "Shape fixture only; never publish or install this manifest.",
+    "redistributable": false,
+    "commercial_use": "prohibited",
+    "derivative_use": "prohibited",
+    "acceptance_required": true,
+    "notices": [
+      "This fixture contains no model or executable payload."
+    ]
+  },
+  "self_test": {
+    "kind": "deterministic_fixture",
+    "suite_revision": "example-only",
+    "allowed_runtime_backends": [
+      "fixture"
+    ],
+    "input_fixture": "fixtures/self-test.json",
+    "expected_output_sha256": null,
+    "timeout_millis": 1000
+  }
+}

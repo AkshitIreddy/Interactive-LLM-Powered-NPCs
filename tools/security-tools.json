@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "auto_install": false,
+  "required_internal_generators": {
+    "lock_sbom": "scripts/security/generate_lock_sbom.py@2",
+    "license_policy": "scripts/security/check_lock_licenses.py@1",
+    "source_evidence": "scripts/security/generate_source_evidence.py@1"
+  },
+  "optional_enrichment": {
+    "cargo-cyclonedx": { "version": "0.5.7", "required": false },
+    "cargo-deny": { "version": "0.18.4", "required": false },
+    "@cyclonedx/cyclonedx-npm": { "version": "4.0.3", "required": false }
+  }
+}

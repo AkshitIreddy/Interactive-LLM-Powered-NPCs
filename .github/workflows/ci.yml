@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workspace:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+          - name: Portable checks
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      CI: 'true'
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Use Node.js 20.20.2
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20.20.2'
+
+      - name: Use the locked pnpm version
+        shell: pwsh
+        run: |
+          if (Test-Path package.json) {
+            corepack enable
+            corepack install
+          }
+
+      - name: Use the locked Rust toolchain
+        shell: pwsh
+        run: |
+          if (Test-Path rust-toolchain.toml) {
+            rustup show
+          }
+
+      - name: Use uv for optional worker fixtures
+        if: ${{ hashFiles('pyproject.toml') != '' }}
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          enable-cache: true
+
+      - name: Validate environment
+        shell: pwsh
+        run: ./scripts/dev.ps1 environment
+
+      - name: Restore locked workspaces
+        shell: pwsh
+        run: ./scripts/dev.ps1 setup
+
+      - name: Lint
+        shell: pwsh
+        run: ./scripts/dev.ps1 lint
+
+      - name: Test
+        shell: pwsh
+        run: ./scripts/dev.ps1 test
+
+      - name: Scan tracked files for secrets
+        shell: pwsh
+        run: ./scripts/security/scan-secrets.ps1

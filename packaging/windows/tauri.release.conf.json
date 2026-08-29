@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "createUpdaterArtifacts": false,
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "displayLanguageSelector": false,
+        "installerHooks": "../../../packaging/windows/nsis/installer-hooks.nsh",
+        "installMode": "currentUser",
+        "languages": [
+          "English"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "$schema": "./layout.schema.json",
+  "schema_version": 1,
+  "base_installer": {
+    "architecture": "windows-x86_64",
+    "large_models_included": false,
+    "python_included": false,
+    "cuda_included": false,
+    "ffmpeg_required": false
+  },
+  "directories": [
+    {
+      "path": "app",
+      "purpose": "signed Tauri shell and static control UI",
+      "mutable": false
+    },
+    {
+      "path": "runtime/bin",
+      "purpose": "Rust runtime, media broker, and native inference launchers",
+      "mutable": false
+    },
+    {
+      "path": "runtime/migrations",
+      "purpose": "versioned SQLite migrations",
+      "mutable": false
+    },
+    {
+      "path": "runtime/profiles",
+      "purpose": "built-in provenance-checked game profiles",
+      "mutable": false
+    },
+    {
+      "path": "packs/models/<pack-id>/<version>",
+      "purpose": "immutable model pack versions installed by Model Manager",
+      "mutable": true
+    },
+    {
+      "path": "packs/workers/<pack-id>/<version>",
+      "purpose": "optional isolated worker runtimes, including approved CPython packs",
+      "mutable": true
+    },
+    {
+      "path": "data",
+      "purpose": "per-user databases, settings, logs, and repair metadata",
+      "mutable": true
+    },
+    {
+      "path": "staging/<operation-id>",
+      "purpose": "bounded temporary download and safe-extraction area",
+      "mutable": true
+    }
+  ]
+}

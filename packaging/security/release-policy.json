@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "distribution": "local-review-only",
+  "require_clean_tests": true,
+  "require_secret_scan": true,
+  "require_sbom": true,
+  "require_license_review": true,
+  "require_artifact_sha256": true,
+  "artifact_hash_algorithm": "SHA-256",
+  "require_source_identity": true,
+  "require_all_dependency_locks": true,
+  "require_reachable_history_secret_scan": true,
+  "skip_checks_classification": "unchecked-development-package",
+  "allow_publication": false,
+  "allow_update_feed_activation": false,
+  "allow_embedded_secrets": false,
+  "allow_large_models_in_base_installer": false,
+  "allow_system_python_dependency": false
+}

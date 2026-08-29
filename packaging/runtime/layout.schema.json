@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://interactive-npcs.invalid/schemas/runtime-layout-v1.json",
+  "title": "Interactive NPCs runtime layout",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "base_installer",
+    "directories"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "base_installer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "architecture",
+        "large_models_included",
+        "python_included",
+        "cuda_included",
+        "ffmpeg_required"
+      ],
+      "properties": {
+        "architecture": {
+          "const": "windows-x86_64"
+        },
+        "large_models_included": {
+          "const": false
+        },
+        "python_included": {
+          "const": false
+        },
+        "cuda_included": {
+          "const": false
+        },
+        "ffmpeg_required": {
+          "const": false
+        }
+      }
+    },
+    "directories": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "purpose",
+          "mutable"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "purpose": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mutable": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "allowed_identifiers": [
+    "0BSD", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "BSL-1.0",
+    "CC-BY-4.0", "CC0-1.0", "CDLA-Permissive-2.0", "ISC", "LGPL-2.1-or-later",
+    "LLVM-exception", "MIT", "MIT-0", "MPL-2.0", "Unicode-3.0", "Unlicense", "Zlib"
+  ],
+  "disallowed_identifiers": ["AGPL-1.0", "AGPL-3.0", "GPL-2.0", "GPL-3.0", "GPL-3.0-or-later", "SSPL-1.0"],
+  "reviewed_exceptions": {
+    "pkg:npm/ffmpeg-static@5.2.0": {
+      "license": "GPL-3.0-or-later",
+      "scope": "development-only-demo-renderer",
+      "required_source_lock": "demo/readme/package-lock.json",
+      "distributed_in_base_installer": false
+    }
+  }
+}

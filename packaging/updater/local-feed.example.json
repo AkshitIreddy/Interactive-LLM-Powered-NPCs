@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "enabled": false,
+  "channel": "local-review",
+  "endpoints": [],
+  "public_key": null,
+  "artifacts": []
+}
