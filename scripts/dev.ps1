@@ -647,6 +647,17 @@ function Invoke-Lint {
 
     Invoke-CheckBlock -Label 'Repository JSON validation' -Action {
         Write-Step 'Validating repository JSON files'
+        $jsonValidator = Join-Path $PSScriptRoot 'validate-json.cjs'
+        $jsonValidatorTest = Join-Path $PSScriptRoot 'test-json-validator.cjs'
+        if (-not (Test-Path -LiteralPath $jsonValidator -PathType Leaf)) {
+            throw "Repository JSON validator was not found: $jsonValidator"
+        }
+        if (-not (Test-Path -LiteralPath $jsonValidatorTest -PathType Leaf)) {
+            throw "Repository JSON validator regression test was not found: $jsonValidatorTest"
+        }
+
+        Invoke-External -FilePath 'node' -ArgumentList @($jsonValidatorTest) -WorkingDirectory $script:RepoRoot -DisplayArguments '<repository JSON validator regression test>'
+
         $excludedDirectories = @('.git', '.secrets', '.pnpm-store', '.render-work', 'node_modules', 'target', 'out', 'dist', 'coverage')
         $pendingDirectories = New-Object 'System.Collections.Generic.Stack[string]'
         $pendingDirectories.Push($script:RepoRoot)
@@ -663,10 +674,9 @@ function Invoke-Lint {
                 $jsonFiles.Add($jsonFile)
             }
         }
-        $nodeScript = 'const fs=require("node:fs");let bad=0;for(const p of process.argv.slice(1)){try{let text=fs.readFileSync(p,"utf8");if(text.charCodeAt(0)===0xfeff)text=text.slice(1);JSON.parse(text);}catch(e){console.error(`${p}: ${e.message}`);bad=1;}}process.exitCode=bad;'
-        $jsonArguments = @('-e', $nodeScript, '--')
+        $jsonArguments = @($jsonValidator)
         $jsonArguments += @($jsonFiles | Sort-Object FullName | ForEach-Object { $_.FullName })
-        Invoke-External -FilePath 'node' -ArgumentList $jsonArguments -WorkingDirectory $script:RepoRoot -DisplayArguments "-e <local JSON parser> -- <$($jsonFiles.Count) sorted JSON paths>"
+        Invoke-External -FilePath 'node' -ArgumentList $jsonArguments -WorkingDirectory $script:RepoRoot -DisplayArguments "<local JSON parser> <$($jsonFiles.Count) sorted JSON paths>"
         Write-Host "    Validated $($jsonFiles.Count) JSON files." -ForegroundColor DarkGray
     }
 
