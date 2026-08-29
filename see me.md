@@ -70,6 +70,37 @@ described as real spoken/lip-synced application E2E.
    `nvidia-smi` for compute ownership, use the test-root mutex/wrapper, and
    restore `no` in cleanup. Do not contend with another project.
 
+### Live-audio implementation checkpoint
+
+Committed, independently reviewed components now exist but are not yet wired
+into the normal application turn:
+
+- `30c4001` / `a2a9359`: concrete and hardened ElevenLabs WebSocket transport
+  with a normal-account default, bounded messages, non-cloned stock-voice
+  format validation, and a <=150 ms cancellation boundary.
+- `b15da19`: Runtime Core no longer drops an audio sink before its cooperative
+  cancellation receipt returns.
+- `01206d0` / `b7c0022`: `devLiveTts` request shaping is allowlisted, carries
+  no secret over IPC, preserves old JSON, carries trusted safety context, and
+  remains truthfully fixture-only until an actual provider and output path are
+  connected.
+- `3d9a72b`, `0c9b2a1`, `0f17ba2`, `0cbbf14`: hosted-TTS bridge creates one
+  upstream session per sentence, enforces a conservative cloud/privacy
+  descriptor, emits metadata before EOS, and keeps vault-secret conversions
+  zeroizing.
+- `3c32280`, `413413a`, `221b54c`, `ff68c16`: feature-off developer WASAPI
+  raw-speaker probe uses bounded device-rate resampling, owned SPSC handles,
+  cancellation wakeups and explicit submission/drain telemetry. It is not a
+  production broker replacement and does not claim physical audibility.
+
+A manual real-provider raw-PCM speaker smoke was run through the default
+Windows endpoint. The probe exited zero, but the best-effort endpoint-wide
+SoundCard loopback capture selected the Bluetooth headphones and did not
+correlate cleanly with the source waveform. Treat that run as **inconclusive**,
+not evidence that the full reply reached physical speakers. The next rigorous
+step, if requested, is the documented native process-scoped WASAPI loopback
+verifier rather than a desktop/endpoint-wide capture.
+
 The adversarial ledger for this continuation is
 `artifacts/actual-ui-demo/ADVERSARIAL_REFINEMENT_LEDGER.md`.
 
