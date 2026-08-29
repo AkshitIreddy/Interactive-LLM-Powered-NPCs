@@ -217,6 +217,20 @@ impl BudgetSnapshot {
 
 pub trait BudgetTelemetry: Send + Sync {
     fn snapshot(&self) -> Result<BudgetSnapshot, BrokerError>;
+
+    /// VRAM already included in [`BudgetSnapshot::gpu_vram_used_bytes`] that is
+    /// also owned by this broker. Subtracting this overlap before adding broker
+    /// reservations prevents a loaded model from being counted twice once DXGI
+    /// observes its allocation.
+    fn broker_accounted_gpu_usage(&self) -> Result<BrokerAccountedGpuUsage, BrokerError> {
+        Ok(BrokerAccountedGpuUsage::default())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrokerAccountedGpuUsage {
+    pub resident_bytes: u64,
+    pub transient_bytes: u64,
 }
 
 /// Thread-safe host-fed telemetry implementation. The media/runtime host updates it
@@ -224,12 +238,14 @@ pub trait BudgetTelemetry: Send + Sync {
 #[derive(Clone, Debug)]
 pub struct ReportedBudgetTelemetry {
     snapshot: Arc<Mutex<BudgetSnapshot>>,
+    broker_accounted_gpu_usage: Arc<Mutex<BrokerAccountedGpuUsage>>,
 }
 
 impl ReportedBudgetTelemetry {
     pub fn new(snapshot: BudgetSnapshot) -> Result<Self, BrokerError> {
         Ok(Self {
             snapshot: Arc::new(Mutex::new(snapshot.validate()?)),
+            broker_accounted_gpu_usage: Arc::new(Mutex::new(BrokerAccountedGpuUsage::default())),
         })
     }
 
@@ -244,12 +260,95 @@ impl ReportedBudgetTelemetry {
         *current = snapshot;
         Ok(())
     }
+
+    /// Updates the portion of reported GPU usage attributable to allocations
+    /// already tracked by this broker. Values larger than the current broker
+    /// reservations are harmless: overlap is clamped when projections are made.
+    pub fn update_broker_accounted_gpu_usage(&self, usage: BrokerAccountedGpuUsage) {
+        *self
+            .broker_accounted_gpu_usage
+            .lock()
+            .expect("telemetry accounting mutex poisoned") = usage;
+    }
 }
 
 impl BudgetTelemetry for ReportedBudgetTelemetry {
     fn snapshot(&self) -> Result<BudgetSnapshot, BrokerError> {
         Ok(*self.snapshot.lock().expect("telemetry mutex poisoned"))
     }
+
+    fn broker_accounted_gpu_usage(&self) -> Result<BrokerAccountedGpuUsage, BrokerError> {
+        Ok(*self
+            .broker_accounted_gpu_usage
+            .lock()
+            .expect("telemetry accounting mutex poisoned"))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelResidencyState {
+    Cold,
+    Warming,
+    Loaded,
+    InFlight,
+    Evicting,
+    Quarantined,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MeasuredGpuEnvelope {
+    /// Steady-state allocation measured after the model has finished warming.
+    pub resident_bytes: u64,
+    /// Measured p99 workspace above resident allocation while inference runs.
+    pub p99_transient_bytes: u64,
+    /// Number of representative samples behind the p99 envelope.
+    pub sample_count: u32,
+}
+
+impl MeasuredGpuEnvelope {
+    fn validate(self) -> Result<Self, BrokerError> {
+        if self.resident_bytes == 0 {
+            return Err(BrokerError::InvalidResidency(
+                "measured resident_bytes must be non-zero".into(),
+            ));
+        }
+        if self.sample_count == 0 {
+            return Err(BrokerError::InvalidResidency(
+                "measured GPU envelope must contain at least one sample".into(),
+            ));
+        }
+        Ok(self)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelResidencySpec {
+    pub model_id: String,
+    pub target_id: String,
+    pub provider: ProviderDescriptor,
+    pub gpu_residency: GpuResidency,
+    pub envelope: MeasuredGpuEnvelope,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelResidencyStatus {
+    pub model_id: String,
+    pub target_id: String,
+    pub state: ModelResidencyState,
+    pub envelope: MeasuredGpuEnvelope,
+    pub active_jobs: u32,
+    pub quarantine_until_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResidencyLedgerSnapshot {
+    pub models: Vec<ModelResidencyStatus>,
+    pub reserved_resident_bytes: u64,
+    pub reserved_p99_transient_bytes: u64,
+    pub telemetry_accounted: BrokerAccountedGpuUsage,
+    pub unreported_resident_bytes: u64,
+    pub unreported_transient_bytes: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -444,6 +543,18 @@ pub enum BrokerError {
     InvalidTelemetry(String),
     #[error("job is invalid: {0}")]
     InvalidJob(String),
+    #[error("model residency is invalid: {0}")]
+    InvalidResidency(String),
+    #[error("model residency entry not found: {0}")]
+    UnknownModel(String),
+    #[error("invalid model residency transition for {model_id}: {from:?} -> {to:?}")]
+    InvalidResidencyTransition {
+        model_id: String,
+        from: ModelResidencyState,
+        to: ModelResidencyState,
+    },
+    #[error("insufficient GPU capacity to warm model {model_id}")]
+    ResidencyCapacityExceeded { model_id: String },
 }
 
 #[derive(Debug)]
@@ -478,6 +589,37 @@ struct TargetHealth {
     quarantine_until_ms: u64,
 }
 
+#[derive(Clone, Debug)]
+struct ModelResidencyRecord {
+    spec: ModelResidencySpec,
+    state: ModelResidencyState,
+    active_jobs: u32,
+    quarantine_until_ms: Option<u64>,
+}
+
+impl ModelResidencyRecord {
+    fn status(&self) -> ModelResidencyStatus {
+        ModelResidencyStatus {
+            model_id: self.spec.model_id.clone(),
+            target_id: self.spec.target_id.clone(),
+            state: self.state,
+            envelope: self.spec.envelope,
+            active_jobs: self.active_jobs,
+            quarantine_until_ms: self.quarantine_until_ms,
+        }
+    }
+
+    fn holds_resident_memory(&self) -> bool {
+        matches!(
+            self.state,
+            ModelResidencyState::Warming
+                | ModelResidencyState::Loaded
+                | ModelResidencyState::InFlight
+                | ModelResidencyState::Evicting
+        ) || (self.state == ModelResidencyState::Quarantined && self.active_jobs > 0)
+    }
+}
+
 #[derive(Clone)]
 struct QueuedRecord {
     sequence: u64,
@@ -493,8 +635,10 @@ struct BrokerState {
     active: HashMap<String, ActiveRecord>,
     queued: Vec<QueuedRecord>,
     target_health: HashMap<String, TargetHealth>,
+    residency: HashMap<String, ModelResidencyRecord>,
     utterance_bindings: HashMap<String, String>,
     diagnostics: VecDeque<BrokerDiagnostic>,
+    telemetry_accounted: BrokerAccountedGpuUsage,
 }
 
 impl Default for BrokerState {
@@ -508,8 +652,10 @@ impl Default for BrokerState {
             active: HashMap::new(),
             queued: Vec::new(),
             target_health: HashMap::new(),
+            residency: HashMap::new(),
             utterance_bindings: HashMap::new(),
             diagnostics: VecDeque::new(),
+            telemetry_accounted: BrokerAccountedGpuUsage::default(),
         }
     }
 }
@@ -540,7 +686,9 @@ impl ResourceBroker {
     pub fn submit(&self, job: ResourceJob) -> Result<Submission, BrokerError> {
         validate_job(&job)?;
         let snapshot = self.inner.telemetry.snapshot()?.validate()?;
+        let accounted = self.inner.telemetry.broker_accounted_gpu_usage()?;
         let mut state = self.inner.state.lock().expect("broker mutex poisoned");
+        state.telemetry_accounted = accounted;
         self.expire_transient_overages_locked(&mut state, snapshot.monotonic_ms);
         self.update_pressure_locked(&mut state, snapshot);
 
@@ -645,7 +793,9 @@ impl ResourceBroker {
     /// ordered by priority, deadline, and stable submission order.
     pub fn poll_ready(&self) -> Result<Vec<ResourceLease>, BrokerError> {
         let snapshot = self.inner.telemetry.snapshot()?.validate()?;
+        let accounted = self.inner.telemetry.broker_accounted_gpu_usage()?;
         let mut state = self.inner.state.lock().expect("broker mutex poisoned");
+        state.telemetry_accounted = accounted;
         self.expire_transient_overages_locked(&mut state, snapshot.monotonic_ms);
         self.update_pressure_locked(&mut state, snapshot);
         state.queued.sort_by(queue_order);
@@ -698,7 +848,9 @@ impl ResourceBroker {
 
     pub fn refresh_pressure(&self) -> Result<PressureLevel, BrokerError> {
         let snapshot = self.inner.telemetry.snapshot()?.validate()?;
+        let accounted = self.inner.telemetry.broker_accounted_gpu_usage()?;
         let mut state = self.inner.state.lock().expect("broker mutex poisoned");
+        state.telemetry_accounted = accounted;
         self.expire_transient_overages_locked(&mut state, snapshot.monotonic_ms);
         self.update_pressure_locked(&mut state, snapshot);
         Ok(state.pressure)
@@ -715,6 +867,233 @@ impl ResourceBroker {
     pub fn active_degradations(&self) -> Vec<BrokerDegradation> {
         let state = self.inner.state.lock().expect("broker mutex poisoned");
         DEGRADATION_ORDER[..state.degradation_count].to_vec()
+    }
+
+    /// Registers a configured local model without loading it. Registration is
+    /// intentionally cold: alternatives do not consume VRAM until the runtime
+    /// explicitly warms one of them.
+    pub fn register_model_residency(&self, spec: ModelResidencySpec) -> Result<(), BrokerError> {
+        if spec.model_id.trim().is_empty() || spec.target_id.trim().is_empty() {
+            return Err(BrokerError::InvalidResidency(
+                "model_id and target_id must be non-empty".into(),
+            ));
+        }
+        if spec.provider.location.is_networked() || spec.gpu_residency == GpuResidency::None {
+            return Err(BrokerError::InvalidResidency(
+                "API-only and CPU-only targets have no GPU model residency context".into(),
+            ));
+        }
+        spec.envelope.validate()?;
+        let mut state = self.inner.state.lock().expect("broker mutex poisoned");
+        if state.residency.contains_key(&spec.model_id)
+            || state
+                .residency
+                .values()
+                .any(|record| record.spec.target_id == spec.target_id)
+        {
+            return Err(BrokerError::InvalidResidency(
+                "model_id and target_id must be unique in the residency ledger".into(),
+            ));
+        }
+        state.residency.insert(
+            spec.model_id.clone(),
+            ModelResidencyRecord {
+                spec,
+                state: ModelResidencyState::Cold,
+                active_jobs: 0,
+                quarantine_until_ms: None,
+            },
+        );
+        Ok(())
+    }
+
+    /// Reserves steady-state VRAM before model loading begins.
+    pub fn begin_model_warming(&self, model_id: &str) -> Result<(), BrokerError> {
+        let snapshot = self.inner.telemetry.snapshot()?.validate()?;
+        let accounted = self.inner.telemetry.broker_accounted_gpu_usage()?;
+        let mut state = self.inner.state.lock().expect("broker mutex poisoned");
+        let record = state
+            .residency
+            .get(model_id)
+            .ok_or_else(|| BrokerError::UnknownModel(model_id.into()))?;
+        if record.state != ModelResidencyState::Cold {
+            return Err(invalid_residency_transition(
+                model_id,
+                record.state,
+                ModelResidencyState::Warming,
+            ));
+        }
+        let ceiling = self
+            .inner
+            .config
+            .vram_ceiling_bytes
+            .min(snapshot.gpu_vram_budget_bytes);
+        let reserved = broker_reserved_gpu_usage(&state);
+        let unreported = unreported_gpu_usage(reserved, accounted);
+        let projected = snapshot
+            .gpu_vram_used_bytes
+            .saturating_add(unreported.resident_bytes)
+            .saturating_add(unreported.transient_bytes)
+            .saturating_add(record.spec.envelope.resident_bytes);
+        if projected > ceiling {
+            return Err(BrokerError::ResidencyCapacityExceeded {
+                model_id: model_id.into(),
+            });
+        }
+        state
+            .residency
+            .get_mut(model_id)
+            .expect("residency disappeared while locked")
+            .state = ModelResidencyState::Warming;
+        Ok(())
+    }
+
+    /// Finishes warmup and records the envelope measured on this machine.
+    pub fn mark_model_loaded(
+        &self,
+        model_id: &str,
+        measured: MeasuredGpuEnvelope,
+    ) -> Result<(), BrokerError> {
+        let measured = measured.validate()?;
+        let snapshot = self.inner.telemetry.snapshot()?.validate()?;
+        let accounted = self.inner.telemetry.broker_accounted_gpu_usage()?;
+        let mut state = self.inner.state.lock().expect("broker mutex poisoned");
+        state.telemetry_accounted = accounted;
+        let record = state
+            .residency
+            .get(model_id)
+            .ok_or_else(|| BrokerError::UnknownModel(model_id.into()))?;
+        if record.state != ModelResidencyState::Warming {
+            return Err(invalid_residency_transition(
+                model_id,
+                record.state,
+                ModelResidencyState::Loaded,
+            ));
+        }
+        let reserved = broker_reserved_gpu_usage(&state);
+        let future_reserved = BrokerAccountedGpuUsage {
+            resident_bytes: reserved
+                .resident_bytes
+                .saturating_sub(record.spec.envelope.resident_bytes)
+                .saturating_add(measured.resident_bytes),
+            transient_bytes: reserved.transient_bytes,
+        };
+        let unreported = unreported_gpu_usage(future_reserved, accounted);
+        let ceiling = self
+            .inner
+            .config
+            .vram_ceiling_bytes
+            .min(snapshot.gpu_vram_budget_bytes);
+        if snapshot
+            .gpu_vram_used_bytes
+            .saturating_add(unreported.resident_bytes)
+            .saturating_add(unreported.transient_bytes)
+            > ceiling
+        {
+            return Err(BrokerError::ResidencyCapacityExceeded {
+                model_id: model_id.into(),
+            });
+        }
+        let record = state
+            .residency
+            .get_mut(model_id)
+            .expect("residency disappeared while locked");
+        record.spec.envelope = measured;
+        record.state = ModelResidencyState::Loaded;
+        Ok(())
+    }
+
+    pub fn begin_model_eviction(&self, model_id: &str) -> Result<(), BrokerError> {
+        self.transition_idle_model(
+            model_id,
+            ModelResidencyState::Loaded,
+            ModelResidencyState::Evicting,
+        )
+    }
+
+    pub fn mark_model_cold(&self, model_id: &str) -> Result<(), BrokerError> {
+        self.transition_idle_model(
+            model_id,
+            ModelResidencyState::Evicting,
+            ModelResidencyState::Cold,
+        )
+    }
+
+    pub fn quarantine_model_residency(
+        &self,
+        model_id: &str,
+        until_ms: u64,
+    ) -> Result<(), BrokerError> {
+        let mut state = self.inner.state.lock().expect("broker mutex poisoned");
+        let record = state
+            .residency
+            .get_mut(model_id)
+            .ok_or_else(|| BrokerError::UnknownModel(model_id.into()))?;
+        record.state = ModelResidencyState::Quarantined;
+        record.quarantine_until_ms = Some(until_ms);
+        Ok(())
+    }
+
+    pub fn clear_model_quarantine(&self, model_id: &str) -> Result<(), BrokerError> {
+        let now_ms = self.inner.telemetry.snapshot()?.validate()?.monotonic_ms;
+        let mut state = self.inner.state.lock().expect("broker mutex poisoned");
+        let record = state
+            .residency
+            .get_mut(model_id)
+            .ok_or_else(|| BrokerError::UnknownModel(model_id.into()))?;
+        if record.state != ModelResidencyState::Quarantined
+            || record
+                .quarantine_until_ms
+                .is_some_and(|until| now_ms < until)
+        {
+            return Err(invalid_residency_transition(
+                model_id,
+                record.state,
+                ModelResidencyState::Cold,
+            ));
+        }
+        record.state = ModelResidencyState::Cold;
+        record.quarantine_until_ms = None;
+        Ok(())
+    }
+
+    pub fn residency_ledger_snapshot(&self) -> Result<ResidencyLedgerSnapshot, BrokerError> {
+        let accounted = self.inner.telemetry.broker_accounted_gpu_usage()?;
+        let state = self.inner.state.lock().expect("broker mutex poisoned");
+        let reserved = broker_reserved_gpu_usage(&state);
+        let unreported = unreported_gpu_usage(reserved, accounted);
+        let mut models: Vec<_> = state
+            .residency
+            .values()
+            .map(ModelResidencyRecord::status)
+            .collect();
+        models.sort_by(|left, right| left.model_id.cmp(&right.model_id));
+        Ok(ResidencyLedgerSnapshot {
+            models,
+            reserved_resident_bytes: reserved.resident_bytes,
+            reserved_p99_transient_bytes: reserved.transient_bytes,
+            telemetry_accounted: accounted,
+            unreported_resident_bytes: unreported.resident_bytes,
+            unreported_transient_bytes: unreported.transient_bytes,
+        })
+    }
+
+    fn transition_idle_model(
+        &self,
+        model_id: &str,
+        from: ModelResidencyState,
+        to: ModelResidencyState,
+    ) -> Result<(), BrokerError> {
+        let mut state = self.inner.state.lock().expect("broker mutex poisoned");
+        let record = state
+            .residency
+            .get_mut(model_id)
+            .ok_or_else(|| BrokerError::UnknownModel(model_id.into()))?;
+        if record.state != from || record.active_jobs != 0 {
+            return Err(invalid_residency_transition(model_id, record.state, to));
+        }
+        record.state = to;
+        Ok(())
     }
 
     pub fn cancel(&self, job_id: &str, reason: impl Into<String>) -> bool {
@@ -789,7 +1168,9 @@ impl ResourceBroker {
 
     pub fn report_oom(&self, job_id: &str) -> Result<RecoveryDirective, BrokerError> {
         let snapshot = self.inner.telemetry.snapshot()?.validate()?;
+        let accounted = self.inner.telemetry.broker_accounted_gpu_usage()?;
         let mut state = self.inner.state.lock().expect("broker mutex poisoned");
+        state.telemetry_accounted = accounted;
         let Some(active) = state.active.get(job_id).cloned() else {
             return Ok(RecoveryDirective::JobNotActive);
         };
@@ -809,6 +1190,12 @@ impl ResourceBroker {
             .saturating_add(self.inner.config.quarantine_ms);
         let until_ms = health.quarantine_until_ms;
         let oom_failures = health.oom_failures;
+        if let Some(model_id) = active.target.model_id.as_deref() {
+            if let Some(record) = state.residency.get_mut(model_id) {
+                record.state = ModelResidencyState::Quarantined;
+                record.quarantine_until_ms = Some(until_ms);
+            }
+        }
         self.push_diagnostic(
             &mut state,
             BrokerDiagnostic::TargetQuarantined {
@@ -958,7 +1345,9 @@ impl ResourceBroker {
         snapshot: BudgetSnapshot,
         target: &ComputeTarget,
     ) -> bool {
-        let estimate = target.estimate;
+        let Some(estimate) = effective_job_estimate(state, target) else {
+            return false;
+        };
         let projected_ram = snapshot
             .system_ram_used_bytes
             .saturating_add(state.reservations.ram_bytes)
@@ -971,10 +1360,12 @@ impl ResourceBroker {
             .config
             .vram_ceiling_bytes
             .min(snapshot.gpu_vram_budget_bytes);
+        let unreported =
+            unreported_gpu_usage(broker_reserved_gpu_usage(state), state.telemetry_accounted);
         let projected_resident = snapshot
             .gpu_vram_used_bytes
-            .saturating_add(state.reservations.vram_resident_bytes)
-            .saturating_add(state.reservations.vram_transient_bytes)
+            .saturating_add(unreported.resident_bytes)
+            .saturating_add(unreported.transient_bytes)
             .saturating_add(estimate.vram_resident_bytes);
         let projected_total = projected_resident.saturating_add(estimate.vram_transient_bytes);
         if projected_resident > ceiling {
@@ -1051,6 +1442,19 @@ impl ResourceBroker {
         if job.kind.is_foreground_llm() && state.reservations.foreground_llm_job.is_some() {
             return false;
         }
+        if let Some(model_id) = target.model_id.as_deref() {
+            if let Some(record) = state.residency.get(model_id) {
+                if record.spec.target_id != target.target_id
+                    || record.spec.gpu_residency != target.gpu_residency
+                    || !matches!(
+                        record.state,
+                        ModelResidencyState::Loaded | ModelResidencyState::InFlight
+                    )
+                {
+                    return false;
+                }
+            }
+        }
         match target.gpu_residency {
             GpuResidency::None => true,
             GpuResidency::Shared => state.reservations.exclusive_gpu_job.is_none(),
@@ -1059,10 +1463,18 @@ impl ResourceBroker {
     }
 
     fn is_target_quarantined(&self, state: &BrokerState, target_id: &str, now_ms: u64) -> bool {
-        state
+        let health_quarantined = state
             .target_health
             .get(target_id)
-            .is_some_and(|health| health.quarantine_until_ms > now_ms)
+            .is_some_and(|health| health.quarantine_until_ms > now_ms);
+        health_quarantined
+            || state.residency.values().any(|record| {
+                record.spec.target_id == target_id
+                    && record.state == ModelResidencyState::Quarantined
+                    && record
+                        .quarantine_until_ms
+                        .is_none_or(|until| until > now_ms)
+            })
     }
 
     fn admit_locked(
@@ -1087,7 +1499,7 @@ impl ResourceBroker {
                 "resource lease admitted"
             },
         );
-        reserve(&mut state.reservations, &job, &target);
+        reserve(state, &job, &target);
         state.active.insert(
             job.job_id.clone(),
             ActiveRecord {
@@ -1147,10 +1559,12 @@ impl ResourceBroker {
             .config
             .vram_ceiling_bytes
             .min(snapshot.gpu_vram_budget_bytes);
+        let unreported =
+            unreported_gpu_usage(broker_reserved_gpu_usage(state), state.telemetry_accounted);
         let vram = snapshot
             .gpu_vram_used_bytes
-            .saturating_add(state.reservations.vram_resident_bytes)
-            .saturating_add(state.reservations.vram_transient_bytes) as f64
+            .saturating_add(unreported.resident_bytes)
+            .saturating_add(unreported.transient_bytes) as f64
             / ceiling as f64;
         let ram = snapshot
             .system_ram_used_bytes
@@ -1330,16 +1744,101 @@ fn queue_order(left: &QueuedRecord, right: &QueuedRecord) -> Ordering {
         .then_with(|| left.sequence.cmp(&right.sequence))
 }
 
-fn reserve(reservations: &mut Reservations, job: &ResourceJob, target: &ComputeTarget) {
-    reservations.ram_bytes = reservations
-        .ram_bytes
-        .saturating_add(target.estimate.ram_bytes);
+fn invalid_residency_transition(
+    model_id: &str,
+    from: ModelResidencyState,
+    to: ModelResidencyState,
+) -> BrokerError {
+    BrokerError::InvalidResidencyTransition {
+        model_id: model_id.into(),
+        from,
+        to,
+    }
+}
+
+fn registered_model_for_target<'a>(
+    state: &'a BrokerState,
+    target: &ComputeTarget,
+) -> Option<&'a ModelResidencyRecord> {
+    target
+        .model_id
+        .as_deref()
+        .and_then(|model_id| state.residency.get(model_id))
+        .filter(|record| {
+            record.spec.target_id == target.target_id
+                && record.spec.gpu_residency == target.gpu_residency
+        })
+}
+
+fn effective_job_estimate(state: &BrokerState, target: &ComputeTarget) -> Option<ResourceEstimate> {
+    let Some(model_id) = target.model_id.as_deref() else {
+        return Some(target.estimate);
+    };
+    let Some(record) = state.residency.get(model_id) else {
+        return Some(target.estimate);
+    };
+    if record.spec.target_id != target.target_id
+        || record.spec.gpu_residency != target.gpu_residency
+        || !matches!(
+            record.state,
+            ModelResidencyState::Loaded | ModelResidencyState::InFlight
+        )
+    {
+        return None;
+    }
+    Some(ResourceEstimate {
+        vram_resident_bytes: 0,
+        vram_transient_bytes: target
+            .estimate
+            .vram_transient_bytes
+            .max(record.spec.envelope.p99_transient_bytes),
+        ..target.estimate
+    })
+}
+
+fn broker_reserved_gpu_usage(state: &BrokerState) -> BrokerAccountedGpuUsage {
+    let ledger_resident = state
+        .residency
+        .values()
+        .filter(|record| record.holds_resident_memory())
+        .fold(0u64, |total, record| {
+            total.saturating_add(record.spec.envelope.resident_bytes)
+        });
+    BrokerAccountedGpuUsage {
+        resident_bytes: state
+            .reservations
+            .vram_resident_bytes
+            .saturating_add(ledger_resident),
+        transient_bytes: state.reservations.vram_transient_bytes,
+    }
+}
+
+fn unreported_gpu_usage(
+    reserved: BrokerAccountedGpuUsage,
+    accounted: BrokerAccountedGpuUsage,
+) -> BrokerAccountedGpuUsage {
+    BrokerAccountedGpuUsage {
+        resident_bytes: reserved
+            .resident_bytes
+            .saturating_sub(accounted.resident_bytes.min(reserved.resident_bytes)),
+        transient_bytes: reserved
+            .transient_bytes
+            .saturating_sub(accounted.transient_bytes.min(reserved.transient_bytes)),
+    }
+}
+
+fn reserve(state: &mut BrokerState, job: &ResourceJob, target: &ComputeTarget) {
+    let estimate = effective_job_estimate(state, target).unwrap_or(target.estimate);
+    let registered_model_id =
+        registered_model_for_target(state, target).map(|record| record.spec.model_id.clone());
+    let reservations = &mut state.reservations;
+    reservations.ram_bytes = reservations.ram_bytes.saturating_add(estimate.ram_bytes);
     reservations.vram_resident_bytes = reservations
         .vram_resident_bytes
-        .saturating_add(target.estimate.vram_resident_bytes);
+        .saturating_add(estimate.vram_resident_bytes);
     reservations.vram_transient_bytes = reservations
         .vram_transient_bytes
-        .saturating_add(target.estimate.vram_transient_bytes);
+        .saturating_add(estimate.vram_transient_bytes);
     if target.gpu_residency != GpuResidency::None {
         reservations.gpu_leases += 1;
     }
@@ -1349,18 +1848,42 @@ fn reserve(reservations: &mut Reservations, job: &ResourceJob, target: &ComputeT
     if job.kind.is_foreground_llm() {
         reservations.foreground_llm_job = Some(job.job_id.clone());
     }
+    if let Some(model_id) = registered_model_id {
+        let record = state
+            .residency
+            .get_mut(&model_id)
+            .expect("registered model disappeared while locked");
+        record.active_jobs = record.active_jobs.saturating_add(1);
+        record.state = ModelResidencyState::InFlight;
+    }
 }
 
-fn release(reservations: &mut Reservations, job: &ResourceJob, target: &ComputeTarget) {
-    reservations.ram_bytes = reservations
-        .ram_bytes
-        .saturating_sub(target.estimate.ram_bytes);
+fn release(state: &mut BrokerState, job: &ResourceJob, target: &ComputeTarget) {
+    let estimate = if registered_model_for_target(state, target).is_some() {
+        ResourceEstimate {
+            vram_resident_bytes: 0,
+            vram_transient_bytes: target.estimate.vram_transient_bytes.max(
+                registered_model_for_target(state, target)
+                    .expect("registered model disappeared while locked")
+                    .spec
+                    .envelope
+                    .p99_transient_bytes,
+            ),
+            ..target.estimate
+        }
+    } else {
+        target.estimate
+    };
+    let registered_model_id =
+        registered_model_for_target(state, target).map(|record| record.spec.model_id.clone());
+    let reservations = &mut state.reservations;
+    reservations.ram_bytes = reservations.ram_bytes.saturating_sub(estimate.ram_bytes);
     reservations.vram_resident_bytes = reservations
         .vram_resident_bytes
-        .saturating_sub(target.estimate.vram_resident_bytes);
+        .saturating_sub(estimate.vram_resident_bytes);
     reservations.vram_transient_bytes = reservations
         .vram_transient_bytes
-        .saturating_sub(target.estimate.vram_transient_bytes);
+        .saturating_sub(estimate.vram_transient_bytes);
     if target.gpu_residency != GpuResidency::None {
         reservations.gpu_leases = reservations.gpu_leases.saturating_sub(1);
     }
@@ -1369,6 +1892,16 @@ fn release(reservations: &mut Reservations, job: &ResourceJob, target: &ComputeT
     }
     if reservations.foreground_llm_job.as_deref() == Some(&job.job_id) {
         reservations.foreground_llm_job = None;
+    }
+    if let Some(model_id) = registered_model_id {
+        let record = state
+            .residency
+            .get_mut(&model_id)
+            .expect("registered model disappeared while locked");
+        record.active_jobs = record.active_jobs.saturating_sub(1);
+        if record.active_jobs == 0 && record.state == ModelResidencyState::InFlight {
+            record.state = ModelResidencyState::Loaded;
+        }
     }
 }
 
@@ -1385,10 +1918,12 @@ fn projection(
         .system_ram_used_bytes
         .saturating_add(state.reservations.ram_bytes)
         .saturating_add(estimate.ram_bytes);
+    let unreported =
+        unreported_gpu_usage(broker_reserved_gpu_usage(state), state.telemetry_accounted);
     let vram = snapshot
         .gpu_vram_used_bytes
-        .saturating_add(state.reservations.vram_resident_bytes)
-        .saturating_add(state.reservations.vram_transient_bytes)
+        .saturating_add(unreported.resident_bytes)
+        .saturating_add(unreported.transient_bytes)
         .saturating_add(estimate.total_vram());
     ResourceProjection {
         ram_bytes: ram,
@@ -1408,15 +1943,16 @@ fn admission_diagnostic(
     selected_target_id: Option<String>,
     reason: &str,
 ) -> AdmissionDiagnostic {
-    let estimate = selected_target_id
+    let selected_target = selected_target_id
         .as_deref()
         .and_then(|id| {
             std::iter::once(&job.primary)
                 .chain(job.fallbacks.iter())
                 .find(|target| target.target_id == id)
         })
-        .unwrap_or(&job.primary)
-        .estimate;
+        .unwrap_or(&job.primary);
+    let estimate =
+        effective_job_estimate(state, selected_target).unwrap_or(selected_target.estimate);
     AdmissionDiagnostic {
         monotonic_ms: snapshot.monotonic_ms,
         job_id: job.job_id.clone(),
@@ -1493,7 +2029,7 @@ fn finish_lease(
     let Some(active) = state.active.remove(job_id) else {
         return;
     };
-    release(&mut state.reservations, &active.job, &active.target);
+    release(&mut state, &active.job, &active.target);
     if status == CompletionStatus::Completed {
         state.target_health.remove(&active.target.target_id);
     }
@@ -2070,5 +2606,325 @@ mod tests {
             assert_eq!(active, DEGRADATION_ORDER[..active.len()]);
         }
         assert_eq!(broker.active_degradations(), DEGRADATION_ORDER);
+    }
+
+    fn residency_spec(
+        model_id: &str,
+        target_id: &str,
+        resident_mib: u64,
+        transient_mib: u64,
+    ) -> ModelResidencySpec {
+        ModelResidencySpec {
+            model_id: model_id.into(),
+            target_id: target_id.into(),
+            provider: local_provider("local"),
+            gpu_residency: GpuResidency::Shared,
+            envelope: MeasuredGpuEnvelope {
+                resident_bytes: resident_mib * MIB,
+                p99_transient_bytes: transient_mib * MIB,
+                sample_count: 500,
+            },
+        }
+    }
+
+    fn residency_target(
+        model_id: &str,
+        target_id: &str,
+        resident_mib: u64,
+        transient_mib: u64,
+    ) -> ComputeTarget {
+        let mut value = target(
+            target_id,
+            local_provider("local"),
+            resident_mib,
+            transient_mib,
+            20,
+            GpuResidency::Shared,
+        );
+        value.model_id = Some(model_id.into());
+        value
+    }
+
+    #[test]
+    fn configured_models_remain_cold_until_explicitly_warmed() {
+        let telemetry =
+            Arc::new(ReportedBudgetTelemetry::new(snapshot(0, 100 * MIB, 2_000 * MIB)).unwrap());
+        let broker = ResourceBroker::new(config(), telemetry);
+        broker
+            .register_model_residency(residency_spec("primary", "primary-target", 300, 80))
+            .unwrap();
+        broker
+            .register_model_residency(residency_spec("alternative", "alt-target", 250, 60))
+            .unwrap();
+
+        let initial = broker.residency_ledger_snapshot().unwrap();
+        assert_eq!(initial.reserved_resident_bytes, 0);
+        assert!(initial
+            .models
+            .iter()
+            .all(|model| model.state == ModelResidencyState::Cold));
+        let cold_alternative = broker
+            .submit(job(
+                "cold-alternative",
+                ResourceJobKind::Embedding,
+                residency_target("alternative", "alt-target", 250, 10),
+            ))
+            .unwrap();
+        assert_eq!(
+            cold_alternative.diagnostic.outcome,
+            AdmissionOutcome::Queued
+        );
+        assert!(cold_alternative.lease.is_none());
+        assert!(broker.cancel("cold-alternative", "configured alternative stays cold"));
+
+        broker.begin_model_warming("primary").unwrap();
+        let warming = broker.residency_ledger_snapshot().unwrap();
+        assert_eq!(warming.reserved_resident_bytes, 300 * MIB);
+        assert_eq!(warming.models[1].state, ModelResidencyState::Warming);
+        assert_eq!(warming.models[0].state, ModelResidencyState::Cold);
+
+        broker
+            .mark_model_loaded(
+                "primary",
+                MeasuredGpuEnvelope {
+                    resident_bytes: 310 * MIB,
+                    p99_transient_bytes: 85 * MIB,
+                    sample_count: 1_000,
+                },
+            )
+            .unwrap();
+        let loaded = broker.residency_ledger_snapshot().unwrap();
+        assert_eq!(loaded.reserved_resident_bytes, 310 * MIB);
+        assert_eq!(loaded.models[1].state, ModelResidencyState::Loaded);
+        assert_eq!(loaded.models[0].state, ModelResidencyState::Cold);
+    }
+
+    #[test]
+    fn loaded_residency_is_not_double_counted_when_telemetry_reports_it() {
+        let telemetry =
+            Arc::new(ReportedBudgetTelemetry::new(snapshot(0, 100 * MIB, 2_000 * MIB)).unwrap());
+        let broker = ResourceBroker::new(config(), telemetry.clone());
+        broker
+            .register_model_residency(residency_spec("lipsync", "lipsync-target", 300, 80))
+            .unwrap();
+        broker.begin_model_warming("lipsync").unwrap();
+        broker
+            .mark_model_loaded(
+                "lipsync",
+                MeasuredGpuEnvelope {
+                    resident_bytes: 300 * MIB,
+                    p99_transient_bytes: 80 * MIB,
+                    sample_count: 500,
+                },
+            )
+            .unwrap();
+
+        // DXGI now includes the 300 MiB model in its 400 MiB total.
+        telemetry
+            .update(snapshot(1, 400 * MIB, 2_000 * MIB))
+            .unwrap();
+        telemetry.update_broker_accounted_gpu_usage(BrokerAccountedGpuUsage {
+            resident_bytes: 300 * MIB,
+            transient_bytes: 0,
+        });
+
+        let submission = broker
+            .submit(job(
+                "lip-frame",
+                ResourceJobKind::ScreenSpaceLipSync {
+                    frame_sequence: 1,
+                    captured_at_ms: 1,
+                },
+                residency_target("lipsync", "lipsync-target", 300, 20),
+            ))
+            .unwrap();
+        assert_eq!(submission.diagnostic.projection.vram_bytes, 480 * MIB);
+
+        let active = broker.residency_ledger_snapshot().unwrap();
+        assert_eq!(active.models[0].state, ModelResidencyState::InFlight);
+        assert_eq!(active.models[0].active_jobs, 1);
+        assert_eq!(active.reserved_resident_bytes, 300 * MIB);
+        assert_eq!(active.reserved_p99_transient_bytes, 80 * MIB);
+        assert_eq!(active.unreported_resident_bytes, 0);
+        assert_eq!(active.unreported_transient_bytes, 80 * MIB);
+
+        submission
+            .lease
+            .unwrap()
+            .complete(ActualUsage::default(), CompletionStatus::Completed);
+        let idle = broker.residency_ledger_snapshot().unwrap();
+        assert_eq!(idle.models[0].state, ModelResidencyState::Loaded);
+        assert_eq!(idle.models[0].active_jobs, 0);
+    }
+
+    #[test]
+    fn loaded_model_cannot_be_evicted_while_a_job_is_in_flight() {
+        let telemetry =
+            Arc::new(ReportedBudgetTelemetry::new(snapshot(0, 100 * MIB, 2_000 * MIB)).unwrap());
+        let broker = ResourceBroker::new(config(), telemetry);
+        broker
+            .register_model_residency(residency_spec("model", "model-target", 200, 40))
+            .unwrap();
+        broker.begin_model_warming("model").unwrap();
+        broker
+            .mark_model_loaded(
+                "model",
+                MeasuredGpuEnvelope {
+                    resident_bytes: 200 * MIB,
+                    p99_transient_bytes: 40 * MIB,
+                    sample_count: 500,
+                },
+            )
+            .unwrap();
+        let lease = broker
+            .submit(job(
+                "inference",
+                ResourceJobKind::Embedding,
+                residency_target("model", "model-target", 200, 10),
+            ))
+            .unwrap()
+            .lease
+            .unwrap();
+
+        assert!(matches!(
+            broker.begin_model_eviction("model"),
+            Err(BrokerError::InvalidResidencyTransition {
+                from: ModelResidencyState::InFlight,
+                to: ModelResidencyState::Evicting,
+                ..
+            })
+        ));
+        drop(lease);
+        broker.begin_model_eviction("model").unwrap();
+        assert_eq!(
+            broker.residency_ledger_snapshot().unwrap().models[0].state,
+            ModelResidencyState::Evicting
+        );
+        broker.mark_model_cold("model").unwrap();
+        let cold = broker.residency_ledger_snapshot().unwrap();
+        assert_eq!(cold.models[0].state, ModelResidencyState::Cold);
+        assert_eq!(cold.reserved_resident_bytes, 0);
+    }
+
+    #[test]
+    fn api_and_cpu_targets_cannot_enter_gpu_residency_ledger() {
+        let telemetry =
+            Arc::new(ReportedBudgetTelemetry::new(snapshot(0, 100 * MIB, 2_000 * MIB)).unwrap());
+        let broker = ResourceBroker::new(config(), telemetry);
+        let mut cloud = residency_spec("cloud", "cloud-target", 1, 1);
+        cloud.provider = cloud_provider("cloud");
+        assert!(matches!(
+            broker.register_model_residency(cloud),
+            Err(BrokerError::InvalidResidency(_))
+        ));
+
+        let mut cpu = residency_spec("cpu", "cpu-target", 1, 1);
+        cpu.gpu_residency = GpuResidency::None;
+        assert!(matches!(
+            broker.register_model_residency(cpu),
+            Err(BrokerError::InvalidResidency(_))
+        ));
+        assert!(broker
+            .residency_ledger_snapshot()
+            .unwrap()
+            .models
+            .is_empty());
+    }
+
+    #[test]
+    fn warmup_and_measured_growth_are_rejected_when_they_exceed_ceiling() {
+        let telemetry =
+            Arc::new(ReportedBudgetTelemetry::new(snapshot(0, 850 * MIB, 2_000 * MIB)).unwrap());
+        let broker = ResourceBroker::new(config(), telemetry.clone());
+        broker
+            .register_model_residency(residency_spec("too-large", "large-target", 200, 10))
+            .unwrap();
+        assert_eq!(
+            broker.begin_model_warming("too-large"),
+            Err(BrokerError::ResidencyCapacityExceeded {
+                model_id: "too-large".into()
+            })
+        );
+
+        telemetry
+            .update(snapshot(1, 500 * MIB, 2_000 * MIB))
+            .unwrap();
+        broker.begin_model_warming("too-large").unwrap();
+        assert_eq!(
+            broker.mark_model_loaded(
+                "too-large",
+                MeasuredGpuEnvelope {
+                    resident_bytes: 600 * MIB,
+                    p99_transient_bytes: 10 * MIB,
+                    sample_count: 500,
+                }
+            ),
+            Err(BrokerError::ResidencyCapacityExceeded {
+                model_id: "too-large".into()
+            })
+        );
+        assert_eq!(
+            broker.residency_ledger_snapshot().unwrap().models[0].state,
+            ModelResidencyState::Warming
+        );
+    }
+
+    #[test]
+    fn repeated_oom_quarantines_residency_until_explicit_expiry_clear() {
+        let telemetry =
+            Arc::new(ReportedBudgetTelemetry::new(snapshot(0, 100 * MIB, 2_000 * MIB)).unwrap());
+        let broker = ResourceBroker::new(config(), telemetry.clone());
+        broker
+            .register_model_residency(residency_spec("unstable", "unstable-target", 200, 40))
+            .unwrap();
+        broker.begin_model_warming("unstable").unwrap();
+        broker
+            .mark_model_loaded(
+                "unstable",
+                MeasuredGpuEnvelope {
+                    resident_bytes: 200 * MIB,
+                    p99_transient_bytes: 40 * MIB,
+                    sample_count: 500,
+                },
+            )
+            .unwrap();
+        let lease = broker
+            .submit(job(
+                "unstable-job",
+                ResourceJobKind::Embedding,
+                residency_target("unstable", "unstable-target", 200, 10),
+            ))
+            .unwrap()
+            .lease
+            .unwrap();
+        assert!(matches!(
+            broker.report_oom(lease.job_id()).unwrap(),
+            RecoveryDirective::RetrySameTargetAfterEviction { .. }
+        ));
+        assert!(matches!(
+            broker.report_oom(lease.job_id()).unwrap(),
+            RecoveryDirective::QuarantinedNoSafeFallback
+        ));
+        let active = broker.residency_ledger_snapshot().unwrap();
+        assert_eq!(active.models[0].state, ModelResidencyState::Quarantined);
+        assert_eq!(active.models[0].active_jobs, 1);
+        assert_eq!(active.reserved_resident_bytes, 200 * MIB);
+
+        drop(lease);
+        let released = broker.residency_ledger_snapshot().unwrap();
+        assert_eq!(released.models[0].state, ModelResidencyState::Quarantined);
+        assert_eq!(released.reserved_resident_bytes, 0);
+        assert!(matches!(
+            broker.clear_model_quarantine("unstable"),
+            Err(BrokerError::InvalidResidencyTransition { .. })
+        ));
+        telemetry
+            .update(snapshot(1_000, 100 * MIB, 2_000 * MIB))
+            .unwrap();
+        broker.clear_model_quarantine("unstable").unwrap();
+        assert_eq!(
+            broker.residency_ledger_snapshot().unwrap().models[0].state,
+            ModelResidencyState::Cold
+        );
     }
 }
