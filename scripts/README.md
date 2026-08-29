@@ -48,3 +48,35 @@ Validate manifest policy, target snapshots, and result/source-identity generatio
 ```
 
 The harness never searches for or deletes unrelated installations. Older smoke-result files that do not contain all four post-uninstall booleans and both snapshots are not evidence of uninstall cleanliness.
+
+## Synthetic game replay
+
+Use the repository-owned Eclipse Harbor MP4 as a deterministic, rights-cleared
+top-level Windows capture target without opening a real game:
+
+```powershell
+.\scripts\synthetic-game-replay.ps1 -PlaceOnSecondMonitor
+```
+
+The launcher compiles a task-local `interactive-npcs-synthetic-target.exe` beneath
+the ignored `artifacts/synthetic-replay/` directory. The player software-decodes
+the MP4 with FFmpeg (`-hwaccel none`), renders through WinForms/GDI, and writes
+`capture-target.json` containing stable `pid`, `window_handle`, and
+`executable_basename` fields (plus compatibility aliases), its window title,
+source identity, and decode policy. The Tauri debug bridge can read that JSON
+path after the launcher returns and pass those three fields to its allowlisted
+capture-target command.
+It never requests NVIDIA compute. When monitor placement is requested it
+invokes the installed `prefer-second-monitor` helper first in dry-run mode and
+then for the exact player PID only; a primary-display fallback is allowed.
+
+Run the non-GUI compile, provenance, and one-frame software-decode check with:
+
+```powershell
+.\scripts\test-synthetic-game-replay.ps1
+```
+
+Useful bounded recording options are `-ExitAfterSeconds <n>`, `-NoLoop`,
+`-Wait`, `-WindowTitle <name>`, and `-MetadataPath <path>`. This fixture proves
+capture-target plumbing only. It is synthetic replay evidence, not live-game
+certification or a game-load performance benchmark.
