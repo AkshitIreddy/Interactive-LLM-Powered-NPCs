@@ -347,18 +347,47 @@ void close_child(ChildService& child) {
     }
     request.cancellation_generation = cleared->cancellation_generation;
 
-    ++request.sequence;
-    request.deadline_qpc = qpc_now() + frequency * 2;
-    request.command = ipc::CommandKind::diagnostics;
-    request.payload = *diagnostics_payload;
-    const auto after_clear = transact(child.pipe, request);
-    const auto cleared_evidence = after_clear ? decode_capture_evidence(after_clear->payload) : std::nullopt;
-    if (!after_clear || after_clear->status != ipc::StatusCode::ok || !cleared_evidence ||
-        cleared_evidence->state != BrokerState::awaiting_target ||
-        cleared_evidence->capture_backend != CaptureBackend::none ||
-        cleared_evidence->target_state != TargetState::none ||
-        cleared_evidence->frames_received != capture_evidence->frames_received) {
-        return fail_child("post-ClearTarget diagnostics");
+    // Frames may legitimately arrive between the final active diagnostics
+    // response and processing ClearTarget. Prove capture stopped by observing
+    // the cleared state and stable counters after that command boundary.
+    constexpr unsigned required_stable_observations = 5;
+    unsigned stable_observations{};
+    std::optional<CaptureDiagnosticsEvidence> cleared_evidence;
+    const auto clear_observation_deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+    while (std::chrono::steady_clock::now() < clear_observation_deadline) {
+        ++request.sequence;
+        request.deadline_qpc = qpc_now() + frequency * 2;
+        request.command = ipc::CommandKind::diagnostics;
+        request.payload = *diagnostics_payload;
+        const auto after_clear = transact(child.pipe, request);
+        const auto observation =
+            after_clear ? decode_capture_evidence(after_clear->payload) : std::nullopt;
+        if (!after_clear || after_clear->status != ipc::StatusCode::ok || !observation ||
+            observation->state != BrokerState::awaiting_target ||
+            observation->capture_backend != CaptureBackend::none ||
+            observation->target_state != TargetState::none) {
+            return fail_child("post-ClearTarget state");
+        }
+        if (cleared_evidence &&
+            observation->frames_received == cleared_evidence->frames_received &&
+            observation->frames_presented == cleared_evidence->frames_presented) {
+            ++stable_observations;
+        } else {
+            stable_observations = 1;
+        }
+        cleared_evidence = observation;
+        if (stable_observations >= required_stable_observations) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
+    if (!cleared_evidence || stable_observations < required_stable_observations) {
+        if (cleared_evidence) {
+            std::cerr << "post-ClearTarget counters did not stabilize: received="
+                      << cleared_evidence->frames_received
+                      << " presented=" << cleared_evidence->frames_presented
+                      << " stable_observations=" << stable_observations << '\n';
+        }
+        return fail_child("post-ClearTarget capture quiescence");
     }
 
     const auto shutdown_payload = ipc::encode_command(ipc::CommandKind::shutdown, ipc::ShutdownCommand{});
