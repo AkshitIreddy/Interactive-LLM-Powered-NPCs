@@ -1,0 +1,70 @@
+[package]
+name = "interactive-npcs-control"
+version = "2.0.0-alpha.1"
+description = "Tauri control plane for Interactive LLM Powered NPCs 2.0"
+authors = ["Interactive LLM Powered NPCs contributors"]
+edition = "2021"
+rust-version = "1.80"
+license = "MIT"
+publish = false
+
+[lib]
+name = "interactive_npcs_control_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "interactive-npcs-control"
+path = "src/main.rs"
+
+# This package intentionally owns a small nested workspace. The repository root
+# workspace remains focused on reusable crates, while Tauri can resolve this
+# application directly without changing the root membership list.
+[workspace]
+
+[build-dependencies]
+tauri-build = { version = "2.4", features = [] }
+
+[dependencies]
+getrandom = "0.3"
+interactive-npcs-credential-vault = { path = "../../../crates/credential-vault" }
+npc-provider-loadouts = { path = "../../../crates/provider-loadouts" }
+npc-protocol = { path = "../../../crates/protocol" }
+prost = "0.13"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tauri = { version = "2.8", features = ["tray-icon"] }
+tempfile = "3.14"
+thiserror = "2.0"
+tokio = { version = "1.41", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+uuid = { version = "1", features = ["v4"] }
+zeroize = "1.8"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Security_Credentials",
+  "Win32_System_Performance",
+  "Win32_System_JobObjects",
+  "Win32_System_RemoteDesktop",
+  "Win32_System_SystemServices",
+  "Win32_System_Threading",
+  "Win32_Storage_FileSystem",
+] }
+
+[dev-dependencies]
+pretty_assertions = "1.4"
+
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+await_holding_lock = "deny"
+dbg_macro = "deny"
+todo = "deny"
+undocumented_unsafe_blocks = "deny"
+unwrap_used = "warn"

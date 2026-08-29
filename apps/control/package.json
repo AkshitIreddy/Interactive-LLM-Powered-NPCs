@@ -1,0 +1,39 @@
+{
+  "name": "@npc2/control",
+  "version": "2.0.0-alpha.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -b --pretty false",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"*.{json,ts}\" --ignore-unknown"
+  },
+  "dependencies": {
+    "@react-aria/visually-hidden": "^3.8.28",
+    "@tauri-apps/api": "^2.8.0",
+    "react": "^19.1.1",
+    "react-aria-components": "^1.12.2",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/react": "^19.1.10",
+    "@types/react-dom": "^19.1.7",
+    "@vitejs/plugin-react": "^5.0.2",
+    "jsdom": "^26.1.0",
+    "prettier": "3.6.2",
+    "typescript": "~5.8.3",
+    "vite": "^7.1.4",
+    "vitest": "^3.2.4"
+  }
+}

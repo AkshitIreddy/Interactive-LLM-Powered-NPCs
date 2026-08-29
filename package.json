@@ -1,0 +1,30 @@
+{
+  "name": "interactive-llm-powered-npcs",
+  "version": "2.0.0-alpha.1",
+  "private": true,
+  "description": "Windows-first desktop runtime for low-latency, game-aware NPC conversations",
+  "packageManager": "pnpm@10.28.2",
+  "engines": {
+    "node": "20.20.2",
+    "pnpm": "10.28.2"
+  },
+  "scripts": {
+    "dev": "corepack pnpm --filter @npc2/control dev",
+    "tauri": "corepack pnpm --filter @npc2/control tauri",
+    "build": "corepack pnpm -r --if-present build",
+    "test": "corepack pnpm run test:frontend",
+    "test:frontend": "corepack pnpm --filter @npc2/control test",
+    "test:sim": "corepack pnpm --filter @npc2/simulation-harness test",
+    "typecheck": "corepack pnpm -r --if-present typecheck",
+    "format:check": "corepack pnpm --filter @npc2/control format:check",
+    "visual:qa": "node scripts/visual-qa.cjs",
+    "sim": "corepack pnpm --filter @npc2/simulation-harness sim",
+    "sim:verify": "corepack pnpm --filter @npc2/simulation-harness verify",
+    "rust:test": "cargo test --workspace --all-targets --all-features --locked --offline",
+    "rust:lint": "cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings",
+    "rust:format": "cargo fmt --all -- --check"
+  },
+  "devDependencies": {
+    "playwright-core": "1.62.1"
+  }
+}

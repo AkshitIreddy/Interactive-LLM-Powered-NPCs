@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="NPC 2.0">
+  <path fill="#12070d" stroke="#ff4c5f" stroke-width="3" d="M5 5h43l11 11v43H16L5 48Z"/>
+  <path fill="none" stroke="#5ffbff" stroke-width="4" stroke-linecap="square" d="M20 45V19l24 26V19"/>
+  <path fill="#ff4c5f" d="M48 5h7v7h-7zM5 48h7v7H5z"/>
+</svg>

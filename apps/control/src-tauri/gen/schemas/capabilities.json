@@ -1,0 +1,1 @@
+{"response-console":{"identifier":"response-console","description":"Minimal capability surface for the Response Console WebView. Product operations are exposed only as typed application commands.","local":true,"windows":["main"],"permissions":[]}}
