@@ -41,8 +41,20 @@ pub struct NativeSimulationRequest {
     pub turn_id: String,
     pub game_id: String,
     pub character_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generic_selection: Option<NativeGenericGameSelection>,
     pub transcript: String,
     pub locale: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeGenericGameSelection {
+    pub game_name: String,
+    pub executable_name: String,
+    pub character_name: String,
+    pub protected_online_detected: bool,
+    pub anti_cheat_detected: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]

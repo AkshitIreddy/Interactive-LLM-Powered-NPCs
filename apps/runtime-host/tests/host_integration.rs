@@ -160,6 +160,52 @@ async fn generic_game_is_simulatable_but_not_counted_as_an_authored_profile() {
 }
 
 #[tokio::test]
+async fn eclipse_harbor_fixture_reply_matches_its_authored_turn() {
+    let app_data = tempfile::tempdir().unwrap();
+    let state = HostState::initialize(HostConfig {
+        repo_root: repo_root(),
+        app_data: app_data.path().to_path_buf(),
+    })
+    .await
+    .unwrap();
+
+    let result = state
+        .simulate_turn(SimulationRequest {
+            session_id: "eclipse-harbor-session".into(),
+            turn_id: "eclipse-harbor-turn".into(),
+            game_id: GENERIC_GAME_ID.into(),
+            character_id: None,
+            generic_selection: Some(GenericGameSelection {
+                game_name: "Eclipse Harbor".into(),
+                executable_name: "interactive-npcs-synthetic-target.exe".into(),
+                character_name: "Mara Venn".into(),
+                protected_online_detected: false,
+                anti_cheat_detected: false,
+            }),
+            safety_context: SimulationSafetyContext::default(),
+            transcript: "Did you ever make it to the old lighthouse?".into(),
+            locale: "en-US".into(),
+        })
+        .await
+        .unwrap();
+
+    let delivered = result
+        .outcome
+        .delivered
+        .iter()
+        .map(|sentence| sentence.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert_eq!(result.integration_mode, "generic_experimental");
+    assert_eq!(result.outcome.lifecycle, TurnLifecycle::Completed);
+    assert_eq!(
+        delivered,
+        "I made it as far as the eastern lock. It jammed again, but I remembered your service-tunnel route. If the tide stays low, I can reach the old lighthouse before dark."
+    );
+    assert!(result.outcome.effects.action_proposals.is_empty());
+}
+
+#[tokio::test]
 async fn every_game_is_hard_limited_to_the_generic_external_capture_boundary() {
     let app_data = tempfile::tempdir().unwrap();
     let state = HostState::initialize(HostConfig {

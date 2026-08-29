@@ -52,6 +52,7 @@ async fn fixed_fixture_host_supports_authenticated_control_lifecycle() {
             turn_id: "control-turn-1".into(),
             game_id: "skyrim-special-edition".into(),
             character_id: Some("lydia".into()),
+            generic_selection: None,
             transcript: "Bounded fixture input for the authenticated sidecar test.".into(),
             locale: "en-US".into(),
         })

@@ -4,14 +4,29 @@ use crate::domain::{
     StartSimulationRequest, StartSimulationResult,
 };
 use crate::runtime_bridge::{SimulationController, StartError};
-use crate::sidecar_protocol::{NativeSimulationRequest, NativeSimulationResult};
+use crate::sidecar_protocol::{
+    NativeGenericGameSelection, NativeSimulationRequest, NativeSimulationResult,
+};
 use crate::sidecar_supervisor::{RuntimeSupervisor, SupervisorError};
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use tauri::ipc::Channel;
 
-const DEFAULT_TRANSCRIPT: &str = "Can you help me understand what is happening nearby?";
+const ECLIPSE_HARBOR_PROFILE_ID: &str = "eclipse-harbor";
+const GENERIC_GAME_ID: &str = "generic-game";
+const ECLIPSE_HARBOR_CHARACTER: &str = "Mara Venn";
+const ECLIPSE_HARBOR_EXECUTABLE: &str = "interactive-npcs-synthetic-target.exe";
+const DEFAULT_TRANSCRIPT: &str = "Did you ever make it to the old lighthouse?";
+const FIXTURE_STAGE_TIMINGS: &[(ResponseStage, u64)] = &[
+    (ResponseStage::Listening, 240),
+    (ResponseStage::Transcribing, 220),
+    (ResponseStage::Identifying, 180),
+    (ResponseStage::Remembering, 220),
+    (ResponseStage::Responding, 320),
+    (ResponseStage::Voicing, 240),
+    (ResponseStage::Animating, 180),
+];
 
 #[derive(Debug)]
 struct NativeActive {
@@ -101,23 +116,7 @@ impl RuntimeRouter {
             (simulation_id, generation)
         };
 
-        let game_id = request
-            .game_profile_id
-            .as_deref()
-            .filter(|id| *id != "eclipse-harbor")
-            .unwrap_or("skyrim-special-edition")
-            .to_owned();
-        let native_request = NativeSimulationRequest {
-            session_id: "response-console-simulation".into(),
-            turn_id: simulation_id.clone(),
-            game_id,
-            character_id: request.character_id.clone(),
-            transcript: request
-                .transcript
-                .clone()
-                .unwrap_or_else(|| DEFAULT_TRANSCRIPT.into()),
-            locale: "en-US".into(),
-        };
+        let native_request = native_request_for(&request, &simulation_id);
         let _ = events.send(SimulationEvent::Started {
             simulation_id: simulation_id.clone(),
             generation,
@@ -130,7 +129,7 @@ impl RuntimeRouter {
         tauri::async_runtime::spawn(async move {
             match supervisor.simulate(native_request).await {
                 Ok(result) => {
-                    emit_native_result(&events, &task_id, generation, result, &native_state)
+                    emit_native_result(&events, &task_id, generation, result, &native_state).await
                 }
                 Err(error) => {
                     emit_native_failure(&events, &task_id, generation, &error, &native_state)
@@ -178,7 +177,7 @@ impl RuntimeRouter {
     }
 }
 
-fn emit_native_result(
+async fn emit_native_result(
     channel: &Channel<SimulationEvent>,
     simulation_id: &str,
     generation: u64,
@@ -195,26 +194,40 @@ fn emit_native_result(
         return;
     }
     let mut sequence = 1_u64;
+    let mut fixture_elapsed_ms = 0_u64;
     let mut seen = BTreeSet::new();
     for event in &result.events {
         if let Some(stage) = event_stage(event) {
             if seen.insert(stage) {
+                if !native_turn_is_running(state, generation) {
+                    emit_native_cancelled(channel, simulation_id, generation, sequence + 1);
+                    return;
+                }
                 sequence += 1;
                 set_native_stage(state, generation, stage);
+                let fixture_stage_ms = fixture_stage_duration(result.fixture_only, stage);
                 let _ = channel.send(SimulationEvent::StageStarted {
                     simulation_id: simulation_id.into(),
                     generation,
                     sequence,
                     stage,
-                    estimated_duration_ms: 0,
+                    estimated_duration_ms: fixture_stage_ms,
                 });
+                if fixture_stage_ms > 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(fixture_stage_ms)).await;
+                    fixture_elapsed_ms = fixture_elapsed_ms.saturating_add(fixture_stage_ms);
+                }
+                if !native_turn_is_running(state, generation) {
+                    emit_native_cancelled(channel, simulation_id, generation, sequence + 1);
+                    return;
+                }
                 sequence += 1;
                 let _ = channel.send(SimulationEvent::StageCompleted {
                     simulation_id: simulation_id.into(),
                     generation,
                     sequence,
                     stage,
-                    fixture_elapsed_ms: 0,
+                    fixture_elapsed_ms,
                 });
             }
         }
@@ -258,6 +271,84 @@ fn emit_native_result(
             reason: reason.into(),
         });
     }
+}
+
+fn native_request_for(
+    request: &StartSimulationRequest,
+    simulation_id: &str,
+) -> NativeSimulationRequest {
+    let is_eclipse_harbor = request.game_profile_id.as_deref() == Some(ECLIPSE_HARBOR_PROFILE_ID);
+    let character_name = request
+        .character_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unwrap_or(ECLIPSE_HARBOR_CHARACTER);
+    NativeSimulationRequest {
+        session_id: "response-console-simulation".into(),
+        turn_id: simulation_id.into(),
+        game_id: if is_eclipse_harbor {
+            GENERIC_GAME_ID.into()
+        } else {
+            request
+                .game_profile_id
+                .clone()
+                .unwrap_or_else(|| "skyrim-special-edition".into())
+        },
+        character_id: if is_eclipse_harbor {
+            None
+        } else {
+            request.character_id.clone()
+        },
+        generic_selection: is_eclipse_harbor.then(|| NativeGenericGameSelection {
+            game_name: "Eclipse Harbor".into(),
+            executable_name: ECLIPSE_HARBOR_EXECUTABLE.into(),
+            character_name: character_name.into(),
+            protected_online_detected: false,
+            anti_cheat_detected: false,
+        }),
+        transcript: request
+            .transcript
+            .clone()
+            .unwrap_or_else(|| DEFAULT_TRANSCRIPT.into()),
+        locale: "en-US".into(),
+    }
+}
+
+fn fixture_stage_duration(fixture_only: bool, stage: ResponseStage) -> u64 {
+    if !fixture_only {
+        return 0;
+    }
+    FIXTURE_STAGE_TIMINGS
+        .iter()
+        .find_map(|(candidate, duration)| (*candidate == stage).then_some(*duration))
+        .unwrap_or(0)
+}
+
+fn native_turn_is_running(state: &Arc<Mutex<NativeState>>, generation: u64) -> bool {
+    state
+        .lock()
+        .ok()
+        .and_then(|state| {
+            state.active.as_ref().map(|active| {
+                active.generation == generation && active.status == SimulationStatus::Running
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn emit_native_cancelled(
+    channel: &Channel<SimulationEvent>,
+    simulation_id: &str,
+    generation: u64,
+    sequence: u64,
+) {
+    let _ = channel.send(SimulationEvent::Cancelled {
+        simulation_id: simulation_id.into(),
+        generation,
+        sequence,
+        reason: "Runtime simulation was cancelled; undelivered dialogue was not committed.".into(),
+    });
 }
 
 fn emit_native_failure(
@@ -374,5 +465,45 @@ mod tests {
             "generatedButNotDelivered": "must not appear"
         });
         assert_eq!(delivered_text(&outcome), "First. Second.");
+    }
+
+    #[test]
+    fn eclipse_harbor_uses_a_truthful_generic_fixture_selection() {
+        let request = StartSimulationRequest {
+            transcript: Some(DEFAULT_TRANSCRIPT.into()),
+            ..StartSimulationRequest::default()
+        };
+        let native = native_request_for(&request, "fixture-turn-1");
+        let selection = native
+            .generic_selection
+            .expect("Eclipse Harbor must use explicit generic selection");
+
+        assert_eq!(native.game_id, GENERIC_GAME_ID);
+        assert_eq!(native.character_id, None);
+        assert_eq!(native.transcript, DEFAULT_TRANSCRIPT);
+        assert_eq!(selection.game_name, "Eclipse Harbor");
+        assert_eq!(selection.character_name, ECLIPSE_HARBOR_CHARACTER);
+        assert_eq!(selection.executable_name, ECLIPSE_HARBOR_EXECUTABLE);
+        assert!(!selection.protected_online_detected);
+        assert!(!selection.anti_cheat_detected);
+    }
+
+    #[test]
+    fn only_fixture_results_receive_visible_stage_pacing() {
+        for (stage, expected_duration) in FIXTURE_STAGE_TIMINGS {
+            assert_eq!(
+                fixture_stage_duration(true, *stage),
+                *expected_duration,
+                "fixture stage {stage:?}"
+            );
+            assert_eq!(
+                fixture_stage_duration(false, *stage),
+                0,
+                "non-fixture stage {stage:?}"
+            );
+        }
+        assert!(FIXTURE_STAGE_TIMINGS
+            .iter()
+            .all(|(_, duration)| *duration >= 180));
     }
 }

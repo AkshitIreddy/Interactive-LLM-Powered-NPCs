@@ -150,10 +150,7 @@ impl HostState {
             game_id: game_id.clone(),
             character_id: character_id.clone(),
         });
-        let response = format!(
-            "I hear you. We can continue as {} while keeping this local simulation deterministic.",
-            display_name
-        );
+        let response = fixture_response(&request, &display_name);
         let llm = Arc::new(FixtureLlm {
             descriptor: local_descriptor("fixture-llm", ProviderModality::LanguageModel),
             response,
@@ -585,6 +582,20 @@ fn generic_memory_scope(selection: &GenericGameSelection) -> String {
         .flat_map(char::to_lowercase)
         .collect::<String>();
     format!("generic-game:{executable}")
+}
+
+fn fixture_response(request: &SimulationRequest, display_name: &str) -> String {
+    let eclipse_harbor_turn = request.generic_selection.as_ref().is_some_and(|selection| {
+        selection.game_name.trim() == "Eclipse Harbor"
+            && selection.character_name.trim() == "Mara Venn"
+    }) && request.transcript.trim()
+        == "Did you ever make it to the old lighthouse?";
+    if eclipse_harbor_turn {
+        return "I made it as far as the eastern lock. It jammed again, but I remembered your service-tunnel route. If the tide stays low, I can reach the old lighthouse before dark.".into();
+    }
+    format!(
+        "I hear you. We can continue as {display_name} while keeping this local simulation deterministic."
+    )
 }
 
 #[derive(Debug, thiserror::Error)]

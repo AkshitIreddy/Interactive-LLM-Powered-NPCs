@@ -415,6 +415,7 @@ export async function startNativeSimulation(
     request: {
       gameProfileId: "eclipse-harbor",
       characterName: "Mara Venn",
+      transcript: "Did you ever make it to the old lighthouse?",
       executionMode: execution,
     },
     events,
