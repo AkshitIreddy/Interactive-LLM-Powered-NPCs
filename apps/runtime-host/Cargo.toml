@@ -7,9 +7,20 @@ license.workspace = true
 description = "Trusted runtime process and control endpoint for Interactive LLM Powered NPCs"
 publish = false
 
+[features]
+default = []
+# Developer-only speaker qualification. Production playback remains owned by the
+# native media broker and this feature is intentionally excluded from normal builds.
+dev-wasapi-audio = ["dep:cpal"]
+
 [[bin]]
 name = "npc-runtime"
 path = "src/main.rs"
+
+[[example]]
+name = "dev_wasapi_audio"
+path = "examples/dev_wasapi_audio.rs"
+required-features = ["dev-wasapi-audio"]
 
 [dependencies]
 async-stream = "0.3"
@@ -39,6 +50,7 @@ tokio-util = { version = "0.7", features = ["rt"] }
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(windows)'.dependencies]
+cpal = { version = "0.15", optional = true }
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Security",
