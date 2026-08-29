@@ -22,6 +22,10 @@ use crate::{
     HostState,
 };
 
+const DEV_LIVE_TTS_PROVIDER_ID: &str = "elevenlabs";
+const DEV_LIVE_TTS_MODEL_ID: &str = "eleven_flash_v2_5";
+const DEV_LIVE_TTS_STOCK_VOICE_IDS: &[&str] = &["EXAVITQu4vr4xnSDxMaL"];
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SimulationRequest {
@@ -36,6 +40,27 @@ pub struct SimulationRequest {
     pub transcript: String,
     #[serde(default = "default_locale")]
     pub locale: String,
+    #[serde(default)]
+    pub execution_mode: Option<SimulationExecutionMode>,
+    #[serde(default)]
+    pub dev_live_tts: Option<DevLiveTtsRequest>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DevLiveTtsRequest {
+    pub provider_id: String,
+    pub model_id: String,
+    pub voice_id: String,
+    pub explicit_user_authorization: bool,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SimulationExecutionMode {
+    Cloud,
+    Hybrid,
+    Local,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -59,6 +84,30 @@ impl SimulationRequest {
             || self.transcript.trim().is_empty()
             || self.transcript.len() > 64 * 1024
         {
+            return Err(SimulationError::InvalidRequest);
+        }
+        if let Some(route) = &self.dev_live_tts {
+            if !cfg!(debug_assertions)
+                || !route.explicit_user_authorization
+                || !matches!(
+                    self.execution_mode,
+                    Some(SimulationExecutionMode::Cloud | SimulationExecutionMode::Hybrid)
+                )
+                || route.provider_id != DEV_LIVE_TTS_PROVIDER_ID
+                || route.model_id != DEV_LIVE_TTS_MODEL_ID
+                || !DEV_LIVE_TTS_STOCK_VOICE_IDS.contains(&route.voice_id.as_str())
+            {
+                return Err(SimulationError::InvalidRequest);
+            }
+            if self.safety_context.protected_online_detected
+                || self.safety_context.anti_cheat_detected
+                || self.generic_selection.as_ref().is_some_and(|selection| {
+                    selection.protected_online_detected || selection.anti_cheat_detected
+                })
+            {
+                return Err(SimulationError::InvalidRequest);
+            }
+        } else if self.execution_mode.is_some() {
             return Err(SimulationError::InvalidRequest);
         }
         Ok(())
@@ -97,6 +146,7 @@ impl HostState {
         if request.safety_context.anti_cheat_detected {
             return Err(SimulationError::AntiCheatBlocked);
         }
+        let dev_live_tts_accepted = request.dev_live_tts.is_some();
         let (game_id, character_id, display_name, generic_mode) =
             if request.game_id == GENERIC_GAME_ID {
                 let selection = request
@@ -225,13 +275,21 @@ impl HostState {
         supervisor.shutdown().await;
         Ok(SimulationResult {
             schema_version: "1.0.0".to_owned(),
-            fixture_only: true,
-            integration_mode: if generic_mode {
+            fixture_only: !dev_live_tts_accepted,
+            integration_mode: if dev_live_tts_accepted {
+                "developer_live_tts"
+            } else if generic_mode {
                 "generic_experimental"
             } else {
                 "authored_profile"
             },
-            capability_notices: if generic_mode {
+            capability_notices: if dev_live_tts_accepted {
+                vec![
+                    "Developer live TTS route accepted for private qualification; IPC contains provider, model, and allowlisted stock-voice identifiers only, never credential values.".into(),
+                    "Live transport and playback are not exercised by this request-shaping layer; lip-sync remains unavailable.".into(),
+                    "Executable adapters and action proposals are disabled.".into(),
+                ]
+            } else if generic_mode {
                 vec![
                     "Identity is manual and experimental; no visual identity claim is made.".into(),
                     "Screen-space lip-sync is experimental and is not exercised by this simulation.".into(),
@@ -620,3 +678,102 @@ pub enum SimulationError {
 
 #[allow(dead_code)]
 fn _assert_profile_corpus(_: &ProfileCorpus) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request_with(route: Option<DevLiveTtsRequest>) -> SimulationRequest {
+        SimulationRequest {
+            session_id: "session-1".into(),
+            turn_id: "turn-1".into(),
+            game_id: "skyrim-special-edition".into(),
+            character_id: None,
+            generic_selection: None,
+            safety_context: SimulationSafetyContext::default(),
+            transcript: "Can you hear me?".into(),
+            locale: "en-US".into(),
+            execution_mode: route.as_ref().map(|_| SimulationExecutionMode::Hybrid),
+            dev_live_tts: route,
+        }
+    }
+
+    fn allowed_route() -> DevLiveTtsRequest {
+        DevLiveTtsRequest {
+            provider_id: DEV_LIVE_TTS_PROVIDER_ID.into(),
+            model_id: DEV_LIVE_TTS_MODEL_ID.into(),
+            voice_id: DEV_LIVE_TTS_STOCK_VOICE_IDS[0].into(),
+            explicit_user_authorization: true,
+        }
+    }
+
+    #[test]
+    fn legacy_request_without_dev_route_remains_valid() {
+        let wire = serde_json::json!({
+            "sessionId": "session-1",
+            "turnId": "turn-1",
+            "gameId": "skyrim-special-edition",
+            "characterId": null,
+            "transcript": "Can you hear me?",
+            "locale": "en-US"
+        });
+        let request: SimulationRequest =
+            serde_json::from_value(wire).expect("deserialize legacy request");
+        assert!(request.dev_live_tts.is_none());
+        assert!(request.validate().is_ok());
+    }
+
+    #[test]
+    fn dev_live_tts_rejects_unauthorized_local_or_unknown_routes() {
+        assert!(request_with(Some(allowed_route())).validate().is_ok());
+
+        let mutations: Vec<Box<dyn Fn(&mut DevLiveTtsRequest)>> = vec![
+            Box::new(|route| route.explicit_user_authorization = false),
+            Box::new(|route| route.provider_id = "unknown-provider".into()),
+            Box::new(|route| route.model_id = "unknown-model".into()),
+            Box::new(|route| route.voice_id = "custom-or-cloned-voice".into()),
+        ];
+        for mutate in mutations {
+            let mut route = allowed_route();
+            mutate(&mut route);
+            assert!(matches!(
+                request_with(Some(route)).validate(),
+                Err(SimulationError::InvalidRequest)
+            ));
+        }
+        let mut local = request_with(Some(allowed_route()));
+        local.execution_mode = Some(SimulationExecutionMode::Local);
+        assert!(matches!(
+            local.validate(),
+            Err(SimulationError::InvalidRequest)
+        ));
+    }
+
+    #[test]
+    fn dev_live_tts_rejects_detected_risk_and_secret_fields() {
+        let mut unsafe_request = request_with(Some(allowed_route()));
+        unsafe_request.safety_context.protected_online_detected = true;
+        assert!(matches!(
+            unsafe_request.validate(),
+            Err(SimulationError::InvalidRequest)
+        ));
+
+        let with_secret = serde_json::json!({
+            "sessionId": "session-1",
+            "turnId": "turn-1",
+            "gameId": "skyrim-special-edition",
+            "characterId": null,
+            "transcript": "Can you hear me?",
+            "locale": "en-US",
+            "executionMode": "hybrid",
+            "devLiveTts": {
+                "providerId": "elevenlabs",
+                "modelId": "eleven_flash_v2_5",
+                "voiceId": "EXAVITQu4vr4xnSDxMaL",
+                "explicitUserAuthorization": true,
+                "apiKey": "must-never-cross-ipc"
+            }
+        });
+        assert!(serde_json::from_value::<SimulationRequest>(with_secret).is_err());
+    }
+}

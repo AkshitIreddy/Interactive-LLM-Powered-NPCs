@@ -5,7 +5,8 @@ use crate::domain::{
 };
 use crate::runtime_bridge::{SimulationController, StartError};
 use crate::sidecar_protocol::{
-    NativeGenericGameSelection, NativeSimulationRequest, NativeSimulationResult,
+    NativeDevLiveTtsRequest, NativeExecutionMode, NativeGenericGameSelection,
+    NativeSimulationRequest, NativeSimulationResult,
 };
 use crate::sidecar_supervisor::{RuntimeSupervisor, SupervisorError};
 use serde_json::Value;
@@ -312,6 +313,23 @@ fn native_request_for(
             .clone()
             .unwrap_or_else(|| DEFAULT_TRANSCRIPT.into()),
         locale: "en-US".into(),
+        execution_mode: request
+            .dev_live_tts
+            .as_ref()
+            .map(|_| match request.execution_mode {
+                crate::domain::ExecutionMode::Cloud => NativeExecutionMode::Cloud,
+                crate::domain::ExecutionMode::Hybrid => NativeExecutionMode::Hybrid,
+                crate::domain::ExecutionMode::Local => NativeExecutionMode::Local,
+            }),
+        dev_live_tts: request
+            .dev_live_tts
+            .as_ref()
+            .map(|route| NativeDevLiveTtsRequest {
+                provider_id: route.provider_id.clone(),
+                model_id: route.model_id.clone(),
+                voice_id: route.voice_id.clone(),
+                explicit_user_authorization: route.explicit_user_authorization,
+            }),
     }
 }
 
@@ -486,6 +504,30 @@ mod tests {
         assert_eq!(selection.executable_name, ECLIPSE_HARBOR_EXECUTABLE);
         assert!(!selection.protected_online_detected);
         assert!(!selection.anti_cheat_detected);
+    }
+
+    #[test]
+    fn authorized_dev_live_tts_is_shaped_without_credentials() {
+        let request = StartSimulationRequest {
+            dev_live_tts: Some(crate::domain::DevLiveTtsRequest {
+                provider_id: "elevenlabs".into(),
+                model_id: "eleven_flash_v2_5".into(),
+                voice_id: "EXAVITQu4vr4xnSDxMaL".into(),
+                explicit_user_authorization: true,
+            }),
+            ..StartSimulationRequest::default()
+        };
+        let native = native_request_for(&request, "dev-live-tts-turn");
+        let route = native.dev_live_tts.as_ref().expect("authorized route");
+
+        assert_eq!(route.provider_id, "elevenlabs");
+        assert_eq!(route.model_id, "eleven_flash_v2_5");
+        assert_eq!(route.voice_id, "EXAVITQu4vr4xnSDxMaL");
+        assert!(route.explicit_user_authorization);
+        assert!(matches!(
+            native.execution_mode,
+            Some(NativeExecutionMode::Hybrid)
+        ));
     }
 
     #[test]

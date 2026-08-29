@@ -326,6 +326,8 @@ impl ProfileReplayV1 {
             safety_context,
             transcript: self.simulation.transcript.clone(),
             locale: self.simulation.locale.clone(),
+            execution_mode: None,
+            dev_live_tts: None,
         }
     }
 }

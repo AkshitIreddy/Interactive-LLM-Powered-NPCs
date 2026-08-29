@@ -1,6 +1,8 @@
 #![cfg(windows)]
 
-use interactive_npcs_control_lib::sidecar_protocol::NativeSimulationRequest;
+use interactive_npcs_control_lib::sidecar_protocol::{
+    NativeDevLiveTtsRequest, NativeExecutionMode, NativeSimulationRequest,
+};
 use interactive_npcs_control_lib::sidecar_supervisor::{RuntimeLaunchConfig, RuntimeSupervisor};
 use std::path::PathBuf;
 
@@ -55,10 +57,13 @@ async fn fixed_fixture_host_supports_authenticated_control_lifecycle() {
             generic_selection: None,
             transcript: "Bounded fixture input for the authenticated sidecar test.".into(),
             locale: "en-US".into(),
+            execution_mode: None,
+            dev_live_tts: None,
         })
         .await
         .expect("simulation response");
     assert!(simulation.fixture_only);
+    assert_eq!(simulation.integration_mode, "authored_profile");
     assert!(!simulation.events.is_empty());
 
     let generation = supervisor
@@ -66,6 +71,33 @@ async fn fixed_fixture_host_supports_authenticated_control_lifecycle() {
         .await
         .expect("idempotent cancellation request");
     assert!(generation > 0);
+
+    let live_route = supervisor
+        .simulate(NativeSimulationRequest {
+            session_id: "control-integration".into(),
+            turn_id: "control-turn-2".into(),
+            game_id: "skyrim-special-edition".into(),
+            character_id: Some("lydia".into()),
+            generic_selection: None,
+            transcript: "Use the explicitly authorized stock voice.".into(),
+            locale: "en-US".into(),
+            execution_mode: Some(NativeExecutionMode::Hybrid),
+            dev_live_tts: Some(NativeDevLiveTtsRequest {
+                provider_id: "elevenlabs".into(),
+                model_id: "eleven_flash_v2_5".into(),
+                voice_id: "EXAVITQu4vr4xnSDxMaL".into(),
+                explicit_user_authorization: true,
+            }),
+        })
+        .await
+        .expect("authorized dev live TTS route response");
+    assert!(!live_route.fixture_only);
+    assert_eq!(live_route.integration_mode, "developer_live_tts");
+    assert!(live_route
+        .capability_notices
+        .iter()
+        .any(|notice| notice.contains("never credential values")));
+
     supervisor.shutdown().await;
     assert!(!supervisor.health().connected);
 }

@@ -45,6 +45,27 @@ pub struct NativeSimulationRequest {
     pub generic_selection: Option<NativeGenericGameSelection>,
     pub transcript: String,
     pub locale: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_mode: Option<NativeExecutionMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dev_live_tts: Option<NativeDevLiveTtsRequest>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeDevLiveTtsRequest {
+    pub provider_id: String,
+    pub model_id: String,
+    pub voice_id: String,
+    pub explicit_user_authorization: bool,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NativeExecutionMode {
+    Cloud,
+    Hybrid,
+    Local,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -97,6 +118,8 @@ pub struct NativeDoctorReport {
 pub struct NativeSimulationResult {
     pub schema_version: String,
     pub fixture_only: bool,
+    pub integration_mode: String,
+    pub capability_notices: Vec<String>,
     pub events: Vec<Value>,
     pub outcome: Value,
 }
@@ -750,7 +773,14 @@ mod tests {
             generic_selection: None,
             transcript: "Can you hear me?".into(),
             locale: "en-US".into(),
+            execution_mode: None,
+            dev_live_tts: None,
         }));
+        let encoded = serde_json::to_string(&request).expect("serialize legacy simulation request");
+        assert_eq!(
+            encoded,
+            r#"{"type":"simulate_turn","sessionId":"session-1","turnId":"turn-1","gameId":"eclipse-harbor","characterId":"mara-venn","transcript":"Can you hear me?","locale":"en-US"}"#
+        );
 
         assert_eq!(
             serde_json::to_value(request).expect("serialize simulation request"),
@@ -764,6 +794,42 @@ mod tests {
                 "locale": "en-US"
             })
         );
+    }
+
+    #[test]
+    fn authorized_dev_live_tts_wire_contains_route_identifiers_only() {
+        let request = WireRequest::SimulateTurn(Box::new(NativeSimulationRequest {
+            session_id: "session-1".into(),
+            turn_id: "turn-1".into(),
+            game_id: "generic-game".into(),
+            character_id: None,
+            generic_selection: None,
+            transcript: "Can you hear me?".into(),
+            locale: "en-US".into(),
+            execution_mode: Some(NativeExecutionMode::Hybrid),
+            dev_live_tts: Some(NativeDevLiveTtsRequest {
+                provider_id: "elevenlabs".into(),
+                model_id: "eleven_flash_v2_5".into(),
+                voice_id: "EXAVITQu4vr4xnSDxMaL".into(),
+                explicit_user_authorization: true,
+            }),
+        }));
+
+        let wire = serde_json::to_value(request).expect("serialize dev TTS request");
+        assert_eq!(
+            wire["devLiveTts"],
+            serde_json::json!({
+                "providerId": "elevenlabs",
+                "modelId": "eleven_flash_v2_5",
+                "voiceId": "EXAVITQu4vr4xnSDxMaL",
+                "explicitUserAuthorization": true
+            })
+        );
+        assert_eq!(wire["executionMode"], "hybrid");
+        let encoded = serde_json::to_string(&wire).expect("encode wire JSON");
+        for forbidden in ["apiKey", "credential", "secret", "token"] {
+            assert!(!encoded.contains(forbidden), "forbidden field {forbidden}");
+        }
     }
 
     #[tokio::test]

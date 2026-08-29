@@ -10,8 +10,8 @@ use npc_runtime_core::TurnLifecycle;
 use npc_runtime_host::profile_replays::ProfileReplayCorpus;
 use npc_runtime_host::profiles::{GenericGameSelection, GENERIC_GAME_ID};
 use npc_runtime_host::{
-    simulation::SimulationSafetyContext, CatalogTrustState, HostConfig, HostState,
-    SimulationRequest, REQUIRED_PROFILE_COUNT,
+    simulation::{DevLiveTtsRequest, SimulationExecutionMode, SimulationSafetyContext},
+    CatalogTrustState, HostConfig, HostState, SimulationRequest, REQUIRED_PROFILE_COUNT,
 };
 
 fn repo_root() -> PathBuf {
@@ -66,6 +66,8 @@ async fn initializes_every_contract_and_runs_offline_turn() {
             safety_context: SimulationSafetyContext::default(),
             transcript: "Fixture input for a deterministic offline turn.".into(),
             locale: "en-US".into(),
+            execution_mode: None,
+            dev_live_tts: None,
         })
         .await
         .unwrap();
@@ -146,6 +148,8 @@ async fn generic_game_is_simulatable_but_not_counted_as_an_authored_profile() {
             safety_context: SimulationSafetyContext::default(),
             transcript: "Can you hear me from offscreen?".into(),
             locale: "en-US".into(),
+            execution_mode: None,
+            dev_live_tts: None,
         })
         .await
         .unwrap();
@@ -185,6 +189,8 @@ async fn eclipse_harbor_fixture_reply_matches_its_authored_turn() {
             safety_context: SimulationSafetyContext::default(),
             transcript: "Did you ever make it to the old lighthouse?".into(),
             locale: "en-US".into(),
+            execution_mode: None,
+            dev_live_tts: None,
         })
         .await
         .unwrap();
@@ -203,6 +209,49 @@ async fn eclipse_harbor_fixture_reply_matches_its_authored_turn() {
         "I made it as far as the eastern lock. It jammed again, but I remembered your service-tunnel route. If the tide stays low, I can reach the old lighthouse before dark."
     );
     assert!(result.outcome.effects.action_proposals.is_empty());
+}
+
+#[tokio::test]
+async fn explicitly_authorized_dev_live_tts_changes_only_integration_labels() {
+    let app_data = tempfile::tempdir().unwrap();
+    let state = HostState::initialize(HostConfig {
+        repo_root: repo_root(),
+        app_data: app_data.path().to_path_buf(),
+    })
+    .await
+    .unwrap();
+
+    let result = state
+        .simulate_turn(SimulationRequest {
+            session_id: "dev-live-tts-session".into(),
+            turn_id: "dev-live-tts-turn".into(),
+            game_id: "skyrim-special-edition".into(),
+            character_id: None,
+            generic_selection: None,
+            safety_context: SimulationSafetyContext::default(),
+            transcript: "Use the explicitly authorized stock voice.".into(),
+            locale: "en-US".into(),
+            execution_mode: Some(SimulationExecutionMode::Hybrid),
+            dev_live_tts: Some(DevLiveTtsRequest {
+                provider_id: "elevenlabs".into(),
+                model_id: "eleven_flash_v2_5".into(),
+                voice_id: "EXAVITQu4vr4xnSDxMaL".into(),
+                explicit_user_authorization: true,
+            }),
+        })
+        .await
+        .unwrap();
+
+    assert!(!result.fixture_only);
+    assert_eq!(result.integration_mode, "developer_live_tts");
+    assert!(result
+        .capability_notices
+        .iter()
+        .any(|notice| notice.contains("never credential values")));
+    assert!(result
+        .capability_notices
+        .iter()
+        .any(|notice| notice.contains("lip-sync remains unavailable")));
 }
 
 #[tokio::test]
@@ -279,6 +328,8 @@ async fn generic_game_refuses_protected_online_and_anti_cheat_states() {
                 safety_context: SimulationSafetyContext::default(),
                 transcript: "This must be refused.".into(),
                 locale: "en-US".into(),
+                execution_mode: None,
+                dev_live_tts: None,
             })
             .await;
         assert!(result.is_err());

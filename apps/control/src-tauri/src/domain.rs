@@ -248,6 +248,43 @@ pub enum ResponseStage {
     Animating,
 }
 
+pub const DEV_LIVE_TTS_PROVIDER_ID: &str = "elevenlabs";
+pub const DEV_LIVE_TTS_MODEL_ID: &str = "eleven_flash_v2_5";
+pub const DEV_LIVE_TTS_STOCK_VOICE_IDS: &[&str] = &["EXAVITQu4vr4xnSDxMaL"];
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DevLiveTtsRequest {
+    pub provider_id: String,
+    pub model_id: String,
+    pub voice_id: String,
+    pub explicit_user_authorization: bool,
+}
+
+impl DevLiveTtsRequest {
+    fn validate(&self, execution_mode: ExecutionMode) -> Result<(), String> {
+        if !cfg!(debug_assertions) {
+            return Err("devLiveTts is unavailable in release builds".into());
+        }
+        if !self.explicit_user_authorization {
+            return Err("devLiveTts requires explicit user authorization".into());
+        }
+        if execution_mode == ExecutionMode::Local {
+            return Err("devLiveTts cannot be used in Fully Local execution mode".into());
+        }
+        if self.provider_id != DEV_LIVE_TTS_PROVIDER_ID {
+            return Err("devLiveTts provider is not allowlisted".into());
+        }
+        if self.model_id != DEV_LIVE_TTS_MODEL_ID {
+            return Err("devLiveTts model is not allowlisted".into());
+        }
+        if !DEV_LIVE_TTS_STOCK_VOICE_IDS.contains(&self.voice_id.as_str()) {
+            return Err("devLiveTts voice is not an allowlisted stock voice".into());
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StartSimulationRequest {
@@ -258,6 +295,8 @@ pub struct StartSimulationRequest {
     #[serde(default)]
     pub transcript: Option<String>,
     pub execution_mode: ExecutionMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dev_live_tts: Option<DevLiveTtsRequest>,
 }
 
 impl Default for StartSimulationRequest {
@@ -268,6 +307,7 @@ impl Default for StartSimulationRequest {
             character_id: None,
             transcript: None,
             execution_mode: ExecutionMode::Hybrid,
+            dev_live_tts: None,
         }
     }
 }
@@ -297,6 +337,9 @@ impl StartSimulationRequest {
             {
                 return Err("simulation transcript must contain 1-65536 bytes and no NUL".into());
             }
+        }
+        if let Some(route) = &self.dev_live_tts {
+            route.validate(self.execution_mode)?;
         }
         Ok(())
     }
@@ -634,6 +677,62 @@ mod tests {
         ] {
             assert!(wire.get(legacy_key).is_none(), "legacy key {legacy_key}");
         }
+    }
+
+    #[test]
+    fn simulation_request_omits_dev_live_tts_by_default() {
+        let wire = serde_json::to_value(StartSimulationRequest::default())
+            .expect("serialize default simulation request");
+        assert!(wire.get("devLiveTts").is_none());
+    }
+
+    #[test]
+    fn dev_live_tts_requires_the_exact_authorized_hosted_route() {
+        let valid = DevLiveTtsRequest {
+            provider_id: DEV_LIVE_TTS_PROVIDER_ID.into(),
+            model_id: DEV_LIVE_TTS_MODEL_ID.into(),
+            voice_id: DEV_LIVE_TTS_STOCK_VOICE_IDS[0].into(),
+            explicit_user_authorization: true,
+        };
+        let request = StartSimulationRequest {
+            dev_live_tts: Some(valid.clone()),
+            ..StartSimulationRequest::default()
+        };
+        assert!(request.validate().is_ok());
+
+        for invalid in [
+            DevLiveTtsRequest {
+                explicit_user_authorization: false,
+                ..valid.clone()
+            },
+            DevLiveTtsRequest {
+                provider_id: "unknown-provider".into(),
+                ..valid.clone()
+            },
+            DevLiveTtsRequest {
+                model_id: "unknown-model".into(),
+                ..valid.clone()
+            },
+            DevLiveTtsRequest {
+                voice_id: "custom-or-cloned-voice".into(),
+                ..valid.clone()
+            },
+        ] {
+            assert!(StartSimulationRequest {
+                dev_live_tts: Some(invalid),
+                ..StartSimulationRequest::default()
+            }
+            .validate()
+            .is_err());
+        }
+
+        assert!(StartSimulationRequest {
+            execution_mode: ExecutionMode::Local,
+            dev_live_tts: Some(valid),
+            ..StartSimulationRequest::default()
+        }
+        .validate()
+        .is_err());
     }
 
     #[test]

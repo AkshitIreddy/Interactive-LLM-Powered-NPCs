@@ -150,6 +150,8 @@ pub async fn run(cli: Cli) -> Result<(), CliError> {
                     },
                     transcript,
                     locale,
+                    execution_mode: None,
+                    dev_live_tts: None,
                 })
                 .await?;
             write_json(&result)?;
