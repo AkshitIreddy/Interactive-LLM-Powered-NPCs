@@ -140,6 +140,26 @@ try {
 }
 finally { Pop-Location }
 
+# Explorer launch acceptance is a binary property, not a source-code claim.
+# Verify every local-review configuration because Debug packages are used for
+# hands-on testing and previously allocated a visible console.
+$targetProfile = $(if ($Configuration -eq 'Debug') { 'debug' } else { 'release' })
+$controlBinaryCandidates = @(
+    (Join-Path $repoRoot "apps/control/src-tauri/target/$targetProfile/interactive-npcs-control.exe"),
+    (Join-Path $repoRoot "target/$targetProfile/interactive-npcs-control.exe"),
+    (Join-Path $packageRoot "src-tauri/target/$targetProfile/interactive-npcs-control.exe"),
+    (Join-Path $packageRoot "target/$targetProfile/interactive-npcs-control.exe")
+)
+$controlBinary = $controlBinaryCandidates |
+    Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+    Select-Object -First 1
+if ([string]::IsNullOrWhiteSpace($controlBinary)) {
+    Write-Error "Tauri completed but the control executable was not found in: $($controlBinaryCandidates -join ', ')."
+    exit 1
+}
+& (Join-Path $PSScriptRoot 'assert-pe-subsystem.ps1') -Path $controlBinary -Expected Gui
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 # Re-read source identity after compilation so a concurrent edit cannot be
 # packaged under stale evidence. Ignored build outputs do not affect this digest.
 $sourceProcess = Start-Process -FilePath $pythonPath -ArgumentList $sourceArguments -NoNewWindow -Wait -PassThru
@@ -152,7 +172,6 @@ if (([string]$sourceEvidence.head_commit) -ne $sourceHeadBeforeBuild -or
     exit 1
 }
 
-$targetProfile = $(if ($Configuration -eq 'Debug') { 'debug' } else { 'release' })
 $bundleCandidates = @(
     (Join-Path $repoRoot "apps/control/src-tauri/target/$targetProfile/bundle/nsis"),
     (Join-Path $repoRoot "target/$targetProfile/bundle/nsis"),

@@ -326,7 +326,7 @@ async fn run_fixture_turn(mut launch: TurnLaunch) {
             simulation_id: launch.simulation_id.clone(),
             generation: launch.generation,
             sequence,
-            fixture_first_audio_ms: FIXTURE_FIRST_AUDIO_MS,
+            fixture_first_audio_ms: Some(FIXTURE_FIRST_AUDIO_MS),
             runtime_fixture_only: true,
             delivered_text: fixture_reply_for(&launch.request),
         },

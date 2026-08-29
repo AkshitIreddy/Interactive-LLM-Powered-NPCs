@@ -92,17 +92,11 @@ async fn fixed_fixture_host_supports_authenticated_control_lifecycle() {
                 explicit_user_authorization: true,
             }),
         })
-        .await
-        .expect("authorized dev live TTS route response");
-    assert!(live_route.fixture_only);
-    assert_eq!(
-        live_route.integration_mode,
-        "hosted_tts_request_shaping_only"
+        .await;
+    assert!(
+        live_route.is_err(),
+        "a host built without the qualified live-audio feature must refuse the route"
     );
-    assert!(live_route
-        .capability_notices
-        .iter()
-        .any(|notice| notice.contains("never credential values")));
 
     supervisor.shutdown().await;
     assert!(!supervisor.health().connected);

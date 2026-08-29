@@ -400,7 +400,7 @@ pub enum SimulationEvent {
         simulation_id: String,
         generation: u64,
         sequence: u64,
-        fixture_first_audio_ms: u64,
+        fixture_first_audio_ms: Option<u64>,
         runtime_fixture_only: bool,
         delivered_text: String,
     },
@@ -659,7 +659,7 @@ mod tests {
             simulation_id: "simulation-fixture".into(),
             generation: 2,
             sequence: 9,
-            fixture_first_audio_ms: 418,
+            fixture_first_audio_ms: Some(418),
             runtime_fixture_only: true,
             delivered_text: "The harbor remembers.".into(),
         };

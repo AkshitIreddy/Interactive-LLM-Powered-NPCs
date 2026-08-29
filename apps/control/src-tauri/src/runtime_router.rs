@@ -129,11 +129,17 @@ impl RuntimeRouter {
 
         let native_request =
             native_request_for(&request, &simulation_id, self.trusted_safety_context);
+        let measurement_basis = if request.dev_live_tts.is_some() {
+            MeasurementBasis::ControlledBenchmark
+        } else {
+            MeasurementBasis::TrustedRuntimeFixture
+        };
+        let runtime_fixture_only = request.dev_live_tts.is_none();
         let _ = events.send(SimulationEvent::Started {
             simulation_id: simulation_id.clone(),
             generation,
             sequence: 1,
-            measurement_basis: MeasurementBasis::TrustedRuntimeFixture,
+            measurement_basis,
         });
         let supervisor = self.supervisor.clone();
         let native_state = Arc::clone(&self.native);
@@ -154,8 +160,8 @@ impl RuntimeRouter {
             simulation_id,
             generation,
             backend: RuntimeBackend::NativeRuntime,
-            measurement_basis: MeasurementBasis::TrustedRuntimeFixture,
-            runtime_fixture_only: true,
+            measurement_basis,
+            runtime_fixture_only,
         })
     }
 
@@ -266,7 +272,10 @@ async fn emit_native_result(
             simulation_id: simulation_id.into(),
             generation,
             sequence,
-            fixture_first_audio_ms: 0,
+            // The runtime currently proves delivery with receipt-backed source
+            // and device-frame submission, but does not expose a comparable
+            // first-audible timestamp. Never turn that absence into a fake 0 ms.
+            fixture_first_audio_ms: None,
             runtime_fixture_only: result.fixture_only,
             delivered_text: delivered_text(&result.outcome),
         });
