@@ -6,7 +6,7 @@ use crate::domain::{
 use crate::runtime_bridge::{SimulationController, StartError};
 use crate::sidecar_protocol::{
     NativeDevLiveTtsRequest, NativeExecutionMode, NativeGenericGameSelection,
-    NativeSimulationRequest, NativeSimulationResult,
+    NativeSimulationRequest, NativeSimulationResult, NativeSimulationSafetyContext,
 };
 use crate::sidecar_supervisor::{RuntimeSupervisor, SupervisorError};
 use serde_json::Value;
@@ -48,14 +48,23 @@ pub struct RuntimeRouter {
     supervisor: RuntimeSupervisor,
     fixture: SimulationController,
     native: Arc<Mutex<NativeState>>,
+    trusted_safety_context: NativeSimulationSafetyContext,
 }
 
 impl RuntimeRouter {
     pub fn new(supervisor: RuntimeSupervisor) -> Self {
+        Self::with_trusted_safety_context(supervisor, NativeSimulationSafetyContext::default())
+    }
+
+    pub(crate) fn with_trusted_safety_context(
+        supervisor: RuntimeSupervisor,
+        trusted_safety_context: NativeSimulationSafetyContext,
+    ) -> Self {
         Self {
             supervisor,
             fixture: SimulationController::default(),
             native: Arc::new(Mutex::new(NativeState::default())),
+            trusted_safety_context,
         }
     }
 
@@ -92,6 +101,7 @@ impl RuntimeRouter {
         events: Channel<SimulationEvent>,
     ) -> Result<StartSimulationResult, RouterError> {
         request.validate().map_err(RouterError::InvalidRequest)?;
+        validate_trusted_safety_context(self.trusted_safety_context)?;
         if self.supervisor.health().state == RuntimeConnectionState::DevelopmentFixture {
             return self
                 .fixture
@@ -117,7 +127,8 @@ impl RuntimeRouter {
             (simulation_id, generation)
         };
 
-        let native_request = native_request_for(&request, &simulation_id);
+        let native_request =
+            native_request_for(&request, &simulation_id, self.trusted_safety_context);
         let _ = events.send(SimulationEvent::Started {
             simulation_id: simulation_id.clone(),
             generation,
@@ -277,6 +288,7 @@ async fn emit_native_result(
 fn native_request_for(
     request: &StartSimulationRequest,
     simulation_id: &str,
+    trusted_safety_context: NativeSimulationSafetyContext,
 ) -> NativeSimulationRequest {
     let is_eclipse_harbor = request.game_profile_id.as_deref() == Some(ECLIPSE_HARBOR_PROFILE_ID);
     let character_name = request
@@ -308,6 +320,7 @@ fn native_request_for(
             protected_online_detected: false,
             anti_cheat_detected: false,
         }),
+        safety_context: trusted_safety_context,
         transcript: request
             .transcript
             .clone()
@@ -331,6 +344,22 @@ fn native_request_for(
                 explicit_user_authorization: route.explicit_user_authorization,
             }),
     }
+}
+
+fn validate_trusted_safety_context(
+    context: NativeSimulationSafetyContext,
+) -> Result<(), RouterError> {
+    if context.protected_online_detected {
+        return Err(RouterError::InvalidRequest(
+            "trusted game-state evidence detected protected online play".into(),
+        ));
+    }
+    if context.anti_cheat_detected {
+        return Err(RouterError::InvalidRequest(
+            "trusted game-state evidence detected anti-cheat".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn fixture_stage_duration(fixture_only: bool, stage: ResponseStage) -> u64 {
@@ -491,7 +520,11 @@ mod tests {
             transcript: Some(DEFAULT_TRANSCRIPT.into()),
             ..StartSimulationRequest::default()
         };
-        let native = native_request_for(&request, "fixture-turn-1");
+        let native = native_request_for(
+            &request,
+            "fixture-turn-1",
+            NativeSimulationSafetyContext::default(),
+        );
         let selection = native
             .generic_selection
             .expect("Eclipse Harbor must use explicit generic selection");
@@ -517,7 +550,11 @@ mod tests {
             }),
             ..StartSimulationRequest::default()
         };
-        let native = native_request_for(&request, "dev-live-tts-turn");
+        let native = native_request_for(
+            &request,
+            "dev-live-tts-turn",
+            NativeSimulationSafetyContext::default(),
+        );
         let route = native.dev_live_tts.as_ref().expect("authorized route");
 
         assert_eq!(route.provider_id, "elevenlabs");
@@ -528,6 +565,24 @@ mod tests {
             native.execution_mode,
             Some(NativeExecutionMode::Hybrid)
         ));
+    }
+
+    #[test]
+    fn authored_profile_safety_is_trusted_router_state_not_webview_input() {
+        let request = StartSimulationRequest {
+            game_profile_id: Some("cyberpunk-2077".into()),
+            ..StartSimulationRequest::default()
+        };
+        let webview_wire = serde_json::to_value(&request).expect("serialize WebView request");
+        assert!(webview_wire.get("safetyContext").is_none());
+
+        let trusted = NativeSimulationSafetyContext {
+            protected_online_detected: false,
+            anti_cheat_detected: true,
+        };
+        let native = native_request_for(&request, "unsafe-authored-turn", trusted);
+        assert_eq!(native.safety_context, trusted);
+        assert!(validate_trusted_safety_context(native.safety_context).is_err());
     }
 
     #[test]

@@ -99,18 +99,26 @@ impl SimulationRequest {
             {
                 return Err(SimulationError::InvalidRequest);
             }
-            if self.safety_context.protected_online_detected
-                || self.safety_context.anti_cheat_detected
-                || self.generic_selection.as_ref().is_some_and(|selection| {
-                    selection.protected_online_detected || selection.anti_cheat_detected
-                })
-            {
-                return Err(SimulationError::InvalidRequest);
-            }
         } else if self.execution_mode.is_some() {
             return Err(SimulationError::InvalidRequest);
         }
         Ok(())
+    }
+
+    fn protected_online_detected(&self) -> bool {
+        self.safety_context.protected_online_detected
+            || self
+                .generic_selection
+                .as_ref()
+                .is_some_and(|selection| selection.protected_online_detected)
+    }
+
+    fn anti_cheat_detected(&self) -> bool {
+        self.safety_context.anti_cheat_detected
+            || self
+                .generic_selection
+                .as_ref()
+                .is_some_and(|selection| selection.anti_cheat_detected)
     }
 }
 
@@ -140,13 +148,13 @@ impl HostState {
         cancellation: CancellationToken,
     ) -> Result<SimulationResult, SimulationError> {
         request.validate()?;
-        if request.safety_context.protected_online_detected {
+        if request.protected_online_detected() {
             return Err(SimulationError::ProtectedOnlineBlocked);
         }
-        if request.safety_context.anti_cheat_detected {
+        if request.anti_cheat_detected() {
             return Err(SimulationError::AntiCheatBlocked);
         }
-        let dev_live_tts_accepted = request.dev_live_tts.is_some();
+        let dev_live_tts_requested = request.dev_live_tts.is_some();
         let (game_id, character_id, display_name, generic_mode) =
             if request.game_id == GENERIC_GAME_ID {
                 let selection = request
@@ -275,18 +283,18 @@ impl HostState {
         supervisor.shutdown().await;
         Ok(SimulationResult {
             schema_version: "1.0.0".to_owned(),
-            fixture_only: !dev_live_tts_accepted,
-            integration_mode: if dev_live_tts_accepted {
-                "developer_live_tts"
+            fixture_only: true,
+            integration_mode: if dev_live_tts_requested {
+                "hosted_tts_request_shaping_only"
             } else if generic_mode {
                 "generic_experimental"
             } else {
                 "authored_profile"
             },
-            capability_notices: if dev_live_tts_accepted {
+            capability_notices: if dev_live_tts_requested {
                 vec![
-                    "Developer live TTS route accepted for private qualification; IPC contains provider, model, and allowlisted stock-voice identifiers only, never credential values.".into(),
-                    "Live transport and playback are not exercised by this request-shaping layer; lip-sync remains unavailable.".into(),
+                    "Developer hosted-TTS request shape validated for private qualification; IPC contains provider, model, and allowlisted stock-voice identifiers only, never credential values.".into(),
+                    "The deterministic fixture still produced this turn: provider synthesis, speaker playback, and lip-sync were not exercised.".into(),
                     "Executable adapters and action proposals are disabled.".into(),
                 ]
             } else if generic_mode {
@@ -753,10 +761,9 @@ mod tests {
     fn dev_live_tts_rejects_detected_risk_and_secret_fields() {
         let mut unsafe_request = request_with(Some(allowed_route()));
         unsafe_request.safety_context.protected_online_detected = true;
-        assert!(matches!(
-            unsafe_request.validate(),
-            Err(SimulationError::InvalidRequest)
-        ));
+        assert!(unsafe_request.validate().is_ok());
+        assert!(unsafe_request.protected_online_detected());
+        assert!(!unsafe_request.anti_cheat_detected());
 
         let with_secret = serde_json::json!({
             "sessionId": "session-1",

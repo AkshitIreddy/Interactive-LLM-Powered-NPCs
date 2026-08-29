@@ -2,6 +2,7 @@
 
 use interactive_npcs_control_lib::sidecar_protocol::{
     NativeDevLiveTtsRequest, NativeExecutionMode, NativeSimulationRequest,
+    NativeSimulationSafetyContext,
 };
 use interactive_npcs_control_lib::sidecar_supervisor::{RuntimeLaunchConfig, RuntimeSupervisor};
 use std::path::PathBuf;
@@ -55,6 +56,7 @@ async fn fixed_fixture_host_supports_authenticated_control_lifecycle() {
             game_id: "skyrim-special-edition".into(),
             character_id: Some("lydia".into()),
             generic_selection: None,
+            safety_context: NativeSimulationSafetyContext::default(),
             transcript: "Bounded fixture input for the authenticated sidecar test.".into(),
             locale: "en-US".into(),
             execution_mode: None,
@@ -79,6 +81,7 @@ async fn fixed_fixture_host_supports_authenticated_control_lifecycle() {
             game_id: "skyrim-special-edition".into(),
             character_id: Some("lydia".into()),
             generic_selection: None,
+            safety_context: NativeSimulationSafetyContext::default(),
             transcript: "Use the explicitly authorized stock voice.".into(),
             locale: "en-US".into(),
             execution_mode: Some(NativeExecutionMode::Hybrid),
@@ -91,8 +94,11 @@ async fn fixed_fixture_host_supports_authenticated_control_lifecycle() {
         })
         .await
         .expect("authorized dev live TTS route response");
-    assert!(!live_route.fixture_only);
-    assert_eq!(live_route.integration_mode, "developer_live_tts");
+    assert!(live_route.fixture_only);
+    assert_eq!(
+        live_route.integration_mode,
+        "hosted_tts_request_shaping_only"
+    );
     assert!(live_route
         .capability_notices
         .iter()

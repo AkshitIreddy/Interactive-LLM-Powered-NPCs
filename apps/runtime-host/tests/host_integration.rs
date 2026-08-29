@@ -212,7 +212,7 @@ async fn eclipse_harbor_fixture_reply_matches_its_authored_turn() {
 }
 
 #[tokio::test]
-async fn explicitly_authorized_dev_live_tts_changes_only_integration_labels() {
+async fn dev_live_tts_request_stays_fixture_only_and_refuses_trusted_risk() {
     let app_data = tempfile::tempdir().unwrap();
     let state = HostState::initialize(HostConfig {
         repo_root: repo_root(),
@@ -242,8 +242,8 @@ async fn explicitly_authorized_dev_live_tts_changes_only_integration_labels() {
         .await
         .unwrap();
 
-    assert!(!result.fixture_only);
-    assert_eq!(result.integration_mode, "developer_live_tts");
+    assert!(result.fixture_only);
+    assert_eq!(result.integration_mode, "hosted_tts_request_shaping_only");
     assert!(result
         .capability_notices
         .iter()
@@ -251,7 +251,49 @@ async fn explicitly_authorized_dev_live_tts_changes_only_integration_labels() {
     assert!(result
         .capability_notices
         .iter()
-        .any(|notice| notice.contains("lip-sync remains unavailable")));
+        .any(|notice| notice.contains("speaker playback, and lip-sync were not exercised")));
+
+    for safety_context in [
+        SimulationSafetyContext {
+            protected_online_detected: true,
+            anti_cheat_detected: false,
+        },
+        SimulationSafetyContext {
+            protected_online_detected: false,
+            anti_cheat_detected: true,
+        },
+    ] {
+        let refusal = state
+            .simulate_turn(SimulationRequest {
+                session_id: "blocked-live-tts-session".into(),
+                turn_id: "blocked-live-tts-turn".into(),
+                game_id: "skyrim-special-edition".into(),
+                character_id: None,
+                generic_selection: None,
+                safety_context: safety_context.clone(),
+                transcript: "This provider route must not begin.".into(),
+                locale: "en-US".into(),
+                execution_mode: Some(SimulationExecutionMode::Hybrid),
+                dev_live_tts: Some(DevLiveTtsRequest {
+                    provider_id: "elevenlabs".into(),
+                    model_id: "eleven_flash_v2_5".into(),
+                    voice_id: "EXAVITQu4vr4xnSDxMaL".into(),
+                    explicit_user_authorization: true,
+                }),
+            })
+            .await;
+        if safety_context.protected_online_detected {
+            assert!(matches!(
+                refusal,
+                Err(npc_runtime_host::simulation::SimulationError::ProtectedOnlineBlocked)
+            ));
+        } else {
+            assert!(matches!(
+                refusal,
+                Err(npc_runtime_host::simulation::SimulationError::AntiCheatBlocked)
+            ));
+        }
+    }
 }
 
 #[tokio::test]

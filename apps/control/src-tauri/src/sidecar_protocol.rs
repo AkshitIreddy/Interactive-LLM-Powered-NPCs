@@ -43,6 +43,11 @@ pub struct NativeSimulationRequest {
     pub character_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub generic_selection: Option<NativeGenericGameSelection>,
+    #[serde(
+        default,
+        skip_serializing_if = "NativeSimulationSafetyContext::is_clear"
+    )]
+    pub safety_context: NativeSimulationSafetyContext,
     pub transcript: String,
     pub locale: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -58,6 +63,19 @@ pub struct NativeDevLiveTtsRequest {
     pub model_id: String,
     pub voice_id: String,
     pub explicit_user_authorization: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSimulationSafetyContext {
+    pub protected_online_detected: bool,
+    pub anti_cheat_detected: bool,
+}
+
+impl NativeSimulationSafetyContext {
+    fn is_clear(&self) -> bool {
+        !self.protected_online_detected && !self.anti_cheat_detected
+    }
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -118,10 +136,16 @@ pub struct NativeDoctorReport {
 pub struct NativeSimulationResult {
     pub schema_version: String,
     pub fixture_only: bool,
+    #[serde(default = "legacy_simulation_integration_mode")]
     pub integration_mode: String,
+    #[serde(default)]
     pub capability_notices: Vec<String>,
     pub events: Vec<Value>,
     pub outcome: Value,
+}
+
+fn legacy_simulation_integration_mode() -> String {
+    "legacy_schema_1".into()
 }
 
 struct PendingRequest {
@@ -764,6 +788,26 @@ mod tests {
     }
 
     #[test]
+    fn schema_one_simulation_response_defaults_new_metadata() {
+        let response = br#"{
+            "type":"simulation",
+            "result":{
+                "schemaVersion":"1.0.0",
+                "fixtureOnly":true,
+                "events":[],
+                "outcome":{}
+            }
+        }"#;
+        let WireResponse::Simulation { result } =
+            serde_json::from_slice::<WireResponse>(response).expect("legacy schema-one response")
+        else {
+            panic!("simulation response expected");
+        };
+        assert_eq!(result.integration_mode, "legacy_schema_1");
+        assert!(result.capability_notices.is_empty());
+    }
+
+    #[test]
     fn boxed_simulation_request_preserves_wire_shape() {
         let request = WireRequest::SimulateTurn(Box::new(NativeSimulationRequest {
             session_id: "session-1".into(),
@@ -771,6 +815,7 @@ mod tests {
             game_id: "eclipse-harbor".into(),
             character_id: Some("mara-venn".into()),
             generic_selection: None,
+            safety_context: NativeSimulationSafetyContext::default(),
             transcript: "Can you hear me?".into(),
             locale: "en-US".into(),
             execution_mode: None,
@@ -804,6 +849,7 @@ mod tests {
             game_id: "generic-game".into(),
             character_id: None,
             generic_selection: None,
+            safety_context: NativeSimulationSafetyContext::default(),
             transcript: "Can you hear me?".into(),
             locale: "en-US".into(),
             execution_mode: Some(NativeExecutionMode::Hybrid),
@@ -830,6 +876,34 @@ mod tests {
         for forbidden in ["apiKey", "credential", "secret", "token"] {
             assert!(!encoded.contains(forbidden), "forbidden field {forbidden}");
         }
+    }
+
+    #[test]
+    fn detected_trusted_safety_context_crosses_the_native_boundary() {
+        let request = WireRequest::SimulateTurn(Box::new(NativeSimulationRequest {
+            session_id: "session-1".into(),
+            turn_id: "turn-1".into(),
+            game_id: "cyberpunk-2077".into(),
+            character_id: None,
+            generic_selection: None,
+            safety_context: NativeSimulationSafetyContext {
+                protected_online_detected: true,
+                anti_cheat_detected: false,
+            },
+            transcript: "This route must be refused.".into(),
+            locale: "en-US".into(),
+            execution_mode: Some(NativeExecutionMode::Hybrid),
+            dev_live_tts: Some(NativeDevLiveTtsRequest {
+                provider_id: "elevenlabs".into(),
+                model_id: "eleven_flash_v2_5".into(),
+                voice_id: "EXAVITQu4vr4xnSDxMaL".into(),
+                explicit_user_authorization: true,
+            }),
+        }));
+
+        let wire = serde_json::to_value(request).expect("serialize protected route");
+        assert_eq!(wire["safetyContext"]["protectedOnlineDetected"], true);
+        assert_eq!(wire["safetyContext"]["antiCheatDetected"], false);
     }
 
     #[tokio::test]
