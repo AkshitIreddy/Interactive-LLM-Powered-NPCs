@@ -715,6 +715,12 @@ fn map_transport(provider_id: HostedTtsProviderId, error: TransportError) -> Tts
             "authentication_failed",
             false,
         ),
+        TransportError::QuotaExceeded => TtsError::new(
+            provider_id.as_str(),
+            TtsErrorKind::QuotaExceeded,
+            "quota_exceeded",
+            false,
+        ),
         TransportError::RateLimited { retry_after } => {
             let mut error = TtsError::new(
                 provider_id.as_str(),

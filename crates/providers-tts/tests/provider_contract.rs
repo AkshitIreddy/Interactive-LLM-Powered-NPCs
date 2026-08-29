@@ -343,6 +343,24 @@ async fn transport_faults_become_content_free_typed_errors() {
 }
 
 #[tokio::test]
+async fn provider_quota_is_non_retryable_and_distinct_from_rate_limiting() {
+    let transport = Arc::new(MockTransport::scripted(MockScript {
+        connect_error: Some(TransportError::QuotaExceeded),
+        ..MockScript::default()
+    }));
+    let provider = provider(HostedTtsProviderId::ElevenLabs, transport);
+    let error = provider
+        .start_session(request())
+        .await
+        .err()
+        .expect("quota fixture rejects connection");
+    assert_eq!(error.kind, TtsErrorKind::QuotaExceeded);
+    assert_eq!(error.code, "quota_exceeded");
+    assert!(!error.retryable);
+    assert_eq!(error.retry_after, None);
+}
+
+#[tokio::test]
 async fn premature_stream_close_and_invalid_alignment_are_protocol_faults() {
     let closed_transport = Arc::new(MockTransport::default());
     let deepgram_provider = provider(HostedTtsProviderId::Deepgram, Arc::clone(&closed_transport));

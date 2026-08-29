@@ -71,6 +71,7 @@ pub enum TtsErrorKind {
     InvalidState,
     InvalidRequest,
     Authentication,
+    QuotaExceeded,
     RateLimited,
     Timeout,
     Unavailable,
@@ -116,6 +117,8 @@ pub enum TransportError {
     Timeout,
     #[error("transport authentication failed")]
     Authentication,
+    #[error("provider quota exceeded")]
+    QuotaExceeded,
     #[error("transport rate limited")]
     RateLimited { retry_after: Option<Duration> },
     #[error("transport protocol failure")]
