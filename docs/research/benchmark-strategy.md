@@ -27,8 +27,12 @@ Fixtures, exact hosted model/provider/catalog revisions, optional lip-sync model
 3. WGC + DirectComposition on the full display matrix and device recovery.
 4. Worker kill/restart/quarantine at every turn stage.
 5. NSIS install/update interruption/rollback on clean VMs.
-6. Tracked viseme/mouth-warp baseline versus MuseTalk 1.5 under 12 GB contention.
-7. Conditional NVIDIA AR SDK LipSync spike only after private access/license validation; record its fixed pre-roll rather than hiding it in end-to-end timing.
+6. Audio2Face-3D regression v2.3 coefficient-to-2D-residual baseline under 12 GB contention, including tracking, immutable-frame residual validation and fail-open latency. No native game rig participates.
+7. Conditional NVIDIA Maxine AR SDK LipSync direct-video spike only after access/license validation; measure startup/pre-roll and isolate the mouth residual rather than presenting vendor numbers as product results.
+8. Keep MuseTalk as an offline comparator: the existing ~102 s wall time for 1.579 s output is a failed live-admission result, not a baseline to optimize around.
+9. Revisit EfficientSync/FlashLips only when public immutable code/weights and licenses can be evaluated; reproduce all paper speed/quality claims locally.
+
+Local conversation models are outside the current product policy. If that policy changes, add a separate co-residency spike that combines live game reserve, each model's warm and p99 workspace, load/unload latency and incompatible-stage serialization. A configuration passes only when admission can classify it without silent device/provider switching.
 
 ## Release gates
 

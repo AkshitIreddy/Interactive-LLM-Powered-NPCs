@@ -20,13 +20,15 @@ Reserve the signed pack lifecycle for generic screen-space lip-sync candidates o
 
 No pack is bundled, auto-selected, auto-downloaded, auto-activated as a default/dependency/migration/game requirement/fallback, or represented as available until its license and Windows/game-load/visual gates pass. Activation additionally requires a valid attestation and an explicit user choice. A CPython runtime may accompany an explicitly selected pack only when the qualified implementation requires it and the pack remains self-contained.
 
-Current research lanes are: a lightweight tracked viseme/mouth-warp baseline; MuseTalk 1.5 as the public experimental comparator; and NVIDIA AR SDK LipSync as a conditional candidate if its private NGC access, Windows/Ada support, fixed pre-roll, licensing, and integration constraints can be qualified. A normal NVIDIA NIM key does not unlock that private SDK. Ditto remains deferred, and LatentSync is an offline-rendering comparison only. Native rigs/Audio2Face, Wav2Lip, SadTalker, and LivePortrait are rejected as live product paths.
+Current research lanes are: Audio2Face-3D regression v2.3 as a coefficient source for a project-owned tracked 2D mouth residual; NVIDIA Maxine AR SDK LipSync as an access-controlled, direct-video experiment; and MuseTalk 1.5 as an offline comparator after its measured batch path took approximately 102 seconds for 1.579 seconds of output. Audio2Face-3D is not connected to a native game rig, and none of these lanes is a qualified or available pack. EfficientSync and FlashLips remain paper watchlist entries pending code, weights, license and Windows qualification. Ditto remains deferred, LatentSync remains offline-only, and Wav2Lip, SadTalker and LivePortrait remain rejected as live product paths.
 
 ## Model manager contract
 
 The base installer contains no AI model, Python pack, CUDA toolkit or FFmpeg requirement. After explicit user selection, TUF-protected catalog metadata may resolve a qualified lip-sync pack; the manager stages, resumes, verifies size/hash/signature, safely extracts, self-tests, atomically activates, repairs, rolls back, removes and reference-counts shared files.
 
-The resource broker uses live DXGI budget, measured worker envelope, user VRAM ceiling and target FPS. It drops stale frames, grants only the declared optional visual lease, and disables lip-sync before affecting conversation audio/subtitles.
+The resource broker uses live DXGI budget, a configured game reserve, measured warm and p99 worker envelopes, load/unload cost, user VRAM ceiling and target FPS. It grants at most one optional local visual lease, drops stale frames, and suspends or unloads lip-sync before affecting hosted conversation or audio/subtitles. A captured source frame remains immutable; only a validated mouth residual may be applied to a presentation copy of the newest compatible frame.
+
+Local LLM, STT, TTS and embedding packs remain outside the current product policy. If that policy changes, a separate architecture decision and co-residency matrix must classify combinations before download/activation, reserve live game headroom, serialize incompatible GPU work, expose cold/warm switching cost, and prohibit silent device/provider substitution.
 
 ## Consequences
 
@@ -37,7 +39,9 @@ The resource broker uses live DXGI budget, measured worker envelope, user VRAM c
 
 ## Evidence
 
-- NVIDIA LipSync model card: <https://build.nvidia.com/nvidia/lipsync/modelcard>
+- Audio2Face-3D: <https://github.com/NVIDIA/Audio2Face-3D>
+- NVIDIA AR SDK LipSync: <https://docs.nvidia.com/maxine/ar/latest/API/Architecture/using-ar-features.html#lipsync>
 - MuseTalk: <https://github.com/TMElyralab/MuseTalk>
-- LatentSync: <https://github.com/bytedance/LatentSync>
+- EfficientSync: <https://arxiv.org/abs/2608.18832>
+- FlashLips: <https://arxiv.org/abs/2512.20033>
 - TUF specification: <https://theupdateframework.github.io/specification/latest/>

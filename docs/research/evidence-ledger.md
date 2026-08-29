@@ -1,6 +1,6 @@
 # Research evidence ledger
 
-Snapshot date: 2026-08-28. This ledger records decision evidence, not a permanent claim that provider catalogs, model IDs, pricing or licenses remain unchanged. Volatile facts must be refreshed into signed catalogs before a release candidate.
+Snapshot date: 2026-08-29. This ledger records decision evidence, not a permanent claim that provider catalogs, model IDs, pricing or licenses remain unchanged. Volatile facts must be refreshed into signed catalogs before a release candidate.
 
 ## Evidence quality rules
 
@@ -43,17 +43,19 @@ Snapshot date: 2026-08-28. This ledger records decision evidence, not a permanen
 
 | ID | Source | Relevant evidence | Decision use | Remaining validation |
 | --- | --- | --- | --- | --- |
-| E-040 | [NVIDIA LipSync model card](https://build.nvidia.com/nvidia/lipsync/modelcard) | Private-access lip-sync research route; a standard NIM key is not access to the package. | Conditional generic screen-space candidate only. | Exact terms/access, Windows/Ada path, image + 16 kHz mono contract, region/tracking, 14-frame pre-roll, size/VRAM, quality and game impact. |
-| E-041 | [MuseTalk](https://github.com/TMElyralab/MuseTalk) | Realtime-oriented audio-driven lip-sync implementation/citations. | Public generic screen-space comparator. | Full transitive license, Windows pack, game-footage robustness and 12 GB contention. |
-| E-044 | [LatentSync](https://github.com/bytedance/LatentSync) | Offline-oriented lip-sync research implementation. | Offline comparison only; not a live candidate. | Keep outside the live pack catalog. |
+| E-040 | [Audio2Face-3D collection](https://github.com/NVIDIA/Audio2Face-3D) and [SDK executor documentation](https://github.com/NVIDIA/Audio2Face-3D-SDK/blob/main/docs/README.md) | Regression models produce facial animation from audio and the SDK exposes geometry/blend-shape execution. | Candidate coefficient source for a project-owned tracked 2D mouth residual; no native game-rig path. | Exact model/SDK/license, Windows runtime, coefficient mapping, cancellation, latency, RAM/VRAM, quality and game impact. |
+| E-041 | [NVIDIA AR SDK LipSync processing contract](https://docs.nvidia.com/maxine/ar/latest/API/Architecture/using-ar-features.html#lipsync), [installation](https://docs.nvidia.com/maxine/ar/latest/WindowsARSDK/InstalltheARSDK.html), and [vendor performance reference](https://docs.nvidia.com/maxine/ar/latest/WindowsARSDK/PerformanceReference.html) | Separate NGC-distributed feature consumes synchronized video/audio and emits modified frames; vendor reports device-specific latency. | Access-controlled direct-video experiment only. | Exact entitlement/license, supported Windows/GPU path, startup/pre-roll, local latency, residual isolation, size/VRAM, quality and game impact. |
 | E-042 | V1 repository audit and `single-monitor-root-cause.md` | Opaque mirror, fixed geometry and frozen rectangle fail structurally. | Remove mirror/full-frame/pasted-rectangle designs. | Rendered WGC/DComp acceptance matrix. |
 | E-043 | [WCAG 2.2](https://www.w3.org/TR/WCAG22/) and [Xbox Accessibility Guidelines](https://learn.microsoft.com/en-us/gaming/accessibility/xbox-accessibility-guidelines/) | Web/Windows gaming accessibility criteria and test guidance. | Keyboard/Narrator/contrast/scaling/reduced-motion UI gates. | Screen reader/controller and rendered review. |
+| E-044 | [LatentSync](https://github.com/bytedance/LatentSync) | Offline-oriented lip-sync research implementation. | Offline comparison only; not a live candidate. | Keep outside the live pack catalog. |
+| E-045 | [MuseTalk](https://github.com/TMElyralab/MuseTalk) and local attested report | Upstream has prepared-avatar/realtime-oriented code, but the measured standalone Windows batch path took ~102 s for 1.579 s output. | Offline comparator only; measured path fails live admission. | No persistent worker, app integration, redistribution or live-game qualification. |
+| E-046 | [EfficientSync](https://arxiv.org/abs/2608.18832) and [FlashLips](https://arxiv.org/abs/2512.20033) | Papers describe localized deformation/reconstruction intended to reduce full-frame generation cost. | Architecture watchlist only. | Public code/weights, exact licenses, Windows runtime, cancellation and reproduced visual/resource evidence. |
 
 ## Conclusions supported by multiple sources
 
 1. Use Tauri only for control UI, not the continuous media path (E-001–E-008).
 2. Keep authoritative memory in SQLite and treat vector data as rebuildable (E-009–E-010 plus the legacy audit).
 3. Provider models are capability-discovered and cataloged, not hard-coded forever (E-020–E-025).
-4. Conversation is API-first; the only optional model-pack lane is generic local screen-space lip-sync (E-026, E-040–E-044).
-5. Reject native-rig/per-game integration and require generic screen-space animation to yield immediately to audio/subtitles (E-040–E-042).
+4. Conversation is API-first; the only optional model-pack lane is generic local screen-space lip-sync (E-026, E-040–E-046).
+5. Reject native-rig/per-game integration and require generic screen-space animation to yield immediately to audio/subtitles (E-040–E-046).
 6. Release claims require local end-to-end measurements and rendered evidence; upstream/vendor claims only choose prototypes.

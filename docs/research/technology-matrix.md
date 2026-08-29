@@ -41,9 +41,11 @@ Decisions are for a Windows gaming companion, not a general SaaS or research not
 | STT | explicitly configured hosted providers | provider endpointing plus PTT | API-first; PTT key-up remains authoritative. |
 | TTS | explicitly configured hosted providers | provider stock voices | API-first; no actor imitation or local TTS pack. |
 | Retrieval | SQLite FTS/recent context + optional hosted embeddings/reranking | lexical-only fallback | Hosted semantic text egress requires explicit route authorization. |
-| Screen-space baseline | tracked viseme/mouth warp | no model required | Lowest-resource generic baseline; fresh-frame masked residual. |
-| Screen-space model | MuseTalk 1.5 comparator | conditional private NVIDIA AR SDK LipSync candidate | Explicit user-selected pack only; no bundle/automatic download; size/VRAM/license/quality/game-impact gates. |
-| Deferred/rejected | Ditto deferred; LatentSync offline-only | native rigs/Audio2Face, Wav2Lip, SadTalker, LivePortrait rejected | No per-game integration or full-frame live replacement. |
+| Screen-space baseline | Audio2Face-3D regression v2.3 coefficient source → project-owned tracked 2D mouth residual | audio-derived viseme/mouth warp | Research architecture only; no native rig, no pack claim, immutable current frame and strict masked fail-open composition. |
+| Direct-video experiment | NVIDIA Maxine AR SDK LipSync | none qualified | Access-controlled NGC feature; synchronized frame/audio contract; exact access, license, Windows, latency, VRAM, quality and game-impact qualification required. |
+| Offline comparator | MuseTalk 1.5 | LatentSync offline-only | MuseTalk's measured batch path took ~102 s for 1.579 s output; neither is a live pack candidate. |
+| Watchlist | EfficientSync; FlashLips | Ditto deferred | Paper results only until code, weights, license, Windows, cancellation and local resource/visual gates pass. |
+| Rejected live paths | Native game-rig integration; Wav2Lip; SadTalker; LivePortrait | — | No per-game integration or full-frame live replacement. |
 
 ## Decision guardrails
 
@@ -51,3 +53,5 @@ Decisions are for a Windows gaming companion, not a general SaaS or research not
 - No model/library is packed before exact source revision, all transitive assets and intended redistribution/commercial terms are recorded.
 - A faster optional visual feature that destabilizes the game or delays audio loses to audio/subtitles.
 - Backend diversity is a catalog/pack concern; core contracts do not expose CUDA-specific assumptions.
+- The captured source frame is immutable. Visual output is a bounded, frame/generation-addressed mouth residual applied only to a presentation copy; invalid or stale work reveals the untouched current frame.
+- Current admission permits one optional local visual lease. Any future local conversation-model policy requires measured co-residency, live game reserve, p99 workspace and load/unload accounting; no silent device or cloud substitution.

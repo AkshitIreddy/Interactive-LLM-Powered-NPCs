@@ -67,3 +67,9 @@ Any pre-activation failure → Failed (staging retained only when safe/resumable
 Downloads use TUF-selected metadata, bounded resume with ETag/content-range validation, declared size and hash. Extraction rejects path traversal, links/reparse points, ADS/device paths, duplicates and bombs. Activation switches an atomic version pointer only after verification, self-test, attestation, and an explicit user activation choice; the old version remains until health confirmation. Defaults, dependencies, migrations, profiles/games, and fallback policy cannot activate a pack. Removal enumerates exact manifest-owned files and respects shared reference counts.
 
 Disk-full, changed ETag, bad size/hash/signature, interrupted extraction, crashed self-test, locked file and rollback are first-class tests.
+
+## Runtime admission and residency
+
+The current policy admits no local LLM, STT, TTS or embedding pack. It may admit at most one explicitly selected generic visual worker after checking live DXGI budget/headroom, configured game reserve, measured warm and p99 RAM/VRAM workspace, backend/driver compatibility, frame-time target, and load/unload cost. A pack manifest's minimum VRAM or the GPU's advertised total is not sufficient evidence. Pressure revokes or unloads the visual lease first; audio/subtitles and the configured hosted routes continue unchanged.
+
+If future scope reopens local conversation models, the pack contract and UI must first add a measured co-residency matrix. Every selected combination is classified before download and activation as safe resident, serialized/cold-load only, CPU-only, conflicting or unverified. The scheduler grants exclusive leases for incompatible GPU stages and exposes switching latency; it never silently co-resides unsafe models, changes execution device, evicts a selected route or switches to cloud.

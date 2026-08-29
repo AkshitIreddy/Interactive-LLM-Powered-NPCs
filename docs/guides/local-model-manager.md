@@ -20,7 +20,9 @@ Downloads are resumable and size-limited. Archives are extracted into staging wi
 
 ## Recommendations
 
-Recommendations use current hardware, live available memory, runtime backend, selected game/performance mode, and measured pack data. The GPU model or total VRAM alone is insufficient. Every pack stays visibly experimental until its gates pass. The user must explicitly select the model and confirm its exact size, resource envelope, license/use terms, quality evidence, and download. A pack can never be installed or activated automatically as a default, dependency, migration, profile/game requirement, or fallback.
+Recommendations use current hardware, live DXGI budget/headroom, a configured game reserve, measured warm and p99 RAM/VRAM workspace, runtime backend, selected game/performance mode, frame-time target and load/unload cost. The GPU model or total VRAM alone is insufficient. The current scheduler may admit at most one optional local visual lease and revokes or unloads it before affecting hosted conversation or audio/subtitles. Every pack stays visibly experimental until its gates pass. The user must explicitly select the model and confirm its exact size, resource envelope, license/use terms, quality evidence, and download. A pack can never be installed or activated automatically as a default, dependency, migration, profile/game requirement, or fallback.
+
+Local LLM, STT, TTS and embedding models remain outside the current product policy. If that scope changes, the application must first add a measured co-residency matrix that classifies every selected combination as safe resident, serialized/cold-load only, CPU-only, conflicting or unverified. It must account for the running game's reserve and model p99 workspace, serialize incompatible GPU stages, disclose switching latency, and never silently change device or provider.
 
 ## Repair, update, remove
 
@@ -42,4 +44,6 @@ No approved public pack catalog, TUF root, third-party runtime, or model weight 
 
 Permissive redistributable lip-sync packs can enter a signed catalog after review. Research-only, personal-use, non-commercial, private-access, or no-redistribution weights must not be repackaged. A direct-from-upstream flow is allowed only when exact terms permit the intended use and the UI clearly segregates it from official redistributable packs.
 
-Current research compares a lightweight tracked viseme/mouth-warp baseline with MuseTalk 1.5. NVIDIA AR SDK LipSync is conditional on private NGC access and full Windows/license/resource qualification; a standard NIM API key does not unlock it. Ditto is deferred, and LatentSync is treated as offline-only. Native rigs/Audio2Face, Wav2Lip, SadTalker, and LivePortrait are not live product paths.
+Current research uses Audio2Face-3D regression v2.3 only as a possible audio-to-animation coefficient source for a project-owned tracked 2D mouth residual; it does not connect to a native game rig. NVIDIA Maxine AR SDK LipSync is a separate access-controlled direct-video experiment pending exact access, license, Windows, latency, VRAM, quality and game-impact qualification. MuseTalk 1.5 is offline/comparator-only after its measured batch path took approximately 102 seconds for 1.579 seconds of output. EfficientSync and FlashLips are paper watchlist entries only. None is a qualified, downloadable or selectable pack.
+
+In every lane the captured game frame is immutable. A worker may return only a bounded mouth residual keyed to the exact actor, frame, timestamp and cancellation generation. The compositor applies an accepted residual to a presentation copy of the newest compatible frame; stale, occluded, wrong-identity, out-of-mask or over-budget work is discarded and the untouched current frame is shown.

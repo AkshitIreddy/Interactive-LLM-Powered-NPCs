@@ -64,14 +64,17 @@ and [API Trial Terms](https://assets.ngc.nvidia.com/products/api-catalog/legal/N
 
 | Candidate | Policy |
 | --- | --- |
-| Tracked viseme/mouth-warp | Low-resource generic baseline; no model availability claim and still requires rendered tracking/quality evidence |
-| MuseTalk 1.5 | Public experimental comparator; an attested standalone Windows run produced 39 frames for 1.579 s of synthetic stock-voice audio, but its ~102 s batch-path wall time fails live-latency admission. It remains blocked pending a persistent runner, exact license/security review, quality, and game-impact evidence. |
-| NVIDIA AR SDK LipSync/private NGC package | Conditional candidate; a normal NIM API key does not unlock it. Private access, Windows/Ada path, image + 16 kHz mono input, region/tracking, fixed 14-frame pre-roll, license, size/VRAM, quality, and impact must be qualified |
+| Audio2Face-3D regression v2.3 → tracked 2D mouth residual | Unqualified low-latency architecture candidate. Audio2Face supplies animation coefficients/geometry; project code would map approved mouth/jaw controls onto a strict 2D residual without native-rig access. No runtime or pack availability claim. |
+| NVIDIA Maxine AR SDK LipSync | Separate access-controlled direct-video experiment. Its synchronized frame/audio contract, exact access/license, supported Windows/GPU path, startup/pre-roll, latency, size/VRAM, quality, and game impact must be qualified; a hosted NIM key alone does not prove entitlement. |
+| MuseTalk 1.5 | Offline comparator only. An attested standalone Windows run produced 39 frames for 1.579 s of synthetic stock-voice audio, but its ~102 s batch-path wall time fails live-latency admission. It does not qualify a persistent runner, app integration or pack. |
+| EfficientSync; FlashLips | Paper watchlist only; code, weights, license, Windows runtime, cancellation, resources and rendered behavior remain unqualified. |
 | Ditto | Deferred until leading candidates and the baseline are resolved |
 | LatentSync | Offline comparison only; rejected as a live-game route |
-| Native rigs/Audio2Face, Wav2Lip, SadTalker, LivePortrait | Rejected as live product paths |
+| Native game-rig integration, Wav2Lip, SadTalker, LivePortrait | Rejected as live product paths |
 
 Conversation is API-first: there are no product download routes for local LLM, STT, TTS, or embedding models. The list above is not a redistribution or availability promise. Every eligible lip-sync runtime/weight needs an immutable source, hash, ABI, download/installed size, RAM/VRAM envelope, signed pack manifest, runtime self-test, explicit license approval, quality/game-impact report, and experimental disclosure. The checked-in catalog has no `installed_qualified` lip-sync route and therefore exposes no selectable or default local third-party model.
+
+The source game frame is immutable. Visual candidates may return only a bounded residual keyed to an exact actor/frame/timestamp/cancellation generation; invalid or stale output is discarded and presentation falls open to the untouched current frame. Current resource admission permits one optional local visual lease and uses live game reserve plus measured p99 workspace—not total VRAM. Any future local conversation-model scope requires a separate decision and co-residency matrix; it cannot silently share the lease, move devices or switch providers.
 
 `ModelPackManifestV1` is implemented by `crates/model-manager/src/manifest.rs`. The example/schema boundary under `packaging/model-packs/` is illustrative until it is generated from or checked against the authoritative Rust contract.
 
