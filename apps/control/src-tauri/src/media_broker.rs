@@ -870,7 +870,12 @@ fn read_frame<R: Read>(reader: &mut R) -> Result<Vec<u8>, MediaBrokerError> {
 }
 
 fn decode_diagnostics(payload: &[u8]) -> Result<MediaBrokerDiagnostics, MediaBrokerError> {
-    if payload.len() != 80 {
+    // v1 originally exposed ten fixed fields (80 bytes). Native residual
+    // rejection counters were appended in a compatible broker update. Accept
+    // both payload sizes and ignore unknown trailing diagnostics until the
+    // desktop domain exposes them, rather than treating a healthy broker as an
+    // authentication failure during its health refresh.
+    if payload.len() != 80 && payload.len() != 104 {
         return Err(MediaBrokerError::Malformed);
     }
     Ok(MediaBrokerDiagnostics {
@@ -1062,7 +1067,9 @@ mod tests {
         assert!(decode_diagnostics(&[]).is_err());
         assert!(decode_diagnostics(&[0; 79]).is_err());
         assert!(decode_diagnostics(&[0; 81]).is_err());
+        assert!(decode_diagnostics(&[0; 103]).is_err());
         assert!(decode_diagnostics(&[0; 80]).is_ok());
+        assert!(decode_diagnostics(&[0; 104]).is_ok());
     }
 
     #[test]
