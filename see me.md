@@ -4,6 +4,70 @@ Paused at the user’s request on 2026-08-29. Do not push, publish, tag, upload,
 activate an updater, use provider credentials, download models, or change the
 power profile while resuming this work.
 
+## Active continuation — real speaking/lip-sync qualification
+
+The user later explicitly resumed work and authorized their local test-provider
+credentials and disposable model downloads for **private testing only**. The
+public-distribution boundary above remains unchanged: do not push, publish,
+tag, upload, activate updates, or bundle any test model.
+
+The new evidence gate is stricter than the earlier fixture video: a test is not
+complete unless it contains a real stock voice, a real local model render, and
+an inspected video with a muxed audio stream. The existing app is still silent
+and metadata-only for animation, so no existing Response Console video may be
+described as real spoken/lip-synced application E2E.
+
+### Completed in this continuation
+
+- Hardened the one-off ElevenLabs test generator to select only verified
+  `premade`/`default` stock voices, reject stale output, measure 24 kHz PCM,
+  hash outputs, and round-trip the exact Mara reply through AssemblyAI. The
+  real call succeeded using a non-cloned premade voice: 9.639 s, 24 kHz mono,
+  peak `0.872101`, RMS `0.181025`, zero clipped samples; ASR matched the full
+  reply at `0.9876` confidence and the remote transcript was deleted.
+- Fixed and committed the real WGC frame-lifetime bug as
+  `334000c fix(capture): own WGC texture before frame close`. The product
+  broker now owns/copies a D3D texture before a WGC frame closes.
+- Created the fully isolated test root:
+  `C:\Users\akshi\AppData\Local\InteractiveNPCsTests\wav2lip-qualification-20260829T163112Z`
+  with a Python 3.10 venv, pinned dependencies, original synthetic face/video
+  inputs, redacted provenance, hardening scripts, and GPU coordination wrappers.
+- Ran the official Wav2Lip path for real: CUDA detected the RTX 4080 and
+  processed the full PCM/face-detection preflight. It then correctly rejected
+  the official downloaded GAN artifact because it was a TorchScript archive,
+  not tensor-only state data. Do **not** bypass this with `weights_only=False`
+  or `torch.jit.load`; PyTorch documents arbitrary-code-execution risk for
+  untrusted/tampered TorchScript archives.
+- Prepared a segregated fallback ONNX graph from a third-party conversion,
+  pinned to its Hugging Face revision/content hash. It passes ONNX structural
+  validation: standard-domain graph only, expected Wav2Lip inputs/outputs, and
+  only standard Conv/ConvTranspose/normalization/activation operators. It is
+  expressly **not** a product pack or catalog candidate.
+
+### Current state and exact next steps
+
+1. Respect `C:\Users\akshi\Desktop\Code Palace\gpu use.txt`. It is currently
+   owned by another real-E2E workload (`yes`); do not clear or contend with it.
+2. When it returns to `no` and `nvidia-smi` shows no compute workload, run
+   `run_onnx_qualification.sh` from the test root. It reserves the GPU only
+   around CUDA execution and restores `no` in `trap` cleanup.
+3. Verify that ONNX Runtime actually uses `CUDAExecutionProvider`; reject CPU
+   fallback. Inspect MP4 stream metadata/duration, PCM metrics and multiple
+   mouth frames. Run a second 720p Eclipse Harbor video pass only after the
+   static-face pass has passed visual review.
+4. If the ONNX result fails quality/safety/latency, preserve its report then
+   clean only its exact test cache. Do not promote any Wav2Lip-derived artifact
+   into the installer because its upstream non-commercial license and this
+   conversion’s provenance both disqualify it.
+5. For a truthful live application test, implement the bounded Windows-only
+   runtime-host qualification path: concrete ElevenLabs transport, Runtime
+   Core TTS bridge, dev-only WASAPI `AudioSink`, explicit live-audio
+   authorization/provider/voice selection, and an honest `lip_sync_unavailable`
+   state. Production audio still requires the planned broker shared-PCM mapping.
+
+The adversarial ledger for this continuation is
+`artifacts/actual-ui-demo/ADVERSARIAL_REFINEMENT_LEDGER.md`.
+
 ## What is complete
 
 - The 2.0 local Debug review build was previously packaged through its full
