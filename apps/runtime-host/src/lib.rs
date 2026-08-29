@@ -13,6 +13,7 @@ pub mod profile_replays;
 pub mod profiles;
 pub mod simulation;
 pub mod supervisor;
+pub mod tts_bridge;
 
 pub use bootstrap::{CatalogTrustState, HostConfig, HostState};
 pub use control::{ControlRequest, ControlResponse, ServeOptions};
