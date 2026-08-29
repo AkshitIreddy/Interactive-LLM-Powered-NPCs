@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use async_trait::async_trait;
 use futures_util::{stream, StreamExt};
@@ -17,10 +21,27 @@ use npc_runtime_core::{
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
+#[cfg(any(test, all(windows, debug_assertions, feature = "dev-wasapi-audio")))]
+#[allow(dead_code)]
+#[path = "audio_output/mod.rs"]
+mod dev_audio_output;
+
 use crate::{
     profiles::{GenericGameError, GenericGameSelection, ProfileCorpus, GENERIC_GAME_ID},
     HostState,
 };
+
+#[cfg(all(windows, debug_assertions, feature = "dev-wasapi-audio"))]
+use crate::tts_bridge::{RuntimeTtsBridge, RuntimeTtsBridgeConfig, VaultTtsCredentialResolver};
+#[cfg(all(windows, debug_assertions, feature = "dev-wasapi-audio"))]
+use dev_audio_output::{DevSubmittedPlaybackReceipt, DevWasapiAudioSink, DevWasapiConfig};
+#[cfg(all(windows, debug_assertions, feature = "dev-wasapi-audio"))]
+use npc_providers_tts::{
+    ElevenLabsConfig, ElevenLabsProvider, ElevenLabsWebSocketTransport, HostedTtsProviderId,
+    StreamingTtsProvider, VoiceBinding, VoiceBindings,
+};
+#[cfg(all(windows, debug_assertions, feature = "dev-wasapi-audio"))]
+use npc_runtime_core::DataClass;
 
 const DEV_LIVE_TTS_PROVIDER_ID: &str = "elevenlabs";
 const DEV_LIVE_TTS_MODEL_ID: &str = "eleven_flash_v2_5";
@@ -133,6 +154,46 @@ pub struct SimulationResult {
     pub outcome: TurnOutcome,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LivePlaybackEvidence {
+    sentence_id: u64,
+    source_frames_submitted: u64,
+    device_frames_submitted: u64,
+    source_duration: Duration,
+    source_submission_complete: bool,
+    endpoint_drain_complete: bool,
+    cancelled: bool,
+}
+
+#[derive(Default)]
+struct LivePlaybackLedger {
+    receipts: Mutex<Vec<LivePlaybackEvidence>>,
+}
+
+impl LivePlaybackLedger {
+    #[cfg(all(windows, debug_assertions, feature = "dev-wasapi-audio"))]
+    fn record(&self, receipt: LivePlaybackEvidence) -> Result<(), RuntimeDependencyError> {
+        self.receipts
+            .lock()
+            .map_err(|_| RuntimeDependencyError::Internal("live playback ledger poisoned".into()))?
+            .push(receipt);
+        Ok(())
+    }
+
+    fn snapshot(&self) -> Result<Vec<LivePlaybackEvidence>, SimulationError> {
+        self.receipts
+            .lock()
+            .map(|receipts| receipts.clone())
+            .map_err(|_| SimulationError::Runtime)
+    }
+}
+
+struct DevLiveDependencies {
+    tts: Arc<dyn TtsProvider>,
+    audio: Arc<dyn AudioSink>,
+    ledger: Arc<LivePlaybackLedger>,
+}
+
 impl HostState {
     pub async fn simulate_turn(
         &self,
@@ -154,7 +215,7 @@ impl HostState {
         if request.anti_cheat_detected() {
             return Err(SimulationError::AntiCheatBlocked);
         }
-        let dev_live_tts_requested = request.dev_live_tts.is_some();
+        let dev_live_tts = request.dev_live_tts.clone();
         let (game_id, character_id, display_name, generic_mode) =
             if request.game_id == GENERIC_GAME_ID {
                 let selection = request
@@ -216,9 +277,28 @@ impl HostState {
         let effects = Arc::new(FixtureEffects {
             descriptor: local_descriptor("fixture-effects", ProviderModality::Effects),
         });
-        let tts = Arc::new(FixtureTts {
-            descriptor: local_descriptor("fixture-tts", ProviderModality::Speech),
-        });
+        let live_dependencies = match dev_live_tts.as_ref() {
+            Some(route) => Some(build_dev_live_dependencies(self, route)?),
+            None => None,
+        };
+        let (tts, audio, live_ledger): (
+            Arc<dyn TtsProvider>,
+            Arc<dyn AudioSink>,
+            Option<Arc<LivePlaybackLedger>>,
+        ) = match live_dependencies {
+            Some(dependencies) => (
+                dependencies.tts,
+                dependencies.audio,
+                Some(dependencies.ledger),
+            ),
+            None => (
+                Arc::new(FixtureTts {
+                    descriptor: local_descriptor("fixture-tts", ProviderModality::Speech),
+                }),
+                Arc::new(FixtureAudio),
+                None,
+            ),
+        };
         // Game profiles provide dialogue/lore data only. The runtime never
         // turns model output into game actions or an executable integration
         // route, regardless of which authored profile is selected.
@@ -236,9 +316,10 @@ impl HostState {
                 },
                 identity,
                 memory,
-                audio: Arc::new(FixtureAudio),
+                audio,
             },
         );
+        let is_dev_live_tts = dev_live_tts.is_some();
         let turn = TurnRequest {
             session_id: request.session_id,
             turn_id: request.turn_id,
@@ -246,12 +327,27 @@ impl HostState {
             character_hint: Some(character_id),
             game_id,
             locale: request.locale,
-            execution_mode: ExecutionMode::FullyLocal,
-            network_policy: NetworkPolicy::Offline,
-            authorized_cloud_providers: Vec::new(),
+            execution_mode: match request.execution_mode {
+                Some(SimulationExecutionMode::Cloud) => ExecutionMode::Cloud,
+                Some(SimulationExecutionMode::Hybrid) => ExecutionMode::Hybrid,
+                Some(SimulationExecutionMode::Local) | None => ExecutionMode::FullyLocal,
+            },
+            network_policy: if is_dev_live_tts {
+                NetworkPolicy::Online
+            } else {
+                NetworkPolicy::Offline
+            },
+            authorized_cloud_providers: if is_dev_live_tts {
+                vec![DEV_LIVE_TTS_PROVIDER_ID.to_owned()]
+            } else {
+                Vec::new()
+            },
             allow_provider_fallback: false,
             allow_local_to_cloud_fallback: false,
-            allow_retaining_providers: false,
+            // The bridge deliberately describes the ordinary hosted route
+            // conservatively as retaining. Reaching this branch requires the
+            // request's explicit, per-turn developer authorization.
+            allow_retaining_providers: is_dev_live_tts,
             metadata: BTreeMap::new(),
         };
         let mut handle = supervisor
@@ -281,20 +377,35 @@ impl HostState {
             .await
             .map_err(|_| SimulationError::Runtime)?;
         supervisor.shutdown().await;
+        let live_receipts = match live_ledger {
+            Some(ledger) => {
+                let receipts = ledger.snapshot()?;
+                validate_live_delivery(&outcome, &receipts)?;
+                receipts
+            }
+            None => Vec::new(),
+        };
+        let submitted_source_frames = live_receipts
+            .iter()
+            .map(|receipt| receipt.source_frames_submitted)
+            .sum::<u64>();
+        let submitted_device_frames = live_receipts
+            .iter()
+            .map(|receipt| receipt.device_frames_submitted)
+            .sum::<u64>();
+        let (fixture_only, integration_mode) = result_mode(is_dev_live_tts, generic_mode);
         Ok(SimulationResult {
             schema_version: "1.0.0".to_owned(),
-            fixture_only: true,
-            integration_mode: if dev_live_tts_requested {
-                "hosted_tts_request_shaping_only"
-            } else if generic_mode {
-                "generic_experimental"
-            } else {
-                "authored_profile"
-            },
-            capability_notices: if dev_live_tts_requested {
+            fixture_only,
+            integration_mode,
+            capability_notices: if is_dev_live_tts {
                 vec![
-                    "Developer hosted-TTS request shape validated for private qualification; IPC contains provider, model, and allowlisted stock-voice identifiers only, never credential values.".into(),
-                    "The deterministic fixture still produced this turn: provider synthesis, speaker playback, and lip-sync were not exercised.".into(),
+                    "Developer-only ElevenLabs stock-voice synthesis completed through the trusted credential resolver; IPC contained provider, model, and allowlisted stock-voice identifiers only, never credential values.".into(),
+                    format!(
+                        "The developer WASAPI sink accepted {submitted_source_frames} source frames and submitted {submitted_device_frames} device frames with bounded endpoint drain receipts. These are operating-system callback submission measurements, not proof of physical audibility."
+                    ),
+                    "lip_sync_unavailable: this live-audio qualification path does not claim or drive mouth animation.".into(),
+                    "The response text and effects remain deterministic fixtures; only hosted TTS synthesis and developer WASAPI submission are live in this mixed qualification route.".into(),
                     "Executable adapters and action proposals are disabled.".into(),
                 ]
             } else if generic_mode {
@@ -313,6 +424,201 @@ impl HostState {
             outcome,
         })
     }
+}
+
+fn result_mode(is_dev_live_tts: bool, generic_mode: bool) -> (bool, &'static str) {
+    if is_dev_live_tts {
+        (false, "debug_hosted_tts_wasapi_submission")
+    } else if generic_mode {
+        (true, "generic_experimental")
+    } else {
+        (true, "authored_profile")
+    }
+}
+
+#[cfg(all(windows, debug_assertions, feature = "dev-wasapi-audio"))]
+fn build_dev_live_dependencies(
+    state: &HostState,
+    route: &DevLiveTtsRequest,
+) -> Result<DevLiveDependencies, SimulationError> {
+    let bindings = VoiceBindings::new([VoiceBinding {
+        intent_id: "dev.elevenlabs.stock".to_owned(),
+        provider_id: HostedTtsProviderId::ElevenLabs,
+        voice_id: route.voice_id.clone(),
+        model_id: route.model_id.clone(),
+        provider_options: BTreeMap::new(),
+    }])
+    .map_err(|_| SimulationError::DevLiveTtsUnavailable)?;
+    let transport = Arc::new(ElevenLabsWebSocketTransport::default());
+    let credentials = Arc::new(VaultTtsCredentialResolver::new(Arc::clone(&state.vault)));
+    let upstream: Arc<dyn StreamingTtsProvider> = Arc::new(ElevenLabsProvider::new(
+        transport,
+        credentials,
+        bindings,
+        ElevenLabsConfig::default(),
+    ));
+    let bridge = RuntimeTtsBridge::new(
+        upstream,
+        RuntimeTtsBridgeConfig::dev_elevenlabs_stock(dev_elevenlabs_descriptor()),
+    )
+    .map_err(|_| SimulationError::DevLiveTtsUnavailable)?;
+
+    let ledger = Arc::new(LivePlaybackLedger::default());
+    let sink = DevWasapiAudioSink::new(DevWasapiConfig::default())
+        .map_err(|_| SimulationError::DevLiveTtsUnavailable)?;
+    Ok(DevLiveDependencies {
+        tts: Arc::new(bridge),
+        audio: Arc::new(ReceiptCheckedDevAudio {
+            sink,
+            ledger: Arc::clone(&ledger),
+        }),
+        ledger,
+    })
+}
+
+#[cfg(all(windows, debug_assertions, feature = "dev-wasapi-audio"))]
+fn dev_elevenlabs_descriptor() -> ProviderDescriptor {
+    ProviderDescriptor {
+        id: DEV_LIVE_TTS_PROVIDER_ID.to_owned(),
+        display_name: "ElevenLabs".to_owned(),
+        modality: ProviderModality::Speech,
+        location: ProviderLocation::Cloud {
+            service: DEV_LIVE_TTS_PROVIDER_ID.to_owned(),
+        },
+        may_retain_data: true,
+        transmitted_data: vec![DataClass::Transcript],
+        capabilities: BTreeMap::new(),
+    }
+}
+
+#[cfg(all(windows, debug_assertions, feature = "dev-wasapi-audio"))]
+struct ReceiptCheckedDevAudio {
+    sink: DevWasapiAudioSink,
+    ledger: Arc<LivePlaybackLedger>,
+}
+
+#[cfg(all(windows, debug_assertions, feature = "dev-wasapi-audio"))]
+#[async_trait]
+impl AudioSink for ReceiptCheckedDevAudio {
+    async fn play(
+        &self,
+        identity: &TurnIdentity,
+        sentence_id: u64,
+        stream: SpeechStream,
+        cancellation: CancellationToken,
+    ) -> Result<PlaybackReceipt, RuntimeDependencyError> {
+        let receipt = self
+            .sink
+            .play_submitted(identity, sentence_id, stream, cancellation)
+            .await?;
+        self.ledger
+            .record(live_playback_evidence(sentence_id, &receipt))?;
+
+        if receipt.cancelled {
+            return Ok(PlaybackReceipt {
+                audible_frames: receipt.source_frames_submitted,
+                duration: receipt.source_duration,
+                completed: false,
+            });
+        }
+        if receipt.source_frames_submitted == 0
+            || receipt.device_frames_submitted == 0
+            || receipt.source_duration.is_zero()
+            || !receipt.source_submission_complete
+            || !receipt.endpoint_drain_complete
+            || receipt.detached_cleanup_pending
+        {
+            return Err(RuntimeDependencyError::Unavailable(
+                "developer WASAPI sink did not return a complete nonzero submission receipt".into(),
+            ));
+        }
+
+        // Runtime Core's historical field is named `audible_frames`, but this
+        // developer sink can prove only frames accepted and submitted through
+        // WASAPI callbacks. The result notice preserves that narrower claim.
+        Ok(PlaybackReceipt {
+            audible_frames: receipt.source_frames_submitted,
+            duration: receipt.source_duration,
+            completed: true,
+        })
+    }
+
+    async fn stop(&self, identity: &TurnIdentity) -> Result<(), RuntimeDependencyError> {
+        self.sink.stop(identity).await
+    }
+}
+
+#[cfg(all(windows, debug_assertions, feature = "dev-wasapi-audio"))]
+fn live_playback_evidence(
+    sentence_id: u64,
+    receipt: &DevSubmittedPlaybackReceipt,
+) -> LivePlaybackEvidence {
+    LivePlaybackEvidence {
+        sentence_id,
+        source_frames_submitted: receipt.source_frames_submitted,
+        device_frames_submitted: receipt.device_frames_submitted,
+        source_duration: receipt.source_duration,
+        source_submission_complete: receipt.source_submission_complete,
+        endpoint_drain_complete: receipt.endpoint_drain_complete,
+        cancelled: receipt.cancelled,
+    }
+}
+
+#[cfg(not(all(windows, debug_assertions, feature = "dev-wasapi-audio")))]
+fn build_dev_live_dependencies(
+    _state: &HostState,
+    _route: &DevLiveTtsRequest,
+) -> Result<DevLiveDependencies, SimulationError> {
+    Err(SimulationError::DevLiveTtsUnavailable)
+}
+
+fn validate_live_delivery(
+    outcome: &TurnOutcome,
+    receipts: &[LivePlaybackEvidence],
+) -> Result<(), SimulationError> {
+    if outcome.lifecycle != npc_runtime_core::TurnLifecycle::Completed
+        || outcome.delivered.is_empty()
+        || outcome.selected_tts_providers.as_slice() != [DEV_LIVE_TTS_PROVIDER_ID]
+        || outcome.delivered.len() != receipts.len()
+    {
+        return Err(SimulationError::DevLiveTtsDeliveryFailed);
+    }
+
+    for delivered in &outcome.delivered {
+        if delivered.delivery != npc_runtime_core::DeliveryMode::Audio
+            || delivered.audible_frames == 0
+            || delivered.duration.is_zero()
+        {
+            return Err(SimulationError::DevLiveTtsDeliveryFailed);
+        }
+        let Some(receipt) = receipts
+            .iter()
+            .find(|receipt| receipt.sentence_id == delivered.sentence_id)
+        else {
+            return Err(SimulationError::DevLiveTtsDeliveryFailed);
+        };
+        if receipt.source_frames_submitted != delivered.audible_frames
+            || receipt.source_duration != delivered.duration
+            || receipt.source_frames_submitted == 0
+            || receipt.device_frames_submitted == 0
+            || !receipt.source_submission_complete
+            || !receipt.endpoint_drain_complete
+            || receipt.cancelled
+        {
+            return Err(SimulationError::DevLiveTtsDeliveryFailed);
+        }
+    }
+
+    let mut sentence_ids = receipts
+        .iter()
+        .map(|receipt| receipt.sentence_id)
+        .collect::<Vec<_>>();
+    sentence_ids.sort_unstable();
+    sentence_ids.dedup();
+    if sentence_ids.len() != receipts.len() {
+        return Err(SimulationError::DevLiveTtsDeliveryFailed);
+    }
+    Ok(())
 }
 
 fn local_descriptor(id: &str, modality: ProviderModality) -> ProviderDescriptor {
@@ -678,6 +984,12 @@ pub enum SimulationError {
     Generic(#[from] GenericGameError),
     #[error("simulation runtime failed")]
     Runtime,
+    #[error(
+        "developer live TTS is available only in a Windows debug build with dev-wasapi-audio enabled"
+    )]
+    DevLiveTtsUnavailable,
+    #[error("developer live TTS did not produce receipt-backed nonzero WASAPI delivery")]
+    DevLiveTtsDeliveryFailed,
     #[error("simulation is blocked for protected online play")]
     ProtectedOnlineBlocked,
     #[error("simulation is blocked when anti-cheat is detected")]
@@ -690,6 +1002,42 @@ fn _assert_profile_corpus(_: &ProfileCorpus) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn completed_live_outcome() -> TurnOutcome {
+        TurnOutcome {
+            identity: TurnIdentity {
+                session_id: "receipt-session".into(),
+                turn_id: "receipt-turn".into(),
+                cancellation_generation: 0,
+            },
+            lifecycle: npc_runtime_core::TurnLifecycle::Completed,
+            full_response: "Receipt-backed speech.".into(),
+            effects: NpcEffectsV1::neutral(),
+            delivered: vec![DeliveredSentence {
+                sentence_id: 1,
+                text: "Receipt-backed speech.".into(),
+                delivery: npc_runtime_core::DeliveryMode::Audio,
+                audible_frames: 4_800,
+                duration: Duration::from_millis(200),
+            }],
+            degradations: Vec::new(),
+            selected_llm_provider: Some("fixture-llm".into()),
+            selected_tts_providers: vec![DEV_LIVE_TTS_PROVIDER_ID.into()],
+            error: None,
+        }
+    }
+
+    fn completed_sink_receipt() -> LivePlaybackEvidence {
+        LivePlaybackEvidence {
+            sentence_id: 1,
+            source_frames_submitted: 4_800,
+            device_frames_submitted: 9_600,
+            source_duration: Duration::from_millis(200),
+            source_submission_complete: true,
+            endpoint_drain_complete: true,
+            cancelled: false,
+        }
+    }
 
     fn request_with(route: Option<DevLiveTtsRequest>) -> SimulationRequest {
         SimulationRequest {
@@ -782,5 +1130,59 @@ mod tests {
             }
         });
         assert!(serde_json::from_value::<SimulationRequest>(with_secret).is_err());
+    }
+
+    #[test]
+    fn live_route_rejects_fixture_or_silent_delivery() {
+        let mut fixture = completed_live_outcome();
+        fixture.selected_tts_providers = vec!["fixture-tts".into()];
+        assert!(matches!(
+            validate_live_delivery(&fixture, &[completed_sink_receipt()]),
+            Err(SimulationError::DevLiveTtsDeliveryFailed)
+        ));
+
+        let mut silent = completed_live_outcome();
+        silent.delivered[0].audible_frames = 0;
+        silent.delivered[0].duration = Duration::ZERO;
+        let mut silent_receipt = completed_sink_receipt();
+        silent_receipt.source_frames_submitted = 0;
+        silent_receipt.source_duration = Duration::ZERO;
+        assert!(matches!(
+            validate_live_delivery(&silent, &[silent_receipt]),
+            Err(SimulationError::DevLiveTtsDeliveryFailed)
+        ));
+    }
+
+    #[test]
+    fn live_route_cannot_claim_audio_without_matching_sink_receipt() {
+        let outcome = completed_live_outcome();
+        assert!(matches!(
+            validate_live_delivery(&outcome, &[]),
+            Err(SimulationError::DevLiveTtsDeliveryFailed)
+        ));
+
+        let mut incomplete = completed_sink_receipt();
+        incomplete.endpoint_drain_complete = false;
+        assert!(matches!(
+            validate_live_delivery(&outcome, &[incomplete]),
+            Err(SimulationError::DevLiveTtsDeliveryFailed)
+        ));
+    }
+
+    #[test]
+    fn live_route_accepts_only_matching_nonzero_completed_receipt() {
+        assert!(
+            validate_live_delivery(&completed_live_outcome(), &[completed_sink_receipt()]).is_ok()
+        );
+    }
+
+    #[test]
+    fn live_route_result_metadata_cannot_fall_back_to_fixture_only() {
+        let (fixture_only, integration_mode) = result_mode(true, false);
+        assert!(!fixture_only);
+        assert_eq!(integration_mode, "debug_hosted_tts_wasapi_submission");
+
+        assert_eq!(result_mode(false, false), (true, "authored_profile"));
+        assert_eq!(result_mode(false, true), (true, "generic_experimental"));
     }
 }

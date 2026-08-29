@@ -212,7 +212,7 @@ async fn eclipse_harbor_fixture_reply_matches_its_authored_turn() {
 }
 
 #[tokio::test]
-async fn dev_live_tts_request_stays_fixture_only_and_refuses_trusted_risk() {
+async fn dev_live_tts_requires_the_qualified_build_and_refuses_trusted_risk() {
     let app_data = tempfile::tempdir().unwrap();
     let state = HostState::initialize(HostConfig {
         repo_root: repo_root(),
@@ -239,19 +239,12 @@ async fn dev_live_tts_request_stays_fixture_only_and_refuses_trusted_risk() {
                 explicit_user_authorization: true,
             }),
         })
-        .await
-        .unwrap();
+        .await;
 
-    assert!(result.fixture_only);
-    assert_eq!(result.integration_mode, "hosted_tts_request_shaping_only");
-    assert!(result
-        .capability_notices
-        .iter()
-        .any(|notice| notice.contains("never credential values")));
-    assert!(result
-        .capability_notices
-        .iter()
-        .any(|notice| notice.contains("speaker playback, and lip-sync were not exercised")));
+    assert!(matches!(
+        result,
+        Err(npc_runtime_host::simulation::SimulationError::DevLiveTtsUnavailable)
+    ));
 
     for safety_context in [
         SimulationSafetyContext {
