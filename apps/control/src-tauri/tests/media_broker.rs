@@ -14,9 +14,9 @@ fn repository_root() -> PathBuf {
 fn fixture_broker() -> PathBuf {
     std::env::var_os("NPC_MEDIA_BROKER_FIXTURE")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            repository_root().join("artifacts/media-broker-build/Debug/npc-media-broker.exe")
-        })
+        .expect(
+            "NPC_MEDIA_BROKER_FIXTURE is required; run scripts/dev.ps1 test or set the fixed-name native broker path explicitly",
+        )
 }
 
 #[tokio::test]

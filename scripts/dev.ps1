@@ -538,6 +538,8 @@ function Invoke-Tests {
     if (Test-Path -LiteralPath $tauriManifest -PathType Leaf) {
         if (Test-IsWindows) {
             Invoke-CheckBlock -Label 'Tauri Rust tests' -Action {
+                Write-Step 'Preparing project sidecars for nested Tauri tests'
+                Prepare-TauriSidecarsForValidation
                 Write-Step 'Running nested Tauri Rust tests'
                 Invoke-External -FilePath 'cargo' -ArgumentList @(
                     'test', '--manifest-path', $tauriManifest, '--all-targets', '--locked', '--offline'

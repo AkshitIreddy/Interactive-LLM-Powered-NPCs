@@ -137,8 +137,15 @@ foreach ($source in @($runtimeSource, $brokerSource)) {
 }
 
 New-Item -ItemType Directory -Path $destination -Force | Out-Null
-Copy-Item -LiteralPath $runtimeSource -Destination (Join-Path $destination 'npc-runtime-x86_64-pc-windows-msvc.exe') -Force
-Copy-Item -LiteralPath $brokerSource -Destination (Join-Path $destination 'npc-media-broker-x86_64-pc-windows-msvc.exe') -Force
+$runtimeDestination = Join-Path $destination 'npc-runtime-x86_64-pc-windows-msvc.exe'
+$brokerDestination = Join-Path $destination 'npc-media-broker-x86_64-pc-windows-msvc.exe'
+Copy-Item -LiteralPath $runtimeSource -Destination $runtimeDestination -Force
+Copy-Item -LiteralPath $brokerSource -Destination $brokerDestination -Force
+
+# The integration test launches the native binary directly, whose fixed-name
+# validation intentionally rejects Tauri's target-triple filename. Publish the
+# resolved short-cache source so Rust does not duplicate this path algorithm.
+$env:NPC_MEDIA_BROKER_FIXTURE = $brokerSource
 
 Write-Host "Prepared project sidecars in $destination" -ForegroundColor Green
 Write-Host 'No third-party runtime or model payload was bundled.' -ForegroundColor Yellow

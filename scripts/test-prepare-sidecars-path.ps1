@@ -99,6 +99,11 @@ try {
         $brokerDestination = Join-Path $fixture.Destination 'npc-media-broker-x86_64-pc-windows-msvc.exe'
         Assert-True -Condition (([System.IO.File]::ReadAllText($runtimeDestination)) -eq "runtime-$($fixture.Marker)") -Message 'Runtime sidecar was not copied from the deep checkout.'
         Assert-True -Condition (([System.IO.File]::ReadAllText($brokerDestination)) -eq "broker-$($fixture.Marker)") -Message 'Native sidecar was not copied from the short repository-specific build path.'
+        Assert-True -Condition ([string]::Equals(
+                $env:NPC_MEDIA_BROKER_FIXTURE,
+                (Join-Path $fixture.NativeBuild 'Debug/npc-media-broker.exe'),
+                [System.StringComparison]::OrdinalIgnoreCase
+            )) -Message "prepare-sidecars.ps1 did not publish the resolved short-cache broker fixture path. Expected beneath: $($fixture.NativeBuild); actual: $env:NPC_MEDIA_BROKER_FIXTURE"
         Assert-True -Condition (-not (Test-Path -LiteralPath $fixture.LegacyNativeBuild)) -Message 'prepare-sidecars.ps1 recreated the vulnerable repository-local native build path.'
     }
 
@@ -124,6 +129,7 @@ try {
 }
 finally {
     [System.Environment]::SetEnvironmentVariable('LOCALAPPDATA', $savedLocalAppData, 'Process')
+    Remove-Item Env:NPC_MEDIA_BROKER_FIXTURE -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $caseRoot) {
         Remove-Item -LiteralPath $caseRoot -Recurse -Force
     }
