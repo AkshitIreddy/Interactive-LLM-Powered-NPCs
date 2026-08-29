@@ -81,6 +81,16 @@ enum BrokerCommand {
     Shutdown = 10,
 }
 
+impl BrokerCommand {
+    fn advances_cancellation_generation_on_success(self) -> bool {
+        #[cfg(debug_assertions)]
+        if matches!(self, Self::SelectTarget | Self::ClearTarget) {
+            return true;
+        }
+        false
+    }
+}
+
 #[cfg(debug_assertions)]
 #[derive(Clone, PartialEq, Message)]
 struct SelectTargetPayload {
@@ -260,17 +270,50 @@ fn request_blocking(
     let frame = read_frame(&mut connection.stream)?;
     let response =
         BrokerResponse::decode(frame.as_slice()).map_err(|_| MediaBrokerError::Malformed)?;
-    if response.version != PROTOCOL_VERSION
-        || response.response_to_sequence != sequence
-        || response.cancellation_generation != connection.cancellation_generation
-    {
+    if response.version != PROTOCOL_VERSION || response.response_to_sequence != sequence {
         return Err(MediaBrokerError::Malformed);
     }
     let status = response.status();
+    connection.cancellation_generation = reconcile_response_generation(
+        command,
+        connection.cancellation_generation,
+        response.cancellation_generation,
+        status,
+    )?;
     if status != BrokerStatus::Ok {
         return Err(MediaBrokerError::Remote(status));
     }
     Ok(response)
+}
+
+fn reconcile_response_generation(
+    command: BrokerCommand,
+    current: u64,
+    response: u64,
+    status: BrokerStatus,
+) -> Result<u64, MediaBrokerError> {
+    let mutating = command.advances_cancellation_generation_on_success();
+    if !mutating {
+        return (response == current)
+            .then_some(current)
+            .ok_or(MediaBrokerError::Malformed);
+    }
+
+    let next = current.checked_add(1).ok_or(MediaBrokerError::Malformed)?;
+    if response != current && response != next {
+        return Err(MediaBrokerError::Malformed);
+    }
+    if status == BrokerStatus::Ok {
+        // Newer brokers return the post-command generation. The original V1
+        // SelectTarget/ClearTarget response was assembled before dispatch and
+        // still carried `current`; both represent the same guaranteed one-step
+        // transition after a successful target mutation.
+        Ok(next)
+    } else {
+        // A rejected command may fail before mutation. Only adopt a transition
+        // when the broker explicitly reports it.
+        Ok(response)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1345,6 +1388,50 @@ mod tests {
         let decoded = BrokerEnvelope::decode(envelope.encode_to_vec().as_slice()).expect("decode");
         assert_eq!(decoded, envelope);
         assert_eq!(decoded.launch_nonce.len(), 32);
+    }
+
+    #[test]
+    fn target_mutations_accept_only_one_monotonic_generation_step() {
+        let wire = BrokerResponse {
+            version: PROTOCOL_VERSION,
+            response_to_sequence: 2,
+            status: BrokerStatus::Ok as i32,
+            cancellation_generation: 1,
+            payload: Vec::new(),
+        }
+        .encode_to_vec();
+        let decoded = BrokerResponse::decode(wire.as_slice()).expect("decode native response");
+        assert_eq!(
+            reconcile_response_generation(
+                BrokerCommand::SelectTarget,
+                0,
+                decoded.cancellation_generation,
+                decoded.status(),
+            )
+            .expect("post-command generation"),
+            1
+        );
+        assert_eq!(
+            reconcile_response_generation(BrokerCommand::SelectTarget, 0, 0, BrokerStatus::Ok)
+                .expect("legacy pre-command response"),
+            1
+        );
+        assert_eq!(
+            reconcile_response_generation(BrokerCommand::ClearTarget, 7, 8, BrokerStatus::Ok)
+                .expect("clear transition"),
+            8
+        );
+        assert!(
+            reconcile_response_generation(BrokerCommand::SelectTarget, 7, 9, BrokerStatus::Ok)
+                .is_err()
+        );
+        assert!(
+            reconcile_response_generation(BrokerCommand::SelectTarget, 7, 6, BrokerStatus::Ok)
+                .is_err()
+        );
+        assert!(
+            reconcile_response_generation(BrokerCommand::Health, 7, 8, BrokerStatus::Ok).is_err()
+        );
     }
 
     #[test]
