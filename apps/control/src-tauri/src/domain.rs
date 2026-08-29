@@ -321,7 +321,11 @@ pub enum MeasurementBasis {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", tag = "type")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
 pub enum SimulationEvent {
     Started {
         simulation_id: String,
@@ -604,6 +608,32 @@ mod tests {
             ..OnboardingSnapshot::default()
         };
         assert!(state.validate().is_err());
+    }
+
+    #[test]
+    fn simulation_event_wire_fields_are_camel_case() {
+        let event = SimulationEvent::Completed {
+            simulation_id: "simulation-fixture".into(),
+            generation: 2,
+            sequence: 9,
+            fixture_first_audio_ms: 418,
+            runtime_fixture_only: true,
+            delivered_text: "The harbor remembers.".into(),
+        };
+        let wire = serde_json::to_value(event).expect("serialize simulation event");
+        assert_eq!(wire["type"], "completed");
+        assert_eq!(wire["simulationId"], "simulation-fixture");
+        assert_eq!(wire["fixtureFirstAudioMs"], 418);
+        assert_eq!(wire["runtimeFixtureOnly"], true);
+        assert_eq!(wire["deliveredText"], "The harbor remembers.");
+        for legacy_key in [
+            "simulation_id",
+            "fixture_first_audio_ms",
+            "runtime_fixture_only",
+            "delivered_text",
+        ] {
+            assert!(wire.get(legacy_key).is_none(), "legacy key {legacy_key}");
+        }
     }
 
     #[test]
