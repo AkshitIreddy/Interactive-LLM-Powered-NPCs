@@ -54,10 +54,21 @@ namespace InteractiveNpcs.SyntheticReplay
                 values[key] = args[++index];
             }
 
+            var executableDirectory = AppDomain.CurrentDomain.BaseDirectory;
+            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
             var options = new Options();
-            options.InputPath = Required(values, "--input");
-            options.MetadataPath = Required(values, "--metadata");
-            options.FfmpegPath = Required(values, "--ffmpeg");
+            options.InputPath = Path.GetFullPath(Value(
+                values,
+                "--input",
+                Path.Combine(executableDirectory, "eclipse-harbor-synthetic-game.mp4")));
+            options.MetadataPath = Path.GetFullPath(Value(
+                values,
+                "--metadata",
+                Path.Combine(appData, "io.github.akshitireddy.interactive-npcs", "debug-synthetic-replay-target.json")));
+            options.FfmpegPath = Path.GetFullPath(Value(
+                values,
+                "--ffmpeg",
+                DefaultFfmpegPath(executableDirectory)));
             options.WindowTitle = Value(values, "--title", options.WindowTitle);
             options.PlacementHelper = Value(values, "--placement-helper", null);
             options.Width = Integer(values, "--width", options.Width, 64, 7680);
@@ -67,6 +78,18 @@ namespace InteractiveNpcs.SyntheticReplay
             options.Loop = !values.ContainsKey("--no-loop");
             options.PlaceOnSecondMonitor = values.ContainsKey("--place-on-second-monitor");
             return options;
+        }
+
+        private static string DefaultFfmpegPath(string executableDirectory)
+        {
+            var sibling = Path.Combine(executableDirectory, "ffmpeg.exe");
+            if (File.Exists(sibling))
+            {
+                return sibling;
+            }
+
+            var installed = @"C:\ffmpeg\bin\ffmpeg.exe";
+            return File.Exists(installed) ? installed : sibling;
         }
 
         private static string Required(Dictionary<string, string> values, string key)
