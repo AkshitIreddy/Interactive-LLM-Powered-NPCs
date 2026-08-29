@@ -41,7 +41,8 @@ function New-ClippyDispatchFixture {
             $binRoot,
             $outsideRoot,
             (Join-Path $repoRoot 'scripts'),
-            (Join-Path $repoRoot 'apps/control/src-tauri')
+            (Join-Path $repoRoot 'apps/control/src-tauri'),
+            (Join-Path $repoRoot 'apps/control/src-tauri/binaries')
         )) {
         New-Item -ItemType Directory -Path $directory -Force | Out-Null
     }
@@ -64,6 +65,13 @@ function New-ClippyDispatchFixture {
     Write-Utf8NoBom -Path (Join-Path $repoRoot 'scripts/validate-json.cjs') -Content "process.exit(0);`n"
     Write-Utf8NoBom -Path (Join-Path $repoRoot 'scripts/test-json-validator.cjs') -Content "process.exit(0);`n"
     Write-Utf8NoBom -Path (Join-Path $repoRoot 'scripts/check-doc-links.ps1') -Content "exit 0`n"
+    Write-Utf8NoBom -Path (Join-Path $repoRoot 'scripts/prepare-sidecars.ps1') -Content @'
+param([string]$Configuration)
+Add-Content -LiteralPath $env:NPC_CLIPPY_TEST_LOG -Value "prepare|$PWD|$Configuration"
+$sidecarRoot = Join-Path $PSScriptRoot '../apps/control/src-tauri/binaries'
+Set-Content -LiteralPath (Join-Path $sidecarRoot 'npc-runtime-x86_64-pc-windows-msvc.exe') -Value 'fixture'
+Set-Content -LiteralPath (Join-Path $sidecarRoot 'npc-media-broker-x86_64-pc-windows-msvc.exe') -Value 'fixture'
+'@
 
     $cargoShim = @'
 @echo off
@@ -160,6 +168,7 @@ function Invoke-ClippyDispatchCase {
             @()
         }
         $repoPrefix = "cargo|$($fixture.RepoRoot)|"
+        $prepareCall = "prepare|$($fixture.RepoRoot)|Debug"
 
         Assert-True -Condition ($calls -contains "${repoPrefix}clippy --version") -Message "$Name did not probe plain Clippy from the sanitized repository root. Calls: $($calls -join '; '). Output: $text"
         Assert-True -Condition (-not ($calls -contains "cargo|$($fixture.OutsideRoot)|clippy --version")) -Message "$Name incorrectly probed Clippy from the caller's directory."
@@ -173,6 +182,11 @@ function Invoke-ClippyDispatchCase {
             Assert-True -Condition ($text -match 'verified \+stable is identical') -Message "Matching identity fixture did not report the verified fallback. Calls: $($calls -join '; '). Output: $text"
             Assert-True -Condition (@($calls | Where-Object { $_ -like "${repoPrefix}+stable clippy*" }).Count -eq 2) -Message "Matching identity fixture did not run both Clippy gates through +stable. Calls: $($calls -join '; ')"
             Assert-True -Condition (-not ($calls | Where-Object { $_ -like "${repoPrefix}clippy --workspace*" })) -Message 'Matching identity fixture bypassed the selected +stable invocation.'
+            Assert-True -Condition ($calls -contains $prepareCall) -Message "Matching identity fixture did not prepare clean-checkout sidecars. Calls: $($calls -join '; ')"
+            $prepareIndex = [array]::IndexOf($calls, $prepareCall)
+            $tauriClippyCall = @($calls | Where-Object { $_ -like "${repoPrefix}+stable clippy --manifest-path*" }) | Select-Object -First 1
+            $tauriClippyIndex = [array]::IndexOf($calls, $tauriClippyCall)
+            Assert-True -Condition ($prepareIndex -ge 0 -and $tauriClippyIndex -gt $prepareIndex) -Message "Matching identity fixture did not prepare sidecars before nested Tauri Clippy. Calls: $($calls -join '; ')"
         }
     }
     finally {

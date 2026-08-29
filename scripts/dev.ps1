@@ -297,6 +297,38 @@ function Get-ClippyInvocation {
     throw "The pinned Clippy component is unavailable and +stable was not proven identical to the active rustc release and commit. Reinstall the clippy component for rust-toolchain.toml. cargo clippy reported: $plainMessage"
 }
 
+function Prepare-TauriSidecarsForValidation {
+    $prepareSidecars = Join-Path $PSScriptRoot 'prepare-sidecars.ps1'
+    if (-not (Test-Path -LiteralPath $prepareSidecars -PathType Leaf)) {
+        throw "Sidecar preparation script was not found: $prepareSidecars"
+    }
+
+    Write-Step 'Preparing project sidecars for nested Tauri validation'
+    Push-Location -LiteralPath $script:RepoRoot
+    try {
+        $global:LASTEXITCODE = 0
+        & $prepareSidecars -Configuration $Configuration
+        $prepareExitCode = $LASTEXITCODE
+    }
+    finally {
+        Pop-Location
+    }
+    if ($prepareExitCode -ne 0) {
+        throw "Sidecar preparation exited with code $prepareExitCode."
+    }
+
+    $sidecarRoot = Join-Path $script:RepoRoot 'apps/control/src-tauri/binaries'
+    foreach ($sidecarName in @(
+            'npc-runtime-x86_64-pc-windows-msvc.exe',
+            'npc-media-broker-x86_64-pc-windows-msvc.exe'
+        )) {
+        $sidecarPath = Join-Path $sidecarRoot $sidecarName
+        if (-not (Test-Path -LiteralPath $sidecarPath -PathType Leaf)) {
+            throw "Sidecar preparation completed without required output: $sidecarPath"
+        }
+    }
+}
+
 function Invoke-Pnpm {
     param(
         [string[]]$Arguments,
@@ -653,12 +685,20 @@ function Invoke-Lint {
             Invoke-External -FilePath $clippy.FilePath -ArgumentList $rootClippyArguments -WorkingDirectory $script:RepoRoot
             }
             if (Test-IsWindows) {
-                Invoke-CheckBlock -Label 'Tauri Rust Clippy' -Action {
-                    Write-Step 'Running nested Tauri Rust Clippy with the locked dependency graph'
-                    $tauriClippyArguments = @($clippy.Prefix + @(
-                        'clippy', '--manifest-path', $tauriManifest, '--all-targets', '--all-features', '--locked', '--offline', '--', '-D', 'warnings'
-                    ))
-                    Invoke-External -FilePath $clippy.FilePath -ArgumentList $tauriClippyArguments -WorkingDirectory $script:RepoRoot
+                $failureCountBeforeSidecars = $script:Failures.Count
+                Invoke-CheckBlock -Label 'Tauri sidecar preparation' -Action {
+                    Prepare-TauriSidecarsForValidation
+                }
+                if ($script:Failures.Count -eq $failureCountBeforeSidecars) {
+                    Invoke-CheckBlock -Label 'Tauri Rust Clippy' -Action {
+                        Write-Step 'Running nested Tauri Rust Clippy with the locked dependency graph'
+                        $tauriClippyArguments = @($clippy.Prefix + @(
+                            'clippy', '--manifest-path', $tauriManifest, '--all-targets', '--all-features', '--locked', '--offline', '--', '-D', 'warnings'
+                        ))
+                        Invoke-External -FilePath $clippy.FilePath -ArgumentList $tauriClippyArguments -WorkingDirectory $script:RepoRoot
+                    }
+                } else {
+                    Write-Skip 'Nested Tauri Rust Clippy was not run because its required project sidecars were not prepared.'
                 }
             } else {
                 Write-Skip 'Nested Tauri Rust Clippy requires the supported Windows target; this host is not Windows.'
