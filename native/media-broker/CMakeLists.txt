@@ -97,5 +97,11 @@ if(BUILD_TESTING AND NPC_MEDIA_BROKER_BUILD_TESTS)
         add_test(NAME npc_media_broker_windows_smoke_tests COMMAND npc_media_broker_windows_smoke_tests)
         add_test(NAME npc_media_broker_service_protocol_tests
                  COMMAND npc_media_broker_windows_smoke_tests --service-only)
+        # Both tests create a real broker sidecar and exercise the user's shared
+        # WASAPI/WGC devices. Keep them isolated even under parallel CTest runs.
+        set_tests_properties(
+            npc_media_broker_windows_smoke_tests
+            npc_media_broker_service_protocol_tests
+            PROPERTIES RESOURCE_LOCK npc_media_broker_windows_services)
     endif()
 endif()

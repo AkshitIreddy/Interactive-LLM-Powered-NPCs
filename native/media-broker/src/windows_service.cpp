@@ -78,6 +78,21 @@ namespace {
     return result;
 }
 
+[[nodiscard]] HANDLE module_snapshot(const DWORD process_id) noexcept {
+    // Microsoft documents ERROR_BAD_LENGTH as a transient module-list race and
+    // explicitly requires callers to retry CreateToolhelp32Snapshot. Keep the
+    // retry bounded so a changing or hostile target cannot stall the broker.
+    constexpr unsigned maximum_attempts = 8;
+    for (unsigned attempt = 0; attempt < maximum_attempts; ++attempt) {
+        HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32,
+                                                   process_id);
+        if (snapshot != INVALID_HANDLE_VALUE) return snapshot;
+        if (GetLastError() != ERROR_BAD_LENGTH) break;
+        Sleep(2);
+    }
+    return INVALID_HANDLE_VALUE;
+}
+
 [[nodiscard]] bool read_exact(HANDLE pipe, std::span<std::byte> output) {
     std::size_t position{};
     while (position < output.size()) {
@@ -143,7 +158,7 @@ TargetInspectionEvidence inspect_target(const HWND window, const std::uint32_t e
         evidence.process_name = narrow_lower(std::filesystem::path(path).filename().wstring());
     }
 
-    HANDLE modules = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, process_id);
+    HANDLE modules = module_snapshot(process_id);
     if (modules != INVALID_HANDLE_VALUE) {
         MODULEENTRY32W module{sizeof(module)};
         if (Module32FirstW(modules, &module)) {

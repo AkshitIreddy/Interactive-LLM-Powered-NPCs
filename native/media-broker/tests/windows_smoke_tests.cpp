@@ -182,12 +182,24 @@ struct ChildService {
     const std::wstring pipe_name = L"\\\\.\\pipe\\npc-media-broker-" +
                                    std::wstring(child.session.begin(), child.session.end());
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+    DWORD last_pipe_error{};
     while (std::chrono::steady_clock::now() < deadline) {
         child.pipe = CreateFileW(pipe_name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
                                  OPEN_EXISTING, 0, nullptr);
         if (child.pipe != INVALID_HANDLE_VALUE) return child;
-        if (WaitForSingleObject(child.process.hProcess, 0) == WAIT_OBJECT_0) break;
+        last_pipe_error = GetLastError();
+        if (WaitForSingleObject(child.process.hProcess, 0) == WAIT_OBJECT_0) {
+            DWORD exit_code{};
+            GetExitCodeProcess(child.process.hProcess, &exit_code);
+            std::cerr << "media service exited before control-pipe connection: exit=" << exit_code
+                      << " pipe_error=" << last_pipe_error << '\n';
+            break;
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    if (WaitForSingleObject(child.process.hProcess, 0) != WAIT_OBJECT_0) {
+        std::cerr << "media service control-pipe connection timed out: pipe_error="
+                  << last_pipe_error << '\n';
     }
     TerminateProcess(child.process.hProcess, 1);
     return std::nullopt;
@@ -212,12 +224,24 @@ void close_child(ChildService& child) {
         DWORD exit_code{};
         GetExitCodeProcess(malformed.hProcess, &exit_code);
         CloseHandle(malformed.hProcess);
-        if (!rejected || exit_code == 0) return false;
+        if (!rejected || exit_code == 0) {
+            std::cerr << "malformed service launch was not rejected: waited=" << rejected
+                      << " exit=" << exit_code << '\n';
+            return false;
+        }
     }
 
     auto child_value = launch_service(executable, 1);
-    if (!child_value) return false;
+    if (!child_value) {
+        std::cerr << "authenticated service launch failed before health exchange\n";
+        return false;
+    }
     auto child = std::move(*child_value);
+    const auto fail_child = [&child](const std::string_view stage) {
+        std::cerr << "authenticated service protocol failed at " << stage << '\n';
+        close_child(child);
+        return false;
+    };
     const auto frequency = qpc_frequency();
     const auto now = qpc_now();
     const auto empty = ipc::encode_command(ipc::CommandKind::health, ipc::HealthCommand{});
@@ -225,19 +249,30 @@ void close_child(ChildService& child) {
                           now + frequency * 2, 0, ipc::CommandKind::health, *empty};
     request.nonce[0] ^= std::byte{0xff};
     const auto rejected = transact(child.pipe, request);
-    if (!rejected || rejected->status != ipc::StatusCode::authentication_failed) { close_child(child); return false; }
+    if (!rejected || rejected->status != ipc::StatusCode::authentication_failed) {
+        return fail_child("nonce rejection");
+    }
     request.nonce = child.nonce;
     request.sequence = 2;
     request.deadline_qpc = qpc_now() + frequency * 2;
     const auto health = transact(child.pipe, request);
-    if (!health || health->status != ipc::StatusCode::ok) { close_child(child); return false; }
+    if (!health || health->status != ipc::StatusCode::ok) return fail_child("authenticated health");
 
     const auto inspected = inspect_target(target_window, GetCurrentProcessId());
+    if (!inspected.valid_window || !inspected.process_id_matches ||
+        !inspected.inspection_complete || inspected.process_name.empty()) {
+        std::cerr << "synthetic target preflight incomplete: valid=" << inspected.valid_window
+                  << " pid_match=" << inspected.process_id_matches
+                  << " inspection_complete=" << inspected.inspection_complete
+                  << " process_name_empty=" << inspected.process_name.empty() << '\n';
+        return fail_child("synthetic target preflight");
+    }
     const auto select_payload = ipc::encode_command(
         ipc::CommandKind::select_target,
         ipc::SelectTargetCommand{reinterpret_cast<std::uintptr_t>(target_window),
                                  GetCurrentProcessId(),
                                  {inspected.process_name}});
+    if (!select_payload) return fail_child("SelectTarget encoding");
     request.sequence = 3;
     request.deadline_qpc = qpc_now() + frequency * 2;
     request.command = ipc::CommandKind::select_target;
@@ -245,8 +280,16 @@ void close_child(ChildService& child) {
     const auto selected = transact(child.pipe, request);
     if (!selected || selected->status != ipc::StatusCode::ok ||
         selected->cancellation_generation <= request.cancellation_generation) {
-        close_child(child);
-        return false;
+        if (selected) {
+            std::cerr << "SelectTarget response: status=" << ipc::to_string(selected->status)
+                      << " request_generation=" << request.cancellation_generation
+                      << " response_generation=" << selected->cancellation_generation;
+            if (const auto reason = read_little<std::uint32_t>(selected->payload, 0)) {
+                std::cerr << " block_reason=" << *reason;
+            }
+            std::cerr << '\n';
+        }
+        return fail_child("SelectTarget response");
     }
     request.cancellation_generation = selected->cancellation_generation;
 
@@ -265,8 +308,7 @@ void close_child(ChildService& child) {
         request.payload = *diagnostics_payload;
         const auto diagnostics = transact(child.pipe, request);
         if (!diagnostics || diagnostics->status != ipc::StatusCode::ok) {
-            close_child(child);
-            return false;
+            return fail_child("capture diagnostics exchange");
         }
         capture_evidence = decode_capture_evidence(diagnostics->payload);
         if (capture_evidence && capture_evidence->state == BrokerState::capturing_primary &&
@@ -281,8 +323,15 @@ void close_child(ChildService& child) {
         capture_evidence->capture_backend != CaptureBackend::windows_graphics_capture ||
         capture_evidence->target_state != TargetState::selected ||
         capture_evidence->frames_received < 2 || capture_evidence->frames_presented < 1) {
-        close_child(child);
-        return false;
+        if (capture_evidence) {
+            std::cerr << "capture evidence timeout: state="
+                      << static_cast<std::uint32_t>(capture_evidence->state)
+                      << " backend=" << static_cast<std::uint32_t>(capture_evidence->capture_backend)
+                      << " target=" << static_cast<std::uint32_t>(capture_evidence->target_state)
+                      << " received=" << capture_evidence->frames_received
+                      << " presented=" << capture_evidence->frames_presented << '\n';
+        }
+        return fail_child("primary WGC frame evidence");
     }
 
     const auto clear_payload = ipc::encode_command(ipc::CommandKind::clear_target,
@@ -294,8 +343,7 @@ void close_child(ChildService& child) {
     const auto cleared = transact(child.pipe, request);
     if (!cleared || cleared->status != ipc::StatusCode::ok ||
         cleared->cancellation_generation <= request.cancellation_generation) {
-        close_child(child);
-        return false;
+        return fail_child("ClearTarget response");
     }
     request.cancellation_generation = cleared->cancellation_generation;
 
@@ -310,8 +358,7 @@ void close_child(ChildService& child) {
         cleared_evidence->capture_backend != CaptureBackend::none ||
         cleared_evidence->target_state != TargetState::none ||
         cleared_evidence->frames_received != capture_evidence->frames_received) {
-        close_child(child);
-        return false;
+        return fail_child("post-ClearTarget diagnostics");
     }
 
     const auto shutdown_payload = ipc::encode_command(ipc::CommandKind::shutdown, ipc::ShutdownCommand{});
@@ -323,18 +370,25 @@ void close_child(ChildService& child) {
     const bool exited = shutdown && shutdown->status == ipc::StatusCode::ok &&
                         WaitForSingleObject(child.process.hProcess, 5000) == WAIT_OBJECT_0;
     close_child(child);
-    if (!exited) return false;
+    if (!exited) {
+        std::cerr << "authenticated service did not exit after Shutdown\n";
+        return false;
+    }
     std::cout << "authenticated SelectTarget observed " << capture_evidence->frames_received
               << " WGC frames (" << capture_evidence->frames_presented
               << " presented); ClearTarget stopped capture\n";
 
     auto disconnect_value = launch_service(executable, 2);
-    if (!disconnect_value) return false;
+    if (!disconnect_value) {
+        std::cerr << "disconnect service launch failed\n";
+        return false;
+    }
     auto disconnect = std::move(*disconnect_value);
     CloseHandle(disconnect.pipe);
     disconnect.pipe = INVALID_HANDLE_VALUE;
     const bool disconnected_exit = WaitForSingleObject(disconnect.process.hProcess, 5000) == WAIT_OBJECT_0;
     close_child(disconnect);
+    if (!disconnected_exit) std::cerr << "service did not exit after control-pipe disconnect\n";
     return disconnected_exit;
 }
 
