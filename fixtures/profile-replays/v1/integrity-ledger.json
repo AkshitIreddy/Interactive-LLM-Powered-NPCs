@@ -20,7 +20,7 @@
     {
       "profile_id": "divinity-original-sin-2",
       "profile_path": "profiles/games/divinity-original-sin-2/profile.json",
-      "profile_sha256": "e7e3c1e7023c524f1ddf401e59e767973cd01731492bf0badf3ef8f27813d2e7",
+      "profile_sha256": "c70c96b101c48e3ec8938e1e651cae7b5e88029a890784f11fe9417bbedc8cb5",
       "replay_path": "fixtures/profile-replays/v1/divinity-original-sin-2.replay.json",
       "replay_sha256": "0bd5292e3a04dc8de7435c3ddb3d8492499ac31a646203232b6bf156518b796e"
     },
@@ -48,7 +48,7 @@
     {
       "profile_id": "fallout-new-vegas",
       "profile_path": "profiles/games/fallout-new-vegas/profile.json",
-      "profile_sha256": "9be3c70baf913b85e38a355ecb336b105ad85443d0cbce46a26de38971c9fa2e",
+      "profile_sha256": "fdf968a5619014c9f7937e94769f120211a7e7e580f90e84a5e79132b9e22ff7",
       "replay_path": "fixtures/profile-replays/v1/fallout-new-vegas.replay.json",
       "replay_sha256": "f80d4a0ab7386fb50ca27af97b388e817e5ceb86b5fdfecfcc5c419a945819a1"
     },
@@ -83,7 +83,7 @@
     {
       "profile_id": "minecraft-java",
       "profile_path": "profiles/games/minecraft-java/profile.json",
-      "profile_sha256": "8706094a9866dc815891880f93ff6b7ee367cfc19ec6b5fb8b0d2e902879e4c6",
+      "profile_sha256": "b5d32c2c69cc307fa99ba5cea78eaea09dbc8e72edb73157bffe197b8cd3b84d",
       "replay_path": "fixtures/profile-replays/v1/minecraft-java.replay.json",
       "replay_sha256": "a32139620d3582787c701604f8821e9067ede7ca38885fac3b4df605fd99f2e1"
     },
@@ -118,7 +118,7 @@
     {
       "profile_id": "stardew-valley",
       "profile_path": "profiles/games/stardew-valley/profile.json",
-      "profile_sha256": "09760c5777612f08f70b20513bee49790b6ed11cd7f97e535a4caecd779cec20",
+      "profile_sha256": "10af3bd45393d8f89bce39dcc3f1d9b2dec25923f9ce4caa7b5c9aec9d9cf088",
       "replay_path": "fixtures/profile-replays/v1/stardew-valley.replay.json",
       "replay_sha256": "ebb1a5d9999306d344a29567589e0dc7a6558fcff011a8a17740f2c60fdc201a"
     },
@@ -139,7 +139,7 @@
     {
       "profile_id": "the-witcher-3",
       "profile_path": "profiles/games/the-witcher-3/profile.json",
-      "profile_sha256": "620927e8136c2c2a8df4ec36ecf0025b8d3eaef08d374d0ba2925cceee17b3bf",
+      "profile_sha256": "da9be600ada26e3b9ea004684af05435deb0dd0a6d3ca6002c7d3506a7676383",
       "replay_path": "fixtures/profile-replays/v1/the-witcher-3.replay.json",
       "replay_sha256": "af64fb6e3040f7764b2a41dbef201c01609e0d007aacf330d09eb756d8c9bb59"
     }

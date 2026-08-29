@@ -354,7 +354,7 @@ fn v1_migration_is_deterministic_and_conservative() {
 }
 
 #[test]
-fn authored_corpus_is_exactly_twenty_strict_profiles_with_no_live_claims() {
+fn authored_corpus_has_twenty_strict_profiles_with_replay_verified_core_routes() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../profiles/games");
     let mut ids = BTreeSet::new();
     let mut count = 0;
@@ -370,6 +370,22 @@ fn authored_corpus_is_exactly_twenty_strict_profiles_with_no_live_claims() {
             assert!(!claim.evidence.is_empty());
             assert!(!claim.fallback.trim().is_empty());
             assert_ne!(claim.tier, npc_game_profile::CapabilityTier::LiveCertified);
+        }
+        for (route, claim) in [
+            ("conversation", &profile.capabilities.conversation),
+            ("subtitles", &profile.capabilities.subtitles),
+            ("memory", &profile.capabilities.memory),
+        ] {
+            assert_eq!(
+                claim.tier,
+                npc_game_profile::CapabilityTier::ReplayVerified,
+                "{} must replay-verify {route}",
+                profile.id
+            );
+            assert!(claim.evidence.iter().any(|evidence| {
+                evidence.kind == npc_game_profile::CapabilityEvidenceKind::DeterministicReplay
+                    && evidence.reference == format!("profile-replay-v1:{}:{route}", profile.id)
+            }));
         }
         assert_eq!(
             profile.capabilities.screen_space_lip_sync.tier,

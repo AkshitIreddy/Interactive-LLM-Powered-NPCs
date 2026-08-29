@@ -136,7 +136,7 @@
   },
   "capabilities": {
     "conversation": {
-      "tier": "experimental",
+      "tier": "replay_verified",
       "evidence": [
         {
           "kind": "deterministic_replay",
@@ -169,7 +169,7 @@
       "fallback": "Continue in audio-and-subtitles mode without capturing or modifying the game image."
     },
     "subtitles": {
-      "tier": "experimental",
+      "tier": "replay_verified",
       "evidence": [
         {
           "kind": "deterministic_replay",
@@ -180,7 +180,7 @@
       "fallback": "Keep delivered dialogue in the Conversation view and surface a retry if subtitle presentation fails."
     },
     "memory": {
-      "tier": "experimental",
+      "tier": "replay_verified",
       "evidence": [
         {
           "kind": "deterministic_replay",
