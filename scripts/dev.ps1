@@ -19,6 +19,11 @@ Set-StrictMode -Version 2.0
 $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $script:Failures = New-Object System.Collections.Generic.List[string]
 $script:Warnings = New-Object System.Collections.Generic.List[string]
+$shortBuildPathScript = Join-Path $PSScriptRoot 'short-cmake-build-path.ps1'
+if (-not (Test-Path -LiteralPath $shortBuildPathScript -PathType Leaf)) {
+    throw "Short CMake build-path helper was not found: $shortBuildPathScript"
+}
+. $shortBuildPathScript
 
 # Windows shells launched by IDEs, WSL, or desktop automation do not always
 # inherit the standard developer-tool directories. Add only known existing
@@ -487,6 +492,7 @@ function Invoke-Tests {
     if ($script:Failures.Count -gt 0) { return }
 
     $clippyDispatchTest = Join-Path $PSScriptRoot 'test-dev-clippy-dispatch.ps1'
+    $shortCmakePathTest = Join-Path $PSScriptRoot 'test-short-cmake-build-paths.ps1'
     if (Test-IsWindows) {
         Invoke-CheckBlock -Label 'Clippy dispatch regression' -Action {
             if (-not (Test-Path -LiteralPath $clippyDispatchTest -PathType Leaf)) {
@@ -495,6 +501,14 @@ function Invoke-Tests {
             Write-Step 'Testing pinned Clippy fallback selection and identity refusal'
             & $clippyDispatchTest
             if ($LASTEXITCODE -ne 0) { throw "Clippy dispatch regression exited with code $LASTEXITCODE." }
+        }
+        Invoke-CheckBlock -Label 'Short CMake build-path regression' -Action {
+            if (-not (Test-Path -LiteralPath $shortCmakePathTest -PathType Leaf)) {
+                throw "Short CMake build-path regression script was not found: $shortCmakePathTest"
+            }
+            Write-Step 'Testing deep-checkout CMake build-path isolation'
+            & $shortCmakePathTest
+            if ($LASTEXITCODE -ne 0) { throw "Short CMake build-path regression exited with code $LASTEXITCODE." }
         }
     } else {
         Write-Skip 'Clippy dispatch regression requires Windows rustup command semantics.'
@@ -582,7 +596,7 @@ function Invoke-Tests {
     if (Test-IsWindows) {
         if (Test-Path -LiteralPath (Join-Path $mediaSource 'CMakeLists.txt') -PathType Leaf) {
             Invoke-CheckBlock -Label 'Native media broker tests' -Action {
-                $nativeBuild = Join-Path $script:RepoRoot 'out/build/native-media-broker-windows'
+                $nativeBuild = Get-NpcShortCMakeBuildPath -RepositoryRoot $script:RepoRoot -Component 'mb-tests'
                 Write-Step 'Configuring native media broker tests for Windows x64'
                 Invoke-External -FilePath 'cmake' -ArgumentList @(
                     '-S', $mediaSource,

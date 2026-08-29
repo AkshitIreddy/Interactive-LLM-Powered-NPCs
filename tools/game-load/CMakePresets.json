@@ -7,16 +7,6 @@
   },
   "configurePresets": [
     {
-      "name": "windows-msvc",
-      "displayName": "Windows MSVC (Visual Studio 2022)",
-      "generator": "Visual Studio 17 2022",
-      "architecture": "x64",
-      "binaryDir": "${sourceDir}/out/build/windows-msvc",
-      "cacheVariables": {
-        "GAME_LOAD_BUILD_TESTS": "ON"
-      }
-    },
-    {
       "name": "portable-tests",
       "displayName": "Portable policy tests",
       "generator": "Ninja",
@@ -29,22 +19,11 @@
   ],
   "buildPresets": [
     {
-      "name": "windows-msvc",
-      "configurePreset": "windows-msvc",
-      "configuration": "RelWithDebInfo"
-    },
-    {
       "name": "portable-tests",
       "configurePreset": "portable-tests"
     }
   ],
   "testPresets": [
-    {
-      "name": "windows-msvc",
-      "configurePreset": "windows-msvc",
-      "configuration": "RelWithDebInfo",
-      "output": { "outputOnFailure": true }
-    },
     {
       "name": "portable-tests",
       "configurePreset": "portable-tests",

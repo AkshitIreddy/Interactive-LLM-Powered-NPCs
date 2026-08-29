@@ -70,11 +70,13 @@ Requirements: Windows 10 22H2 or Windows 11, Visual Studio 2022 with Desktop C++
 Windows 10/11 SDK, and CMake 3.24+.
 
 ```powershell
-cd tools/game-load
-cmake --preset windows-msvc
-cmake --build --preset windows-msvc
-ctest --preset windows-msvc
+./tools/game-load/scripts/smoke.ps1
 ```
+
+The Windows wrapper keeps Visual Studio intermediates in a repository-keyed short
+path beneath `%LOCALAPPDATA%\InteractiveNPCs\build\gl`. This prevents FileTracker
+path failures in deeply nested clean checkouts and keeps generated files out of the
+source tree. The `portable-tests` preset remains available on non-Windows hosts.
 
 The policy library and tests contain no Windows headers and can be built on any C++20
 host with CMake/Ninja using `portable-tests`. This exercises profile defaults,
@@ -84,10 +86,10 @@ configuration validation without applying load.
 The Windows smoke script builds, runs tests, then verifies a dry-run manifest:
 
 ```powershell
-./scripts/smoke.ps1
+./tools/game-load/scripts/smoke.ps1
 ```
 
-It does not apply load. `./scripts/smoke.ps1 -Live` additionally performs a visible,
+It does not apply load. `./tools/game-load/scripts/smoke.ps1 -Live` additionally performs a visible,
 three-second idle run and should only be used intentionally.
 
 ## Examples

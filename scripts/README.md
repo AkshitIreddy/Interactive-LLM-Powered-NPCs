@@ -23,6 +23,18 @@ Validate sidecar copying, checkout isolation and the deep-path FileTracker regre
 
 The first command is a fast path-contract check. `-BuildNative` additionally places a clean broker source fixture beneath a deliberately deep checkout, then performs a real Visual Studio configure and build using the shortened binary directory.
 
+The native test suites use the same checkout-keyed policy without sharing build
+trees between components. Validate both the media-broker test path and the inert
+game-load Windows smoke path with:
+
+```powershell
+.\scripts\test-short-cmake-build-paths.ps1
+.\scripts\test-short-cmake-build-paths.ps1 -BuildNative
+```
+
+The native variant performs real MSVC builds from a deep clean-source fixture;
+the game-load portion remains a dry run and never applies a workload.
+
 Security hooks:
 
 ```powershell
