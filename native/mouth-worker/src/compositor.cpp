@@ -329,131 +329,99 @@ ResidualPatch compose_current_frame_residual(const CpuFrame& source,
     const double opening_strength = unit(
         coefficients.jaw_open * (1.0 - coefficients.lip_close * 0.55) +
         coefficients.lower_lip_depress * 0.16);
-    // Split the lips around their measured seam and synthesize only the oral
-    // cavity that the source image cannot contain.  The displacement is tied
-    // to measured mouth width, tapered to zero at each corner, and remains
-    // inside the same bounded residual used by every other visual path.
+    // The PCM fallback has no phoneme or identity-specific mouth atlas, so it
+    // must remain deliberately conservative.  Move the source lips a few
+    // pixels and add only a soft, source-derived seam; never invent teeth or
+    // tongue anatomy that cannot be inferred from this frame.
     const double maximum_half_gap = std::clamp(
-        std::min(mouth_half_width * 0.18, static_cast<double>(patch.height) * 0.27),
-        1.5, 13.0);
+        std::min(mouth_half_width * 0.255, static_cast<double>(patch.height) * 0.36),
+        1.0, 17.0);
     const double added_half_gap = opening_strength * maximum_half_gap;
 
     for (std::uint32_t y = 0; y < patch.height; ++y) {
         for (std::uint32_t x = 0; x < patch.width; ++x) {
-            const double normalized_x = (static_cast<double>(x) + 0.5) /
-                                            static_cast<double>(patch.width) * 2.0 - 1.0;
-            const double normalized_y = (static_cast<double>(y) + 0.5) /
-                                            static_cast<double>(patch.height) * 2.0 - 1.0;
-            const double ellipse = normalized_x * normalized_x + normalized_y * normalized_y;
-            if (ellipse >= 1.0) {
-                continue;
-            }
-            const double alpha = unit((1.0 - ellipse) / 0.22);
             const double pixel_x = static_cast<double>(x) + 0.5;
             const double pixel_y = static_cast<double>(y) + 0.5;
             const double mouth_x = (pixel_x - mouth_center_x) / mouth_half_width;
+            if (std::abs(mouth_x) >= 1.12) {
+                continue;
+            }
             const double taper = std::sqrt(std::max(0.0, 1.0 - mouth_x * mouth_x));
             const double half_gap = std::abs(mouth_x) < 1.0 ? added_half_gap * taper : 0.0;
             const double seam_y = lip_mid_y + (pixel_x - mouth_center_x) * seam_slope;
             const double seam_delta = pixel_y - seam_y;
+            const double base_lip_radius = std::max(
+                2.0, std::min(mouth_half_width * 0.22,
+                              static_cast<double>(patch.height) * 0.31));
+            const double effect_radius = base_lip_radius + half_gap * 0.95;
+            if (std::abs(seam_delta) >= effect_radius) {
+                continue;
+            }
+            const double horizontal_feather =
+                smooth_unit((1.12 - std::abs(mouth_x)) / 0.18);
+            const double vertical_feather = smooth_unit(
+                (effect_radius - std::abs(seam_delta)) /
+                std::max(1.0, effect_radius * 0.34));
+            // A translucent core helps the warped source lips retain their
+            // original lighting and beard/skin texture at the blend boundary.
+            const double alpha = horizontal_feather * vertical_feather * 0.96;
             const bool in_cavity = half_gap > 1.0e-6 && std::abs(seam_delta) < half_gap;
             const double source_patch_x = mouth_center_x +
                 (pixel_x - mouth_center_x) / horizontal_scale;
-            // Human jaw opening is not a symmetric split: the upper lip and
-            // philtrum remain comparatively stable while the lower lip and
-            // chin carry most of the displacement.  Preserving that anchor is
-            // especially important when the source frame is already moving.
+            const double warp_falloff = smooth_unit(
+                (effect_radius - std::abs(seam_delta)) /
+                std::max(1.0, effect_radius * 0.52));
             const double upper_displacement = half_gap *
-                (0.42 + coefficients.upper_lip_raise * 0.08);
+                (0.52 + coefficients.upper_lip_raise * 0.08);
             const double lower_displacement = half_gap *
-                (0.94 + coefficients.lower_lip_depress * 0.12);
+                (1.08 + coefficients.lower_lip_depress * 0.14);
             const double source_patch_y = pixel_y +
-                (seam_delta < 0.0 ? upper_displacement : -lower_displacement);
+                (seam_delta < 0.0 ? upper_displacement : -lower_displacement) *
+                    warp_falloff;
             const double sample_x = static_cast<double>(left) +
                                     source_patch_x - 0.5;
             const double sample_y = static_cast<double>(top) +
                                     source_patch_y - 0.5;
             const auto output = static_cast<std::size_t>(y) * patch.stride_bytes +
                                 static_cast<std::size_t>(x) * 4U;
+            const double seam_sample_x = static_cast<double>(left) +
+                source_patch_x - 0.5;
+            double cavity_sample_y = static_cast<double>(top) + seam_y - 0.5;
+            if (in_cavity) {
+                // Find the darkest real lip/seam texel in a narrow vertical
+                // neighbourhood. This preserves local colour variation and
+                // avoids turning a light lower-lip sample into a flat stripe.
+                const double search_radius = std::max(1.0, base_lip_radius * 0.58);
+                double darkest_luma = std::numeric_limits<double>::max();
+                for (int candidate = -3; candidate <= 3; ++candidate) {
+                    const double candidate_y = static_cast<double>(top) + seam_y - 0.5 +
+                        search_radius * static_cast<double>(candidate) / 3.0;
+                    const double candidate_blue = sample_channel(
+                        source, seam_sample_x, candidate_y, 0U);
+                    const double candidate_green = sample_channel(
+                        source, seam_sample_x, candidate_y, 1U);
+                    const double candidate_red = sample_channel(
+                        source, seam_sample_x, candidate_y, 2U);
+                    const double candidate_luma = candidate_blue * 0.114 +
+                        candidate_green * 0.587 + candidate_red * 0.299;
+                    if (candidate_luma < darkest_luma) {
+                        darkest_luma = candidate_luma;
+                        cavity_sample_y = candidate_y;
+                    }
+                }
+            }
             for (std::size_t channel = 0; channel < 3U; ++channel) {
                 double value = sample_channel(source, sample_x, sample_y, channel);
                 if (in_cavity) {
-                    const double seam_sample_x = static_cast<double>(left) +
-                        source_patch_x - 0.5;
-                    const double seam_sample_y = static_cast<double>(top) +
-                        seam_y - 0.5;
-                    const double cavity_scale = channel == 2U ? 0.27 :
-                                                channel == 0U ? 0.18 : 0.12;
-                    const double cavity =
-                        sample_channel(source, seam_sample_x, seam_sample_y, channel) *
-                        cavity_scale;
-                    const double feather = std::max(0.75, half_gap * 0.45);
-                    const double cavity_mix =
-                        unit((half_gap - std::abs(seam_delta)) / feather);
-                    // Tiny and medium openings should not jump immediately to
-                    // a fully dark synthetic slit. Preserve some current-frame
-                    // lip colour until the jaw is open far enough to expose a
-                    // deep oral cavity.
-                    const double cavity_depth = 0.60 + 0.40 *
-                        smooth_unit((opening_strength - 0.28) / 0.40);
-                    const double cavity_fill_mix = cavity_mix * cavity_depth;
-                    value = value * (1.0 - cavity_fill_mix) + cavity * cavity_fill_mix;
-
-                    // Add anatomy only when there is enough opening to expose
-                    // it.  The colour is derived from the current frame's
-                    // exposure and kept warm/off-white; a flat pure-white band
-                    // is one of the quickest ways to make a procedural mouth
-                    // read as a sticker.  Restricting it to the central upper
-                    // cavity also avoids "teeth to the corners" artifacts.
-                    const double detail_strength =
-                        smooth_unit((opening_strength - 0.27) / 0.33);
-                    const double central_strength =
-                        smooth_unit((0.82 - std::abs(mouth_x)) / 0.22);
-                    const double detail_feather = std::max(0.45, half_gap * 0.16);
-                    const double teeth_top = -half_gap * 0.76;
-                    const double teeth_bottom = -half_gap * 0.12;
-                    const double teeth_vertical =
-                        smooth_unit((seam_delta - teeth_top) / detail_feather) *
-                        smooth_unit((teeth_bottom - seam_delta) / detail_feather);
-                    const double teeth_mix = detail_strength * central_strength *
-                                             teeth_vertical * cavity_mix * 0.92;
-                    if (teeth_mix > 1.0e-6) {
-                        const double exposure_y = static_cast<double>(top) + seam_y -
-                            std::max(2.0, half_gap * 1.45);
-                        const double exposure_b = sample_channel(
-                            source, seam_sample_x, exposure_y, 0U);
-                        const double exposure_g = sample_channel(
-                            source, seam_sample_x, exposure_y, 1U);
-                        const double exposure_r = sample_channel(
-                            source, seam_sample_x, exposure_y, 2U);
-                        const double exposure_luma = exposure_b * 0.114 +
-                            exposure_g * 0.587 + exposure_r * 0.299;
-                        const double tooth_luma = std::clamp(
-                            exposure_luma * 0.78 + 78.0, 128.0, 218.0);
-                        const double tooth = tooth_luma *
-                            (channel == 2U ? 1.00 : channel == 1U ? 0.96 : 0.90);
-                        value = value * (1.0 - teeth_mix) + tooth * teeth_mix;
-                    }
-
-                    // A low-saturation tongue cue gives deep openings a floor
-                    // without competing with the upper teeth.  It fades out
-                    // entirely for small consonant openings.
-                    const double tongue_top = half_gap * 0.18;
-                    const double tongue_bottom = half_gap * 0.82;
-                    const double tongue_vertical =
-                        smooth_unit((seam_delta - tongue_top) / detail_feather) *
-                        smooth_unit((tongue_bottom - seam_delta) / detail_feather);
-                    const double tongue_strength =
-                        smooth_unit((opening_strength - 0.46) / 0.30);
-                    const double tongue_mix = tongue_strength * central_strength *
-                                              tongue_vertical * cavity_mix * 0.34;
-                    if (tongue_mix > 1.0e-6) {
-                        const double tongue = cavity *
-                            (channel == 2U ? 2.05 : channel == 1U ? 1.10 : 1.20) +
-                            (channel == 2U ? 18.0 : channel == 1U ? 5.0 : 7.0);
-                        value = value * (1.0 - tongue_mix) +
-                                std::clamp(tongue, 0.0, 190.0) * tongue_mix;
-                    }
+                    const double darkest_source_value = sample_channel(
+                        source, seam_sample_x, cavity_sample_y, channel);
+                    const double shadow_value = darkest_source_value * 0.72;
+                    const double cavity_feather = std::max(0.55, half_gap * 0.72);
+                    const double cavity_core = unit(
+                        (half_gap - std::abs(seam_delta)) / cavity_feather);
+                    const double cavity_mix = cavity_core *
+                        smooth_unit((opening_strength - 0.08) / 0.45) * 0.90;
+                    value = value * (1.0 - cavity_mix) + shadow_value * cavity_mix;
                 }
                 patch.premultiplied_bgra[output + channel] =
                     static_cast<std::uint8_t>(std::lround(value * alpha));

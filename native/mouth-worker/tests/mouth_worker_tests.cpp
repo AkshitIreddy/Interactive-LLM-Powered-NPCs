@@ -186,17 +186,18 @@ void test_current_frame_residual_is_bounded_and_premultiplied() {
            "residual is bounded to the hard mouth region ceilings");
 
     bool saw_transparent = false;
-    bool saw_opaque = false;
+    bool saw_strong_core = false;
     for (std::size_t offset = 0; offset < result.residual.premultiplied_bgra.size(); offset += 4U) {
         const auto alpha = result.residual.premultiplied_bgra[offset + 3U];
         saw_transparent = saw_transparent || alpha == 0U;
-        saw_opaque = saw_opaque || alpha == 255U;
+        saw_strong_core = saw_strong_core || alpha >= 224U;
         expect(result.residual.premultiplied_bgra[offset + 0U] <= alpha &&
                    result.residual.premultiplied_bgra[offset + 1U] <= alpha &&
                    result.residual.premultiplied_bgra[offset + 2U] <= alpha,
                "every residual pixel obeys premultiplied alpha");
     }
-    expect(saw_transparent && saw_opaque, "mouth mask has transparent exterior and opaque core");
+    expect(saw_transparent && saw_strong_core,
+           "mouth mask has a transparent exterior and strongly covered core");
 
     const auto composited = composite_over_source(item.source, result.residual);
     expect(composited != item.source.bgra, "reference compositor changes the mouth presentation");
@@ -222,6 +223,44 @@ void test_current_frame_residual_is_bounded_and_premultiplied() {
         }
     }
     expect(changed_inside > 0U, "at least one pixel changes inside the mouth rectangle");
+}
+
+void test_pcm_fallback_preserves_source_colour_envelope() {
+    auto item = make_item();
+    for (std::size_t offset = 0; offset < item.source.bgra.size(); offset += 4U) {
+        item.source.bgra[offset + 0U] = 80U;
+        item.source.bgra[offset + 1U] = 110U;
+        item.source.bgra[offset + 2U] = 150U;
+        item.source.bgra[offset + 3U] = 255U;
+    }
+
+    const auto residual = compose_current_frame_residual(
+        item.source, item.track, item.tracking,
+        coefficients_for_viseme(Viseme::open_vowel, 1.0),
+        item.source.identity.captured_at_ns + 4'000'000);
+    expect(!residual.premultiplied_bgra.empty(),
+           "procedural fallback produces a residual for valid tracked lips");
+    const auto composited = composite_over_source(item.source, residual);
+
+    std::uint8_t minimum_blue = 255U;
+    std::uint8_t minimum_green = 255U;
+    std::uint8_t minimum_red = 255U;
+    std::uint8_t maximum_blue = 0U;
+    std::uint8_t maximum_green = 0U;
+    std::uint8_t maximum_red = 0U;
+    for (std::size_t offset = 0; offset < composited.size(); offset += 4U) {
+        minimum_blue = std::min(minimum_blue, composited[offset + 0U]);
+        minimum_green = std::min(minimum_green, composited[offset + 1U]);
+        minimum_red = std::min(minimum_red, composited[offset + 2U]);
+        maximum_blue = std::max(maximum_blue, composited[offset + 0U]);
+        maximum_green = std::max(maximum_green, composited[offset + 1U]);
+        maximum_red = std::max(maximum_red, composited[offset + 2U]);
+    }
+
+    expect(minimum_blue >= 46U && minimum_green >= 63U && minimum_red >= 86U,
+           "procedural PCM motion does not paint a detached near-black cavity");
+    expect(maximum_blue <= 96U && maximum_green <= 126U && maximum_red <= 166U,
+           "procedural PCM motion does not invent a bright teeth strip");
 }
 
 void test_atlas_residual_interpolates_and_binds_to_current_frame() {
@@ -603,6 +642,7 @@ void test_public_compositor_rejects_malformed_direct_calls() {
 int main() {
     test_viseme_and_audio_drives();
     test_current_frame_residual_is_bounded_and_premultiplied();
+    test_pcm_fallback_preserves_source_colour_envelope();
     test_atlas_residual_interpolates_and_binds_to_current_frame();
     test_queue_depth_one();
     test_exact_binding_and_no_retained_visual();
