@@ -247,6 +247,8 @@ if(BUILD_TESTING AND NPC_MEDIA_BROKER_BUILD_TESTS)
             npc_media_broker_windows_playback_smoke_tests
             npc_media_broker_windows_input_smoke_tests
             npc_media_broker_windows_identity_smoke_tests
-            PROPERTIES RESOURCE_LOCK npc_media_broker_windows_services)
+            PROPERTIES
+                LABELS interactive_windows_smoke
+                RESOURCE_LOCK npc_media_broker_windows_services)
     endif()
 endif()

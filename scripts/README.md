@@ -7,7 +7,7 @@ Run commands from the repository root on Windows PowerShell 5.1+ or PowerShell 7
 .\scripts\dev.ps1 setup [-Offline]
 .\scripts\dev.ps1 dev
 .\scripts\dev.ps1 lint
-.\scripts\dev.ps1 test
+.\scripts\dev.ps1 test [-IncludeWindowsSmoke]
 .\scripts\dev.ps1 benchmark [-Quick] [-OutputDirectory <path>]
 .\scripts\dev.ps1 package [-Configuration Debug|Release] [-SkipChecks] [-OutputDirectory <path>]
 ```
@@ -19,6 +19,12 @@ captured launcher with `CreateNoWindow=true`, hidden window style, redirected
 stdout/stderr, exact argument quoting, and checked exit propagation. This keeps
 task commands from opening console windows. The separately authorized final
 installer/app/test-game GUI launches are not disguised as headless checks.
+
+`test` excludes the interactive Windows broker smoke label by default. Those
+tests can touch real display, playback, input, identity, WGC, or WASAPI state
+and may present pixels or audio. Run `test -IncludeWindowsSmoke` only during an
+explicitly authorized desktop qualification window; ordinary lint, test, and
+package gates use the non-GUI media-broker suite.
 
 The root `typecheck` and `build` package scripts use exact Corepack dispatch with
 an explicit `@npc2/control` filter. They never use recursive `pnpm -r` (which

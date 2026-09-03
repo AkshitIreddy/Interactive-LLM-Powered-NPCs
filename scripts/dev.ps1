@@ -10,6 +10,7 @@ param(
     [switch]$Offline,
     [switch]$Quick,
     [switch]$SkipChecks,
+    [switch]$IncludeWindowsSmoke,
     [string]$OutputDirectory
 )
 
@@ -919,8 +920,17 @@ function Invoke-Tests {
                 )
                 Write-Step 'Building the native media broker tests'
                 Invoke-External -FilePath 'cmake' -ArgumentList @('--build', $nativeBuild, '--config', 'Debug')
+                $nativeTestArguments = @(
+                    '--test-dir', $nativeBuild,
+                    '-C', 'Debug',
+                    '--output-on-failure'
+                )
+                if (-not $IncludeWindowsSmoke) {
+                    $nativeTestArguments += @('-LE', 'interactive_windows_smoke')
+                    Write-Skip 'Interactive Windows broker smoke is opt-in; running the non-GUI media suite only.'
+                }
                 Write-Step 'Running native media broker tests'
-                Invoke-External -FilePath 'ctest' -ArgumentList @('--test-dir', $nativeBuild, '-C', 'Debug', '--output-on-failure')
+                Invoke-External -FilePath 'ctest' -ArgumentList $nativeTestArguments
             }
         } else {
             Add-Failure 'Native media broker tests: native/media-broker/CMakeLists.txt was not found.'
