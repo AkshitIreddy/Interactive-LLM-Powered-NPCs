@@ -4152,13 +4152,15 @@ mod tests {
     fn admitted_actor_authority_accepts_newer_frames_only_inside_the_freshness_window() {
         const FREQUENCY: u64 = 1_000_000_000;
         const AUTHORITY_QPC: u64 = 10_000_000_000;
+        let authority_qpc_ns =
+            i64::try_from(AUTHORITY_QPC).expect("test authority QPC must fit in i64");
         assert!(bounded_frame_progression(
             40,
             AUTHORITY_QPC,
             43,
             AUTHORITY_QPC + 30_000_000,
             FREQUENCY,
-            i64::try_from(AUTHORITY_QPC).unwrap() + 100_000_000,
+            authority_qpc_ns + 100_000_000,
         ));
         assert!(!bounded_frame_progression(
             40,
@@ -4166,7 +4168,7 @@ mod tests {
             39,
             AUTHORITY_QPC + 30_000_000,
             FREQUENCY,
-            i64::try_from(AUTHORITY_QPC).unwrap() + 100_000_000,
+            authority_qpc_ns + 100_000_000,
         ));
         assert!(!bounded_frame_progression(
             40,
@@ -4174,7 +4176,7 @@ mod tests {
             43,
             AUTHORITY_QPC + 30_000_000,
             FREQUENCY,
-            i64::try_from(AUTHORITY_QPC).unwrap() + VISUAL_FRAME_DEADLINE_NS + 1,
+            authority_qpc_ns + VISUAL_FRAME_DEADLINE_NS + 1,
         ));
         assert!(!bounded_frame_progression(
             40,
@@ -4182,7 +4184,7 @@ mod tests {
             43,
             AUTHORITY_QPC + 103_000_000,
             FREQUENCY,
-            i64::try_from(AUTHORITY_QPC).unwrap() + 100_000_000,
+            authority_qpc_ns + 100_000_000,
         ));
     }
 
