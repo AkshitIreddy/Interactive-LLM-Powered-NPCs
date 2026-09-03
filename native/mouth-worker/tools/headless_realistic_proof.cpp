@@ -185,6 +185,33 @@ struct WavPcm {
     return frames;
 }
 
+[[nodiscard]] NormalizedRect expanded_tracking_seed(
+    const NormalizedRect& detected_face) noexcept {
+    // The product path receives an identity-tracked face ROI rather than
+    // searching most of the source frame after every acquisition. Keep enough
+    // context for ordinary idle/head motion while preventing the offline proof
+    // from benchmarking a deliberately broad cold-search rectangle forever.
+    // MNV3 loses confidence when the detected face is enlarged to nearly fill
+    // its 224 px detector input. Retain roughly one face-width of scene
+    // context while still cutting the acquired search area substantially.
+    constexpr double horizontal_margin_fraction = 1.05;
+    constexpr double top_margin_fraction = 0.90;
+    constexpr double bottom_margin_fraction = 1.10;
+    const double left = std::clamp(
+        detected_face.x - detected_face.width * horizontal_margin_fraction,
+        0.0, 1.0);
+    const double top = std::clamp(
+        detected_face.y - detected_face.height * top_margin_fraction,
+        0.0, 1.0);
+    const double right = std::clamp(
+        detected_face.x + detected_face.width * (1.0 + horizontal_margin_fraction),
+        0.0, 1.0);
+    const double bottom = std::clamp(
+        detected_face.y + detected_face.height * (1.0 + bottom_margin_fraction),
+        0.0, 1.0);
+    return {left, top, right - left, bottom - top};
+}
+
 void write_ppm(const std::filesystem::path& path, const std::vector<std::uint8_t>& bgra,
                const std::uint32_t width, const std::uint32_t height,
                const std::uint32_t stride) {
@@ -269,14 +296,24 @@ void write_ppm(const std::filesystem::path& path, const std::vector<std::uint8_t
 
 int main(int argc, char** argv) {
     try {
-        if (argc != 5) {
+        if (argc != 5 && argc != 6) {
             throw std::runtime_error(
-                "usage: npc_mouth_worker_headless_realistic_proof <pack-root> <portrait.ppm|source-frames-dir> <audio.wav> <output-dir>");
+                "usage: npc_mouth_worker_headless_realistic_proof <pack-root> <portrait.ppm|source-frames-dir> <audio.wav> <output-dir> [tracking-hz:10|15]");
         }
         const auto pack_root = std::filesystem::path(argv[1]);
         const auto source_path = std::filesystem::path(argv[2]);
         const auto audio_path = std::filesystem::path(argv[3]);
         const auto output = std::filesystem::path(argv[4]);
+        std::uint32_t tracking_rate_hz = 15U;
+        if (argc == 6) {
+            const auto text = std::string_view(argv[5]);
+            const auto parsed = std::from_chars(
+                text.data(), text.data() + text.size(), tracking_rate_hz);
+            if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() ||
+                (tracking_rate_hz != 10U && tracking_rate_hz != 15U)) {
+                throw std::runtime_error("tracking-hz must be 10 or 15");
+            }
+        }
         const auto frames_dir = output / "frames";
         std::filesystem::create_directories(frames_dir);
 
@@ -340,6 +377,7 @@ int main(int argc, char** argv) {
         appearance.identity_locked = true;
         appearance.target_visible = true;
         VisualResourceStateV1 resources{};
+        resources.admitted_signal_rate_hz = tracking_rate_hz;
         OpenSeeFaceSignalAdapter adapter(generation);
         const auto adapted_at = packet->measured_at_ns + 1'000'000LL;
         const auto decision = adapter.adapt(*packet, appearance, resources, packet->frame, adapted_at);
@@ -358,6 +396,7 @@ int main(int argc, char** argv) {
         const auto tracking_template = *decision.tracking;
 
         constexpr std::uint32_t video_fps = 30U;
+        const std::size_t tracking_interval_frames = video_fps / tracking_rate_hz;
         const auto audio_frames = audio.samples.size() / audio.channels;
         const auto output_frames = std::max<std::size_t>(1U,
             (audio_frames * video_fps + audio.sample_rate - 1U) / audio.sample_rate);
@@ -375,6 +414,7 @@ int main(int argc, char** argv) {
         std::uint64_t previous_source_digest{};
         std::optional<OpenSeeFaceLandmarkPacketV1> final_packet = packet;
         std::optional<TrackingEvidence> carried_moving_tracking;
+        NormalizedRect moving_seed_face = expanded_tracking_seed(packet->face_bounds);
         Nanoseconds last_moving_inference_at_ns = moving_source ? packet->measured_at_ns : 0;
         for (std::size_t frame_index = 0; frame_index < output_frames; ++frame_index) {
             const auto frame_at = timeline + static_cast<Nanoseconds>(frame_index) * frame_ns;
@@ -383,8 +423,9 @@ int main(int argc, char** argv) {
             source.lease.lease_nonce_low = frame_index + 1U;
             source.lease.expires_at_ns = frame_at + 500'000'000LL;
             auto tracking = tracking_template;
-            if (moving_source && frame_index % 2U == 0U) {
-                constexpr Nanoseconds admitted_tracking_period_ns = 67'000'000;
+            if (moving_source && frame_index % tracking_interval_frames == 0U) {
+                const Nanoseconds admitted_tracking_period_ns =
+                    (1'000'000'000LL + tracking_rate_hz - 1U) / tracking_rate_hz;
                 if (last_moving_inference_at_ns > 0) {
                     const auto wait_ns = last_moving_inference_at_ns +
                         admitted_tracking_period_ns - monotonic_ns();
@@ -401,7 +442,7 @@ int main(int argc, char** argv) {
                 work.frame = inference_source.identity;
                 work.source_frame_qpc = static_cast<std::uint64_t>(inference_now);
                 work.qpc_frequency = 1'000'000'000U;
-                work.seed_face_bounds = {0.12, 0.05, 0.76, 0.90};
+                work.seed_face_bounds = moving_seed_face;
                 work.source = std::move(inference_source);
                 work.deadline_ns = inference_now + 2'000'000'000LL;
                 const auto inference_started = std::chrono::steady_clock::now();
@@ -415,9 +456,17 @@ int main(int argc, char** argv) {
                     *moving_packet, appearance, resources, moving_packet->frame,
                     moving_packet->measured_at_ns + 1'000'000LL);
                 if (!moving_decision.accepted()) {
-                    throw std::runtime_error(
-                        "moving landmark adapter bypassed: " +
-                        std::string(to_string(moving_decision.disposition)));
+                    std::ostringstream detail;
+                    detail << "moving landmark adapter bypassed: "
+                           << to_string(moving_decision.disposition)
+                           << " detector=" << moving_packet->detector_confidence
+                           << " landmarks=" << moving_packet->landmark_confidence
+                           << " visibility=" << moving_packet->visibility_ratio
+                           << " face=[" << moving_packet->face_bounds.x << ','
+                           << moving_packet->face_bounds.y << ','
+                           << moving_packet->face_bounds.width << ','
+                           << moving_packet->face_bounds.height << ']';
+                    throw std::runtime_error(detail.str());
                 }
                 tracking = *moving_decision.tracking;
                 // The provider is measured on the real offline execution
@@ -427,6 +476,7 @@ int main(int argc, char** argv) {
                 tracking.measured_at_ns = frame_at;
                 carried_moving_tracking = tracking;
                 last_moving_inference_at_ns = inference_now;
+                moving_seed_face = expanded_tracking_seed(moving_packet->face_bounds);
                 final_packet = std::move(moving_packet);
             } else if (moving_source) {
                 tracking = carried_moving_tracking.value_or(tracking_template);
@@ -517,8 +567,11 @@ int main(int argc, char** argv) {
         const bool source_motion_qualifies =
             !moving_source || changed_source_frames > output_frames / 4U;
         const bool moving_tracking_qualifies =
-            !moving_source || (moving_inference_ms.size() == (output_frames + 1U) / 2U &&
-                               moving_inference_p95 <= 40.0);
+            !moving_source ||
+            (moving_inference_ms.size() ==
+                 (output_frames + tracking_interval_frames - 1U) /
+                     tracking_interval_frames &&
+             moving_inference_p95 <= 600.0 / static_cast<double>(tracking_rate_hz));
         const bool qualifies = p95_inference <= 220.0 && p95_compositor <= 8.0 &&
                                residual_frames == output_frames && distinct.size() >= 3U &&
                                changed_frames > output_frames / 4U &&
@@ -529,7 +582,7 @@ int main(int argc, char** argv) {
         std::ofstream report(output / "headless-proof.json");
         if (!report) throw std::runtime_error("could not create proof report");
         report << std::fixed << std::setprecision(3)
-               << "{\n  \"schema\": \"interactive-npcs-headless-realistic-lipsync/v3\",\n"
+               << "{\n  \"schema\": \"interactive-npcs-headless-realistic-lipsync/v4\",\n"
                << "  \"status\": \"" << (qualifies ? "passed" : "failed") << "\",\n"
                << "  \"source\": \"" << json_escape(source_path.string()) << "\",\n"
                << "  \"movingSource\": " << (moving_source ? "true" : "false") << ",\n"
@@ -555,7 +608,11 @@ int main(int argc, char** argv) {
                << "  \"inferenceP50Ms\": " << p50_inference << ",\n"
                << "  \"inferenceP95Ms\": " << p95_inference << ",\n"
                << "  \"movingInferenceSamples\": " << moving_inference_ms.size() << ",\n"
-               << "  \"movingTrackingRateHz\": " << (moving_source ? 15 : 0) << ",\n"
+               << "  \"movingTrackingRateHz\": "
+               << (moving_source ? tracking_rate_hz : 0U) << ",\n"
+               << "  \"movingInferenceBudgetMs\": "
+               << (moving_source ? 600.0 / static_cast<double>(tracking_rate_hz) : 0.0)
+               << ",\n"
                << "  \"movingInferenceP50Ms\": " << moving_inference_p50 << ",\n"
                << "  \"movingInferenceP95Ms\": " << moving_inference_p95 << ",\n"
                << "  \"compositorP95Ms\": " << p95_compositor << ",\n"
