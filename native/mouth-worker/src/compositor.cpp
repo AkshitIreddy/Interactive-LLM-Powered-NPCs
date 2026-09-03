@@ -390,7 +390,14 @@ ResidualPatch compose_current_frame_residual(const CpuFrame& source,
                     const double feather = std::max(0.75, half_gap * 0.45);
                     const double cavity_mix =
                         unit((half_gap - std::abs(seam_delta)) / feather);
-                    value = value * (1.0 - cavity_mix) + cavity * cavity_mix;
+                    // Tiny and medium openings should not jump immediately to
+                    // a fully dark synthetic slit. Preserve some current-frame
+                    // lip colour until the jaw is open far enough to expose a
+                    // deep oral cavity.
+                    const double cavity_depth = 0.60 + 0.40 *
+                        smooth_unit((opening_strength - 0.28) / 0.40);
+                    const double cavity_fill_mix = cavity_mix * cavity_depth;
+                    value = value * (1.0 - cavity_fill_mix) + cavity * cavity_fill_mix;
 
                     // Add anatomy only when there is enough opening to expose
                     // it.  The colour is derived from the current frame's
@@ -399,7 +406,7 @@ ResidualPatch compose_current_frame_residual(const CpuFrame& source,
                     // read as a sticker.  Restricting it to the central upper
                     // cavity also avoids "teeth to the corners" artifacts.
                     const double detail_strength =
-                        smooth_unit((opening_strength - 0.38) / 0.34);
+                        smooth_unit((opening_strength - 0.27) / 0.33);
                     const double central_strength =
                         smooth_unit((0.82 - std::abs(mouth_x)) / 0.22);
                     const double detail_feather = std::max(0.45, half_gap * 0.16);
@@ -409,7 +416,7 @@ ResidualPatch compose_current_frame_residual(const CpuFrame& source,
                         smooth_unit((seam_delta - teeth_top) / detail_feather) *
                         smooth_unit((teeth_bottom - seam_delta) / detail_feather);
                     const double teeth_mix = detail_strength * central_strength *
-                                             teeth_vertical * cavity_mix * 0.86;
+                                             teeth_vertical * cavity_mix * 0.92;
                     if (teeth_mix > 1.0e-6) {
                         const double exposure_y = static_cast<double>(top) + seam_y -
                             std::max(2.0, half_gap * 1.45);
@@ -422,7 +429,7 @@ ResidualPatch compose_current_frame_residual(const CpuFrame& source,
                         const double exposure_luma = exposure_b * 0.114 +
                             exposure_g * 0.587 + exposure_r * 0.299;
                         const double tooth_luma = std::clamp(
-                            exposure_luma * 0.78 + 70.0, 118.0, 210.0);
+                            exposure_luma * 0.78 + 78.0, 128.0, 218.0);
                         const double tooth = tooth_luma *
                             (channel == 2U ? 1.00 : channel == 1U ? 0.96 : 0.90);
                         value = value * (1.0 - teeth_mix) + tooth * teeth_mix;
@@ -436,7 +443,9 @@ ResidualPatch compose_current_frame_residual(const CpuFrame& source,
                     const double tongue_vertical =
                         smooth_unit((seam_delta - tongue_top) / detail_feather) *
                         smooth_unit((tongue_bottom - seam_delta) / detail_feather);
-                    const double tongue_mix = detail_strength * central_strength *
+                    const double tongue_strength =
+                        smooth_unit((opening_strength - 0.46) / 0.30);
+                    const double tongue_mix = tongue_strength * central_strength *
                                               tongue_vertical * cavity_mix * 0.34;
                     if (tongue_mix > 1.0e-6) {
                         const double tongue = cavity *
