@@ -42,6 +42,7 @@ item requires implementation evidence; prose progress alone does not count.
 - [x] Rewrite README and documentation; add ADRs, diagrams, troubleshooting, legal/provenance, and contributor setup.
 - [x] Generate and visually inspect the copyright-safe Gifsmith simulated demo.
 - [x] Stage and smoke-test a local unsigned Debug installer on this development machine. Its manifest permanently classifies it as an `unchecked-development-package`; it is not RC evidence.
+- [x] Regenerate the local review package with the refined CPU mouth worker and reconcile the silent install as a closed world: 756 installed files, 755 manifested payload files, exact four-sidecar hashes, legal resources, and unclassified-file rejection passed. Unsafe broker GUI smoke tests remained excluded, so this is still not desktop lip-sync acceptance or RC evidence.
 - [ ] Produce a source-identified local RC and pass or explicitly defer every RC gate.
 
 ## Benchmark environment note
@@ -54,17 +55,17 @@ boost state, temperatures, clocks, driver, power source, and competing workload.
 
 ## Latest local verification snapshot
 
-The 2026-08-29 local pass produced the following functional evidence. Counts
+The 2026-09-03 local pass produced the following functional evidence. Counts
 refer to the current development tree and do not satisfy live-game, clean-VM,
 performance, display-matrix, model-pack, or production-signing gates:
 
 - [x] Full locked Rust workspace tests pass; root formatting and strict Clippy pass.
-- [x] Response Console: 28 frontend tests, TypeScript typecheck, and production Vite build pass.
-- [x] Documentation link validation passes for 152 local links.
-- [x] Worker protocol/pack suite passes 22 tests.
+- [x] Response Console: 124 frontend tests, TypeScript typecheck, and production Vite build pass.
+- [x] Documentation link validation passes for 774 local links across 149 files.
+- [x] Worker protocol/pack suite passes 30 tests; deterministic benchmark harness passes 21 tests.
 - [x] All 20 authored profiles pass schema, semantic, provenance, and replay validation.
-- [x] Deterministic simulation passes 15 checks across seven scenarios.
-- [x] Native media broker CTest passes 2/2; the game-load harness passes only its inert/dry-run path, with no performance claim.
+- [x] Deterministic simulation passes 22 tests and 127 assertions across 13 scenarios.
+- [x] Native media broker non-GUI CTest passes 5/5; display/playback/input/identity Windows smoke executables are deliberately not run. The synthetic rendering and prepared review-game contract checks pass headlessly, with no live-game or performance claim.
 - [x] Current-tree secret scanning, strict license/provenance validation, and deterministic complete CycloneDX SBOM generation pass.
 - [x] The local installer smoke passes application health, protected AppData ACLs, direct runtime/media-broker child topology, parent-death cleanup, normal uninstall, and file/shortcut/registry residue checks. Runtime doctor is intentionally degraded only because Debug permits the unsigned development catalog. One active display was detected, so secondary-display placement correctly remained a no-op.
 

@@ -29,14 +29,15 @@ Notable 2.0 changes are recorded here. No 2.0 version has been published; versio
   face ROI carry and adaptive 10/15 Hz tracking while compositing at 30 FPS.
 - Completed local-only credential and synthetic provider smoke tests for Cohere, ElevenLabs, AssemblyAI, and the qualified NVIDIA NIM routes. Only redacted ignored evidence was retained; keys were never placed in tracked source or logs.
 - Passed a local Debug NSIS install/launch/forced-parent-termination/uninstall smoke with authenticated runtime/media-broker health, direct child topology, protected AppData ACLs, and no orphan process, file, shortcut, or registry residue. Runtime doctor was degraded only by the intentionally unsigned development catalog. The package is permanently classified `unchecked-development-package`, remains local and unsigned, and does not replace the clean Windows 10/11 VM matrix or count as RC evidence.
+- Regenerated a source-clean local Debug package at `cb43a7f` with the refined 185,856-byte CPU mouth worker, silently installed it without launching the app, and passed closed-world reconciliation for 756 installed files, 755 manifested payload files, exact four-sidecar hashes, legal resources, and unclassified-file rejection. Unsafe Windows broker GUI smoke tests remained excluded, so desktop lip-sync presentation is still unaccepted.
 
 ### Verified locally
 
 - Passed the full locked Rust workspace tests, root formatting, and strict Clippy.
-- Passed 28 Response Console tests, TypeScript typecheck, and the production Vite build.
-- Passed 22 worker tests, all 20 profile validations/replays, and 15 deterministic simulation checks across seven scenarios.
-- Passed 2/2 native media-broker CTests and the inert game-load harness path; no live-game or performance result is claimed.
-- Validated 152 local documentation links and passed current-tree secret scanning, strict license/provenance checks, and deterministic complete CycloneDX SBOM generation.
+- Passed 124 Response Console tests, TypeScript typecheck, and the production Vite build.
+- Passed 30 worker tests, 21 deterministic benchmark-harness tests, all 20 authored profile validations plus the synthetic review profile, and 22 deterministic simulation tests with 127 assertions across 13 scenarios.
+- Passed the five native media-broker non-GUI CTests plus the headless synthetic renderer/review-game contract. Unsafe Windows broker GUI smoke tests were not run; no live-game or performance result is claimed.
+- Validated 774 local documentation links across 149 files and passed current-tree secret scanning, strict license/provenance checks, and deterministic complete CycloneDX SBOM generation.
 - Passed the isolated mouth core on two license-safe moving real-person clips
   with a real NVIDIA Magpie WAV. The primary 960x720 proof measured 28.825 ms
   p95 tracking at 10 Hz, 2.027 ms p95 compositing at 30 FPS, and 0 GPU VRAM;

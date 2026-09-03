@@ -14,10 +14,12 @@ headless artifacts unless the user explicitly asks to resume desktop testing.
 - Checkout: `C:\Users\akshi\Desktop\Code Palace\interactive llm\Interactive-LLM-Powered-NPCs`
 - Large build/model/cache root: `E:\temp\InteractiveNPCs`
 - Native source mirror: `E:\temp\IPNbuild`
-- Review app: `E:\temp\InteractiveNPCs\review-app-v8\interactive-npcs-control.exe`
+- Review app: `E:\temp\InteractiveNPCs\review-app-v9-refined\interactive-npcs-control.exe`
 - Test game: `E:\temp\local-app-data\test-game\interactive-npcs-synthetic-target.exe`
 - Accepted headless video: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\moving-pexels-man-v8-final\pexels-man-magpie-moving-lipsync.mp4`
 - Accepted report: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\moving-pexels-man-v8-final\headless-proof.json`
+- Local package manifest: `E:\temp\InteractiveNPCs\package-v9-refined\20260903T084130Z-d0670c5a63ea4dff9ff67d3ca1c917f0\package-manifest.json`
+- Installed reconciliation: `E:\temp\InteractiveNPCs\package-v9-refined\20260903T084130Z-d0670c5a63ea4dff9ff67d3ca1c917f0\installed-review-v9-manifest.json`
 
 The 2.0 overhaul has a local checkpoint at `3386392`. Preserve subsequent work,
 verify status before editing, and do not reset, clean, publish, or rewrite
@@ -44,9 +46,10 @@ Magpie API-generated 22,050 Hz mono PCM WAV drove the actual
 Closed, opening, sustained, and return-to-closed frames were inspected. The
 refined compositor preserves the upper lip, moves the lower jaw more strongly,
 softens shallow cavity transitions, exposes a narrow exposure-matched teeth
-line, and smooths PCM attack and release. The review-app-v8 sidecar predates this refinement and the app
-presentation path remains unaccepted; do not infer app delivery from the
-headless artifact.
+line, and smooths PCM attack and release. Review-app-v9 contains the exact
+refined four-sidecar set and passed closed-world installed-file reconciliation,
+but its desktop presentation path remains unaccepted; do not infer app delivery
+from the headless artifact.
 
 ## Verification completed
 
@@ -58,6 +61,11 @@ headless artifact.
 - Media broker non-GUI suites: core, simulated display matrix, input transport,
   playback transport, and presentation context all passed
 - H.264/AAC output: 960x720, 30 FPS, 1.393 seconds
+- Refined local Debug package: source-clean at `cb43a7f`, unsigned,
+  `unchecked-development-package`, no publication/update-feed action
+- Silent install reconciliation: 756 installed files, 755 manifested payload
+  files, exact four-sidecar and legal-resource reconciliation passed
+- Unsafe broker display/playback/input/identity smoke tests were not run
 
 ## Truth boundary
 
