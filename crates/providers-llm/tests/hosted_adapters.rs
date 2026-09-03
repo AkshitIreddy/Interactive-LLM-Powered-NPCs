@@ -562,10 +562,9 @@ async fn nvidia_nemotron_three_disables_reasoning_for_low_latency_dialogue() {
         .collect::<Vec<_>>()
         .await;
     let received = String::from_utf8(fixture.request.await.expect("request")).expect("UTF-8");
-    let body: serde_json::Value = serde_json::from_str(
-        received.split("\r\n\r\n").nth(1).expect("body"),
-    )
-    .expect("JSON request body");
+    let body: serde_json::Value =
+        serde_json::from_str(received.split("\r\n\r\n").nth(1).expect("body"))
+            .expect("JSON request body");
     assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
 }
 
