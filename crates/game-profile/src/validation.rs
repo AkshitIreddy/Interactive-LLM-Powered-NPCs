@@ -1,7 +1,7 @@
 use crate::{
-    BuildStatus, CapabilityEvidenceKind, CapabilityTier, CaptureMethod, GameProfileV2,
-    IdentityEvidence, IdentityStrategy, ProvenanceKind, GAME_PROFILE_V2_SCHEMA,
-    GAME_PROFILE_V2_VERSION,
+    BuildStatus, CapabilityEvidenceKind, CapabilityTier, CaptureMethod, CharacterDataReadiness,
+    GameProfileV2, IdentityEvidence, IdentityStrategy, KnowledgeAuthority, PromptAuthority,
+    ProvenanceKind, GAME_PROFILE_V2_SCHEMA, GAME_PROFILE_V2_VERSION,
 };
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -161,6 +161,11 @@ impl GameProfileV2 {
             &mut report,
         );
         unique_ids(
+            self.content.knowledge.iter().map(|v| v.id.as_str()),
+            "/content/knowledge",
+            &mut report,
+        );
+        unique_ids(
             self.content.spoiler_tiers.iter().map(|v| v.id.as_str()),
             "/content/spoiler_tiers",
             &mut report,
@@ -205,10 +210,17 @@ impl GameProfileV2 {
             .iter()
             .map(|v| v.id.as_str())
             .collect();
+        let knowledge: HashSet<_> = self
+            .content
+            .knowledge
+            .iter()
+            .map(|v| v.id.as_str())
+            .collect();
         for (index, character) in self.characters.iter().enumerate() {
             for reference in &character.prompt.knowledge_refs {
                 if !provenance.contains(reference.as_str())
                     && !spoiler_tiers.contains(reference.as_str())
+                    && !knowledge.contains(reference.as_str())
                 {
                     report.error(
                         IssueCode::BrokenReference,
@@ -226,6 +238,117 @@ impl GameProfileV2 {
                     "generic profiles require explicit character selection as their sole identity evidence",
                 );
             }
+            unique_ids(
+                character
+                    .style_examples
+                    .iter()
+                    .map(|example| example.id.as_str()),
+                &format!("/characters/{index}/style_examples"),
+                &mut report,
+            );
+            for (example_index, example) in character.style_examples.iter().enumerate() {
+                if example.weight_millis > 1_000 {
+                    report.error(
+                        IssueCode::InconsistentCapability,
+                        format!("/characters/{index}/style_examples/{example_index}/weight_millis"),
+                        "style example weight must be in 0..=1000",
+                    );
+                }
+                if !provenance.contains(example.provenance_id.as_str()) {
+                    report.error(
+                        IssueCode::BrokenReference,
+                        format!("/characters/{index}/style_examples/{example_index}/provenance_id"),
+                        format!("unknown provenance `{}`", example.provenance_id),
+                    );
+                }
+            }
+        }
+
+        for (index, item) in self.content.knowledge.iter().enumerate() {
+            if !provenance.contains(item.provenance_id.as_str()) {
+                report.error(
+                    IssueCode::BrokenReference,
+                    format!("/content/knowledge/{index}/provenance_id"),
+                    format!("unknown provenance `{}`", item.provenance_id),
+                );
+            }
+            if !spoiler_tiers.contains(item.spoiler_tier.as_str()) {
+                report.error(
+                    IssueCode::BrokenReference,
+                    format!("/content/knowledge/{index}/spoiler_tier"),
+                    format!("unknown spoiler tier `{}`", item.spoiler_tier),
+                );
+            }
+            match (item.authority, item.owner_character_id.as_deref()) {
+                (KnowledgeAuthority::CharacterAuthored, Some(owner)) => {
+                    if !characters.contains(owner) {
+                        report.error(
+                            IssueCode::BrokenReference,
+                            format!("/content/knowledge/{index}/owner_character_id"),
+                            format!("unknown character `{owner}`"),
+                        );
+                    }
+                }
+                (KnowledgeAuthority::CharacterAuthored, None) => report.error(
+                    IssueCode::BrokenReference,
+                    format!("/content/knowledge/{index}/owner_character_id"),
+                    "character-authored knowledge requires an owner",
+                ),
+                (_, Some(_)) => report.error(
+                    IssueCode::InconsistentCapability,
+                    format!("/content/knowledge/{index}/owner_character_id"),
+                    "only character-authored knowledge may declare an owner",
+                ),
+                (_, None) => {}
+            }
+        }
+
+        let retrieval = &self.content.retrieval;
+        let authority_count = retrieval
+            .authority_order
+            .iter()
+            .copied()
+            .collect::<HashSet<_>>()
+            .len();
+        if retrieval.authority_order.is_empty()
+            || authority_count != retrieval.authority_order.len()
+            || !retrieval
+                .authority_order
+                .contains(&PromptAuthority::CoreCanon)
+        {
+            report.error(
+                IssueCode::InconsistentCapability,
+                "/content/retrieval/authority_order",
+                "authority order must be unique, non-empty, and include core_canon",
+            );
+        }
+        if matches!(
+            self.content.character_data_readiness,
+            Some(CharacterDataReadiness::Partial | CharacterDataReadiness::Unavailable)
+        ) && self
+            .content
+            .character_data_readiness_notes
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("")
+            .is_empty()
+        {
+            report.error(
+                IssueCode::MissingRationale,
+                "/content/character_data_readiness_notes",
+                "partial or unavailable character data requires a non-empty rationale",
+            );
+        }
+        if self
+            .recommendations
+            .as_ref()
+            .is_some_and(|policy| !policy.game_resource_reserve_required)
+        {
+            report.error(
+                IssueCode::InconsistentCapability,
+                "/recommendations/game_resource_reserve_required",
+                "local activation must reserve resources for the foreground game",
+            );
         }
 
         for (index, process) in self.detection.processes.iter().enumerate() {
@@ -317,6 +440,26 @@ impl GameProfileV2 {
                     format!("/content/provenance/{index}/source_url"),
                     "non-original content requires an HTTPS source URL",
                 );
+            }
+            if let Some(path) = &item.source_path {
+                validate_relative_leaf(
+                    path,
+                    format!("/content/provenance/{index}/source_path"),
+                    &mut report,
+                );
+            }
+            if let Some(hash) = &item.source_sha256 {
+                if hash.len() != 64
+                    || !hash
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                {
+                    report.error(
+                        IssueCode::BrokenReference,
+                        format!("/content/provenance/{index}/source_sha256"),
+                        "source_sha256 must be 64 lowercase hexadecimal characters",
+                    );
+                }
             }
         }
         for (index, build) in self.detection.builds.iter().enumerate() {

@@ -86,6 +86,11 @@ async fn default_elevenlabs_route_uses_ordinary_account_logging() {
         opens[0].query.get("enable_logging").map(String::as_str),
         Some("true")
     );
+    assert_eq!(
+        opens[0].query.get("language_code").map(String::as_str),
+        Some("en"),
+        "the ElevenLabs wire contract accepts ISO 639-1, not the full en-US locale"
+    );
 }
 
 #[tokio::test]

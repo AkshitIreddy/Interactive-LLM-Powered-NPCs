@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://interactive-npcs.invalid/schemas/turn-safety-context-v1.schema.json",
+  "title": "Authenticated turn safety context v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "evidenceState",
+    "profilePolicy",
+    "visualsAllowed",
+    "protectedOnlineDetected",
+    "antiCheatDetected"
+  ],
+  "properties": {
+    "evidenceState": {
+      "enum": ["verifiedSafe", "consoleIsolated", "unknown", "blocked"]
+    },
+    "profilePolicy": {
+      "enum": [
+        "syntheticFixture",
+        "singlePlayerOnly",
+        "offlineOnly",
+        "consoleIsolatedNoGameInteraction",
+        "unknown"
+      ]
+    },
+    "visualsAllowed": { "type": "boolean" },
+    "protectedOnlineDetected": { "type": "boolean" },
+    "antiCheatDetected": { "type": "boolean" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "evidenceState": { "const": "consoleIsolated" } },
+        "required": ["evidenceState"]
+      },
+      "then": {
+        "properties": {
+          "profilePolicy": { "const": "consoleIsolatedNoGameInteraction" },
+          "visualsAllowed": { "const": false },
+          "protectedOnlineDetected": { "const": false },
+          "antiCheatDetected": { "const": false }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "evidenceState": { "const": "verifiedSafe" } },
+        "required": ["evidenceState"]
+      },
+      "then": {
+        "properties": {
+          "profilePolicy": {
+            "enum": ["syntheticFixture", "singlePlayerOnly", "offlineOnly"]
+          },
+          "protectedOnlineDetected": { "const": false },
+          "antiCheatDetected": { "const": false }
+        }
+      }
+    }
+  ]
+}

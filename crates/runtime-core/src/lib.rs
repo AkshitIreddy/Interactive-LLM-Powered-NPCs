@@ -10,6 +10,7 @@ pub mod policy;
 pub mod provider;
 pub mod resource_broker;
 pub mod sentence;
+pub mod structured_response;
 pub mod supervisor;
 pub mod timing;
 pub mod types;
@@ -19,7 +20,8 @@ pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitRegistry}
 pub use policy::{FallbackPolicy, PrivacyDecision, PrivacyPolicy, RoutingPlan};
 pub use provider::*;
 pub use resource_broker::*;
-pub use sentence::{SentenceSegmenter, SentenceSegmenterConfig};
+pub use sentence::{SentenceSegmenter, SentenceSegmenterConfig, SentenceSpan};
+pub use structured_response::*;
 pub use supervisor::{SupervisorConfig, TurnHandle, TurnSupervisor};
 pub use timing::{SpanOutcome, TimingCollector, TimingSpan};
 pub use types::*;

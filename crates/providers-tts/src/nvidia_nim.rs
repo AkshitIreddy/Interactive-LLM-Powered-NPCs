@@ -1,4 +1,4 @@
-//! Experimental NVIDIA NIM Magpie multilingual TTS adapter.
+//! NVIDIA NIM Magpie multilingual TTS adapter.
 //!
 //! This route is intentionally curated: callers cannot replace the NVCF
 //! function, HTTP origin, gRPC authority, or Riva method. The request contract
@@ -16,6 +16,15 @@ use std::{
 };
 
 use async_trait::async_trait;
+use futures_util::StreamExt;
+use reqwest::{
+    header::{HeaderValue, ACCEPT, AUTHORIZATION, RETRY_AFTER},
+    Client, StatusCode,
+};
+use serde_json::Value;
+use tokio::time::Instant;
+use url::Url;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
     CredentialResolveError, HostedTtsProviderId, PcmChunk, PcmEncoding, ProviderCapabilities,
@@ -34,6 +43,12 @@ pub const NVIDIA_MAGPIE_LIST_VOICES_PATH: &str = "/v1/audio/list_voices";
 pub const NVIDIA_MAGPIE_SYNTHESIZE_PATH: &str = "/v1/audio/synthesize";
 pub const RIVA_TTS_SYNTHESIZE_ONLINE_METHOD: &str =
     "/nvidia.riva.tts.RivaSpeechSynthesis/SynthesizeOnline";
+pub const NVIDIA_MAGPIE_DEFAULT_VOICE_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
+
+const NVIDIA_MAGPIE_MIN_VOICE_CACHE_TTL: Duration = Duration::from_millis(100);
+const NVIDIA_MAGPIE_MAX_VOICE_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+const MAX_NVIDIA_VOICE_LIST_BYTES: usize = 2 * 1_048_576;
+const MAX_NVIDIA_VOICE_RECORDS: usize = 4_096;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NvidiaMagpieEndpointDescriptor {
@@ -59,10 +74,10 @@ pub const NVIDIA_MAGPIE_ENDPOINTS: NvidiaMagpieEndpointDescriptor =
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NvidiaMagpieLifecycle {
-    /// The fixed HTTP route produced a non-silent, unclipped stock-voice smoke
-    /// sample. The gRPC `SynthesizeOnline` route remains replay-only and must be
-    /// live-qualified before this adapter can graduate from experimental.
-    ExperimentalHttpSmokeQualifiedAwaitingGrpcStreamingQualification,
+    /// The fixed HTTP discovery route and concrete TLS gRPC `SynthesizeOnline`
+    /// transport produced bounded, non-silent, unclipped stock-voice samples.
+    /// This is development API evidence, not a production entitlement claim.
+    ExperimentalGrpcStreamingQualified,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -288,6 +303,252 @@ pub trait NvidiaNimHttpTransport: Send + Sync {
     ) -> Result<Vec<NvidiaStockVoice>, NvidiaNvcfError>;
 }
 
+/// Bounded production HTTP transport for Magpie stock-voice discovery.
+///
+/// The hosted constructor cannot be pointed at another service. The loopback
+/// fixture constructor exists solely so contract tests can exercise the real
+/// HTTP encoder and decoder without sending credentials over the network.
+#[derive(Clone)]
+pub struct ReqwestNvidiaNimHttpTransport {
+    client: Client,
+    target_origin: Url,
+}
+
+impl fmt::Debug for ReqwestNvidiaNimHttpTransport {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ReqwestNvidiaNimHttpTransport")
+            .field("target_origin", &self.target_origin)
+            .field("client", &"<HTTP_CLIENT>")
+            .finish()
+    }
+}
+
+impl ReqwestNvidiaNimHttpTransport {
+    pub fn new() -> Result<Self, NvidiaNvcfError> {
+        let target_origin =
+            Url::parse(NVIDIA_MAGPIE_HTTP_ORIGIN).map_err(|_| NvidiaNvcfError::Protocol)?;
+        Self::with_target_origin(target_origin)
+    }
+
+    /// Builds the concrete transport against an HTTP loopback fixture.
+    /// Arbitrary hosts, credentials, URL paths, queries, and fragments fail
+    /// closed so this cannot become a configurable production proxy.
+    pub fn with_loopback_fixture(target_origin: Url) -> Result<Self, NvidiaNvcfError> {
+        if target_origin.scheme() != "http"
+            || !target_origin
+                .host_str()
+                .and_then(|host| host.parse::<std::net::IpAddr>().ok())
+                .is_some_and(|host| host.is_loopback())
+            || target_origin.username() != ""
+            || target_origin.password().is_some()
+            || target_origin.query().is_some()
+            || target_origin.fragment().is_some()
+            || target_origin.path() != "/"
+        {
+            return Err(NvidiaNvcfError::Protocol);
+        }
+        Self::with_target_origin(target_origin)
+    }
+
+    fn with_target_origin(target_origin: Url) -> Result<Self, NvidiaNvcfError> {
+        let client = Client::builder()
+            .connect_timeout(Duration::from_secs(20))
+            .redirect(reqwest::redirect::Policy::none())
+            .user_agent(concat!("interactive-npcs/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .map_err(|_| NvidiaNvcfError::Unavailable)?;
+        Ok(Self {
+            client,
+            target_origin,
+        })
+    }
+}
+
+#[async_trait]
+impl NvidiaNimHttpTransport for ReqwestNvidiaNimHttpTransport {
+    async fn list_stock_voices(
+        &self,
+        request: NvidiaVoiceListRequest,
+    ) -> Result<Vec<NvidiaStockVoice>, NvidiaNvcfError> {
+        if request.origin != NVIDIA_MAGPIE_HTTP_ORIGIN
+            || request.path != NVIDIA_MAGPIE_LIST_VOICES_PATH
+            || request.deadline < Duration::from_millis(100)
+            || request.deadline > Duration::from_secs(120)
+        {
+            return Err(NvidiaNvcfError::Protocol);
+        }
+
+        let (scheme, credential) = request.authorization.expose_parts();
+        if scheme != Some("Bearer") || credential.is_empty() {
+            return Err(NvidiaNvcfError::Authentication);
+        }
+        let mut bearer = Zeroizing::new(Vec::with_capacity(7 + credential.len()));
+        bearer.extend_from_slice(b"Bearer ");
+        bearer.extend_from_slice(credential.as_bytes());
+        let mut authorization =
+            HeaderValue::from_bytes(&bearer).map_err(|_| NvidiaNvcfError::Authentication)?;
+        authorization.set_sensitive(true);
+        bearer.zeroize();
+
+        let mut endpoint = self.target_origin.clone();
+        endpoint.set_path(NVIDIA_MAGPIE_LIST_VOICES_PATH);
+        let response = self
+            .client
+            .get(endpoint)
+            .header(ACCEPT, "application/json")
+            .header(AUTHORIZATION, authorization)
+            .timeout(request.deadline)
+            .send()
+            .await
+            .map_err(classify_reqwest_error)?;
+        let status = response.status();
+        if !status.is_success() {
+            let retry_after = response
+                .headers()
+                .get(RETRY_AFTER)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<u64>().ok())
+                .map(Duration::from_secs);
+            return Err(classify_http_status(status, retry_after));
+        }
+
+        let mut bytes = Vec::new();
+        let mut body = response.bytes_stream();
+        while let Some(chunk) = body.next().await {
+            let chunk = chunk.map_err(classify_reqwest_error)?;
+            if bytes.len().saturating_add(chunk.len()) > MAX_NVIDIA_VOICE_LIST_BYTES {
+                return Err(NvidiaNvcfError::Protocol);
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        let value: Value = serde_json::from_slice(&bytes).map_err(|_| NvidiaNvcfError::Protocol)?;
+        parse_stock_voices(&value)
+    }
+}
+
+fn classify_reqwest_error(error: reqwest::Error) -> NvidiaNvcfError {
+    if error.is_timeout() {
+        NvidiaNvcfError::DeadlineExceeded
+    } else {
+        NvidiaNvcfError::Unavailable
+    }
+}
+
+fn classify_http_status(status: StatusCode, retry_after: Option<Duration>) -> NvidiaNvcfError {
+    match status {
+        StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => NvidiaNvcfError::Authentication,
+        StatusCode::TOO_MANY_REQUESTS => NvidiaNvcfError::RateLimited { retry_after },
+        StatusCode::NOT_FOUND => NvidiaNvcfError::BadFunction,
+        status if status.is_server_error() => NvidiaNvcfError::Unavailable,
+        _ => NvidiaNvcfError::Protocol,
+    }
+}
+
+fn parse_stock_voices(value: &Value) -> Result<Vec<NvidiaStockVoice>, NvidiaNvcfError> {
+    let mut records = Vec::new();
+    collect_voice_records(value, 0, &mut records)?;
+    let mut voices = BTreeMap::new();
+    for record in records {
+        let Some((id, display_name, locale)) = parse_voice_record(record) else {
+            continue;
+        };
+        if !is_stock_voice_id(&id) {
+            continue;
+        }
+        let voice = NvidiaStockVoice {
+            id: id.clone(),
+            display_name,
+            locale,
+            origin: NvidiaVoiceOrigin::ProviderStock,
+        };
+        voice.validate().map_err(|_| NvidiaNvcfError::Protocol)?;
+        voices.entry(id).or_insert(voice);
+        if voices.len() > MAX_NVIDIA_VOICE_RECORDS {
+            return Err(NvidiaNvcfError::Protocol);
+        }
+    }
+    if voices.is_empty() {
+        return Err(NvidiaNvcfError::Protocol);
+    }
+    Ok(voices.into_values().collect())
+}
+
+fn collect_voice_records<'a>(
+    value: &'a Value,
+    depth: usize,
+    records: &mut Vec<&'a Value>,
+) -> Result<(), NvidiaNvcfError> {
+    if depth > 8 || records.len() > MAX_NVIDIA_VOICE_RECORDS * 2 {
+        return Err(NvidiaNvcfError::Protocol);
+    }
+    match value {
+        Value::Array(values) => {
+            if records.len().saturating_add(values.len()) > MAX_NVIDIA_VOICE_RECORDS * 2 {
+                return Err(NvidiaNvcfError::Protocol);
+            }
+            records.extend(values);
+        }
+        Value::Object(object) => {
+            if let Some(voices) = object.get("voices") {
+                collect_voice_records(voices, depth + 1, records)?;
+            } else {
+                for child in object.values() {
+                    if child.is_object() || child.is_array() {
+                        collect_voice_records(child, depth + 1, records)?;
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    if records.len() > MAX_NVIDIA_VOICE_RECORDS * 2 {
+        return Err(NvidiaNvcfError::Protocol);
+    }
+    Ok(())
+}
+
+fn parse_voice_record(record: &Value) -> Option<(String, String, String)> {
+    let (id, display_name, locale) = match record {
+        Value::String(id) => (id.as_str(), None, None),
+        Value::Object(object) => {
+            let id = ["name", "voice", "voice_id"]
+                .into_iter()
+                .find_map(|key| object.get(key).and_then(Value::as_str))?;
+            let display_name = object.get("display_name").and_then(Value::as_str);
+            let locale = ["locale", "language", "language_code"]
+                .into_iter()
+                .find_map(|key| object.get(key).and_then(Value::as_str));
+            (id, display_name, locale)
+        }
+        _ => return None,
+    };
+    let inferred_locale = infer_voice_locale(id)?;
+    let inferred_name = id.rsplit('.').next()?;
+    Some((
+        id.to_owned(),
+        display_name.unwrap_or(inferred_name).to_owned(),
+        locale.unwrap_or(&inferred_locale).to_owned(),
+    ))
+}
+
+fn infer_voice_locale(id: &str) -> Option<String> {
+    id.split('.').find_map(|part| {
+        let (language, region) = part.split_once('-')?;
+        (language.len() == 2
+            && region.len() == 2
+            && language.chars().all(|value| value.is_ascii_alphabetic())
+            && region.chars().all(|value| value.is_ascii_alphabetic()))
+        .then(|| {
+            format!(
+                "{}-{}",
+                language.to_ascii_lowercase(),
+                region.to_ascii_uppercase()
+            )
+        })
+    })
+}
+
 #[async_trait]
 pub trait NvidiaNimSynthesisStream: Send {
     async fn next_frame(&mut self) -> Option<Result<NvidiaSynthesizeFrame, NvidiaNvcfError>>;
@@ -308,8 +569,16 @@ pub struct NvidiaNimMagpie {
     http: Arc<dyn NvidiaNimHttpTransport>,
     credential_resolver: Arc<dyn ProviderCredentialResolver>,
     bindings: VoiceBindings,
-    stock_voices: Arc<RwLock<BTreeMap<String, NvidiaStockVoice>>>,
+    stock_voices: Arc<RwLock<NvidiaVoiceCache>>,
+    discovery_gate: Arc<tokio::sync::Mutex<()>>,
+    voice_cache_ttl: Duration,
     request_deadline: Duration,
+}
+
+#[derive(Clone, Debug, Default)]
+struct NvidiaVoiceCache {
+    voices: BTreeMap<String, NvidiaStockVoice>,
+    expires_at: Option<Instant>,
 }
 
 impl NvidiaNimMagpie {
@@ -325,14 +594,16 @@ impl NvidiaNimMagpie {
             http,
             credential_resolver,
             bindings,
-            stock_voices: Arc::new(RwLock::new(BTreeMap::new())),
+            stock_voices: Arc::new(RwLock::new(NvidiaVoiceCache::default())),
+            discovery_gate: Arc::new(tokio::sync::Mutex::new(())),
+            voice_cache_ttl: NVIDIA_MAGPIE_DEFAULT_VOICE_CACHE_TTL,
             request_deadline: Duration::from_secs(30),
         }
     }
 
     #[must_use]
     pub fn lifecycle(&self) -> NvidiaMagpieLifecycle {
-        NvidiaMagpieLifecycle::ExperimentalHttpSmokeQualifiedAwaitingGrpcStreamingQualification
+        NvidiaMagpieLifecycle::ExperimentalGrpcStreamingQualified
     }
 
     pub fn set_request_deadline(&mut self, deadline: Duration) -> Result<(), &'static str> {
@@ -343,22 +614,46 @@ impl NvidiaNimMagpie {
         Ok(())
     }
 
+    pub fn set_voice_cache_ttl(&mut self, ttl: Duration) -> Result<(), &'static str> {
+        if !(NVIDIA_MAGPIE_MIN_VOICE_CACHE_TTL..=NVIDIA_MAGPIE_MAX_VOICE_CACHE_TTL).contains(&ttl) {
+            return Err("invalid_nvidia_voice_cache_ttl");
+        }
+        self.voice_cache_ttl = ttl;
+        Ok(())
+    }
+
     /// Uses the fixed function-id subdomain and installs only validated stock
     /// voices. The credential exists only inside this request.
     pub async fn discover_stock_voices(&self) -> Result<Vec<NvidiaStockVoice>, TtsError> {
+        if let Some(voices) = self.fresh_cached_voices() {
+            return Ok(voices);
+        }
+        let _gate = tokio::time::timeout(self.request_deadline, self.discovery_gate.lock())
+            .await
+            .map_err(|_| map_nvidia_error(NvidiaNvcfError::DeadlineExceeded))?;
+        if let Some(voices) = self.fresh_cached_voices() {
+            return Ok(voices);
+        }
         let provider_id = HostedTtsProviderId::NvidiaNimMagpie;
-        let credential = resolve_credential(&self.credential_resolver, provider_id).await?;
-        let voices = self
-            .http
-            .list_stock_voices(NvidiaVoiceListRequest {
+        let credential = resolve_credential_with_deadline(
+            &self.credential_resolver,
+            provider_id,
+            self.request_deadline,
+        )
+        .await?;
+        let voices = tokio::time::timeout(
+            self.request_deadline,
+            self.http.list_stock_voices(NvidiaVoiceListRequest {
                 origin: NVIDIA_MAGPIE_HTTP_ORIGIN,
                 path: NVIDIA_MAGPIE_LIST_VOICES_PATH,
                 authorization: SensitiveHeaderValue::with_scheme("Bearer", credential),
                 deadline: self.request_deadline,
-            })
-            .await
-            .map_err(map_nvidia_error)?;
-        if voices.is_empty() || voices.len() > 4_096 {
+            }),
+        )
+        .await
+        .map_err(|_| map_nvidia_error(NvidiaNvcfError::DeadlineExceeded))?
+        .map_err(map_nvidia_error)?;
+        if voices.is_empty() || voices.len() > MAX_NVIDIA_VOICE_RECORDS {
             return Err(protocol_error("invalid_nvidia_voice_list"));
         }
         let mut validated = BTreeMap::new();
@@ -373,8 +668,22 @@ impl NvidiaNimMagpie {
         *self
             .stock_voices
             .write()
-            .expect("NVIDIA stock voice lock poisoned") = validated;
+            .expect("NVIDIA stock voice lock poisoned") = NvidiaVoiceCache {
+            voices: validated,
+            expires_at: Some(Instant::now() + self.voice_cache_ttl),
+        };
         Ok(voices)
+    }
+
+    fn fresh_cached_voices(&self) -> Option<Vec<NvidiaStockVoice>> {
+        let cache = self
+            .stock_voices
+            .read()
+            .expect("NVIDIA stock voice lock poisoned");
+        cache
+            .expires_at
+            .filter(|expires_at| *expires_at > Instant::now())
+            .map(|_| cache.voices.values().cloned().collect())
     }
 
     #[must_use]
@@ -382,6 +691,7 @@ impl NvidiaNimMagpie {
         self.stock_voices
             .read()
             .expect("NVIDIA stock voice lock poisoned")
+            .voices
             .values()
             .cloned()
             .collect()
@@ -431,6 +741,7 @@ impl StreamingTtsProvider for NvidiaNimMagpie {
             .stock_voices
             .read()
             .expect("NVIDIA stock voice lock poisoned")
+            .voices
             .get(&binding.voice_id)
             .cloned()
             .ok_or_else(|| invalid_error("nvidia_stock_voice_not_discovered"))?;
@@ -489,7 +800,9 @@ struct NvidiaMagpieSession {
 impl NvidiaMagpieSession {
     async fn start_clause(&mut self, text: String) -> Result<(), TtsError> {
         let provider_id = HostedTtsProviderId::NvidiaNimMagpie;
-        let credential = resolve_credential(&self.credential_resolver, provider_id).await?;
+        let credential =
+            resolve_credential_with_deadline(&self.credential_resolver, provider_id, self.deadline)
+                .await?;
         let request_id = format!(
             "{}:{}:{}:{}",
             self.request.identity.session_id,
@@ -498,9 +811,9 @@ impl NvidiaMagpieSession {
             self.clause_sequence
         );
         self.clause_sequence = self.clause_sequence.saturating_add(1);
-        let stream = self
-            .grpc
-            .synthesize_online(NvidiaSynthesizeOnlineRequest {
+        let stream = tokio::time::timeout(
+            self.deadline,
+            self.grpc.synthesize_online(NvidiaSynthesizeOnlineRequest {
                 authority: NVIDIA_MAGPIE_GRPC_AUTHORITY,
                 tls_required: true,
                 method: RIVA_TTS_SYNTHESIZE_ONLINE_METHOD,
@@ -513,9 +826,11 @@ impl NvidiaMagpieSession {
                 sample_rate_hz: self.request.output.sample_rate_hz,
                 voice_name: self.binding.voice_id.clone(),
                 deadline: self.deadline,
-            })
-            .await
-            .map_err(map_nvidia_error)?;
+            }),
+        )
+        .await
+        .map_err(|_| map_nvidia_error(NvidiaNvcfError::DeadlineExceeded))?
+        .map_err(map_nvidia_error)?;
         self.streams.push_back(stream);
         self.utterance_started = true;
         Ok(())
@@ -524,7 +839,7 @@ impl NvidiaMagpieSession {
     async fn protocol_fault(&mut self, code: &'static str) -> Option<Result<TtsEvent, TtsError>> {
         self.state = SessionState::Faulted;
         while let Some(mut stream) = self.streams.pop_front() {
-            let _ignored = stream.cancel().await;
+            let _ignored = tokio::time::timeout(self.deadline, stream.cancel()).await;
         }
         Some(Err(protocol_error(code)))
     }
@@ -604,7 +919,14 @@ impl StreamingTtsSession for NvidiaMagpieSession {
                 }
                 return None;
             };
-            match stream.next_frame().await {
+            let next_frame = match tokio::time::timeout(self.deadline, stream.next_frame()).await {
+                Ok(frame) => frame,
+                Err(_) => {
+                    self.state = SessionState::Faulted;
+                    return Some(Err(map_nvidia_error(NvidiaNvcfError::DeadlineExceeded)));
+                }
+            };
+            match next_frame {
                 Some(Ok(frame)) => {
                     if frame.pcm.len() > MAX_AUDIO_CHUNK_BYTES {
                         return self.protocol_fault("audio_chunk_too_large").await;
@@ -671,8 +993,14 @@ impl StreamingTtsSession for NvidiaMagpieSession {
         }
         let mut first_error = None;
         while let Some(mut stream) = self.streams.pop_front() {
-            if let Err(error) = stream.cancel().await {
-                first_error.get_or_insert(error);
+            match tokio::time::timeout(self.deadline, stream.cancel()).await {
+                Ok(Err(error)) => {
+                    first_error.get_or_insert(error);
+                }
+                Err(_) => {
+                    first_error.get_or_insert(NvidiaNvcfError::DeadlineExceeded);
+                }
+                Ok(Ok(())) => {}
             }
         }
         self.state = SessionState::Cancelled;
@@ -682,23 +1010,27 @@ impl StreamingTtsSession for NvidiaMagpieSession {
     }
 }
 
-async fn resolve_credential(
+async fn resolve_credential_with_deadline(
     resolver: &Arc<dyn ProviderCredentialResolver>,
     provider_id: HostedTtsProviderId,
+    deadline: Duration,
 ) -> Result<SensitiveString, TtsError> {
-    let credential = resolver.resolve(provider_id).await.map_err(|error| {
-        let (kind, code, retryable) = match error {
-            CredentialResolveError::Missing => {
-                (TtsErrorKind::Authentication, "credential_missing", false)
-            }
-            CredentialResolveError::Unavailable => (
-                TtsErrorKind::Unavailable,
-                "credential_vault_unavailable",
-                true,
-            ),
-        };
-        TtsError::new(provider_id.as_str(), kind, code, retryable)
-    })?;
+    let credential = tokio::time::timeout(deadline, resolver.resolve(provider_id))
+        .await
+        .map_err(|_| map_nvidia_error(NvidiaNvcfError::DeadlineExceeded))?
+        .map_err(|error| {
+            let (kind, code, retryable) = match error {
+                CredentialResolveError::Missing => {
+                    (TtsErrorKind::Authentication, "credential_missing", false)
+                }
+                CredentialResolveError::Unavailable => (
+                    TtsErrorKind::Unavailable,
+                    "credential_vault_unavailable",
+                    true,
+                ),
+            };
+            TtsError::new(provider_id.as_str(), kind, code, retryable)
+        })?;
     if credential.is_empty() {
         return Err(TtsError::new(
             provider_id.as_str(),

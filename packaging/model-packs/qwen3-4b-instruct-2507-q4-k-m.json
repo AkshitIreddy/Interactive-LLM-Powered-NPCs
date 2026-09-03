@@ -1,0 +1,200 @@
+{
+  "$schema": "./model-pack-manifest.schema.json",
+  "schema": "npc.model-pack/v2",
+  "pack_id": "qwen3-4b-instruct-2507-q4-k-m",
+  "revision": "Qwen3-4B-Instruct-2507",
+  "display_name": "Qwen3 4B Instruct 2507 Q4_K_M",
+  "description": "Optional, explicit-download local dialogue model. API providers remain the product default. This non-thinking Qwen3 checkpoint is intended for low-latency NPC dialogue; activation still requires signed-catalog authorization, a passing Windows self-test, and a current device-bound measured resource envelope.",
+  "source": {
+    "project_url": "https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507",
+    "immutable_revision": "cdbee75f17c01a7cc42f958dc650907174af0554",
+    "model_card_url": "https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507/blob/cdbee75f17c01a7cc42f958dc650907174af0554/README.md"
+  },
+  "capability": {
+    "kind": "language_model",
+    "scope": "generic"
+  },
+  "artifacts": [
+    {
+      "id": "qwen3-4b-instruct-2507-q4-k-m-gguf",
+      "role": "model_weights",
+      "kind": "file",
+      "archive_format": null,
+      "source_urls": [
+        "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/a06e946bb6b655725eafa393f4a9745d460374c9/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
+      ],
+      "size_bytes": 2497281120,
+      "sha256": "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597",
+      "destination": "model/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+      "strip_prefix": null,
+      "required_paths": []
+    },
+    {
+      "id": "qwen-apache-license",
+      "role": "license",
+      "kind": "file",
+      "archive_format": null,
+      "source_urls": [
+        "https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507/resolve/cdbee75f17c01a7cc42f958dc650907174af0554/LICENSE"
+      ],
+      "size_bytes": 11343,
+      "sha256": "832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e",
+      "destination": "licenses/QWEN-APACHE-2.0.txt",
+      "strip_prefix": null,
+      "required_paths": []
+    },
+    {
+      "id": "gguf-conversion-provenance",
+      "role": "notice",
+      "kind": "file",
+      "archive_format": null,
+      "source_urls": [
+        "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/a06e946bb6b655725eafa393f4a9745d460374c9/README.md"
+      ],
+      "size_bytes": 11207,
+      "sha256": "c18c2d01645e709fcc0bfd593291d3dc43e51873f5af170a082c36ccd95988c3",
+      "destination": "notices/GGUF-CONVERSION-PROVENANCE.md",
+      "strip_prefix": null,
+      "required_paths": []
+    }
+  ],
+  "runtime": {
+    "runtime": "llama.cpp",
+    "immutable_revision": "b10689+57291f2644af8c9df0dd8d44395881c5bdcf0ecd",
+    "abi": "npc-llama-server-openai-v1+b10689+qwen3",
+    "entrypoint": "llama-server.exe",
+    "supported_platforms": [
+      "windows10",
+      "windows11"
+    ],
+    "supported_architectures": [
+      "x86_64"
+    ],
+    "backends": [
+      "llama.cpp-b10689-cpu",
+      "llama.cpp-b10689-vulkan"
+    ],
+    "network_access_after_install": false
+  },
+  "hardware": {
+    "minimum_ram_bytes": 6442450944,
+    "recommended_ram_bytes": 8589934592,
+    "minimum_vram_bytes": 0,
+    "recommended_vram_bytes": 4294967296,
+    "minimum_cpu_threads": 4,
+    "accelerators": [
+      "cpu",
+      "vulkan"
+    ],
+    "required_cpu_features": []
+  },
+  "resources": {
+    "storage_bytes": 2497303670,
+    "peak_install_bytes": 4994607340,
+    "planning_resident_ram_bytes": null,
+    "planning_resident_vram_bytes": null,
+    "planning_load_millis": null,
+    "planning_hardware": null,
+    "quality_tier": "experimental",
+    "languages": [
+      "multilingual-100-plus"
+    ],
+    "measurement": {
+      "required_schema": "npc.measured-resource-envelope/v1",
+      "minimum_samples": 20,
+      "current_device_fingerprint_required": true,
+      "signed_evidence_required": true,
+      "p99_reload_required": true,
+      "manifest_values_not_for_admission": true
+    }
+  },
+  "license": {
+    "spdx_expression": "Apache-2.0",
+    "license_name": "Apache License 2.0",
+    "license_url": "https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507/blob/cdbee75f17c01a7cc42f958dc650907174af0554/LICENSE",
+    "attribution": "Qwen3-4B-Instruct-2507 by the Qwen Team; Q4_K_M GGUF conversion pinned from unsloth/Qwen3-4B-Instruct-2507-GGUF revision a06e946bb6b655725eafa393f4a9745d460374c9.",
+    "redistributable": true,
+    "commercial_use": "allowed",
+    "derivative_use": "allowed",
+    "acceptance_required": false,
+    "notices": [
+      "The model is not bundled with the application and is downloaded only after an explicit user action.",
+      "The llama.cpp runtime is a separately installed MIT-licensed trust unit pinned by workers/local-llm/runtime-bundle.b10689.json.",
+      "Resource figures in hardware are admission hints only. Null measured fields must remain non-admissible until a device-bound measurement is recorded."
+    ],
+    "components": [
+      {
+        "id": "qwen3-4b-instruct-2507",
+        "component": "Qwen3-4B-Instruct-2507 model weights and configuration",
+        "spdx_expression": "Apache-2.0",
+        "license_url": "https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507/blob/cdbee75f17c01a7cc42f958dc650907174af0554/LICENSE",
+        "immutable_source_revision": "cdbee75f17c01a7cc42f958dc650907174af0554",
+        "redistributable": true,
+        "notice_required": true
+      },
+      {
+        "id": "qwen3-4b-instruct-2507-gguf-conversion",
+        "component": "Pinned Q4_K_M GGUF conversion and conversion provenance",
+        "spdx_expression": "Apache-2.0",
+        "license_url": "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/blob/a06e946bb6b655725eafa393f4a9745d460374c9/README.md",
+        "immutable_source_revision": "a06e946bb6b655725eafa393f4a9745d460374c9",
+        "redistributable": true,
+        "notice_required": true
+      }
+    ]
+  },
+  "self_test": {
+    "kind": "qwen3_structured_dialogue_v1",
+    "suite_revision": "qwen3-4b-self-test-2026-08-30.v1",
+    "allowed_runtime_backends": [
+      "llama.cpp-b10689-cpu",
+      "llama.cpp-b10689-vulkan"
+    ],
+    "input_fixture": "workers/local-llm/fixtures/self-test.request.json",
+    "expected_output_sha256": "2d3d276c32ad6b236fce56102ea44cdcaa4d643839504f87967f5f8d225cf518",
+    "timeout_millis": 120000
+  },
+  "voices": [],
+  "extensions": {
+    "language_model": {
+      "context_tokens": 262144,
+      "structured_output": true,
+      "tool_calling": false,
+      "thinking_mode": false
+    }
+  },
+  "lifecycle": {
+    "explicit_download_required": true,
+    "automatic_download_allowed": false,
+    "install_strategy": "verify_then_atomic_activate",
+    "repair_strategy": "verify_quarantine_reinstall",
+    "remove_requires_unreferenced": true,
+    "activation_gates": [
+      "explicit_user_approval",
+      "catalog_trust",
+      "artifact_integrity",
+      "license_acceptance",
+      "runtime_compatibility",
+      "self_test_attestation",
+      "current_device_measurement",
+      "whole_loadout_admission"
+    ]
+  },
+  "trust": {
+    "release_catalog_required": true,
+    "immutable_revision_required": true,
+    "artifact_sha256_required": true,
+    "self_test_attestation_required": true,
+    "measured_resource_envelope_required": true,
+    "unsigned_activation_allowed": false
+  },
+  "admission": {
+    "state": "blocked_pending_measurement",
+    "reason": "Optional local model remains blocked until a trusted catalog authorizes this exact manifest, its structured self-test is attested, and at least 20 signed current-device samples qualify the whole selected game loadout.",
+    "allowed_residencies": [
+      "cpu_resident",
+      "gpu_resident"
+    ],
+    "unknowns_fail_closed": true
+  }
+}

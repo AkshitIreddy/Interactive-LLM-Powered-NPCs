@@ -1,0 +1,47 @@
+{
+  "schema": "npc.non-qualifying-model-review-evidence-index/v1",
+  "entries": [
+    {
+      "identity": {
+        "pack_id": "bge-small-en-v1.5-onnx-fp32",
+        "revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a.1"
+      },
+      "evidence": {
+        "evidence_schema": "npc.embedding-qualification-report/v1",
+        "file_name": "out/evidence/local-embedding-bge-cpu-2026-08-30.json",
+        "evidence_sha256": "a2852d74ed08e93c5b02676cafeec21331ef5cfadfdfbf6a3301e2a3c5878463",
+        "signed_measurement_envelope": false,
+        "admission_eligible": false,
+        "blocker": "The real report lacks a trusted device fingerprint and threshold-signed QualifiedResourceEnvelope, so it cannot populate measured UI fields or authorize admission."
+      }
+    },
+    {
+      "identity": {
+        "pack_id": "npc.stt.moonshine-v2-medium-streaming-en.win-x64",
+        "revision": "0.1.5-moonshine.234f60f"
+      },
+      "evidence": {
+        "evidence_schema": "npc.non-qualifying-model-review-summary/v1",
+        "file_name": "packaging/model-packs/review-evidence/moonshine-non-qualifying-review-summary-v1.json",
+        "evidence_sha256": "1d9368f3c91d36430d787ba84474c380ca2904eb534029c1018d0ccd3cd7a96e",
+        "signed_measurement_envelope": false,
+        "admission_eligible": false,
+        "blocker": "Unsigned evidence fails low-latency admission: p50 RTF 3.376, approximately 80.7 percent total CPU, and first-final latency 4.96 seconds."
+      }
+    },
+    {
+      "identity": {
+        "pack_id": "openseeface-mnv3-lm1-mouth-signal",
+        "revision": "85aa70fc67582d046e771ea73625182a0d8f7475"
+      },
+      "evidence": {
+        "evidence_schema": "npc.openseeface-manifest-measurement-derivation/v1",
+        "file_name": "out/qualification/openseeface-mnv3-lm1/evidence/openseeface-final-manifest-no-inference-derivation.candidate.json",
+        "evidence_sha256": "34a2c799110642d4493bc64e5efa355051caeb10866ff76f5dfd3c729fe431ae",
+        "signed_measurement_envelope": false,
+        "admission_eligible": false,
+        "blocker": "The immutable no-inference derivation is non-authoritative evidence only; activation requires a separately threshold-signed exact-manifest current-device envelope plus live whole-loadout admission."
+      }
+    }
+  ]
+}

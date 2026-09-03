@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "npc.sim.scenario.v1",
+  "id": "typed-turn",
+  "description": "Typed player input completes one fully mocked response, audio delivery, lip-sync patch, and durable delivery commit.",
+  "seed": 3001,
+  "resourceProfile": "reference-balanced-12gb",
+  "privacy": { "mode": "hosted", "networkAllowed": true },
+  "providers": { "llm": "mock-nvidia-nim", "tts": "mock-elevenlabs" },
+  "turn": {
+    "sessionId": "session-typed",
+    "turnId": "turn-typed-001",
+    "inputMode": "typed",
+    "npc": { "id": "eclipse-harbor-mara", "name": "Mara Venn", "visibility": "visible" }
+  },
+  "stream": [
+    { "atMs": 0, "source": "input", "kind": "typed_input", "payload": { "text": "Is the harbor safe?" } },
+    { "atMs": 20, "source": "identity", "kind": "resolved", "payload": { "strategy": "manual_target", "confidence": 1, "actorTrackId": "track-mara", "trackEpoch": 7 } },
+    { "atMs": 45, "source": "memory", "kind": "retrieved", "payload": { "episodicCount": 2, "factCount": 3, "latencyMs": 25 } },
+    { "atMs": 100, "source": "llm", "kind": "token", "payload": { "text": "Safe", "networkRequest": true, "provider": "mock-nvidia-nim" } },
+    { "atMs": 145, "source": "llm", "kind": "sentence", "payload": { "text": "Safe enough for tonight." } },
+    { "atMs": 205, "source": "tts", "kind": "audio_chunk", "payload": { "chunkIndex": 0, "sampleCount": 1440, "sampleRateHz": 24000, "networkRequest": true, "provider": "mock-elevenlabs" } },
+    { "atMs": 215, "source": "animation", "kind": "frame_patch", "payload": { "actorTrackId": "track-mara", "trackEpoch": 7, "frameId": 22, "currentFrameId": 22 } },
+    { "atMs": 260, "source": "llm", "kind": "complete", "payload": { "finishReason": "stop", "text": "Safe enough for tonight." } },
+    { "atMs": 315, "source": "tts", "kind": "complete", "payload": { "chunks": 1, "deliveredText": "Safe enough for tonight." } },
+    { "atMs": 325, "source": "animation", "kind": "complete", "payload": { "patchCount": 1 } },
+    { "atMs": 330, "source": "delivery", "kind": "commit", "payload": { "sentenceId": "sentence-typed-1", "deliveredText": "Safe enough for tonight." } }
+  ],
+  "faults": [],
+  "expected": {
+    "status": "completed",
+    "traceSha256": "f07bfb037ce2b2685e4d768523c18a7fa2fa0aacb6aec13495e4185b7daab171",
+    "firstAudioAtMs": 205,
+    "speechEndToFirstAudioMs": null,
+    "networkAttempts": 2,
+    "degradationReasons": [],
+    "metrics": { "inputReadyToFirstAudioMs": 205, "deliveryCommitCount": 1, "rejectedDeliveryCommitCount": 0 },
+    "eventCounts": { "input.typed": 1, "delivery.committed": 1, "animation.patch_applied": 1 },
+    "spine": { "listening": "skipped", "transcribing": "skipped", "voicing": "completed", "animating": "completed" }
+  }
+}

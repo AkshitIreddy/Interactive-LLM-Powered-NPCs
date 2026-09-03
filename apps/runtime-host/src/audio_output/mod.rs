@@ -1,9 +1,11 @@
-//! Developer-only audio playback infrastructure.
+//! Audio playback infrastructure.
 //!
-//! The production architecture sends PCM to the native media broker. This module
-//! provides an isolated CPAL/WASAPI qualification path for real 24 kHz mono
-//! provider output before that transport is wired. It intentionally reports PCM
-//! submitted to device callbacks, never PCM proven audible at the speakers.
+//! Production PCM is submitted to the authenticated native media broker. The
+//! CPAL/WASAPI implementation remains an isolated developer qualification path.
+
+#![cfg_attr(not(all(windows, feature = "dev-wasapi-audio")), allow(dead_code))]
+
+pub mod broker;
 
 use std::{
     cell::UnsafeCell,

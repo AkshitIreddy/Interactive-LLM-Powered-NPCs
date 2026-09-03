@@ -1,0 +1,102 @@
+{
+  "schema": "npc.identity-open-set-qualification-plan/v1",
+  "suite_revision": "identity-fixtures-2026-08-30",
+  "status": "blocked_pending_consented_fixture_corpus",
+  "purpose": "Machine-readable admission plan for the optional local YuNet plus SFace private-evaluation pack. This file contains no face images, embeddings, identity labels, or protected-trait labels.",
+  "privacy": {
+    "allowed_reference_provenance": [
+      "user_private",
+      "original_synthetic"
+    ],
+    "forbidden_sources": [
+      "web_scrape",
+      "social_media_scrape",
+      "third_party_biometric_dataset_without_explicit_rights"
+    ],
+    "local_only": true,
+    "protected_trait_inference": false,
+    "retention_requires_explicit_user_consent": true
+  },
+  "pinned_pipeline": {
+    "detector_id": "opencv-zoo-yunet-2026may",
+    "detector_revision": "sha256:ebafce4e3c118d6554634be5c27ab333b4c047a9a8c3faf1d7cf93101c22f0f0",
+    "embedding_provider": "opencv-zoo",
+    "embedding_model_id": "sface-2021dec-mobilefacenet",
+    "embedding_revision": "sha256:0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
+    "preprocessing_revision": "opencv-face-recognizer-sf-aligncrop-bgr-112x112-l2-f32-v1",
+    "embedding_dimensions": 128,
+    "tensor_encoding": "f32le"
+  },
+  "required_partitions": [
+    {
+      "id": "same_character_appearance_change",
+      "minimum_distinct_characters": 20,
+      "minimum_samples_per_character": 5,
+      "requirements": [
+        "different_gameplay_frames",
+        "lighting_change",
+        "pose_change",
+        "expression_change"
+      ]
+    },
+    {
+      "id": "different_character_hard_negatives",
+      "minimum_distinct_characters": 20,
+      "minimum_pairs": 100,
+      "requirements": [
+        "visually_similar_costume_or_face",
+        "same_game_rendering_domain"
+      ]
+    },
+    {
+      "id": "multi_face_tracking",
+      "minimum_sequences": 10,
+      "minimum_frames_per_sequence": 60,
+      "requirements": [
+        "crossing_tracks",
+        "short_occlusion",
+        "detection_reordering",
+        "offscreen_then_return"
+      ]
+    },
+    {
+      "id": "unknown_character_open_set",
+      "minimum_distinct_characters": 20,
+      "minimum_samples_per_character": 3,
+      "requirements": [
+        "no_gallery_identity_overlap"
+      ]
+    }
+  ],
+  "required_outputs": {
+    "threshold_calibration": [
+      "match_threshold",
+      "ambiguity_margin",
+      "consensus_window",
+      "minimum_votes"
+    ],
+    "metrics": [
+      "false_accept_rate",
+      "false_reject_rate",
+      "unknown_false_accept_rate",
+      "identity_switches",
+      "association_accuracy",
+      "p50_inference_millis",
+      "p95_inference_millis",
+      "peak_resident_ram_bytes"
+    ],
+    "whole_loadout_conditions": [
+      "game_running",
+      "overlay_excluded",
+      "cpu_backend",
+      "other_selected_local_models_loaded"
+    ]
+  },
+  "admission": {
+    "expected_output_sha256": null,
+    "production_qualified": false,
+    "redistribution_qualified": false,
+    "commercial_use_qualified": false,
+    "reason": "No consented, rights-cleared fixture corpus or measured Windows result is checked in. An operator must create private local fixtures, run the pinned pipeline, and review the signed measurements before admission."
+  }
+}

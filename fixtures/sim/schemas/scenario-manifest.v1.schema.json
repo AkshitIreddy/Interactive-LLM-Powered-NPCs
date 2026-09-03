@@ -40,7 +40,8 @@
             "name": { "type": "string" },
             "visibility": { "enum": ["visible", "offscreen", "unknown"] }
           }
-        }
+        },
+        "inputMode": { "enum": ["speech", "typed"] }
       }
     },
     "stream": {
@@ -51,8 +52,9 @@
         "required": ["atMs", "source", "kind", "payload"],
         "properties": {
           "atMs": { "type": "integer", "minimum": 0 },
-          "source": { "enum": ["stt", "identity", "memory", "llm", "tts", "animation", "control"] },
-          "kind": { "enum": ["partial", "final", "resolved", "retrieved", "token", "sentence", "complete", "audio_chunk", "viseme", "barge_in"] },
+          "source": { "enum": ["input", "stt", "identity", "memory", "llm", "tts", "animation", "delivery", "control"] },
+          "kind": { "enum": ["partial", "final", "resolved", "retrieved", "token", "sentence", "complete", "audio_chunk", "viseme", "barge_in", "typed_input", "ambiguous", "missed", "frame_patch", "commit", "manual_retry", "runtime_restart"] },
+          "generation": { "type": "integer", "minimum": 0 },
           "payload": { "type": "object" }
         }
       }
@@ -64,8 +66,8 @@
         "required": ["atMs", "target", "kind", "code"],
         "properties": {
           "atMs": { "type": "integer", "minimum": 0 },
-          "target": { "enum": ["stt", "identity", "memory", "llm", "tts", "animation", "resource"] },
-          "kind": { "enum": ["provider_error", "worker_crash", "timeout", "low_vram"] },
+          "target": { "enum": ["stt", "identity", "memory", "llm", "tts", "animation", "resource", "runtime"] },
+          "kind": { "enum": ["provider_error", "worker_crash", "timeout", "low_vram", "runtime_crash"] },
           "code": { "type": "string" },
           "retryable": { "type": "boolean" },
           "freeVramMiB": { "type": "integer", "minimum": 0 },
@@ -82,7 +84,11 @@
         "firstAudioAtMs": { "type": ["integer", "null"] },
         "speechEndToFirstAudioMs": { "type": ["integer", "null"] },
         "networkAttempts": { "type": "integer", "minimum": 0 },
-        "degradationReasons": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+        "degradationReasons": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "metrics": { "type": "object", "additionalProperties": { "type": ["integer", "number", "string", "boolean", "null"] } },
+        "eventCounts": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+        "minimumEventCounts": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+        "spine": { "type": "object", "additionalProperties": { "enum": ["pending", "active", "completed", "cancelled", "failed", "skipped"] } }
       }
     }
   }

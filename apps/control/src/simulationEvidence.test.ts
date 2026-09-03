@@ -9,6 +9,36 @@ import {
 } from "./simulationEvidence";
 
 describe("simulation evidence", () => {
+  it("retains pending provider provenance while the turn is still unproven", () => {
+    const pending = applyNativeSimulationEvent(awaitingNativeEvidence(), {
+      type: "started",
+      simulationId: "sim-pending",
+      generation: 1,
+      sequence: 1,
+      measurementBasis: "pendingProviderEvidence",
+    });
+    expect(pending.phase).toBe("running");
+    expect(pending.measurementBasis).toBe("pendingProviderEvidence");
+    expect(simulationEvidenceLabel(pending)).toBe(
+      "NATIVE RUNTIME · PROVIDER EVIDENCE PENDING",
+    );
+    expect(isRetainedDeliveredNativeTurn(pending)).toBe(false);
+  });
+
+  it("keeps a failed runtime turn distinct from completion", () => {
+    const failed = applyNativeSimulationEvent(awaitingNativeEvidence(), {
+      type: "failed",
+      simulationId: "sim-failed",
+      generation: 1,
+      sequence: 6,
+      reason: "Manual retry required.",
+    });
+    expect(failed.phase).toBe("failed");
+    expect(failed.cancellationReason).toBe("Manual retry required.");
+    expect(simulationEvidenceLabel(failed)).toBe("NATIVE RUNTIME · FAILED");
+    expect(isRetainedDeliveredNativeTurn(failed)).toBe(false);
+  });
+
   it("keeps sentence-ready and delivered native text in sequence", () => {
     const started = applyNativeSimulationEvent(awaitingNativeEvidence(), {
       type: "started",

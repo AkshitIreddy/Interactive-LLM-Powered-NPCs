@@ -83,6 +83,7 @@ class WorkerProcess:
         self.reader.start()
         self.sequence = 0
         self.generation = 0
+        self.closed = False
 
     def _read(self) -> None:
         assert self.process.stdout is not None
@@ -161,6 +162,8 @@ class WorkerProcess:
             raise AssertionError(terminal)
 
     def close(self) -> None:
+        if self.closed:
+            return
         if self.process.poll() is None:
             try:
                 request_id = self.send("shutdown")
@@ -181,6 +184,23 @@ class WorkerProcess:
             self.process.stderr.close()
         if self.process.returncode not in {0, -15}:
             raise AssertionError(f"worker exited {self.process.returncode}: {stderr}")
+        self.closed = True
+
+    def crash(self) -> None:
+        """Abruptly terminate this fixture worker without treating the exit as cleanup failure."""
+
+        if self.closed:
+            return
+        if self.process.poll() is None:
+            self.process.kill()
+            self.process.wait(timeout=3)
+        if self.process.stdin:
+            self.process.stdin.close()
+        if self.process.stdout:
+            self.process.stdout.close()
+        if self.process.stderr:
+            self.process.stderr.close()
+        self.closed = True
 
 
 class FramingTests(unittest.TestCase):
@@ -349,6 +369,32 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(self.worker.until_terminal(expired)[-1]["error"]["code"], "deadline_exceeded")
         wrong_instance = self.worker.send("health", instance_id="worker-someone-else")
         self.assertEqual(self.worker.until_terminal(wrong_instance)[-1]["error"]["code"], "instance_mismatch")
+
+    def test_crashed_worker_is_replaced_without_replaying_the_abandoned_request(self) -> None:
+        self.worker.handshake_and_load()
+        abandoned_id = self.worker.send(
+            "infer",
+            {"prompt": "abandoned before durable delivery", "max_tokens": 32, "fixture_event_delay_ms": 1000},
+            request_id="abandoned-before-crash",
+        )
+        accepted = self.worker.next_event()
+        self.assertEqual((accepted["request_id"], accepted["event"], accepted["terminal"]), (abandoned_id, "accepted", False))
+        self.worker.crash()
+
+        replacement = WorkerProcess("llamacpp.stub-pack.json")
+        try:
+            replacement.handshake_and_load()
+            recovered_id = replacement.send(
+                "infer",
+                {"prompt": "explicit retry after restart"},
+                request_id="recovered-after-crash",
+            )
+            recovered_events = replacement.until_terminal(recovered_id)
+            self.assertTrue(any(event["event"] == "llm_result" for event in recovered_events))
+            self.assertEqual(recovered_events[-1]["event"], "completed")
+            self.assertTrue(all(event["request_id"] != abandoned_id for event in recovered_events))
+        finally:
+            replacement.close()
 
 
 class ModalityTests(unittest.TestCase):
@@ -605,11 +651,17 @@ class LipSyncCatalogTests(unittest.TestCase):
         self.assertFalse(blocked.eligible)
         self.assertEqual(
             blocked.reasons,
-            ("user_initiation_required", "pack_not_installed", "pack_not_verified", "pack_not_qualified"),
+            (
+                "user_initiation_required",
+                "live_selection_not_allowed",
+                "pack_not_installed",
+                "pack_not_verified",
+                "pack_not_qualified",
+            ),
         )
         eligible = self.catalog.selection_eligibility(
             "musetalk-1.5",
-            mode="live",
+            mode="offline",
             user_initiated=True,
             installed=True,
             verified=True,

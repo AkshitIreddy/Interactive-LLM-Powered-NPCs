@@ -19,17 +19,33 @@ import {
 import {
   fromNativeSnapshot,
   nativeActivate,
+  nativeAcknowledgePrivateEvaluation,
   nativeClone,
   nativeCreate,
+  nativeDeactivateScope,
   nativeDelete,
+  nativeDiscoverTtsStockVoices,
+  nativePrivateEvaluationAcknowledgement,
+  nativePrivateEvaluationPolicy,
   nativeRename,
+  nativeReview,
   nativeSnapshot,
   nativeUpdate,
   type NativeLoadoutDocument,
   type NativeLoadoutSnapshot,
+  type NativeProviderLoadoutReview,
+  type NativeProviderPrivateEvaluationAcknowledgement,
+  type NativeProviderPrivateEvaluationPolicy,
+  type NativeTtsStockVoiceDiscovery,
 } from "./providerLoadoutBridge";
 
-const FALLBACK_ROLES: ProviderRole[] = ["llm", "stt", "tts", "retrieval"];
+const FALLBACK_ROLES: ProviderRole[] = [
+  "llm",
+  "stt",
+  "tts",
+  "embeddings",
+  "vision",
+];
 
 const scopeCopy: Record<
   LoadoutScope,
@@ -59,7 +75,9 @@ function scopeKey(loadout: ProviderLoadout) {
 function defaultFallback(role: ProviderRole, primary: RouteChoice) {
   const provider = ROUTE_OPTIONS[role].find(
     (candidate) =>
-      candidate.id !== primary.providerId && candidate.selectable !== false,
+      candidate.id !== primary.providerId &&
+      candidate.execution !== "Off" &&
+      candidate.selectable !== false,
   );
   const selected = provider ?? ROUTE_OPTIONS[role][0];
   return {
@@ -81,9 +99,63 @@ export function ProviderLoadoutEditor() {
   );
   const [nativeDocument, setNativeDocument] =
     useState<NativeLoadoutDocument | null>(null);
+  const [nativeCatalogRevision, setNativeCatalogRevision] = useState<
+    number | null
+  >(null);
+  const [reviewOffline, setReviewOffline] = useState(false);
+  const [review, setReview] = useState<NativeProviderLoadoutReview | null>(
+    null,
+  );
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [stockVoices, setStockVoices] =
+    useState<NativeTtsStockVoiceDiscovery | null>(null);
+  const [stockVoicesBusy, setStockVoicesBusy] = useState(false);
+  const [stockVoicesError, setStockVoicesError] = useState<string | null>(null);
+  const [
+    privateEvaluationAcknowledgement,
+    setPrivateEvaluationAcknowledgement,
+  ] = useState<NativeProviderPrivateEvaluationAcknowledgement | null>(null);
+  const [privateEvaluationPolicy, setPrivateEvaluationPolicy] =
+    useState<NativeProviderPrivateEvaluationPolicy | null>(null);
+  const [privateEvaluationPolicyError, setPrivateEvaluationPolicyError] =
+    useState<string | null>(null);
+  const [privateEvaluationConsentChecked, setPrivateEvaluationConsentChecked] =
+    useState(false);
+  const [privateEvaluationArmed, setPrivateEvaluationArmed] = useState(false);
+  const [privateEvaluationBusy, setPrivateEvaluationBusy] = useState(false);
 
   const selected =
     loadouts.find((loadout) => loadout.id === selectedId) ?? loadouts[0];
+  const selectedNvidiaModalities = [
+    ...(selected.routes.llm.providerId === "nvidia-nim" ? ["LLM"] : []),
+    ...(selected.routes.embeddings.providerId === "nvidia-nim"
+      ? ["embeddings"]
+      : []),
+    ...(selected.routes.tts.providerId === "nvidia-nim-magpie"
+      ? ["Magpie TTS"]
+      : []),
+  ];
+  const privateEvaluationPanelRole: ProviderRole | null =
+    selected.routes.llm.providerId === "nvidia-nim"
+      ? "llm"
+      : selected.routes.embeddings.providerId === "nvidia-nim"
+        ? "embeddings"
+        : selected.routes.tts.providerId === "nvidia-nim-magpie"
+          ? "tts"
+          : null;
+  const privateEvaluationReady = Boolean(
+    privateEvaluationPolicy?.namespaceEligible &&
+      privateEvaluationPolicy.catalogRevision === nativeCatalogRevision &&
+      privateEvaluationAcknowledgement &&
+      privateEvaluationAcknowledgement.providerId ===
+        privateEvaluationPolicy.providerId &&
+      privateEvaluationAcknowledgement.termsRevision ===
+        privateEvaluationPolicy.termsRevision &&
+      privateEvaluationAcknowledgement.catalogRevision ===
+        privateEvaluationPolicy.catalogRevision &&
+      privateEvaluationAcknowledgement.applicationNamespace ===
+        privateEvaluationPolicy.applicationNamespace,
+  );
   const currentScopeLoadouts = loadouts.filter(
     (loadout) => loadout.scope === scopeFilter,
   );
@@ -105,6 +177,14 @@ export function ProviderLoadoutEditor() {
   const activeForScope = loadouts.find(
     (loadout) => loadout.active && scopeKey(loadout) === scopeKey(selected),
   );
+  const fallbackRoles = FALLBACK_ROLES.filter((role) =>
+    ROUTE_OPTIONS[role].some(
+      (provider) =>
+        provider.id !== selected.routes[role].providerId &&
+        provider.execution !== "Off" &&
+        provider.selectable !== false,
+    ),
+  );
 
   const acceptNativeSnapshot = (
     snapshot: NativeLoadoutSnapshot,
@@ -116,6 +196,7 @@ export function ProviderLoadoutEditor() {
       nativeLoadouts.find((loadout) => loadout.id === selectedId) ??
       nativeLoadouts[0];
     setNativeDocument(snapshot.document);
+    setNativeCatalogRevision(snapshot.catalogRevision);
     setLoadouts(nativeLoadouts);
     setSelectedId(preferred.id);
     setScopeFilter(preferred.scope);
@@ -134,8 +215,61 @@ export function ProviderLoadoutEditor() {
   useEffect(() => {
     let current = true;
     nativeSnapshot()
-      .then((snapshot) => {
-        if (current && snapshot) acceptNativeSnapshot(snapshot);
+      .then(async (snapshot) => {
+        if (!current || !snapshot) return;
+        acceptNativeSnapshot(snapshot);
+        setStockVoicesBusy(true);
+        let policy: NativeProviderPrivateEvaluationPolicy | null = null;
+        try {
+          policy = await nativePrivateEvaluationPolicy();
+          if (current) {
+            setPrivateEvaluationPolicy(policy);
+            setPrivateEvaluationPolicyError(null);
+          }
+        } catch (error: unknown) {
+          if (current) {
+            setPrivateEvaluationPolicy(null);
+            setPrivateEvaluationPolicyError(
+              error instanceof Error
+                ? error.message
+                : "Native private-evaluation policy is unavailable.",
+            );
+          }
+        }
+        try {
+          const acknowledgement =
+            await nativePrivateEvaluationAcknowledgement();
+          if (current) {
+            setPrivateEvaluationAcknowledgement(
+              acknowledgement &&
+                policy &&
+                acknowledgement.providerId === policy.providerId &&
+                acknowledgement.termsRevision === policy.termsRevision &&
+                acknowledgement.catalogRevision === policy.catalogRevision &&
+                acknowledgement.applicationNamespace ===
+                  policy.applicationNamespace
+                ? acknowledgement
+                : null,
+            );
+          }
+        } catch {
+          if (current) setPrivateEvaluationAcknowledgement(null);
+        }
+        if (!current) return;
+        try {
+          const stockVoiceResult = await nativeDiscoverTtsStockVoices(false);
+          if (!current) return;
+          setStockVoices(stockVoiceResult);
+          setStockVoicesError(stockVoiceResult.error?.detail ?? null);
+        } catch (error: unknown) {
+          if (!current) return;
+          setStockVoicesError(
+            error instanceof Error
+              ? error.message
+              : "NVIDIA stock voices could not be discovered.",
+          );
+        }
+        setStockVoicesBusy(false);
       })
       .catch(() => {
         if (current) nativeFailure("Native loadout snapshot");
@@ -171,18 +305,26 @@ export function ProviderLoadoutEditor() {
           }
         : loadout,
     );
-    commit(next, message);
     const changed = next.find((loadout) => loadout.id === selected.id);
-    if (syncNative && changed && nativeDocument) {
-      nativeUpdate(changed, nativeDocument)
+    if (
+      syncNative &&
+      changed &&
+      nativeDocument &&
+      nativeCatalogRevision !== null
+    ) {
+      setNotice("Saving route change to protected native state…");
+      nativeUpdate(changed, nativeDocument, nativeCatalogRevision)
         .then((snapshot) => acceptNativeSnapshot(snapshot, message))
         .catch(() => nativeFailure("Loadout update"));
+      return;
     }
+    commit(next, message);
   };
 
   const chooseLoadout = (loadout: ProviderLoadout) => {
     setSelectedId(loadout.id);
     setScopeFilter(loadout.scope);
+    setReview(null);
     setNotice(
       loadout.active
         ? "This is the active preference for its scope. A running turn keeps its original route snapshot."
@@ -197,8 +339,8 @@ export function ProviderLoadoutEditor() {
       "New loadout created locally. Name it, review every role, then activate it explicitly.",
       created.id,
     );
-    if (nativeDocument) {
-      nativeCreate(created, nativeDocument)
+    if (nativeDocument && nativeCatalogRevision !== null) {
+      nativeCreate(created, nativeDocument, nativeCatalogRevision)
         .then((snapshot) =>
           acceptNativeSnapshot(
             snapshot,
@@ -267,11 +409,8 @@ export function ProviderLoadoutEditor() {
             ? false
             : loadout.active,
     }));
-    commit(
-      next,
-      "Activated for the next turn. Any turn already listening, transcribing, or responding keeps its original route.",
-    );
     if (nativeDocument) {
+      setNotice("Requesting activation in protected native state…");
       nativeActivate(selected.id)
         .then((snapshot) =>
           acceptNativeSnapshot(
@@ -280,7 +419,84 @@ export function ProviderLoadoutEditor() {
           ),
         )
         .catch(() => nativeFailure("Loadout activation"));
+      return;
     }
+    commit(
+      next,
+      "Activated for the next turn. Any turn already listening, transcribing, or responding keeps its original route.",
+    );
+  };
+
+  const acknowledgePrivateEvaluation = () => {
+    if (
+      !nativeDocument ||
+      !privateEvaluationPolicy?.namespaceEligible ||
+      !privateEvaluationConsentChecked
+    )
+      return;
+    if (!privateEvaluationArmed) {
+      setPrivateEvaluationArmed(true);
+      setNotice(
+        "Confirm NVIDIA Magpie private-evaluation-only terms. This acknowledgement cannot promote or publish the route and does not prove credentials, stock-voice membership, or provider delivery.",
+      );
+      return;
+    }
+    setPrivateEvaluationBusy(true);
+    nativeAcknowledgePrivateEvaluation(privateEvaluationPolicy.termsRevision)
+      .then((acknowledgement) => {
+        const matchesPolicy =
+          acknowledgement.providerId === privateEvaluationPolicy.providerId &&
+          acknowledgement.termsRevision ===
+            privateEvaluationPolicy.termsRevision &&
+          acknowledgement.catalogRevision ===
+            privateEvaluationPolicy.catalogRevision &&
+          acknowledgement.applicationNamespace ===
+            privateEvaluationPolicy.applicationNamespace;
+        setPrivateEvaluationAcknowledgement(
+          matchesPolicy ? acknowledgement : null,
+        );
+        setPrivateEvaluationArmed(false);
+        setPrivateEvaluationConsentChecked(false);
+        setNotice(
+          matchesPolicy
+            ? `Private-evaluation acknowledgement persisted for ${acknowledgement.applicationNamespace}, terms ${acknowledgement.termsRevision}, catalog revision ${acknowledgement.catalogRevision}. Promotion and publication remain unsupported.`
+            : "Native acknowledgement did not match the displayed terms, catalog, and application namespace. Activation remains blocked; review the current policy and acknowledge again.",
+        );
+      })
+      .catch(() => nativeFailure("Private-evaluation acknowledgement"))
+      .finally(() => setPrivateEvaluationBusy(false));
+  };
+
+  const reviewActiveRoute = () => {
+    if (!nativeDocument) return;
+    setReviewBusy(true);
+    setReview(null);
+    setNotice(
+      "Resolving the active native route without contacting providers…",
+    );
+    nativeReview(selected, reviewOffline)
+      .then((result) => {
+        setReview(result);
+        setNotice(
+          `Native review resolved ${result.resolved.leaf_loadout_id}. Credentials were not checked and no provider request was made.`,
+        );
+      })
+      .catch(() => nativeFailure("Active route review"))
+      .finally(() => setReviewBusy(false));
+  };
+
+  const deactivateScope = () => {
+    if (!nativeDocument || selected.scope === "global" || !activeForScope)
+      return;
+    setNotice("Returning this scope to its inherited native route…");
+    nativeDeactivateScope(activeForScope)
+      .then((snapshot) =>
+        acceptNativeSnapshot(
+          snapshot,
+          "Scope override deactivated. The next turn inherits its parent route; any in-flight turn is unchanged.",
+        ),
+      )
+      .catch(() => nativeFailure("Scope deactivation"));
   };
 
   const changeRoute = (
@@ -288,6 +504,17 @@ export function ProviderLoadoutEditor() {
     part: "providerId" | "modelId",
     value: string,
   ) => {
+    if (
+      role === "tts" &&
+      part === "providerId" &&
+      value === "nvidia-nim-magpie" &&
+      (stockVoices?.status !== "available" || stockVoices.voices.length === 0)
+    ) {
+      setNotice(
+        "Discover an unexpired NVIDIA stock-voice catalog before selecting Magpie.",
+      );
+      return;
+    }
     updateSelected((loadout) => {
       const current = loadout.routes[role];
       const route =
@@ -295,6 +522,16 @@ export function ProviderLoadoutEditor() {
           ? {
               providerId: value,
               modelId: providerFor(role, value).models[0].id,
+              ...(role === "tts"
+                ? {
+                    voiceId:
+                      value === "nvidia-nim-magpie"
+                        ? stockVoices?.voices[0]?.voiceId
+                        : value === "elevenlabs"
+                          ? "EXAVITQu4vr4xnSDxMaL"
+                          : undefined,
+                  }
+                : {}),
             }
           : { ...current, modelId: value };
       loadout.routes[role] = route;
@@ -303,6 +540,46 @@ export function ProviderLoadoutEditor() {
       }
       return loadout;
     }, `${ROLE_META[role].label} preference updated. The change begins on the next turn after activation.`);
+  };
+
+  const refreshStockVoices = () => {
+    if (!nativeDocument) return;
+    setStockVoicesBusy(true);
+    setStockVoicesError(null);
+    setNotice("Refreshing authenticated NVIDIA Magpie stock voices…");
+    nativeDiscoverTtsStockVoices(true)
+      .then((result) => {
+        setStockVoices(result);
+        setStockVoicesError(result.error?.detail ?? null);
+        setNotice(
+          result.status === "available"
+            ? `${result.voices.length} authenticated NVIDIA stock voice${result.voices.length === 1 ? "" : "s"} available for an isolated private-evaluation namespace until ${result.refresh.expiresAtEpochMs ? new Date(result.refresh.expiresAtEpochMs).toLocaleString() : "the provider expiry"}. Promotion and publication remain unsupported.`
+            : `NVIDIA stock voices unavailable: ${result.error?.detail ?? "the provider returned no eligible catalog"}`,
+        );
+      })
+      .catch((error: unknown) => {
+        const detail =
+          error instanceof Error
+            ? error.message
+            : "NVIDIA stock voices could not be discovered.";
+        setStockVoicesError(detail);
+        setNotice(`NVIDIA stock voices unavailable: ${detail}`);
+      })
+      .finally(() => setStockVoicesBusy(false));
+  };
+
+  const changeVoiceId = (voiceId: string) => {
+    updateSelected(
+      (loadout) => {
+        loadout.routes.tts = {
+          ...loadout.routes.tts,
+          voiceId: voiceId.trim() || undefined,
+        };
+        return loadout;
+      },
+      "Stock voice identifier updated locally. The change begins on the next turn after activation.",
+      false,
+    );
   };
 
   const toggleFallback = (role: ProviderRole, authorized: boolean) => {
@@ -572,12 +849,23 @@ export function ProviderLoadoutEditor() {
                           <option
                             key={option.id}
                             value={option.id}
-                            disabled={option.selectable === false}
+                            disabled={
+                              option.selectable === false ||
+                              (role === "tts" &&
+                                option.id === "nvidia-nim-magpie" &&
+                                (stockVoices?.status !== "available" ||
+                                  stockVoices.voices.length === 0))
+                            }
                           >
                             {option.name}
                             {option.selectable === false
                               ? " · qualification pending"
-                              : ""}
+                              : role === "tts" &&
+                                  option.id === "nvidia-nim-magpie" &&
+                                  (stockVoices?.status !== "available" ||
+                                    stockVoices.voices.length === 0)
+                                ? " · discover stock voices first"
+                                : ""}
                           </option>
                         ))}
                       </select>
@@ -606,7 +894,314 @@ export function ProviderLoadoutEditor() {
                         ))}
                       </select>
                     </label>
+                    {role === "tts" &&
+                      route.providerId !== "nvidia-nim-magpie" && (
+                        <label>
+                          <span>STOCK VOICE ID</span>
+                          <input
+                            aria-label="Character voice stock voice ID"
+                            value={route.voiceId ?? ""}
+                            placeholder="Provider default"
+                            maxLength={128}
+                            onChange={(event) =>
+                              changeVoiceId(event.target.value)
+                            }
+                            onBlur={() => {
+                              if (
+                                !nativeDocument ||
+                                nativeCatalogRevision === null
+                              )
+                                return;
+                              nativeUpdate(
+                                selected,
+                                nativeDocument,
+                                nativeCatalogRevision,
+                              )
+                                .then((snapshot) =>
+                                  acceptNativeSnapshot(
+                                    snapshot,
+                                    "Stock voice identifier saved in protected native state.",
+                                  ),
+                                )
+                                .catch(() =>
+                                  nativeFailure("Stock voice update"),
+                                );
+                            }}
+                          />
+                        </label>
+                      )}
+                    {role === "tts" &&
+                      route.providerId === "nvidia-nim-magpie" && (
+                        <label>
+                          <span>DISCOVERED STOCK VOICE</span>
+                          <select
+                            aria-label="Character voice discovered stock voice"
+                            value={
+                              stockVoices?.voices.some(
+                                (voice) => voice.voiceId === route.voiceId,
+                              )
+                                ? route.voiceId
+                                : ""
+                            }
+                            disabled={
+                              stockVoicesBusy ||
+                              stockVoices?.status !== "available" ||
+                              stockVoices.voices.length === 0
+                            }
+                            onChange={(event) =>
+                              updateSelected((loadout) => {
+                                loadout.routes.tts = {
+                                  ...loadout.routes.tts,
+                                  voiceId: event.target.value,
+                                };
+                                return loadout;
+                              }, "Authenticated NVIDIA stock voice saved for the next turn after activation.")
+                            }
+                          >
+                            <option value="" disabled>
+                              {stockVoicesBusy
+                                ? "Discovering voices…"
+                                : "Choose an authenticated stock voice"}
+                            </option>
+                            {stockVoices?.voices.map((voice) => (
+                              <option key={voice.voiceId} value={voice.voiceId}>
+                                {voice.displayName} · {voice.language}
+                                {voice.styles.length
+                                  ? ` · ${voice.styles.join(", ")}`
+                                  : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
                   </div>
+                  {role === "tts" && (
+                    <div className="stock-voice-discovery">
+                      <ActionButton
+                        variant="outline"
+                        icon="refresh"
+                        onPress={refreshStockVoices}
+                        isDisabled={!nativeDocument || stockVoicesBusy}
+                      >
+                        {stockVoicesBusy
+                          ? "Discovering NVIDIA voices…"
+                          : "Refresh NVIDIA stock voices"}
+                      </ActionButton>
+                      <p
+                        className={stockVoicesError ? "is-error" : ""}
+                        role="status"
+                      >
+                        {!nativeDocument
+                          ? "Installed .debug/.review private-evaluation namespace required. Browser preview and the base production namespace cannot select Magpie."
+                          : stockVoicesError
+                            ? `Unavailable: ${stockVoicesError}`
+                            : stockVoices?.status === "available"
+                              ? `${stockVoices.voices.length} authenticated NVIDIA provider-stock voice${stockVoices.voices.length === 1 ? "" : "s"} · ${stockVoices.refresh.cacheHit ? "authenticated cache" : "authenticated refresh"} · expires ${stockVoices.refresh.expiresAtEpochMs ? new Date(stockVoices.refresh.expiresAtEpochMs).toLocaleString() : "not reported"} · private-evaluation namespace only · promotion/publication unsupported`
+                              : "No authenticated NVIDIA stock-voice catalog is loaded. Only an isolated native .debug/.review private-evaluation namespace can discover or select Magpie voices."}
+                      </p>
+                    </div>
+                  )}
+                  {role === privateEvaluationPanelRole && (
+                    <section
+                      className="private-evaluation-acknowledgement"
+                      aria-label="NVIDIA provider private evaluation terms"
+                    >
+                      <div>
+                        <strong>NVIDIA private evaluation only</strong>
+                        <StatusPill
+                          tone={privateEvaluationReady ? "ok" : "warn"}
+                        >
+                          {privateEvaluationReady
+                            ? "Acknowledged"
+                            : "Acknowledgement required"}
+                        </StatusPill>
+                      </div>
+                      <p>
+                        Review/activation/turn use for the selected NVIDIA
+                        routes requires the exact current terms acknowledgement
+                        and NVIDIA credential. Magpie also requires an unexpired
+                        discovered stock voice. Public production, promotion,
+                        and publication remain blocked.
+                      </p>
+                      <ul className="private-evaluation-egress">
+                        {selected.routes.llm.providerId === "nvidia-nim" && (
+                          <li>
+                            LLM: conversation text and derived game context
+                            leave this PC.
+                          </li>
+                        )}
+                        {selected.routes.embeddings.providerId ===
+                          "nvidia-nim" && (
+                          <li>
+                            Embeddings: selected memory or lore text leaves this
+                            PC.
+                          </li>
+                        )}
+                        {selected.routes.tts.providerId ===
+                          "nvidia-nim-magpie" && (
+                          <li>
+                            Magpie TTS: response text and its audio-generation
+                            request leave this PC; stock voices only, with no
+                            cloning.
+                          </li>
+                        )}
+                      </ul>
+                      {privateEvaluationPolicy ? (
+                        <dl className="private-evaluation-policy">
+                          <div>
+                            <dt>Provider</dt>
+                            <dd>{privateEvaluationPolicy.providerId}</dd>
+                          </div>
+                          <div>
+                            <dt>Restriction</dt>
+                            <dd>{privateEvaluationPolicy.mode}</dd>
+                          </div>
+                          <div>
+                            <dt>Current terms</dt>
+                            <dd>{privateEvaluationPolicy.termsRevision}</dd>
+                          </div>
+                          <div>
+                            <dt>Native namespace</dt>
+                            <dd>
+                              {privateEvaluationPolicy.applicationNamespace} ·{" "}
+                              {privateEvaluationPolicy.namespaceEligible
+                                ? "eligible for private evaluation"
+                                : "ineligible; acknowledgement blocked"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Data egress</dt>
+                            <dd>
+                              {selectedNvidiaModalities.join(", ")} → NVIDIA
+                              provider cloud
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Promotion / publication</dt>
+                            <dd>false / false</dd>
+                          </div>
+                          <div>
+                            <dt>Access scope</dt>
+                            <dd>{privateEvaluationPolicy.accessScope}</dd>
+                          </div>
+                          <div>
+                            <dt>Affected selected modalities</dt>
+                            <dd>{selectedNvidiaModalities.join(", ")}</dd>
+                          </div>
+                          <div>
+                            <dt>Provider limits</dt>
+                            <dd>{privateEvaluationPolicy.rateLimitNote}</dd>
+                          </div>
+                          <div>
+                            <dt>Prohibited data</dt>
+                            <dd>
+                              {privateEvaluationPolicy.prohibitedData.join(
+                                ", ",
+                              )}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Logging / improvement disclosure</dt>
+                            <dd>
+                              security abuse logging{" "}
+                              {privateEvaluationPolicy.securityAbuseLogging
+                                ? "disclosed"
+                                : "not disclosed"}
+                              {" · product improvement collection "}
+                              {privateEvaluationPolicy.productImprovementCollectionDisclosed
+                                ? "disclosed"
+                                : "not disclosed"}
+                            </dd>
+                          </div>
+                        </dl>
+                      ) : (
+                        <p className="is-error" role="status">
+                          {privateEvaluationPolicyError ??
+                            "Reading the native private-evaluation policy…"}
+                        </p>
+                      )}
+                      {privateEvaluationPolicy && (
+                        <a
+                          href={privateEvaluationPolicy.termsUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open NVIDIA API Trial Terms
+                        </a>
+                      )}
+                      {privateEvaluationAcknowledgement &&
+                        !privateEvaluationReady && (
+                          <small className="is-error">
+                            A prior acknowledgement is stale for the current
+                            terms, catalog, or native namespace. Re-review and
+                            acknowledge the policy below.
+                          </small>
+                        )}
+                      {privateEvaluationReady &&
+                        privateEvaluationAcknowledgement && (
+                          <small>
+                            {privateEvaluationAcknowledgement.termsRevision} ·
+                            catalog{" "}
+                            {privateEvaluationAcknowledgement.catalogRevision}
+                            {" · "}
+                            nonproduction namespace{" "}
+                            {
+                              privateEvaluationAcknowledgement.applicationNamespace
+                            }
+                            {" · "}
+                            {new Date(
+                              privateEvaluationAcknowledgement.acknowledgedAtEpochMs,
+                            ).toLocaleString()}
+                          </small>
+                        )}
+                      <label className="private-evaluation-consent">
+                        <input
+                          type="checkbox"
+                          checked={privateEvaluationConsentChecked}
+                          disabled={
+                            !nativeDocument ||
+                            !privateEvaluationPolicy?.namespaceEligible ||
+                            privateEvaluationReady ||
+                            privateEvaluationBusy
+                          }
+                          onChange={(event) => {
+                            setPrivateEvaluationConsentChecked(
+                              event.target.checked,
+                            );
+                            setPrivateEvaluationArmed(false);
+                          }}
+                        />
+                        <span>
+                          I reviewed the exact current NVIDIA trial terms and
+                          accept private-evaluation-only use, provider-cloud
+                          route egress, model-specific limits, reduced
+                          pre-release standards, retention/logging/improvement
+                          disclosures, restricted-data exclusions, and the
+                          production/promotion/publication prohibitions.
+                        </span>
+                      </label>
+                      <ActionButton
+                        variant="outline"
+                        icon="shield"
+                        onPress={acknowledgePrivateEvaluation}
+                        isDisabled={
+                          !nativeDocument ||
+                          privateEvaluationBusy ||
+                          !privateEvaluationPolicy?.namespaceEligible ||
+                          !privateEvaluationConsentChecked ||
+                          privateEvaluationReady
+                        }
+                      >
+                        {privateEvaluationBusy
+                          ? "Persisting acknowledgement…"
+                          : privateEvaluationArmed
+                            ? "Confirm private-evaluation-only terms"
+                            : privateEvaluationReady
+                              ? "Current terms acknowledged"
+                              : "Review and acknowledge terms"}
+                      </ActionButton>
+                    </section>
+                  )}
                   <dl className="loadout-role__facts">
                     <div>
                       <dt>EGRESS</dt>
@@ -658,13 +1253,14 @@ export function ProviderLoadoutEditor() {
               and never overrides Offline mode.
             </p>
             <div className="manual-fallbacks__grid">
-              {FALLBACK_ROLES.map((role) => {
+              {fallbackRoles.map((role) => {
                 const fallback =
                   selected.fallbacks[role] ??
                   defaultFallback(role, selected.routes[role]);
                 const eligibleProviders = ROUTE_OPTIONS[role].filter(
                   (provider) =>
                     provider.id !== selected.routes[role].providerId &&
+                    provider.execution !== "Off" &&
                     provider.selectable !== false,
                 );
                 return (
@@ -709,6 +1305,117 @@ export function ProviderLoadoutEditor() {
             </div>
           </section>
 
+          <section
+            className="loadout-native-review"
+            aria-labelledby="loadout-native-review-title"
+          >
+            <header>
+              <div>
+                <span className="eyebrow">PROTECTED NATIVE STATE</span>
+                <h4 id="loadout-native-review-title">
+                  Review the active route for this scope.
+                </h4>
+              </div>
+              <StatusPill tone={nativeDocument ? "ok" : "neutral"}>
+                {nativeDocument ? "Installed app" : "Browser preview"}
+              </StatusPill>
+            </header>
+            <p>
+              Review resolves the active global → game → character inheritance
+              chain. It does not validate an inactive draft, contact a provider,
+              or check credentials.
+            </p>
+            {activeForScope && activeForScope.id !== selected.id && (
+              <p className="loadout-native-review__context">
+                This draft is inactive. Review will resolve active loadout “
+                {activeForScope.name}” for {selected.targetLabel}.
+              </p>
+            )}
+            <div className="loadout-native-review__actions">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={reviewOffline}
+                  onChange={(event) => {
+                    setReviewOffline(event.target.checked);
+                    setReview(null);
+                  }}
+                  disabled={!nativeDocument}
+                />
+                <span>
+                  <strong>Review as fully local</strong>
+                  <small>
+                    Hosted routes should fail the native policy check
+                  </small>
+                </span>
+              </label>
+              <ActionButton
+                variant="outline"
+                icon="shield"
+                onPress={reviewActiveRoute}
+                isDisabled={!nativeDocument || reviewBusy}
+              >
+                {reviewBusy ? "Reviewing…" : "Review active route"}
+              </ActionButton>
+              {selected.scope !== "global" && (
+                <ActionButton
+                  variant="danger"
+                  icon="close"
+                  onPress={deactivateScope}
+                  isDisabled={!nativeDocument || !activeForScope}
+                >
+                  Return scope to inherited route
+                </ActionButton>
+              )}
+            </div>
+            {!nativeDocument && (
+              <p className="loadout-native-review__reason">
+                Review and scope deactivation require the installed app. Browser
+                preview changes remain local to this browser.
+              </p>
+            )}
+            {selected.scope !== "global" &&
+              !activeForScope &&
+              nativeDocument && (
+                <p className="loadout-native-review__reason">
+                  This scope already inherits its parent route; there is no
+                  active override to deactivate.
+                </p>
+              )}
+            {review && (
+              <dl className="loadout-native-review__receipt">
+                <div>
+                  <dt>RESOLVED LEAF</dt>
+                  <dd>{review.resolved.leaf_loadout_id}</dd>
+                </div>
+                <div>
+                  <dt>INHERITANCE</dt>
+                  <dd>{review.resolved.inheritance_chain.join(" → ")}</dd>
+                </div>
+                <div>
+                  <dt>CONFIGURED ROLES</dt>
+                  <dd>{Object.keys(review.resolved.roles).length} / 6</dd>
+                </div>
+                <div>
+                  <dt>POLICY</dt>
+                  <dd>{review.offline ? "Fully local" : "Online allowed"}</dd>
+                </div>
+                <div>
+                  <dt>PROVIDER CONTACT</dt>
+                  <dd>
+                    {review.networkRequestPerformed ? "Performed" : "None"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>CREDENTIAL CHECK</dt>
+                  <dd>
+                    {review.credentialsChecked ? "Checked" : "Not checked"}
+                  </dd>
+                </div>
+              </dl>
+            )}
+          </section>
+
           <footer className="loadout-editor__footer">
             <div role="status" aria-live="polite">
               <Icon name="shield" size={18} />
@@ -717,12 +1424,22 @@ export function ProviderLoadoutEditor() {
             <ActionButton
               icon="check"
               onPress={activateLoadout}
-              isDisabled={selected.active}
+              isDisabled={
+                selected.active ||
+                (selectedNvidiaModalities.length > 0 && !privateEvaluationReady)
+              }
             >
               {selected.active
                 ? "Active for next turn"
                 : "Activate for next turn"}
             </ActionButton>
+            {selectedNvidiaModalities.length > 0 && !privateEvaluationReady && (
+              <small className="loadout-activation-reason">
+                Activation is blocked until the exact current native terms,
+                catalog revision, and eligible .debug/.review application
+                namespace are explicitly acknowledged.
+              </small>
+            )}
           </footer>
         </div>
       </div>

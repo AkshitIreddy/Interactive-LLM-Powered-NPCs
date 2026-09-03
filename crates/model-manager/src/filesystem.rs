@@ -49,10 +49,24 @@ struct InstallIndexV1 {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-struct InstalledFileV1 {
-    relative_path: String,
-    size_bytes: u64,
-    sha256: Sha256Digest,
+pub struct InstalledFileV1 {
+    pub relative_path: String,
+    pub size_bytes: u64,
+    pub sha256: Sha256Digest,
+}
+
+/// Native-only authority over an immutable, fully re-hashed installed version.
+/// The path is never deserialized from a caller and the inventory is accepted
+/// only after its on-disk tree matches the atomically installed index.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InstalledPackInventoryV1 {
+    pub identity: PackRevision,
+    pub root: PathBuf,
+    pub manifest_sha256: Sha256Digest,
+    pub content_tree_sha256: Sha256Digest,
+    pub total_file_bytes: u64,
+    pub artifact_evidence: BTreeMap<String, ArtifactEvidence>,
+    pub files: Vec<InstalledFileV1>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -132,6 +146,52 @@ impl FilesystemPackStorage {
         self.with_lock(&lock, || self.read_active_pointer_unlocked(pack_id))
     }
 
+    /// Re-hashes the complete immutable version tree and returns its exact
+    /// native paths only when its persisted install index still matches.
+    pub fn installed_inventory(
+        &self,
+        identity: &PackRevision,
+    ) -> Result<Option<InstalledPackInventoryV1>, StorageError> {
+        let root = self.version_root(identity);
+        if !root.is_dir() {
+            return Ok(None);
+        }
+        reject_link(&root)?;
+        let index: InstallIndexV1 = read_json(&root.join(".npc").join("index.json"))
+            .map_err(|error| StorageError::new(error.to_string()))?;
+        if index.schema != INSTALL_INDEX_SCHEMA_V1 || &index.identity != identity {
+            return Err(StorageError::new("installed version metadata mismatch"));
+        }
+        if !verify_index(&root, &index)? {
+            return Err(StorageError::new(
+                "installed version content does not match its immutable index",
+            ));
+        }
+        Ok(Some(InstalledPackInventoryV1 {
+            identity: index.identity,
+            root,
+            manifest_sha256: index.manifest_sha256,
+            content_tree_sha256: index.content_tree_sha256,
+            total_file_bytes: index.total_file_bytes,
+            artifact_evidence: index.artifacts,
+            files: index.files,
+        }))
+    }
+
+    /// Resolves only the version selected by the protected active pointer.
+    pub fn active_installed_inventory(
+        &self,
+        pack_id: &PackId,
+    ) -> Result<Option<InstalledPackInventoryV1>, StorageError> {
+        let Some(pointer) = self.active_pointer(pack_id)? else {
+            return Ok(None);
+        };
+        self.installed_inventory(&PackRevision {
+            pack_id: pointer.pack_id,
+            revision: pointer.active_revision,
+        })
+    }
+
     fn read_active_pointer_unlocked(
         &self,
         pack_id: &PackId,
@@ -195,6 +255,20 @@ impl FilesystemPackStorage {
 
     fn staging_root(&self, transaction_id: &str) -> PathBuf {
         self.root.join(".staging").join(transaction_id)
+    }
+
+    fn staged_content_root(&self, staged: &StagedPack) -> Result<PathBuf, StorageError> {
+        let staging = self.staging_root(&staged.transaction_id);
+        if staging.is_dir() {
+            return Ok(staging);
+        }
+        let installed = self.version_root(&staged.identity);
+        if installed.is_dir() {
+            return Ok(installed);
+        }
+        Err(StorageError::new(
+            "staged or atomically committed inactive content is missing",
+        ))
     }
 
     fn write_active_pointer(&self, pointer: &ActivePackPointerV1) -> Result<(), StorageError> {
@@ -382,14 +456,14 @@ impl PackStorage for FilesystemPackStorage {
         staged: &StagedPack,
     ) -> Result<StagedContentBindingV1, StorageError> {
         validate_token(&staged.transaction_id)?;
-        let staging = self.staging_root(&staged.transaction_id);
-        reject_link(&staging)?;
-        let index: InstallIndexV1 = read_json(&staging.join(".npc").join("index.json"))
+        let content_root = self.staged_content_root(staged)?;
+        reject_link(&content_root)?;
+        let index: InstallIndexV1 = read_json(&content_root.join(".npc").join("index.json"))
             .map_err(|error| StorageError::new(error.to_string()))?;
         if index.schema != INSTALL_INDEX_SCHEMA_V1 || index.identity != staged.identity {
             return Err(StorageError::new("staged transaction identity mismatch"));
         }
-        if !verify_index(&staging, &index)? {
+        if !verify_index(&content_root, &index)? {
             return Err(StorageError::new(
                 "staged content tree does not match its index",
             ));
@@ -402,6 +476,56 @@ impl PackStorage for FilesystemPackStorage {
             file_count: index.files.len() as u64,
             total_file_bytes: index.total_file_bytes,
         })
+    }
+
+    fn commit_inactive(&mut self, staged: &StagedPack) -> Result<(), StorageError> {
+        validate_token(&staged.transaction_id)?;
+        let staging = self.staging_root(&staged.transaction_id);
+        reject_link(&staging)?;
+        let index: InstallIndexV1 = read_json(&staging.join(".npc").join("index.json"))
+            .map_err(|error| StorageError::new(error.to_string()))?;
+        if index.schema != INSTALL_INDEX_SCHEMA_V1 || index.identity != staged.identity {
+            return Err(StorageError::new("staged transaction identity mismatch"));
+        }
+        if !verify_index(&staging, &index)? {
+            return Err(StorageError::new(
+                "staged content tree does not match its immutable index",
+            ));
+        }
+        let destination = self.version_root(&staged.identity);
+        let versions = destination
+            .parent()
+            .ok_or_else(|| StorageError::new("version path has no parent"))?;
+        secure_create_dir_all(&self.root.join("packs"), versions).map_err(storage_error)?;
+        reject_link(versions)?;
+        if destination.exists() {
+            reject_link(&destination)?;
+            let existing: InstallIndexV1 = read_json(&destination.join(".npc").join("index.json"))
+                .map_err(|error| StorageError::new(error.to_string()))?;
+            if existing != index || !verify_index(&destination, &existing)? {
+                return Err(StorageError::new(
+                    "immutable inactive version already contains different content",
+                ));
+            }
+            fs::remove_dir_all(&staging).map_err(storage_error)?;
+        } else {
+            let staging_parent = staging
+                .parent()
+                .ok_or_else(|| StorageError::new("staging path has no parent"))?;
+            with_protected_root(staging_parent, || {
+                with_protected_root(versions, || fs::rename(&staging, &destination))
+            })
+            .map_err(storage_error)?;
+            reject_link(&destination)?;
+            let committed: InstallIndexV1 = read_json(&destination.join(".npc").join("index.json"))
+                .map_err(|error| StorageError::new(error.to_string()))?;
+            if committed != index || !verify_index(&destination, &committed)? {
+                return Err(StorageError::new(
+                    "atomically committed inactive version changed during publication",
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn consume_attestation_replay_key(
@@ -426,8 +550,8 @@ impl PackStorage for FilesystemPackStorage {
         authorization: &ActivationAuthorization,
     ) -> Result<(), StorageError> {
         validate_token(&staged.transaction_id)?;
-        let staging = self.staging_root(&staged.transaction_id);
-        reject_link(&staging)?;
+        let content_root = self.staged_content_root(&staged)?;
+        reject_link(&content_root)?;
         let binding = self.staged_content_binding(&staged)?;
         if &binding != authorization.staged() {
             return Err(StorageError::new(
@@ -440,13 +564,13 @@ impl PackStorage for FilesystemPackStorage {
                 "activation authorization replay key was not durably consumed",
             ));
         }
-        let index: InstallIndexV1 = read_json(&staging.join(".npc").join("index.json"))
+        let index: InstallIndexV1 = read_json(&content_root.join(".npc").join("index.json"))
             .map_err(|error| StorageError::new(error.to_string()))?;
         if index.schema != INSTALL_INDEX_SCHEMA_V1 || index.identity != staged.identity {
             return Err(StorageError::new("staged transaction identity mismatch"));
         }
         atomic_write_json(
-            &staging.join(".npc").join("activation.json"),
+            &content_root.join(".npc").join("activation.json"),
             &ActivationReceiptV1 {
                 schema: ACTIVATION_RECEIPT_SCHEMA_V1.to_owned(),
                 attestation_sha256: authorization.attestation_sha256().clone(),
@@ -461,7 +585,15 @@ impl PackStorage for FilesystemPackStorage {
             .ok_or_else(|| StorageError::new("version path has no parent"))?;
         secure_create_dir_all(&self.root.join("packs"), versions).map_err(storage_error)?;
         reject_link(versions)?;
-        if destination.exists() {
+        if content_root == destination {
+            let installed: InstallIndexV1 = read_json(&destination.join(".npc").join("index.json"))
+                .map_err(|error| StorageError::new(error.to_string()))?;
+            if installed != index || !verify_index(&destination, &installed)? {
+                return Err(StorageError::new(
+                    "inactive installed version changed before activation",
+                ));
+            }
+        } else if destination.exists() {
             let existing: InstallIndexV1 = read_json(&destination.join(".npc").join("index.json"))
                 .map_err(|error| StorageError::new(error.to_string()))?;
             if existing != index || !verify_index(&destination, &existing)? {
@@ -469,13 +601,13 @@ impl PackStorage for FilesystemPackStorage {
                     "immutable version directory already contains different content",
                 ));
             }
-            fs::remove_dir_all(&staging).map_err(storage_error)?;
+            fs::remove_dir_all(&content_root).map_err(storage_error)?;
         } else {
-            let staging_parent = staging
+            let staging_parent = content_root
                 .parent()
                 .ok_or_else(|| StorageError::new("staging path has no parent"))?;
             with_protected_root(staging_parent, || {
-                with_protected_root(versions, || fs::rename(&staging, &destination))
+                with_protected_root(versions, || fs::rename(&content_root, &destination))
             })
             .map_err(storage_error)?;
             reject_link(&destination)?;

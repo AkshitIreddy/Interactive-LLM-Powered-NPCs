@@ -1,7 +1,9 @@
 use crate::domain::{RuntimeBackend, RuntimeConnectionState, RuntimeHealthSnapshot};
 use crate::sidecar_protocol::{
-    BoxedControlStream, ClientError, ControlClient, NativeDoctorReport, NativeProfile,
-    NativeSimulationRequest, NativeSimulationResult,
+    BoxedControlStream, ClientError, ControlClient, NativeControlTurnIdentity, NativeDoctorReport,
+    NativeProfile, NativeSelectedSttControlRequest, NativeSelectedSttControlResult,
+    NativeSimulationRequest, NativeSimulationResult, NativeTtsVoiceDiscoveryRequest,
+    NativeTtsVoiceDiscoveryResult,
 };
 use npc_protocol::LaunchNonce;
 use serde::Deserialize;
@@ -243,12 +245,47 @@ impl RuntimeSupervisor {
         }
     }
 
+    pub async fn discover_tts_voices(
+        &self,
+        request: NativeTtsVoiceDiscoveryRequest,
+    ) -> Result<NativeTtsVoiceDiscoveryResult, SupervisorError> {
+        let client = self.ensure_ready().await?;
+        match client.discover_tts_voices(request).await {
+            Ok(result) => Ok(result),
+            Err(error) => {
+                self.observe_client_error(&error).await;
+                Err(error.into())
+            }
+        }
+    }
+
     pub async fn simulate(
         &self,
         request: NativeSimulationRequest,
     ) -> Result<NativeSimulationResult, SupervisorError> {
         let client = self.ensure_ready().await?;
         match client.simulate(request).await {
+            Ok(result) => Ok(result),
+            Err(error) => {
+                self.observe_client_error(&error).await;
+                Err(error.into())
+            }
+        }
+    }
+
+    pub(crate) async fn prepare_selected_stt_turn_identity(
+        &self,
+    ) -> Result<NativeControlTurnIdentity, SupervisorError> {
+        let client = self.ensure_ready().await?;
+        Ok(client.prepare_selected_stt_turn_identity().await)
+    }
+
+    pub(crate) async fn transcribe_selected_stt(
+        &self,
+        request: NativeSelectedSttControlRequest,
+    ) -> Result<NativeSelectedSttControlResult, SupervisorError> {
+        let client = self.ensure_ready().await?;
+        match client.transcribe_selected_stt(request).await {
             Ok(result) => Ok(result),
             Err(error) => {
                 self.observe_client_error(&error).await;

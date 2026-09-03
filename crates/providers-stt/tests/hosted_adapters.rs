@@ -251,7 +251,7 @@ async fn assemblyai_flushes_and_maps_running_turn_to_partial_then_final() {
         })),
     ]);
     let recognizer = HostedRecognizer::new(AssemblyAi, Arc::new(factory.clone()));
-    let mut assembly_config = config("universal-3-pro");
+    let mut assembly_config = config("u3-rt-pro");
     assembly_config.context_hint = Some("Cyberpunk character names".into());
     let mut session = recognizer
         .start_session(

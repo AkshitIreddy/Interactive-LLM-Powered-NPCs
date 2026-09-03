@@ -19,8 +19,14 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
+    audio_input::{BrokerAudioInputLease, BrokerPcmInputSource},
     framing::{read_frame, write_frame, FrameError},
-    HostState, SimulationRequest, MAX_CONTROL_MESSAGE_BYTES,
+    simulation::SimulationError,
+    stt_bridge::{
+        selected_hosted_stt, SelectedSttError, SelectedSttResult, SelectedSttTurnRequest,
+    },
+    tts_bridge::{TtsVoiceDiscoveryRequest, TtsVoiceDiscoveryResult},
+    HostState, SelectedProviderRoute, SimulationRequest, MAX_CONTROL_MESSAGE_BYTES,
 };
 
 #[derive(Clone, Debug)]
@@ -41,18 +47,20 @@ impl ServeOptions {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ControlRequest {
     Ping,
     Doctor,
     ValidateProfiles,
+    DiscoverTtsVoices(TtsVoiceDiscoveryRequest),
     SimulateTurn(Box<SimulationRequest>),
+    TranscribeSelectedStt(Box<SelectedSttControlRequest>),
     Cancel { new_generation: u64 },
     Shutdown,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ControlResponse {
     Pong,
@@ -62,13 +70,95 @@ pub enum ControlResponse {
     Profiles {
         profiles: Vec<crate::profiles::ProfileSummary>,
     },
+    TtsVoices {
+        result: Box<TtsVoiceDiscoveryResult>,
+    },
     Simulation {
         result: Box<crate::SimulationResult>,
+    },
+    SelectedStt {
+        result: Box<SelectedSttControlResult>,
     },
     Cancelled {
         generation: u64,
     },
     ShuttingDown,
+}
+
+pub struct SelectedSttControlRequest {
+    pub schema_version: u32,
+    pub source_loadout_id: String,
+    pub route_snapshot_generation: u64,
+    pub route: SelectedProviderRoute,
+    pub turn: SelectedSttTurnRequest,
+    pub lease: BrokerAudioInputLease,
+}
+
+impl<'de> Deserialize<'de> for SelectedSttControlRequest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct Wire {
+            schema_version: u32,
+            source_loadout_id: String,
+            route_snapshot_generation: u64,
+            route: SelectedProviderRoute,
+            turn: SelectedSttTurnRequest,
+            lease: BrokerAudioInputLease,
+        }
+        let wire = Wire::deserialize(deserializer)?;
+        Ok(Self {
+            schema_version: wire.schema_version,
+            source_loadout_id: wire.source_loadout_id,
+            route_snapshot_generation: wire.route_snapshot_generation,
+            route: wire.route,
+            turn: wire.turn,
+            lease: wire.lease,
+        })
+    }
+}
+
+impl std::fmt::Debug for SelectedSttControlRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SelectedSttControlRequest")
+            .field("schema_version", &self.schema_version)
+            .field("source_loadout_id", &self.source_loadout_id)
+            .field("route_snapshot_generation", &self.route_snapshot_generation)
+            .field("route", &self.route)
+            .field("identity", &self.turn.identity)
+            .field("attempt", &self.turn.attempt)
+            .field(
+                "context_hint_bytes",
+                &self.turn.context_hint.as_ref().map(String::len),
+            )
+            .field("lease", &self.lease)
+            .finish()
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectedSttControlResult {
+    pub schema_version: u32,
+    pub source_loadout_id: String,
+    pub route_snapshot_generation: u64,
+    pub result: SelectedSttResult,
+}
+
+impl std::fmt::Debug for SelectedSttControlResult {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SelectedSttControlResult")
+            .field("schema_version", &self.schema_version)
+            .field("source_loadout_id", &self.source_loadout_id)
+            .field("route_snapshot_generation", &self.route_snapshot_generation)
+            .field("result", &self.result)
+            .finish()
+    }
 }
 
 const MAX_CONTROL_BODY_BYTES: usize = MAX_CONTROL_MESSAGE_BYTES - 4 * 1024;
@@ -258,6 +348,95 @@ where
                 shutdown.cancel();
                 break;
             }
+            ControlRequest::TranscribeSelectedStt(request) => {
+                if active.is_some() {
+                    send_error(
+                        &response_tx,
+                        response_meta,
+                        current_generation,
+                        ErrorCode::PolicyBlocked,
+                        "foreground_turn_busy",
+                        true,
+                    )
+                    .await?;
+                    continue;
+                }
+                let envelope_turn = response_meta
+                    .turn_id
+                    .as_ref()
+                    .ok_or(ControlError::Malformed)?;
+                if !selected_stt_control_request_valid(&request, &session, envelope_turn) {
+                    send_error(
+                        &response_tx,
+                        response_meta,
+                        current_generation,
+                        ErrorCode::InvalidArgument,
+                        "selected_stt_request_invalid",
+                        false,
+                    )
+                    .await?;
+                    continue;
+                }
+                let cancellation = CancellationToken::new();
+                active = Some(cancellation.clone());
+                let completion_marker = cancellation.clone();
+                let state = Arc::clone(&state);
+                let response_tx = response_tx.clone();
+                let generation = current_generation;
+                let remaining = qpc_remaining(response_meta.deadline_qpc_ticks, qpc_now());
+                tokio::spawn(async move {
+                    let SelectedSttControlRequest {
+                        schema_version: _,
+                        source_loadout_id,
+                        route_snapshot_generation,
+                        route,
+                        turn,
+                        lease,
+                    } = *request;
+                    let operation = async {
+                        let selected = selected_hosted_stt(&route, Arc::clone(&state.vault))?;
+                        let input = BrokerPcmInputSource::connect(lease, cancellation.clone())
+                            .await
+                            .map_err(|_| SelectedSttError::NativeInputUnavailable)?;
+                        selected
+                            .transcribe_push_to_talk(turn, Box::new(input), cancellation.clone())
+                            .await
+                    };
+                    match tokio::time::timeout(remaining, operation).await {
+                        Ok(Ok(result)) => {
+                            let _ = send_success(
+                                &response_tx,
+                                response_meta,
+                                generation,
+                                ControlResponse::SelectedStt {
+                                    result: Box::new(SelectedSttControlResult {
+                                        schema_version: 1,
+                                        source_loadout_id,
+                                        route_snapshot_generation,
+                                        result,
+                                    }),
+                                },
+                            )
+                            .await;
+                        }
+                        Ok(Err(error)) => {
+                            let (code, stable_message, retryable) =
+                                selected_stt_control_failure(error);
+                            let _ = send_error(
+                                &response_tx,
+                                response_meta,
+                                generation,
+                                code,
+                                stable_message,
+                                retryable,
+                            )
+                            .await;
+                        }
+                        Err(_) => cancellation.cancel(),
+                    }
+                    completion_marker.cancel();
+                });
+            }
             ControlRequest::SimulateTurn(request) => {
                 if active.is_some() {
                     send_error(
@@ -292,14 +471,16 @@ where
                             )
                             .await;
                         }
-                        Ok(Err(_)) => {
+                        Ok(Err(error)) => {
+                            let (code, stable_message, retryable) =
+                                simulation_control_failure(&error);
                             let _ = send_error(
                                 &response_tx,
                                 response_meta,
                                 generation,
-                                ErrorCode::Internal,
-                                "simulation_failed",
-                                true,
+                                code,
+                                stable_message,
+                                retryable,
                             )
                             .await;
                         }
@@ -318,6 +499,9 @@ where
                         },
                         ControlRequest::ValidateProfiles => ControlResponse::Profiles {
                             profiles: state.profiles.summaries(),
+                        },
+                        ControlRequest::DiscoverTtsVoices(request) => ControlResponse::TtsVoices {
+                            result: Box::new(state.tts_voice_discovery.discover(request).await),
                         },
                         _ => unreachable!("handled above"),
                     }
@@ -338,6 +522,117 @@ where
         writer_task.abort();
     }
     Ok(())
+}
+
+fn simulation_control_failure(error: &SimulationError) -> (ErrorCode, &'static str, bool) {
+    match error {
+        SimulationError::InvalidRequest
+        | SimulationError::UnknownGame
+        | SimulationError::UnknownCharacter
+        | SimulationError::CharacterDatabaseUnavailable
+        | SimulationError::InvalidIdentityEvidence
+        | SimulationError::IdentityEvidenceWrongGame
+        | SimulationError::IdentityAmbiguous
+        | SimulationError::ExplicitCharacterSelectionRequired
+        | SimulationError::GenericSelectionRequired
+        | SimulationError::Generic(_) => (
+            ErrorCode::InvalidArgument,
+            "simulation_request_invalid",
+            false,
+        ),
+        SimulationError::ProtectedOnlineBlocked | SimulationError::AntiCheatBlocked => {
+            (ErrorCode::PolicyBlocked, "simulation_policy_blocked", false)
+        }
+        SimulationError::SafetyEvidenceUnverified => (
+            ErrorCode::PolicyBlocked,
+            "simulation_safety_evidence_unverified",
+            false,
+        ),
+        SimulationError::DevLiveTtsUnavailable => (
+            ErrorCode::ProviderUnavailable,
+            "dev_live_tts_unavailable",
+            true,
+        ),
+        SimulationError::DevLiveTtsTurnIncomplete => (
+            ErrorCode::ProviderUnavailable,
+            "dev_live_tts_turn_incomplete",
+            true,
+        ),
+        SimulationError::DevLiveTtsAudioNotDelivered => (
+            ErrorCode::DeviceUnavailable,
+            "dev_live_tts_audio_not_delivered",
+            true,
+        ),
+        SimulationError::DevLiveTtsProviderNotSelected => (
+            ErrorCode::ProviderUnavailable,
+            "dev_live_tts_provider_not_selected",
+            true,
+        ),
+        SimulationError::DevLiveTtsReceiptCountMismatch => (
+            ErrorCode::DeviceUnavailable,
+            "dev_live_tts_receipt_count_mismatch",
+            true,
+        ),
+        SimulationError::DevLiveTtsReceiptMismatch => (
+            ErrorCode::DeviceUnavailable,
+            "dev_live_tts_receipt_mismatch",
+            true,
+        ),
+        SimulationError::DevLiveTtsReceiptIncomplete => (
+            ErrorCode::DeviceUnavailable,
+            "dev_live_tts_receipt_incomplete",
+            true,
+        ),
+        SimulationError::Runtime => (
+            ErrorCode::ProviderUnavailable,
+            "simulation_runtime_failed",
+            true,
+        ),
+    }
+}
+
+fn selected_stt_control_request_valid(
+    request: &SelectedSttControlRequest,
+    session: &SessionId,
+    turn: &TurnId,
+) -> bool {
+    request.schema_version == 1
+        && !request.source_loadout_id.is_empty()
+        && request.source_loadout_id.len() <= 128
+        && !request.source_loadout_id.chars().any(char::is_control)
+        && request.route_snapshot_generation > 0
+        && request.turn.identity.session_id == session.to_string()
+        && request.turn.identity.turn_id == turn.to_string()
+}
+
+fn selected_stt_control_failure(error: SelectedSttError) -> (ErrorCode, &'static str, bool) {
+    match error {
+        SelectedSttError::Cancelled => (ErrorCode::Cancelled, "selected_stt_cancelled", false),
+        SelectedSttError::UnsupportedRoute
+        | SelectedSttError::CredentialReferenceMismatch
+        | SelectedSttError::InvalidNativeInput
+        | SelectedSttError::ManualRetryNotAuthorized
+        | SelectedSttError::InvalidRequest => (
+            ErrorCode::PolicyBlocked,
+            "selected_stt_policy_blocked",
+            false,
+        ),
+        SelectedSttError::CredentialUnavailable => (
+            ErrorCode::ProviderUnavailable,
+            "selected_stt_credential_unavailable",
+            false,
+        ),
+        SelectedSttError::NativeInputUnavailable => (
+            ErrorCode::DeviceUnavailable,
+            "selected_stt_input_unavailable",
+            true,
+        ),
+        SelectedSttError::ProviderUnavailable | SelectedSttError::ProviderProtocol => (
+            ErrorCode::ProviderUnavailable,
+            "selected_stt_provider_unavailable",
+            true,
+        ),
+    }
 }
 
 async fn handshake<R, W>(
@@ -389,6 +684,7 @@ where
             enabled_features: vec![
                 "envelope-control-v1".to_owned(),
                 "cancellation-generation".to_owned(),
+                "tts-stock-voice-discovery-v1".to_owned(),
             ],
         }),
     )
@@ -452,7 +748,11 @@ fn validate_turn_scope(
     operation: ControlOperationV1,
     turn_id: Option<&TurnId>,
 ) -> Result<(), ControlError> {
-    if (operation == ControlOperationV1::SimulateTurn) != turn_id.is_some() {
+    let turn_bound = matches!(
+        operation,
+        ControlOperationV1::SimulateTurn | ControlOperationV1::TranscribeSelectedStt
+    );
+    if turn_bound != turn_id.is_some() {
         return Err(ControlError::Malformed);
     }
     Ok(())
@@ -463,7 +763,9 @@ fn control_operation(request: &ControlRequest) -> ControlOperationV1 {
         ControlRequest::Ping => ControlOperationV1::Ping,
         ControlRequest::Doctor => ControlOperationV1::Doctor,
         ControlRequest::ValidateProfiles => ControlOperationV1::ValidateProfiles,
+        ControlRequest::DiscoverTtsVoices(_) => ControlOperationV1::DiscoverTtsVoices,
         ControlRequest::SimulateTurn(_) => ControlOperationV1::SimulateTurn,
+        ControlRequest::TranscribeSelectedStt(_) => ControlOperationV1::TranscribeSelectedStt,
         ControlRequest::Cancel { .. } => ControlOperationV1::Cancel,
         ControlRequest::Shutdown => ControlOperationV1::Shutdown,
     }
@@ -1051,5 +1353,99 @@ mod tests {
             server_task.await.unwrap(),
             Err(ControlError::Malformed)
         ));
+    }
+
+    #[test]
+    fn stock_voice_discovery_request_has_a_distinct_authenticated_operation() {
+        let request: ControlRequest = serde_json::from_value(serde_json::json!({
+            "type": "discover_tts_voices",
+            "schemaVersion": 1,
+            "providerId": "nvidia-nim-magpie",
+            "modelId": "magpie-tts-multilingual",
+            "forceRefresh": false
+        }))
+        .expect("strict discovery request");
+        assert_eq!(
+            control_operation(&request),
+            ControlOperationV1::DiscoverTtsVoices
+        );
+        assert!(serde_json::from_value::<ControlRequest>(serde_json::json!({
+            "type": "discover_tts_voices",
+            "schemaVersion": 1,
+            "providerId": "nvidia-nim-magpie",
+            "modelId": "magpie-tts-multilingual",
+            "forceRefresh": false,
+            "credential": "must-not-cross-wire"
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn selected_stt_control_request_is_turn_bound_strict_and_debug_redacted() {
+        let session = SessionId::new();
+        let turn = TurnId::new();
+        let request: ControlRequest = serde_json::from_value(serde_json::json!({
+            "type": "transcribe_selected_stt",
+            "schemaVersion": 1,
+            "sourceLoadoutId": "review-loadout",
+            "routeSnapshotGeneration": 7,
+            "route": {
+                "providerId": "assemblyai",
+                "modelId": "u3-rt-pro",
+                "execution": "cloud",
+                "egress": "microphone_audio_and_optional_non_secret_context",
+                "credentialReference": "providers/assemblyai"
+            },
+            "turn": {
+                "identity": {
+                    "sessionId": session.to_string(),
+                    "turnId": turn.to_string(),
+                    "generation": 4,
+                    "inputEndpointId": "endpoint-fixture",
+                    "inputEndpointGeneration": 3
+                },
+                "attempt": { "kind": "initial" },
+                "contextHint": "sensitive fixture context"
+            },
+            "lease": {
+                "schemaVersion": 2,
+                "streamId": "mic-fixture",
+                "producerEndpoint": r"\\.\pipe\npc-media-input-fixture",
+                "oneTimeToken": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+                "sessionId": session.to_string(),
+                "turnId": turn.to_string(),
+                "generation": 4,
+                "durationMs": 500,
+                "sampleRate": 16000,
+                "channels": 1,
+                "maxFrames": 8000,
+                "maxChunkBytes": 65536,
+                "expiresQpc": 99,
+                "qpcFrequency": 10000000,
+                "inputSelectionMode": "systemDefault",
+                "inputEndpointId": "endpoint-fixture",
+                "inputEndpointGeneration": 3,
+                "activationSource": "pushToTalk",
+                "pttVirtualKey": 88,
+                "pttPressTransitionSequence": 8,
+                "pttPressedQpc": 10
+            }
+        }))
+        .expect("strict selected STT request");
+        assert_eq!(
+            control_operation(&request),
+            ControlOperationV1::TranscribeSelectedStt
+        );
+        assert!(
+            validate_turn_scope(ControlOperationV1::TranscribeSelectedStt, Some(&turn)).is_ok()
+        );
+        let ControlRequest::TranscribeSelectedStt(request) = &request else {
+            panic!("selected STT request");
+        };
+        assert!(selected_stt_control_request_valid(request, &session, &turn));
+        let debug = format!("{request:?}");
+        assert!(debug.contains("context_hint_bytes"));
+        assert!(!debug.contains("sensitive fixture context"));
+        assert!(!debug.contains("010203040506"));
     }
 }

@@ -483,18 +483,22 @@ impl ProtocolParser {
             }
             "content-delta" => {
                 ensure_started(&mut self.started, &mut events);
-                let text = value
-                    .pointer("/delta/message/content/text")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| {
-                        ProviderError::protocol(&self.provider_id, "text delta is missing")
-                    })?;
-                if !text.is_empty() {
-                    events.push(LlmEvent::TextDelta {
-                        text: text.to_owned(),
-                        content_index: value.get("index").and_then(Value::as_u64).unwrap_or(0)
-                            as usize,
-                    });
+                let content = value.pointer("/delta/message/content").ok_or_else(|| {
+                    ProviderError::protocol(&self.provider_id, "content delta is missing")
+                })?;
+                if let Some(text) = content.get("text").and_then(Value::as_str) {
+                    if !text.is_empty() {
+                        events.push(LlmEvent::TextDelta {
+                            text: text.to_owned(),
+                            content_index: value.get("index").and_then(Value::as_u64).unwrap_or(0)
+                                as usize,
+                        });
+                    }
+                } else if content.get("thinking").and_then(Value::as_str).is_none() {
+                    return Err(ProviderError::protocol(
+                        &self.provider_id,
+                        "content delta has no supported payload",
+                    ));
                 }
             }
             "tool-call-start" => {

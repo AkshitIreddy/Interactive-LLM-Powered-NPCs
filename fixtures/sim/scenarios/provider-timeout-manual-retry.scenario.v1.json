@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "npc.sim.scenario.v1",
+  "id": "provider-timeout-manual-retry",
+  "description": "A retryable provider timeout produces no delivery commit until an explicit manual retry completes on a new generation.",
+  "seed": 3002,
+  "resourceProfile": "reference-balanced-12gb",
+  "privacy": { "mode": "hosted", "networkAllowed": true },
+  "providers": { "llm": "mock-nvidia-nim", "tts": "mock-elevenlabs" },
+  "turn": {
+    "sessionId": "session-provider-retry",
+    "turnId": "turn-provider-retry-001",
+    "inputMode": "typed",
+    "npc": { "id": "generic-quartermaster", "name": "Quartermaster Hale", "visibility": "visible" }
+  },
+  "stream": [
+    { "atMs": 0, "source": "input", "kind": "typed_input", "payload": { "text": "Are the supplies ready?" } },
+    { "atMs": 20, "source": "identity", "kind": "resolved", "payload": { "strategy": "manual_target", "confidence": 1 } },
+    { "atMs": 45, "source": "memory", "kind": "retrieved", "payload": { "episodicCount": 0, "factCount": 2, "latencyMs": 25 } },
+    { "atMs": 100, "source": "llm", "kind": "token", "payload": { "text": "Checking", "networkRequest": true, "provider": "mock-nvidia-nim" } },
+    { "atMs": 300, "source": "control", "kind": "manual_retry", "payload": { "reason": "player_selected_retry" } },
+    { "atMs": 310, "source": "input", "kind": "typed_input", "generation": 1, "payload": { "text": "Are the supplies ready?" } },
+    { "atMs": 330, "source": "identity", "kind": "resolved", "generation": 1, "payload": { "strategy": "manual_target", "confidence": 1 } },
+    { "atMs": 350, "source": "memory", "kind": "retrieved", "generation": 1, "payload": { "episodicCount": 0, "factCount": 2, "latencyMs": 20 } },
+    { "atMs": 410, "source": "llm", "kind": "token", "generation": 1, "payload": { "text": "Packed", "networkRequest": true, "provider": "mock-nvidia-nim" } },
+    { "atMs": 455, "source": "llm", "kind": "sentence", "generation": 1, "payload": { "text": "Packed and ready." } },
+    { "atMs": 520, "source": "tts", "kind": "audio_chunk", "generation": 1, "payload": { "chunkIndex": 0, "sampleCount": 1440, "sampleRateHz": 24000, "networkRequest": true, "provider": "mock-elevenlabs" } },
+    { "atMs": 565, "source": "llm", "kind": "complete", "generation": 1, "payload": { "finishReason": "stop", "text": "Packed and ready." } },
+    { "atMs": 620, "source": "tts", "kind": "complete", "generation": 1, "payload": { "chunks": 1, "deliveredText": "Packed and ready." } },
+    { "atMs": 630, "source": "delivery", "kind": "commit", "generation": 1, "payload": { "sentenceId": "sentence-retry-1", "deliveredText": "Packed and ready." } }
+  ],
+  "faults": [
+    { "atMs": 200, "target": "llm", "kind": "timeout", "code": "provider_timeout", "retryable": true }
+  ],
+  "expected": {
+    "status": "completed",
+    "traceSha256": "5ad1f09b3995549e6b381dd354bfefc687dff3c8734a061e06b16a73a4b85487",
+    "firstAudioAtMs": 520,
+    "networkAttempts": 3,
+    "degradationReasons": [],
+    "metrics": { "manualRetryCount": 1, "deliveryCommitCount": 1, "rejectedDeliveryCommitCount": 0, "failureToRecoveryMs": 100, "recoveryToFirstAudioMs": 220 },
+    "eventCounts": { "turn.error": 1, "turn.retry_started": 1, "delivery.committed": 1 },
+    "spine": { "voicing": "completed" }
+  }
+}

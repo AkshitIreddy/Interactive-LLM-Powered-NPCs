@@ -1,5 +1,6 @@
 use crate::path_security::{
-    canonical_existing_directory, inspect_store_executable, ExecutableInspection,
+    canonical_existing_directory, inspect_store_executable, is_link_or_reparse,
+    ExecutableInspection,
 };
 use crate::{
     parse_app_manifest, parse_epic_item, parse_gog_info, parse_launcher_installed,
@@ -9,6 +10,99 @@ use crate::{
 use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommonDirectoryRule {
+    pub display_name: String,
+    pub relative_install_dir: PathBuf,
+    pub relative_executable: PathBuf,
+    pub store_id: Option<String>,
+}
+
+/// Bounded app-authored probes for conventional install roots such as Program
+/// Files. This never recursively scans a drive: every relative directory and
+/// executable comes from a validated built-in profile rule, and a hit receives
+/// verified authority only after canonical containment and regular-file checks.
+#[derive(Debug, Clone, Default)]
+pub struct CommonDirectoryScanner {
+    pub roots: Vec<PathBuf>,
+    pub rules: Vec<CommonDirectoryRule>,
+}
+
+impl StoreScanner for CommonDirectoryScanner {
+    fn id(&self) -> &'static str {
+        "common-directory"
+    }
+
+    fn scan(&self) -> Result<Vec<InstallationCandidate>, DiscoveryError> {
+        let mut candidates = Vec::new();
+        let mut seen = HashSet::new();
+        for declared_root in &self.roots {
+            let Some(root) = canonical_existing_directory(declared_root) else {
+                continue;
+            };
+            for rule in &self.rules {
+                if rule.display_name.trim().is_empty()
+                    || !safe_relative_path(&rule.relative_install_dir)
+                    || !safe_relative_path(&rule.relative_executable)
+                {
+                    return Err(scanner_error(
+                        self.id(),
+                        "an app-authored common-directory rule is invalid",
+                    ));
+                }
+                let install = root.join(&rule.relative_install_dir);
+                let ExecutableInspection::Verified {
+                    canonical_root,
+                    canonical_executable,
+                } = inspect_store_executable(&install, &rule.relative_executable)
+                else {
+                    continue;
+                };
+                let key = canonical_executable.to_string_lossy().to_ascii_lowercase();
+                if !seen.insert(key) {
+                    continue;
+                }
+                candidates.push(InstallationCandidate {
+                    store: StoreKind::Standalone,
+                    display_name: rule.display_name.clone(),
+                    install_dir: canonical_root,
+                    executable: Some(canonical_executable),
+                    edition: EditionEvidence {
+                        edition_id: None,
+                        store_id: rule.store_id.clone(),
+                        build_id: None,
+                    },
+                    evidence: vec![
+                        InstallationEvidence {
+                            source: DetectionSource::CommonDirectory,
+                            confidence: Confidence::Medium,
+                            detail: "bounded built-in common-directory rule".into(),
+                        },
+                        InstallationEvidence {
+                            source: DetectionSource::VerifiedExecutable,
+                            confidence: Confidence::Verified,
+                            detail: "canonical contained executable exists".into(),
+                        },
+                    ],
+                    warnings: BTreeSet::new(),
+                });
+            }
+        }
+        Ok(candidates)
+    }
+}
+
+fn safe_relative_path(path: &Path) -> bool {
+    !path.as_os_str().is_empty()
+        && !path.is_absolute()
+        && path.components().all(|component| {
+            matches!(
+                component,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        })
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct SteamFilesystemScanner {
@@ -337,7 +431,7 @@ fn inspect_declared_executable(
 
 fn read_text_bounded(path: &Path, maximum: u64) -> Result<String, String> {
     let metadata = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
-    if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > maximum {
+    if !metadata.is_file() || is_link_or_reparse(&metadata) || metadata.len() > maximum {
         return Err("manifest path is unsafe, not a file, or oversized".into());
     }
     fs::read_to_string(path).map_err(|error| error.to_string())
@@ -613,5 +707,55 @@ mod tests {
         assert!(result[0]
             .warnings
             .contains("GOG metadata could not be validated"));
+    }
+
+    #[test]
+    fn common_directory_scanner_is_bounded_and_verifies_exact_profile_rule() {
+        let root = tempfile::tempdir().unwrap();
+        let install = root.path().join("Example Game");
+        fs::create_dir_all(install.join("bin")).unwrap();
+        fs::write(install.join("bin/game.exe"), b"fixture").unwrap();
+        fs::write(root.path().join("unlisted.exe"), b"must not be scanned").unwrap();
+
+        let result = CommonDirectoryScanner {
+            roots: vec![root.path().to_path_buf()],
+            rules: vec![CommonDirectoryRule {
+                display_name: "Example Game".into(),
+                relative_install_dir: PathBuf::from("Example Game"),
+                relative_executable: PathBuf::from("bin/game.exe"),
+                store_id: Some("example-common".into()),
+            }],
+        }
+        .scan()
+        .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].store, StoreKind::Standalone);
+        assert!(result[0].has_verified_executable());
+        let canonical_install = fs::canonicalize(install).unwrap();
+        assert_eq!(
+            result[0].verified_install_root(),
+            Some(canonical_install.as_path())
+        );
+        assert!(result[0]
+            .evidence
+            .iter()
+            .any(|item| item.source == DetectionSource::CommonDirectory));
+    }
+
+    #[test]
+    fn common_directory_scanner_rejects_traversal_rules_without_probing() {
+        let root = tempfile::tempdir().unwrap();
+        let result = CommonDirectoryScanner {
+            roots: vec![root.path().to_path_buf()],
+            rules: vec![CommonDirectoryRule {
+                display_name: "Hostile".into(),
+                relative_install_dir: PathBuf::from("../outside"),
+                relative_executable: PathBuf::from("game.exe"),
+                store_id: None,
+            }],
+        }
+        .scan();
+        assert!(matches!(result, Err(DiscoveryError::Scanner { .. })));
     }
 }

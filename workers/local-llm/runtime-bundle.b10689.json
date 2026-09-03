@@ -1,0 +1,64 @@
+{
+  "schema": "npc.local-llm.runtime-bundle/v1",
+  "runtime": "llama.cpp",
+  "release_tag": "b10689",
+  "source_commit": "57291f2644af8c9df0dd8d44395881c5bdcf0ecd",
+  "abi": "npc-llama-server-openai-v1+b10689+qwen3",
+  "license": {
+    "spdx_expression": "MIT",
+    "license_url": "https://github.com/ggml-org/llama.cpp/blob/57291f2644af8c9df0dd8d44395881c5bdcf0ecd/LICENSE",
+    "license_sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d"
+  },
+  "platform": "windows-x86_64",
+  "entrypoint": "llama-server.exe",
+  "required_server_contract": {
+    "transport": "http-loopback",
+    "host": "127.0.0.1",
+    "authentication": "per-launch-api-key-file",
+    "offline_required": true,
+    "web_ui_disabled": true,
+    "parallel_slots": 1,
+    "required_endpoints": [
+      "GET /health",
+      "GET /v1/models",
+      "POST /v1/chat/completions"
+    ],
+    "streaming": "openai-compatible-sse",
+    "structured_output": "response_format.type=json_schema",
+    "qwen_thinking_disabled": true
+  },
+  "variants": [
+    {
+      "id": "windows-x64-vulkan",
+      "backend": "vulkan",
+      "explicit_install_only": true,
+      "artifact": {
+        "kind": "archive",
+        "url": "https://github.com/ggml-org/llama.cpp/releases/download/b10689/llama-b10689-bin-win-vulkan-x64.zip",
+        "size_bytes": 34905903,
+        "sha256": "3da600ff52a746d82e32a2ba3f0382e3bf782bd3a8fece661b646e1dee7ac1c6"
+      },
+      "admission": {
+        "requires_vulkan_1_2": true,
+        "gpu_layers_selected_by_resource_governor": true,
+        "measured_envelope_required": true
+      }
+    },
+    {
+      "id": "windows-x64-cpu",
+      "backend": "cpu",
+      "explicit_install_only": true,
+      "artifact": {
+        "kind": "archive",
+        "url": "https://github.com/ggml-org/llama.cpp/releases/download/b10689/llama-b10689-bin-win-cpu-x64.zip",
+        "size_bytes": 18134786,
+        "sha256": "be2092f2913cd90428b0f1a57b186ab66afe29bc698ea6fbe80f73ffdebd4bdc"
+      },
+      "admission": {
+        "minimum_cpu_features_from_release_binary": true,
+        "cpu_threads_selected_by_resource_governor": true,
+        "measured_envelope_required": true
+      }
+    }
+  ]
+}

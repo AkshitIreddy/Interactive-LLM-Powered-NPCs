@@ -25,16 +25,31 @@ path = "src/main.rs"
 tauri-build = { version = "2.4", features = [] }
 
 [dependencies]
+async-trait = "0.1"
 getrandom = "0.3"
+hex = "0.4"
 interactive-npcs-credential-vault = { path = "../../../crates/credential-vault" }
+interactive-npcs-diagnostics = { path = "../../../crates/diagnostics" }
+npc-character-db = { path = "../../../crates/character-db" }
+npc-game-discovery = { package = "interactive-npcs-game-discovery", path = "../../../crates/game-discovery" }
+npc-game-profile = { path = "../../../crates/game-profile" }
+npc-identity-engine = { path = "../../../crates/identity-engine" }
+npc-memory = { path = "../../../crates/memory" }
+npc-model-manager = { package = "model-manager", path = "../../../crates/model-manager" }
+npc-provider-catalog = { path = "../../../crates/provider-catalog" }
 npc-provider-loadouts = { path = "../../../crates/provider-loadouts" }
+npc-product-benchmark = { path = "../../../crates/product-benchmark" }
 npc-protocol = { path = "../../../crates/protocol" }
+npc-system-telemetry = { path = "../../../crates/system-telemetry" }
+npc-subtitle-engine = { path = "../../../crates/subtitle-engine" }
 prost = "0.13"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sha2 = "0.10"
 tauri = { version = "2.8", features = ["tray-icon"] }
 tempfile = "3.14"
 thiserror = "2.0"
+time = { version = "0.3", features = ["formatting"] }
 tokio = { version = "1.41", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 uuid = { version = "1", features = ["v4"] }
@@ -44,15 +59,18 @@ zeroize = "1.8"
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
+  "Win32_Graphics_Dwm",
   "Win32_Security",
   "Win32_Security_Authorization",
   "Win32_Security_Credentials",
   "Win32_System_Performance",
+  "Win32_System_ProcessStatus",
   "Win32_System_JobObjects",
   "Win32_System_RemoteDesktop",
   "Win32_System_SystemServices",
   "Win32_System_Threading",
   "Win32_Storage_FileSystem",
+  "Win32_UI_WindowsAndMessaging",
 ] }
 
 [dev-dependencies]

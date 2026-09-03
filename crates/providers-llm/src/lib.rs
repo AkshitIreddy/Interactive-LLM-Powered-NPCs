@@ -16,7 +16,8 @@ mod types;
 
 pub use adapter::{
     AnthropicMessages, CohereChat, GeminiGenerateContent, GroqChatCompletions, HostedLanguageModel,
-    NvidiaNimChat, OpenAiCompatible, OpenAiResponses, NVIDIA_NIM_HOSTED_BASE_URL,
+    NvidiaNimChat, OpenAiCompatible, OpenAiResponses, NVIDIA_NIM_DEFAULT_MODEL_CACHE_TTL,
+    NVIDIA_NIM_HOSTED_BASE_URL,
 };
 pub use error::{ErrorKind, ProviderError, SecretError};
 pub use runtime_bridge::{RuntimeBridge, RuntimeBridgeConfig};

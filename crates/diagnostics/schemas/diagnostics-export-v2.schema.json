@@ -1,0 +1,223 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "interactive-npcs/diagnostics-export-v2",
+  "title": "Interactive NPCs redacted diagnostics export",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "generatedAtUtc",
+    "applicationVersion",
+    "privacyEgress",
+    "checkResults",
+    "events",
+    "recovery",
+    "redactionSummary"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "2.0.0" },
+    "generatedAtUtc": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "applicationVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "privacyEgress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "remoteTelemetry", "automaticUpload", "exportInitiation", "locallyRecorded", "excludedByDesign"],
+      "properties": {
+        "schemaVersion": { "const": "1.0.0" },
+        "remoteTelemetry": { "const": "prohibited" },
+        "automaticUpload": { "const": "prohibited" },
+        "exportInitiation": { "const": "user_initiated_only" },
+        "locallyRecorded": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["diagnostic_facts", "diagnostic_events", "crash_recovery_metadata"] }
+        },
+        "excludedByDesign": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["microphone_audio", "transcript", "selected_game_frame", "webcam_frame", "game_context", "conversation_memory"] }
+        }
+      }
+    },
+    "checkResults": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/checkResult" } },
+    "events": { "type": "array", "maxItems": 4096, "items": { "$ref": "#/$defs/event" } },
+    "recovery": {
+      "oneOf": [
+        { "$ref": "#/$defs/recovery" },
+        { "type": "null" }
+      ]
+    },
+    "redactionSummary": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "count"],
+        "properties": {
+          "kind": {
+            "enum": [
+              "bearer_token",
+              "api_credential",
+              "provider_credential",
+              "jwt",
+              "private_key",
+              "url_credential",
+              "sensitive_field",
+              "email",
+              "ip_address",
+              "user_path"
+            ]
+          },
+          "count": { "type": "integer", "minimum": 1 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "checkResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["checkId", "category", "status", "provenance", "observedAtUtc", "durationMs", "timing", "summaryCode", "summary", "errorCode", "providerId", "modelId", "metrics", "suggestedActions"],
+      "properties": {
+        "checkId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "category": { "enum": ["credential", "microphone", "speaker", "stt", "tts", "llm", "provider", "model_pack", "admission", "capture", "audio", "model", "hardware", "gpu", "vram", "game", "overlay", "latency", "permission"] },
+        "status": { "enum": ["ok", "degraded", "failed", "skipped"] },
+        "provenance": { "enum": ["measured", "unmeasured", "fixture"] },
+        "observedAtUtc": { "type": ["string", "null"], "maxLength": 64 },
+        "durationMs": { "type": ["number", "null"], "minimum": 0 },
+        "timing": {
+          "oneOf": [
+            { "$ref": "#/$defs/timingEvidence" },
+            { "type": "null" }
+          ]
+        },
+        "summaryCode": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "errorCode": { "type": ["string", "null"], "maxLength": 128 },
+        "providerId": { "type": ["string", "null"], "maxLength": 160 },
+        "modelId": { "type": ["string", "null"], "maxLength": 200 },
+        "metrics": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": { "minLength": 1, "maxLength": 64 },
+          "additionalProperties": { "$ref": "#/$defs/metric" }
+        },
+        "suggestedActions": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/suggestedAction" }
+        }
+      }
+    },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "unit", "provenance"],
+      "properties": {
+        "value": { "type": "number" },
+        "unit": {
+          "enum": ["milliseconds", "bytes", "mebibytes", "percent", "hertz", "frames_per_second", "count", "ratio"]
+        },
+        "provenance": { "enum": ["measured", "unmeasured", "fixture"] }
+      }
+    },
+    "suggestedAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actionId", "kind", "label", "targetId", "requiresConfirmation"],
+      "properties": {
+        "actionId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "kind": {
+          "enum": [
+            "retry_check",
+            "restart_component",
+            "recheck_permissions",
+            "open_settings_section",
+            "open_bundled_help",
+            "select_alternative_provider",
+            "reduce_local_model_load",
+            "disable_optional_feature"
+          ]
+        },
+        "label": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "targetId": { "type": ["string", "null"], "maxLength": 128 },
+        "requiresConfirmation": { "type": "boolean" }
+      }
+    },
+    "timingEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["clockSource", "provenance", "startedMonotonicNs", "completedMonotonicNs", "durationMs"],
+      "properties": {
+        "clockSource": { "enum": ["process_monotonic", "operating_system_monotonic", "provider_reported", "fixture_clock"] },
+        "provenance": { "enum": ["measured", "fixture"] },
+        "startedMonotonicNs": { "type": "integer", "minimum": 0 },
+        "completedMonotonicNs": { "type": "integer", "minimum": 0 },
+        "durationMs": { "type": "number", "minimum": 0 }
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["monotonicNs", "component", "eventName", "severity", "status", "provenance", "traceId", "spanId", "durationMs", "timing", "errorCode", "providerId", "modelId", "numeric", "labels"],
+      "properties": {
+        "monotonicNs": { "type": "integer", "minimum": 0 },
+        "component": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "eventName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "severity": { "enum": ["trace", "debug", "info", "warn", "error"] },
+        "status": { "enum": ["ok", "degraded", "failed", "skipped"] },
+        "provenance": { "enum": ["measured", "unmeasured", "fixture"] },
+        "traceId": { "type": ["string", "null"], "maxLength": 200 },
+        "spanId": { "type": ["string", "null"], "maxLength": 200 },
+        "durationMs": { "type": ["number", "null"], "minimum": 0 },
+        "timing": {
+          "oneOf": [
+            { "$ref": "#/$defs/timingEvidence" },
+            { "type": "null" }
+          ]
+        },
+        "errorCode": { "type": ["string", "null"], "maxLength": 200 },
+        "providerId": { "type": ["string", "null"], "maxLength": 200 },
+        "modelId": { "type": ["string", "null"], "maxLength": 200 },
+        "numeric": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": { "minLength": 1, "maxLength": 64 },
+          "additionalProperties": { "type": "number" }
+        },
+        "labels": {
+          "type": "object",
+          "maxProperties": 24,
+          "propertyNames": { "minLength": 1, "maxLength": 64 },
+          "additionalProperties": { "type": "string", "maxLength": 256 }
+        }
+      }
+    },
+    "previousSession": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "sessionId", "applicationVersion", "startedAtUtc", "lastUpdatedAtUtc", "lastPhase", "lastEventMonotonicNs", "priorRecoveryAttempt"],
+      "properties": {
+        "status": { "enum": ["no_marker", "unclean_exit", "corrupt_marker"] },
+        "sessionId": { "type": ["string", "null"], "maxLength": 128 },
+        "applicationVersion": { "type": ["string", "null"], "maxLength": 64 },
+        "startedAtUtc": { "type": ["string", "null"], "maxLength": 64 },
+        "lastUpdatedAtUtc": { "type": ["string", "null"], "maxLength": 64 },
+        "lastPhase": { "enum": ["starting", "loading_configuration", "starting_runtime", "running", "shutting_down", null] },
+        "lastEventMonotonicNs": { "type": ["integer", "null"], "minimum": 0 },
+        "priorRecoveryAttempt": { "type": ["integer", "null"], "minimum": 0, "maximum": 100 }
+      }
+    },
+    "recovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "currentSessionId", "previousSession", "suggestedActions"],
+      "properties": {
+        "schemaVersion": { "const": "1.0.0" },
+        "currentSessionId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "previousSession": { "$ref": "#/$defs/previousSession" },
+        "suggestedActions": { "type": "array", "maxItems": 8, "items": { "$ref": "#/$defs/suggestedAction" } }
+      }
+    }
+  }
+}

@@ -19,6 +19,7 @@ Set-StrictMode -Version 2.0
 $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $script:Failures = New-Object System.Collections.Generic.List[string]
 $script:Warnings = New-Object System.Collections.Generic.List[string]
+. (Join-Path $PSScriptRoot 'windows/node-tooling.ps1')
 $shortBuildPathScript = Join-Path $PSScriptRoot 'short-cmake-build-path.ps1'
 if (-not (Test-Path -LiteralPath $shortBuildPathScript -PathType Leaf)) {
     throw "Short CMake build-path helper was not found: $shortBuildPathScript"
@@ -107,19 +108,23 @@ function Invoke-External {
         $DisplayArguments
     }
     Write-Host "    $FilePath $argumentSummary" -ForegroundColor DarkGray
-    Push-Location $WorkingDirectory
-    try {
-        & $FilePath @ArgumentList
-        $exitCode = $LASTEXITCODE
-        if ($null -eq $exitCode) { $exitCode = 0 }
-        if ($exitCode -ne 0 -and -not $AllowFailure) {
-            throw "Command failed with exit code ${exitCode}: $FilePath $argumentSummary"
+    if (Test-IsWindows) {
+        $result = Invoke-NpcHiddenProcess -FilePath $FilePath `
+            -ArgumentList $ArgumentList -WorkingDirectory $WorkingDirectory
+        $exitCode = $result.ExitCode
+    } else {
+        Push-Location $WorkingDirectory
+        try {
+            & $FilePath @ArgumentList
+            $exitCode = $LASTEXITCODE
+            if ($null -eq $exitCode) { $exitCode = 0 }
         }
-        return $exitCode
+        finally { Pop-Location }
     }
-    finally {
-        Pop-Location
+    if ($exitCode -ne 0 -and -not $AllowFailure) {
+        throw "Command failed with exit code ${exitCode}: $FilePath $argumentSummary"
     }
+    return $exitCode
 }
 
 function Invoke-CheckBlock {
@@ -181,14 +186,76 @@ function Get-PackageScriptNames {
 }
 
 function Get-CargoManifests {
+    $manifests = New-Object System.Collections.Generic.List[string]
     $workspaceManifest = Join-Path $script:RepoRoot 'Cargo.toml'
-    if (Test-Path -LiteralPath $workspaceManifest -PathType Leaf) { return @($workspaceManifest) }
-    $cratesRoot = Join-Path $script:RepoRoot 'crates'
-    if (-not (Test-Path -LiteralPath $cratesRoot -PathType Container)) { return @() }
-    return @(Get-ChildItem -LiteralPath $cratesRoot -Filter 'Cargo.toml' -File -Recurse | ForEach-Object { $_.FullName })
+    if (Test-Path -LiteralPath $workspaceManifest -PathType Leaf) {
+        $manifests.Add($workspaceManifest)
+    }
+    else {
+        $cratesRoot = Join-Path $script:RepoRoot 'crates'
+        if (Test-Path -LiteralPath $cratesRoot -PathType Container) {
+            foreach ($manifest in @(Get-ChildItem -LiteralPath $cratesRoot -Filter 'Cargo.toml' -File -Recurse | Sort-Object FullName)) {
+                $manifests.Add($manifest.FullName)
+            }
+        }
+    }
+
+    # The Tauri shell deliberately owns a nested workspace and lockfile. Cargo
+    # does not fetch that graph when the repository workspace is fetched, while
+    # the canonical lint/test commands consume it with --locked --offline.
+    $tauriManifest = Join-Path $script:RepoRoot 'apps/control/src-tauri/Cargo.toml'
+    if (Test-Path -LiteralPath $tauriManifest -PathType Leaf) {
+        $manifests.Add($tauriManifest)
+    }
+    return @($manifests | Select-Object -Unique)
 }
 
 function Get-PnpmInvocation {
+    if (Test-IsWindows) {
+        # Native Codex can place a newer pnpm runtime ahead of the repository's
+        # pinned Node installation. Accept a direct Windows shim only after it
+        # proves that it is the exact package-manager version declared by this
+        # checkout; otherwise use the same exact node.exe + Corepack resolver as
+        # packaging. The explicit probe also keeps sanitized command fixtures
+        # independent from machine-global Corepack caches.
+        $packagePath = Join-Path $script:RepoRoot 'package.json'
+        $pinnedVersion = $null
+        if (Test-Path -LiteralPath $packagePath -PathType Leaf) {
+            $package = Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json
+            $packageManager = [string]$package.packageManager
+            if ($packageManager -match '^pnpm@(?<version>[0-9]+\.[0-9]+\.[0-9]+)(?:$|\+)') {
+                $pinnedVersion = $Matches.version
+            }
+            elseif ($null -ne $package.engines -and
+                [string]$package.engines.pnpm -match '^(?<version>[0-9]+\.[0-9]+\.[0-9]+)$') {
+                $pinnedVersion = $Matches.version
+            }
+        }
+        $directPnpm = Get-Command pnpm.cmd -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($null -ne $directPnpm -and -not [string]::IsNullOrWhiteSpace($pinnedVersion)) {
+            try {
+                $probe = Invoke-NpcHiddenProcess -FilePath $directPnpm.Source `
+                    -ArgumentList @('--version') -WorkingDirectory $script:RepoRoot -NoReplayOutput
+                $observedVersion = @($probe.StandardOutput -split '\r?\n' |
+                        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                        Select-Object -First 1)
+                if ($probe.ExitCode -eq 0 -and $observedVersion.Count -eq 1 -and
+                    $observedVersion[0].Trim() -eq $pinnedVersion) {
+                    return @{ FilePath = $directPnpm.Source; Prefix = @() }
+                }
+            }
+            catch {
+                # A broken or incompatible direct shim is not authoritative;
+                # the exact Corepack path below remains the fail-closed route.
+            }
+        }
+        try {
+            $resolved = Get-NpcCorepackPnpmInvocation
+            return @{ FilePath = $resolved.FilePath; Prefix = @($resolved.Prefix) }
+        }
+        catch { return $null }
+    }
     if (Test-CommandAvailable 'pnpm') {
         return @{ FilePath = 'pnpm'; Prefix = @() }
     }
@@ -232,16 +299,20 @@ function Invoke-NativeProbe {
         # rustup selects a toolchain from the current directory. Probe from the
         # same repository root used by the real command so a caller outside the
         # checkout cannot make the probe see stable while lint sees the pin.
-        Push-Location -LiteralPath $WorkingDirectory
-        $locationPushed = $true
-
-        # Windows PowerShell can promote a native process's stderr to a
-        # terminating NativeCommandError when the caller uses Stop globally.
-        # Probes need the real exit code and bounded output instead.
-        $ErrorActionPreference = 'Continue'
-        $output = @(& $FilePath @ArgumentList 2>&1)
-        $exitCode = $LASTEXITCODE
-        if ($null -eq $exitCode) { $exitCode = 0 }
+        if (Test-IsWindows) {
+            $probe = Invoke-NpcHiddenProcess -FilePath $FilePath `
+                -ArgumentList $ArgumentList -WorkingDirectory $WorkingDirectory -NoReplayOutput
+            $output = @(($probe.StandardOutput + $probe.StandardError) -split "`r?`n" |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+            $exitCode = $probe.ExitCode
+        } else {
+            Push-Location -LiteralPath $WorkingDirectory
+            $locationPushed = $true
+            $ErrorActionPreference = 'Continue'
+            $output = @(& $FilePath @ArgumentList 2>&1)
+            $exitCode = $LASTEXITCODE
+            if ($null -eq $exitCode) { $exitCode = 0 }
+        }
     }
     catch {
         $output += $_.Exception.Message
@@ -325,7 +396,9 @@ function Prepare-TauriSidecarsForValidation {
     $sidecarRoot = Join-Path $script:RepoRoot 'apps/control/src-tauri/binaries'
     foreach ($sidecarName in @(
             'npc-runtime-x86_64-pc-windows-msvc.exe',
-            'npc-media-broker-x86_64-pc-windows-msvc.exe'
+            'npc-media-broker-x86_64-pc-windows-msvc.exe',
+            'npc-mouth-worker-x86_64-pc-windows-msvc.exe',
+            'npc-subtitle-presenter-x86_64-pc-windows-msvc.exe'
         )) {
         $sidecarPath = Join-Path $sidecarRoot $sidecarName
         if (-not (Test-Path -LiteralPath $sidecarPath -PathType Leaf)) {
@@ -350,6 +423,8 @@ function Get-EnvironmentRows {
     $nodeRoot = Get-NodePackageRoot
     $cargoManifests = @(Get-CargoManifests)
     $mediaCmakeManifest = Join-Path $script:RepoRoot 'native/media-broker/CMakeLists.txt'
+    $mouthCmakeManifest = Join-Path $script:RepoRoot 'native/mouth-worker/CMakeLists.txt'
+    $subtitleCmakeManifest = Join-Path $script:RepoRoot 'native/subtitle-renderer/CMakeLists.txt'
     $gameLoadCmakeManifest = Join-Path $script:RepoRoot 'tools/game-load/CMakeLists.txt'
     $pythonManifest = Join-Path $script:RepoRoot 'pyproject.toml'
     $workerTests = Join-Path $script:RepoRoot 'workers/tests'
@@ -362,7 +437,10 @@ function Get-EnvironmentRows {
     $rows += [pscustomobject]@{ Tool = 'pnpm/Corepack'; Required = ($null -ne $nodeRoot); Found = ($null -ne (Get-PnpmInvocation)); Purpose = 'locked JavaScript workspace' }
     $rows += [pscustomobject]@{ Tool = 'npm'; Required = (Test-Path -LiteralPath $demoPackage); Found = ($null -ne (Get-NpmCommand)); Purpose = 'isolated deterministic README demo checks' }
     $rows += [pscustomobject]@{ Tool = 'Rust/Cargo'; Required = ($cargoManifests.Count -gt 0); Found = (Test-CommandAvailable 'cargo'); Purpose = 'runtime and Tauri shell' }
-    $rows += [pscustomobject]@{ Tool = 'CMake/CTest'; Required = ((Test-IsWindows) -and ((Test-Path -LiteralPath $mediaCmakeManifest) -or (Test-Path -LiteralPath $gameLoadCmakeManifest))); Found = ((Test-CommandAvailable 'cmake') -and (Test-CommandAvailable 'ctest')); Purpose = 'Windows media broker and safe game-load harness tests' }
+    $nativeCmakeRequired = (Test-Path -LiteralPath $mouthCmakeManifest) -or
+        (Test-Path -LiteralPath $subtitleCmakeManifest) -or
+        ((Test-IsWindows) -and ((Test-Path -LiteralPath $mediaCmakeManifest) -or (Test-Path -LiteralPath $gameLoadCmakeManifest)))
+    $rows += [pscustomobject]@{ Tool = 'CMake/CTest'; Required = $nativeCmakeRequired; Found = ((Test-CommandAvailable 'cmake') -and (Test-CommandAvailable 'ctest')); Purpose = 'portable mouth/subtitle tests plus Windows media-broker and game-load tests' }
     $rows += [pscustomobject]@{ Tool = 'Python'; Required = (Test-Path -LiteralPath $workerTests); Found = ($null -ne (Get-PythonInvocation)); Purpose = 'deterministic worker protocol tests' }
     $rows += [pscustomobject]@{ Tool = 'uv'; Required = (Test-Path -LiteralPath $pythonManifest); Found = (Test-CommandAvailable 'uv'); Purpose = 'optional isolated inference packs' }
     $rows += [pscustomobject]@{ Tool = 'PowerShell'; Required = $true; Found = $true; Purpose = 'developer command surface' }
@@ -399,7 +477,8 @@ function Assert-Environment {
     }
 
     if (Test-CommandAvailable 'node') {
-        $rawVersion = (& node --version 2>$null)
+        $nodeProbe = Invoke-NativeProbe -FilePath 'node' -ArgumentList @('--version')
+        $rawVersion = if ($nodeProbe.ExitCode -eq 0) { [string]($nodeProbe.Output | Select-Object -First 1) } else { '' }
         if ($rawVersion -match '^v(?<major>\d+)') {
             $actualMajor = [int]$Matches.major
             $constraint = Get-NodeVersionConstraint
@@ -419,6 +498,16 @@ function Assert-Environment {
 function Invoke-Setup {
     Assert-Environment
     if ($script:Failures.Count -gt 0) { return }
+
+    if (Test-IsWindows) {
+        Write-Step 'Preparing the exact Microsoft-signed WebView2 offline-installer cache'
+        $webViewSetup = Join-Path $PSScriptRoot 'windows/prepare-webview2-offline-installer.ps1'
+        if (-not (Test-Path -LiteralPath $webViewSetup -PathType Leaf)) {
+            throw "Pinned WebView2 setup helper was not found: $webViewSetup"
+        }
+        & $webViewSetup -RepositoryRoot $script:RepoRoot -Offline:$Offline | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Pinned WebView2 setup exited with code $LASTEXITCODE." }
+    }
 
     $nodeRoot = Get-NodePackageRoot
     if ($null -ne $nodeRoot) {
@@ -451,6 +540,28 @@ function Invoke-Setup {
         Invoke-External -FilePath 'uv' -ArgumentList $uvArgs
     } else { Write-Skip 'No pyproject.toml was found; no Python runtime is installed.' }
 
+    $demoRoot = Join-Path $script:RepoRoot 'demo/readme'
+    $demoPackage = Join-Path $demoRoot 'package.json'
+    $demoLock = Join-Path $demoRoot 'package-lock.json'
+    if (Test-Path -LiteralPath $demoPackage -PathType Leaf) {
+        if (-not (Test-Path -LiteralPath $demoLock -PathType Leaf)) {
+            Add-Failure "Missing README demo lockfile: $demoLock. Refusing to create an unpinned dependency graph."
+        }
+        else {
+            $npm = Get-NpmCommand
+            if ($null -eq $npm) {
+                Add-Failure 'npm is required to restore the locked README demo workspace.'
+            }
+            else {
+                Write-Step 'Restoring the isolated README demo workspace'
+                $npmArgs = @('ci')
+                if ($Offline) { $npmArgs += '--offline' }
+                Invoke-External -FilePath $npm -ArgumentList $npmArgs -WorkingDirectory $demoRoot
+            }
+        }
+    }
+    else { Write-Skip 'No demo/readme/package.json was found.' }
+
     $cmakePresets = Join-Path $script:RepoRoot 'native/media-broker/CMakePresets.json'
     if (Test-Path $cmakePresets) {
         Write-Step 'Configuring the native media broker'
@@ -473,8 +584,15 @@ function Invoke-Dev {
     $nodeRoot = Get-NodePackageRoot
     $scripts = Get-PackageScriptNames -PackageRoot $nodeRoot
     if ($scripts -contains 'tauri') {
-        Write-Step 'Starting the Tauri development application'
-        Invoke-Pnpm -Arguments @('run', 'tauri', 'dev') -WorkingDirectory $nodeRoot
+        $devTauriConfig = Join-Path $script:RepoRoot 'packaging/windows/tauri.dev.conf.json'
+        if (-not (Test-Path -LiteralPath $devTauriConfig -PathType Leaf)) {
+            Add-Failure "Tauri development namespace config was not found: $devTauriConfig"
+            return
+        }
+        Write-Step 'Starting the Tauri development application in its isolated .debug namespace'
+        Invoke-Pnpm -Arguments @(
+            'run', 'tauri', 'dev', '--config', $devTauriConfig.Replace('\', '/')
+        ) -WorkingDirectory $nodeRoot
     } elseif ($scripts -contains 'dev') {
         Write-Step 'Starting the desktop development application'
         Invoke-Pnpm -Arguments @('run', 'dev') -WorkingDirectory $nodeRoot
@@ -494,6 +612,144 @@ function Invoke-Tests {
     $clippyDispatchTest = Join-Path $PSScriptRoot 'test-dev-clippy-dispatch.ps1'
     $shortCmakePathTest = Join-Path $PSScriptRoot 'test-short-cmake-build-paths.ps1'
     if (Test-IsWindows) {
+        $setupReproducibilityTest = Join-Path $PSScriptRoot 'test-setup-reproducibility.ps1'
+        $sourceHygieneTest = Join-Path $PSScriptRoot 'test-source-hygiene.ps1'
+        $acceptanceEvidenceTest = Join-Path $PSScriptRoot 'test-acceptance-evidence-consistency.ps1'
+        Invoke-CheckBlock -Label 'Source/package hygiene regression' -Action {
+            if (-not (Test-Path -LiteralPath $sourceHygieneTest -PathType Leaf)) {
+                throw "Source hygiene regression script was not found: $sourceHygieneTest"
+            }
+            Write-Step 'Testing Windows reserved names, root redirection artifacts, and native in-source build refusal'
+            & $sourceHygieneTest
+            if ($LASTEXITCODE -ne 0) { throw "Source hygiene regression exited with code $LASTEXITCODE." }
+        }
+        Invoke-CheckBlock -Label 'Acceptance evidence consistency regression' -Action {
+            if (-not (Test-Path -LiteralPath $acceptanceEvidenceTest -PathType Leaf)) {
+                throw "Acceptance evidence consistency regression script was not found: $acceptanceEvidenceTest"
+            }
+            Write-Step 'Testing exact R01-R40 and SC01-SC12 report/ledger agreement, missing rows, and duplicates'
+            & $acceptanceEvidenceTest
+            if ($LASTEXITCODE -ne 0) { throw "Acceptance evidence consistency regression exited with code $LASTEXITCODE." }
+        }
+        Invoke-CheckBlock -Label 'Setup reproducibility regression' -Action {
+            if (-not (Test-Path -LiteralPath $setupReproducibilityTest -PathType Leaf)) {
+                throw "Setup reproducibility regression script was not found: $setupReproducibilityTest"
+            }
+            Write-Step 'Testing locked root, nested Tauri, pnpm, and README demo offline restore dispatch'
+            & $setupReproducibilityTest
+            if ($LASTEXITCODE -ne 0) { throw "Setup reproducibility regression exited with code $LASTEXITCODE." }
+        }
+        $toolchainEvidenceTest = Join-Path $PSScriptRoot 'test-toolchain-evidence.ps1'
+        Invoke-CheckBlock -Label 'Native toolchain evidence regression' -Action {
+            if (-not (Test-Path -LiteralPath $toolchainEvidenceTest -PathType Leaf)) {
+                throw "Native toolchain evidence regression script was not found: $toolchainEvidenceTest"
+            }
+            Write-Step 'Recording and validating exact native toolchain identity and reproducibility classification'
+            & $toolchainEvidenceTest
+            if ($LASTEXITCODE -ne 0) { throw "Native toolchain evidence regression exited with code $LASTEXITCODE." }
+        }
+        $webViewOfflineTest = Join-Path $PSScriptRoot 'test-webview2-offline-installer.ps1'
+        Invoke-CheckBlock -Label 'Pinned offline WebView2 regression' -Action {
+            if (-not (Test-Path -LiteralPath $webViewOfflineTest -PathType Leaf)) {
+                throw "Pinned offline WebView2 regression script was not found: $webViewOfflineTest"
+            }
+            Write-Step 'Testing exact Microsoft signature/hash/version, missing/tamper refusal, and network-free NSIS embedding'
+            & $webViewOfflineTest
+            if ($LASTEXITCODE -ne 0) { throw "Pinned offline WebView2 regression exited with code $LASTEXITCODE." }
+        }
+        $packageCorepackTest = Join-Path $PSScriptRoot 'test-package-corepack-resolution.ps1'
+        Invoke-CheckBlock -Label 'Package Corepack resolution regression' -Action {
+            if (-not (Test-Path -LiteralPath $packageCorepackTest -PathType Leaf)) {
+                throw "Package Corepack resolution regression script was not found: $packageCorepackTest"
+            }
+            Write-Step 'Testing exact node.exe/Corepack dispatch and POSIX shim refusal'
+            & $packageCorepackTest
+            if ($LASTEXITCODE -ne 0) { throw "Package Corepack resolution regression exited with code $LASTEXITCODE." }
+        }
+        $rootWorkspaceScriptTest = Join-Path $PSScriptRoot 'test-root-workspace-script-dispatch.ps1'
+        Invoke-CheckBlock -Label 'Root workspace script recursion regression' -Action {
+            if (-not (Test-Path -LiteralPath $rootWorkspaceScriptTest -PathType Leaf)) {
+                throw "Root workspace script regression was not found: $rootWorkspaceScriptTest"
+            }
+            Write-Step 'Running root typecheck/build once through exact pinned Corepack with bounded recursion detection'
+            & $rootWorkspaceScriptTest
+            if ($LASTEXITCODE -ne 0) { throw "Root workspace script regression exited with code $LASTEXITCODE." }
+        }
+        $packageOutputTest = Join-Path $PSScriptRoot 'test-package-output-contract.ps1'
+        Invoke-CheckBlock -Label 'Package output freshness regression' -Action {
+            if (-not (Test-Path -LiteralPath $packageOutputTest -PathType Leaf)) {
+                throw "Package output freshness regression script was not found: $packageOutputTest"
+            }
+            Write-Step 'Testing stale/extra/zero installer refusal and unique stage isolation'
+            & $packageOutputTest
+            if ($LASTEXITCODE -ne 0) { throw "Package output freshness regression exited with code $LASTEXITCODE." }
+        }
+        $peProductAuditTest = Join-Path $PSScriptRoot 'test-pe-product-binary-audit.ps1'
+        Invoke-CheckBlock -Label 'PE product-binary audit regression' -Action {
+            if (-not (Test-Path -LiteralPath $peProductAuditTest -PathType Leaf)) {
+                throw "PE product-binary audit regression script was not found: $peProductAuditTest"
+            }
+            Write-Step 'Testing GUI-subsystem, x64, import inventory, and Debug CRT refusal'
+            & $peProductAuditTest
+            if ($LASTEXITCODE -ne 0) { throw "PE product-binary audit regression exited with code $LASTEXITCODE." }
+        }
+        $productResourceTest = Join-Path $PSScriptRoot 'test-product-resource-staging.ps1'
+        Invoke-CheckBlock -Label 'Product resource staging regression' -Action {
+            if (-not (Test-Path -LiteralPath $productResourceTest -PathType Leaf)) {
+                throw "Product resource staging regression script was not found: $productResourceTest"
+            }
+            Write-Step 'Testing fail-closed legal, subtitle, SBOM, and sidecar audit staging'
+            & $productResourceTest
+            if ($LASTEXITCODE -ne 0) { throw "Product resource staging regression exited with code $LASTEXITCODE." }
+        }
+        $installedDistributionTest = Join-Path $PSScriptRoot 'test-installed-distribution-reconciliation.ps1'
+        Invoke-CheckBlock -Label 'Installed distribution reconciliation regression' -Action {
+            if (-not (Test-Path -LiteralPath $installedDistributionTest -PathType Leaf)) {
+                throw "Installed distribution reconciliation regression script was not found: $installedDistributionTest"
+            }
+            Write-Step 'Testing deterministic closed-world installed manifests, legal binding, tamper, and extra-file refusal'
+            & $installedDistributionTest
+            if ($LASTEXITCODE -ne 0) { throw "Installed distribution reconciliation regression exited with code $LASTEXITCODE." }
+        }
+        $modelCatalogPromotionTest = Join-Path $PSScriptRoot 'test-model-catalog-promotion-policy.ps1'
+        Invoke-CheckBlock -Label 'Model catalog promotion policy regression' -Action {
+            if (-not (Test-Path -LiteralPath $modelCatalogPromotionTest -PathType Leaf)) {
+                throw "Model catalog promotion policy regression script was not found: $modelCatalogPromotionTest"
+            }
+            Write-Step 'Testing production trust, rotation, publication, promotion, validity, and type-confusion refusal'
+            & $modelCatalogPromotionTest
+            if ($LASTEXITCODE -ne 0) { throw "Model catalog promotion policy regression exited with code $LASTEXITCODE." }
+        }
+        $sidecarProductTest = Join-Path $PSScriptRoot 'test-prepare-sidecars-path.ps1'
+        Invoke-CheckBlock -Label 'Four-sidecar product staging regression' -Action {
+            if (-not (Test-Path -LiteralPath $sidecarProductTest -PathType Leaf)) {
+                throw "Four-sidecar product staging regression script was not found: $sidecarProductTest"
+            }
+            Write-Step 'Testing Release C++ staging, broker audio policy, GUI/import audits, and exact hashes'
+            & $sidecarProductTest
+            if ($LASTEXITCODE -ne 0) { throw "Four-sidecar product staging regression exited with code $LASTEXITCODE." }
+        }
+        foreach ($syntheticRegression in @(
+                [pscustomobject]@{
+                    Label = 'Synthetic test-game rendering regression'
+                    Path = (Join-Path $PSScriptRoot 'test-synthetic-game-replay.ps1')
+                },
+                [pscustomobject]@{
+                    Label = 'Prepared review test-game contract regression'
+                    Path = (Join-Path $PSScriptRoot 'test-prepare-review-test-game.ps1')
+                }
+            )) {
+            Invoke-CheckBlock -Label $syntheticRegression.Label -Action {
+                if (-not (Test-Path -LiteralPath $syntheticRegression.Path -PathType Leaf)) {
+                    throw "Synthetic-game regression script was not found: $($syntheticRegression.Path)"
+                }
+                Write-Step "Running $($syntheticRegression.Label.ToLowerInvariant()) headlessly"
+                & $syntheticRegression.Path
+                if ($LASTEXITCODE -ne 0) {
+                    throw "$($syntheticRegression.Label) exited with code $LASTEXITCODE."
+                }
+            }
+        }
         Invoke-CheckBlock -Label 'Clippy dispatch regression' -Action {
             if (-not (Test-Path -LiteralPath $clippyDispatchTest -PathType Leaf)) {
                 throw "Clippy dispatch regression script was not found: $clippyDispatchTest"
@@ -512,6 +768,46 @@ function Invoke-Tests {
         }
     } else {
         Write-Skip 'Clippy dispatch regression requires Windows rustup command semantics.'
+    }
+
+    $nsisRegistryTest = Join-Path $script:RepoRoot 'packaging/tests/nsis-registry-symmetry.ps1'
+    Invoke-CheckBlock -Label 'NSIS registry symmetry regression' -Action {
+        if (-not (Test-Path -LiteralPath $nsisRegistryTest -PathType Leaf)) {
+            throw "NSIS registry symmetry regression script was not found: $nsisRegistryTest"
+        }
+        Write-Step 'Checking current-user NSIS registry cleanup symmetry without installing'
+        & $nsisRegistryTest
+        if ($LASTEXITCODE -ne 0) { throw "NSIS registry symmetry regression exited with code $LASTEXITCODE." }
+    }
+
+    $installerEvidenceTest = Join-Path $script:RepoRoot 'packaging/tests/installer-smoke-evidence.ps1'
+    Invoke-CheckBlock -Label 'Installer evidence ordering regression' -Action {
+        if (-not (Test-Path -LiteralPath $installerEvidenceTest -PathType Leaf)) {
+            throw "Installer evidence ordering regression script was not found: $installerEvidenceTest"
+        }
+        Write-Step 'Checking installer-smoke evidence ordering and source identity without installing'
+        & $installerEvidenceTest
+        if ($LASTEXITCODE -ne 0) { throw "Installer evidence ordering regression exited with code $LASTEXITCODE." }
+    }
+
+    $reviewNamespaceTest = Join-Path $script:RepoRoot 'packaging/tests/review-namespace-isolation.ps1'
+    Invoke-CheckBlock -Label 'Review namespace isolation regression' -Action {
+        if (-not (Test-Path -LiteralPath $reviewNamespaceTest -PathType Leaf)) {
+            throw "Review namespace isolation regression script was not found: $reviewNamespaceTest"
+        }
+        Write-Step 'Checking local-review namespace isolation without packaging or installing'
+        & $reviewNamespaceTest
+        if ($LASTEXITCODE -ne 0) { throw "Review namespace isolation regression exited with code $LASTEXITCODE." }
+    }
+
+    $productPackageTest = Join-Path $script:RepoRoot 'packaging/tests/product-package-contract.ps1'
+    Invoke-CheckBlock -Label 'Product package contract regression' -Action {
+        if (-not (Test-Path -LiteralPath $productPackageTest -PathType Leaf)) {
+            throw "Product package contract regression script was not found: $productPackageTest"
+        }
+        Write-Step 'Checking atomic four-sidecar and installed resource package contracts without building'
+        & $productPackageTest
+        if ($LASTEXITCODE -ne 0) { throw "Product package contract regression exited with code $LASTEXITCODE." }
     }
 
     $nodeRoot = Get-NodePackageRoot
@@ -567,14 +863,14 @@ function Invoke-Tests {
     }
 
     $profileFiles = @(Get-ChildItem -LiteralPath (Join-Path $script:RepoRoot 'profiles/games') -Filter 'profile.json' -File -Recurse | Sort-Object FullName)
-    if ($profileFiles.Count -ne 20) {
-        Add-Failure "Game profile validation: expected exactly 20 profile.json files; found $($profileFiles.Count)."
+    if ($profileFiles.Count -ne 21) {
+        Add-Failure "Game profile validation: expected exactly 20 authored game profiles plus the synthetic review profile; found $($profileFiles.Count) total profile.json files."
     } else {
         Invoke-CheckBlock -Label 'Game profile validation' -Action {
-            Write-Step 'Validating the exact 20-profile corpus through the profile CLI'
+            Write-Step 'Validating the 20 authored game profiles plus the synthetic review profile through the profile CLI'
             $profileArguments = @('run', '--locked', '--offline', '-p', 'npc-game-profile', '--bin', 'validate-profile', '--')
             $profileArguments += @($profileFiles | ForEach-Object { $_.FullName })
-            Invoke-External -FilePath 'cargo' -ArgumentList $profileArguments -WorkingDirectory $script:RepoRoot -DisplayArguments 'run --locked --offline -p npc-game-profile --bin validate-profile -- <20 sorted profile.json paths>'
+            Invoke-External -FilePath 'cargo' -ArgumentList $profileArguments -WorkingDirectory $script:RepoRoot -DisplayArguments 'run --locked --offline -p npc-game-profile --bin validate-profile -- <21 sorted profile.json paths>'
         }
     }
 
@@ -589,6 +885,21 @@ function Invoke-Tests {
         }
     } else {
         Add-Failure 'Worker protocol tests: workers/tests was not found.'
+    }
+
+    $benchmarkTests = Join-Path $script:RepoRoot 'scripts/benchmarks'
+    if (Test-Path -LiteralPath (Join-Path $benchmarkTests 'test_benchmark_harness.py') -PathType Leaf) {
+        Invoke-CheckBlock -Label 'Benchmark evidence harness tests' -Action {
+            $python = Get-PythonInvocation
+            if ($null -eq $python) { throw 'Python was not found.' }
+            Write-Step 'Running deterministic benchmark evidence harness tests'
+            $benchmarkTestArguments = @($python.Prefix + @(
+                '-m', 'unittest', 'discover', '-s', 'scripts/benchmarks', '-p', 'test_*.py', '-v'
+            ))
+            Invoke-External -FilePath $python.FilePath -ArgumentList $benchmarkTestArguments -WorkingDirectory $script:RepoRoot
+        }
+    } else {
+        Add-Failure 'Benchmark evidence harness tests: scripts/benchmarks/test_benchmark_harness.py was not found.'
     }
 
     $mediaSource = Join-Path $script:RepoRoot 'native/media-broker'
@@ -627,6 +938,66 @@ function Invoke-Tests {
     } else {
         Write-Skip 'Native media-broker tests require Windows 10/11 and MSVC; this host is not Windows.'
         Write-Skip 'Game-load CMake and dry-run smoke require Windows 10/11; no live load was attempted.'
+    }
+
+    $mouthSource = Join-Path $script:RepoRoot 'native/mouth-worker'
+    if (Test-Path -LiteralPath (Join-Path $mouthSource 'CMakeLists.txt') -PathType Leaf) {
+        Invoke-CheckBlock -Label 'Native mouth-worker tests' -Action {
+            $mouthBuild = if (Test-IsWindows) {
+                Get-NpcShortCMakeBuildPath -RepositoryRoot $script:RepoRoot -Component 'mouth-tests'
+            } else {
+                Join-Path $script:RepoRoot 'out/build/native-mouth-worker-tests'
+            }
+            $configureArguments = @(
+                '-S', $mouthSource,
+                '-B', $mouthBuild,
+                '-DBUILD_TESTING=ON',
+                '-DNPC_MOUTH_WORKER_BUILD_TESTS=ON',
+                '-DNPC_MOUTH_WORKER_BUILD_BENCHMARKS=OFF',
+                '-DNPC_MOUTH_WORKER_BUILD_SYNTHETIC_PROOF=OFF',
+                '-DNPC_MOUTH_WORKER_WARNINGS_AS_ERRORS=ON'
+            )
+            if (Test-IsWindows) {
+                $configureArguments += @('-G', 'Visual Studio 17 2022', '-A', 'x64')
+            }
+            Write-Step 'Configuring the portable current-frame mouth-worker tests'
+            Invoke-External -FilePath 'cmake' -ArgumentList $configureArguments
+            Write-Step 'Building the current-frame mouth-worker tests'
+            Invoke-External -FilePath 'cmake' -ArgumentList @('--build', $mouthBuild, '--config', 'Debug', '--parallel', '2')
+            Write-Step 'Running the current-frame mouth-worker tests'
+            Invoke-External -FilePath 'ctest' -ArgumentList @('--test-dir', $mouthBuild, '-C', 'Debug', '--output-on-failure')
+        }
+    } else {
+        Add-Failure 'Native mouth-worker tests: native/mouth-worker/CMakeLists.txt was not found.'
+    }
+
+    $subtitleSource = Join-Path $script:RepoRoot 'native/subtitle-renderer'
+    if (Test-Path -LiteralPath (Join-Path $subtitleSource 'CMakeLists.txt') -PathType Leaf) {
+        Invoke-CheckBlock -Label 'Native subtitle-renderer tests' -Action {
+            $subtitleBuild = if (Test-IsWindows) {
+                Get-NpcShortCMakeBuildPath -RepositoryRoot $script:RepoRoot -Component 'subtitle-tests'
+            } else {
+                Join-Path $script:RepoRoot 'out/build/native-subtitle-renderer-tests'
+            }
+            $configureArguments = @(
+                '-S', $subtitleSource,
+                '-B', $subtitleBuild,
+                '-DBUILD_TESTING=ON',
+                '-DNPC_SUBTITLE_RENDERER_BUILD_TESTS=ON',
+                '-DNPC_SUBTITLE_RENDERER_WARNINGS_AS_ERRORS=ON'
+            )
+            if (Test-IsWindows) {
+                $configureArguments += @('-G', 'Visual Studio 17 2022', '-A', 'x64')
+            }
+            Write-Step 'Configuring the portable subtitle renderer and available platform backend'
+            Invoke-External -FilePath 'cmake' -ArgumentList $configureArguments
+            Write-Step 'Building the subtitle renderer, tests, and available platform backend'
+            Invoke-External -FilePath 'cmake' -ArgumentList @('--build', $subtitleBuild, '--config', 'Debug', '--parallel', '2')
+            Write-Step 'Running the deterministic subtitle-renderer tests'
+            Invoke-External -FilePath 'ctest' -ArgumentList @('--test-dir', $subtitleBuild, '-C', 'Debug', '--output-on-failure')
+        }
+    } else {
+        Add-Failure 'Native subtitle-renderer tests: native/subtitle-renderer/CMakeLists.txt was not found.'
     }
 
     $demoRoot = Join-Path $script:RepoRoot 'demo/readme'
@@ -783,17 +1154,34 @@ function Invoke-Lint {
         Add-Failure "Markdown link validation: missing $linkChecker."
     }
 
-    $analyzer = Get-Module -ListAvailable -Name PSScriptAnalyzer
-    if ($null -ne $analyzer) {
-        Write-Step 'Running PSScriptAnalyzer'
-        Import-Module PSScriptAnalyzer
-        $issues = @(Invoke-ScriptAnalyzer -Path $PSScriptRoot -Recurse -Severity Error, Warning)
-        if ($issues.Count -gt 0) {
-            $issues | Format-Table -AutoSize
-            Add-Failure "PSScriptAnalyzer reported $($issues.Count) issue(s)."
+    Invoke-CheckBlock -Label 'PowerShell syntax validation' -Action {
+        Write-Step 'Parsing repository PowerShell command surfaces with the built-in parser'
+        $powershellFiles = New-Object System.Collections.Generic.List[System.IO.FileInfo]
+        foreach ($rootScript in @(Get-Item -LiteralPath (Join-Path $script:RepoRoot 'dev.ps1') -ErrorAction SilentlyContinue)) {
+            $powershellFiles.Add($rootScript)
         }
-    } else {
-        Write-WarningMessage 'PSScriptAnalyzer is not installed; PowerShell static analysis was skipped.'
+        foreach ($sourceRoot in @('scripts', 'packaging', 'tools')) {
+            $absoluteRoot = Join-Path $script:RepoRoot $sourceRoot
+            if (Test-Path -LiteralPath $absoluteRoot -PathType Container) {
+                foreach ($file in @(Get-ChildItem -LiteralPath $absoluteRoot -Filter '*.ps1' -File -Recurse | Sort-Object FullName)) {
+                    $powershellFiles.Add($file)
+                }
+            }
+        }
+        $parseFailures = New-Object System.Collections.Generic.List[string]
+        foreach ($file in @($powershellFiles | Sort-Object FullName -Unique)) {
+            $tokens = $null
+            $parseErrors = $null
+            [Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$parseErrors) | Out-Null
+            foreach ($parseError in @($parseErrors)) {
+                $relative = $file.FullName.Substring($script:RepoRoot.Length).TrimStart('\', '/')
+                $parseFailures.Add("${relative}:$($parseError.Extent.StartLineNumber): $($parseError.Message)")
+            }
+        }
+        if ($parseFailures.Count -gt 0) {
+            throw "PowerShell parser reported $($parseFailures.Count) error(s):`n$($parseFailures -join "`n")"
+        }
+        Write-Host "    Parsed $($powershellFiles.Count) PowerShell files." -ForegroundColor DarkGray
     }
 }
 

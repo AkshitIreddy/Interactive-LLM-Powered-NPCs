@@ -193,6 +193,8 @@
     }
   },
   "content": {
+    "character_data_readiness": "curated",
+    "character_data_readiness_notes": "Shipped named-character records have stable IDs and authored biography, personality, dialogue-style, prompt, voice-intent, explicit-selection identity, and provenance metadata; live visual identity is not certified.",
     "world_lore": "The Sims 4 is an open-ended life simulation made of neighborhoods, households, careers, skills, relationships, needs, aspirations, and player-created stories. There is no single mandatory plot. Premade households offer starting tensions and connections, but a save may immediately change homes, names, jobs, family structures, identities, friendships, romances, or life states. The profile therefore treats visible UI, explicit player selection, and delivered session memory as current truth. Packs add worlds and systems only when installed; the model must not assume their availability. A Sim can discuss feelings, plans, hobbies, work, neighbors, and remembered events, but conversation does not directly satisfy needs, change relationship scores, spend money, queue interactions, or rewrite the save. Mood labels are game state only when explicitly supplied by the player or readable UI, not psychological diagnoses. Generated townies remain modest and non-canonical, with separate identities even when templates or appearances resemble one another.",
     "spoiler_policy": "The game is emergent rather than plot-linear. Gate premade household backstory, pack-specific worlds, and save-derived relationships separately; current save evidence always overrides initial biography.",
     "spoiler_tiers": [
@@ -604,7 +606,26 @@
       ]
     }
   },
+  "recommendations": {
+    "integration_mode": "external_only",
+    "provider_strategy": "api_first",
+    "local_activation_policy": "measured_whole_loadout_fit_required",
+    "game_resource_reserve_required": true,
+    "screen_space_lip_sync": "experimental_opt_in_after_exact_target_and_advancing_frame_qualification"
+  },
   "diagnostics": [
+    {
+      "id": "recommended-feature-loadout",
+      "severity": "info",
+      "check": "Keep a game-first resource reserve, prefer explicitly configured API routes for LLM, STT, TTS, and embeddings, and admit optional local models only after measured whole-loadout RAM and VRAM fit checks.",
+      "remediation": "Move optional language or speech roles to an explicitly selected hosted provider, unload nonessential local models, or increase the configured game reserve; keep experimental screen-space lip sync disabled until exact target binding, advancing-frame, and untouched-frame restore checks pass."
+    },
+    {
+      "id": "external-only-safety",
+      "severity": "error",
+      "check": "Confirm the selected target remains an eligible single-player top-level game window and that the session uses external capture, audio, and subtitles only, with no injection, hooks, automated input, or anti-cheat bypass.",
+      "remediation": "Stop on online, protection, process, PID, HWND, executable, or session-mode ambiguity; return to a clearly eligible single-player state and bind the exact game window again, otherwise use no game integration."
+    },
     {
       "id": "process-detection",
       "severity": "error",

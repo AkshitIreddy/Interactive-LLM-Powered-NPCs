@@ -180,7 +180,13 @@ impl ProviderFlavor {
             Self::ElevenLabs(config) => {
                 secret_headers.insert("xi-api-key".into(), SensitiveHeaderValue::raw(credential));
                 query.insert("model_id".into(), binding.model_id.clone());
-                query.insert("language_code".into(), request.locale.clone());
+                // ElevenLabs accepts an optional ISO 639-1 language code, not
+                // a full BCP 47 locale such as `en-US`. Preserve the richer
+                // locale in the provider-neutral request while sending only a
+                // valid two-letter primary subtag on this wire boundary.
+                if let Some(language_code) = elevenlabs_language_code(&request.locale) {
+                    query.insert("language_code".into(), language_code);
+                }
                 query.insert("output_format".into(), elevenlabs_format(request.output));
                 query.insert(
                     "sync_alignment".into(),
@@ -344,6 +350,12 @@ fn elevenlabs_format(output: AudioFormat) -> String {
         crate::PcmEncoding::MuLaw => format!("ulaw_{}", output.sample_rate_hz),
         crate::PcmEncoding::ALaw => format!("alaw_{}", output.sample_rate_hz),
     }
+}
+
+fn elevenlabs_language_code(locale: &str) -> Option<String> {
+    let primary = locale.split(['-', '_']).next()?.trim();
+    (primary.len() == 2 && primary.bytes().all(|byte| byte.is_ascii_alphabetic()))
+        .then(|| primary.to_ascii_lowercase())
 }
 
 fn deepgram_encoding(output: AudioFormat) -> String {
@@ -765,6 +777,9 @@ fn map_transport(provider_id: HostedTtsProviderId, error: TransportError) -> Tts
             "transport_protocol_failure",
             false,
         ),
+        TransportError::ProtocolStage(code) => {
+            TtsError::new(provider_id.as_str(), TtsErrorKind::Protocol, code, false)
+        }
     }
 }
 

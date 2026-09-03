@@ -48,9 +48,11 @@ hosted endpoint probe; it remains experimental, explicit, non-default, and
 non-fallback. Rerank transport/fixtures exist, but tested hosted routes were
 unavailable, so rerank remains `catalog_only`. Nemotron Streaming ASR has a
 fixed implemented NVCF/Riva gRPC adapter but remains non-selectable with live
-audio qualification pending. Magpie TTS has green fixed-adapter tests and
-authorized HTTP stock-voice/audio evidence, so it is implemented but remains
-experimental/manual with a live gRPC streaming warning. It uses only discovered
+audio qualification pending. Magpie TTS has green fixed-adapter tests,
+authorized HTTP stock-voice/audio evidence, and an authorized live Aria stream
+through the concrete fixed-origin Riva gRPC transport. It remains
+experimental/manual while normal-turn route selection and app audio delivery
+are still integration gates. It uses only discovered
 stock voices and structurally forbids cloning. Other account-specific hosted
 speech endpoints and service-specific protocol/function
 metadata remain unqualified; catalog presence is not evidence of a free hosted

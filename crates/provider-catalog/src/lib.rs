@@ -176,6 +176,9 @@ pub enum IntendedUse {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct TrialTerms {
+    /// Stable app-facing revision for explicit acknowledgement. Changing this
+    /// value invalidates any acknowledgement of an older terms document.
+    pub terms_revision: String,
     pub access_scope: String,
     pub account_scope: String,
     pub rate_limit_policy: TrialRateLimitPolicy,
@@ -289,6 +292,7 @@ pub enum LiveQualification {
     #[default]
     NotRequired,
     PassedSynthetic,
+    PassedLive,
     Pending,
     EndpointUnavailable,
 }
@@ -298,6 +302,7 @@ pub enum LiveQualification {
 pub enum AdapterLifecycleDetail {
     ExperimentalAwaitingLiveAudioQualification,
     ExperimentalHttpSmokeQualifiedAwaitingGrpcStreamingQualification,
+    ExperimentalGrpcStreamingQualified,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -700,6 +705,7 @@ impl Catalog {
                 if terms.access_scope.trim().is_empty()
                     || terms.account_scope.trim().is_empty()
                     || terms.rate_limit_note.trim().is_empty()
+                    || terms.terms_revision.trim().is_empty()
                 {
                     errors.push(format!(
                         "provider {} trial access/account/rate-limit scope must be explicit",
@@ -1328,6 +1334,25 @@ mod tests {
             .models
             .iter()
             .all(|model| !model.eligibility.automatic_fallback_candidate));
+        for id in [
+            "deepgram.tts.user-selected",
+            "cartesia.tts.user-selected",
+            "inworld.tts.user-selected",
+        ] {
+            let route = document
+                .content
+                .models
+                .iter()
+                .find(|model| model.id == id)
+                .expect("declared catalog-only TTS route");
+            assert_eq!(route.availability, RouteAvailability::CatalogOnly);
+            assert_eq!(route.lifecycle, Lifecycle::QualificationRequired);
+            assert!(!route.is_selectable());
+            assert_eq!(
+                route.eligibility.qualification_gate.as_deref(),
+                Some("runtime_adapter_implementation_and_live_qualification")
+            );
+        }
 
         let cohere = document
             .content
@@ -1423,6 +1448,10 @@ mod tests {
         );
         assert_eq!(nvidia.usage_tiers.len(), 2);
         let terms = nvidia.trial_terms.as_ref().unwrap();
+        assert_eq!(
+            terms.terms_revision,
+            "nvidia-api-trial-terms-2025-09-19-private-evaluation-v1"
+        );
         assert_eq!(terms.production_use, TrialUsePermission::Prohibited);
         assert_eq!(terms.commercial_use, TrialUsePermission::Prohibited);
         assert_eq!(
@@ -1458,6 +1487,12 @@ mod tests {
         assert!(nvidia_chat.is_selectable());
         assert!(!nvidia_chat.eligibility.default_candidate);
         assert!(!nvidia_chat.eligibility.automatic_fallback_candidate);
+        assert_eq!(
+            nvidia_chat.eligibility.qualification_gate.as_deref(),
+            Some(
+                "native_provider_wide_private_evaluation_acknowledgement_explicit_user_model_selection_and_endpoint_probe"
+            )
+        );
         let nvidia_embedding = document
             .content
             .models
@@ -1475,10 +1510,16 @@ mod tests {
         );
         assert_eq!(
             nvidia_embedding.live_qualification,
-            LiveQualification::PassedSynthetic
+            LiveQualification::PassedLive
         );
         assert!(!nvidia_embedding.eligibility.default_candidate);
         assert!(!nvidia_embedding.eligibility.automatic_fallback_candidate);
+        assert_eq!(
+            nvidia_embedding.eligibility.qualification_gate.as_deref(),
+            Some(
+                "native_provider_wide_private_evaluation_acknowledgement_explicit_user_model_selection_and_egress_consent"
+            )
+        );
         let rerank = document
             .content
             .models
@@ -1515,15 +1556,10 @@ mod tests {
             .find(|model| model.id == "nvidia-nim-magpie")
             .unwrap();
         assert_eq!(magpie.availability, RouteAvailability::ImplementedAdapter);
-        assert_eq!(
-            magpie.live_qualification,
-            LiveQualification::PassedSynthetic
-        );
+        assert_eq!(magpie.live_qualification, LiveQualification::PassedLive);
         assert_eq!(
             magpie.adapter_lifecycle,
-            Some(
-                AdapterLifecycleDetail::ExperimentalHttpSmokeQualifiedAwaitingGrpcStreamingQualification
-            )
+            Some(AdapterLifecycleDetail::ExperimentalGrpcStreamingQualified)
         );
         assert!(magpie.is_selectable());
         assert_eq!(magpie.capabilities.discovered_voice_count, Some(86));
@@ -1541,10 +1577,31 @@ mod tests {
         );
         assert!(!magpie.eligibility.default_candidate);
         assert!(!magpie.eligibility.automatic_fallback_candidate);
+        assert_eq!(
+            magpie.eligibility.qualification_gate.as_deref(),
+            Some(
+                "native_provider_wide_private_evaluation_acknowledgement_user_key_stock_voice_selection_promotion_and_publication_false"
+            )
+        );
+
+        let assemblyai = document
+            .content
+            .models
+            .iter()
+            .find(|model| model.id == "assemblyai.stt.default")
+            .unwrap();
+        assert_eq!(assemblyai.upstream_id, "u3-rt-pro");
+        assert_eq!(assemblyai.live_qualification, LiveQualification::PassedLive);
+        assert_eq!(
+            assemblyai.availability,
+            RouteAvailability::ImplementedAdapter
+        );
+        assert!(!assemblyai.eligibility.default_candidate);
+        assert!(!assemblyai.eligibility.automatic_fallback_candidate);
 
         assert_eq!(
             document.signing_sha256().unwrap(),
-            "c32a6136ced1f1ce6923a7c922e6812c2ec25a3b9f644c3d39826bb3ebabba19"
+            "32372c27b89814c2f7ce99bb641791ffeb67dea1bfe3a915ccc5b317f3f2397e"
         );
     }
 

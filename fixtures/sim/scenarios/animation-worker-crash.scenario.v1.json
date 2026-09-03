@@ -32,7 +32,7 @@
   ],
   "expected": {
     "status": "degraded",
-    "traceSha256": "c3499b68c1f899dccf7f2a03bbc26aca2b9478f6c69ca048b29d8bb98966d77f",
+    "traceSha256": "2a82c788ef3c7c9eb8fc475f1295272e240a3db07bb48f4fa9548677596c0d97",
     "firstAudioAtMs": 425,
     "speechEndToFirstAudioMs": 250,
     "networkAttempts": 1,

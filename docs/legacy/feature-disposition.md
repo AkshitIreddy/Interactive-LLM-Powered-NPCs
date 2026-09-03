@@ -51,3 +51,21 @@ Legend: **preserve** keeps the product behavior; **redesign** keeps the intent w
 - Profiles and model outputs are data; they cannot introduce executable code.
 - Online/protected/anti-cheat ambiguity disables capture/overlay rather than attempting bypass.
 - Offscreen or obscured characters continue through explicit selection and audio/subtitles.
+
+## Enforceable 2.0 emotion and webcam boundary
+
+`emotion` in product preferences means optional **NPC output effects** only. It
+does not authorize a webcam, infer the player's inner state, or label a person.
+Malformed optional effect fields are neutralized independently from the spoken
+response, so speech remains usable.
+
+Webcam presence has a separate `webcamPresence` preference and defaults to
+false for every execution/performance preset. A legacy screen-presence setting
+migrates only to game-screen vision and cannot grant webcam consent. Persisting
+the preference records consent intent; it does not open a device, start a route,
+or prove that a webcam producer is installed. The current product registers no
+live webcam capture command. Any future producer must remain local, show an
+active/revocable indicator and preview/device choice, avoid retention by
+default, and degrade to a neutral no-op. It may expose bounded authored signals
+such as presence or action-unit activity, but never age, race, gender, protected
+traits, or a claim about the user's inner emotion.

@@ -1,0 +1,35 @@
+{
+  "schema": "npc.python-worker-runtime-requirements/v1",
+  "python_abi": "cp312-win_amd64",
+  "reviewed_unix_date": "2026-08-30",
+  "direct_runtime_requirements": [
+    {
+      "name": "opencv-python-headless",
+      "version": "5.0.0.93",
+      "filename": "opencv_python_headless-5.0.0.93-cp37-abi3-win_amd64.whl",
+      "size_bytes": 43825962,
+      "sha256": "829717b6a95554f273e49e357cee3b3a2a26b6f4842fbc1bed2b45bdd8f87e0e",
+      "source_url": "https://files.pythonhosted.org/packages/b8/88/763b967f7efd7226b82c9fae16d560cba049b1f0c036647e65c610fd636e/opencv_python_headless-5.0.0.93-cp37-abi3-win_amd64.whl",
+      "license": "Apache-2.0 with bundled third-party notices",
+      "license_url": "https://github.com/opencv/opencv-python/blob/4.x/LICENSE-3RD-PARTY.txt"
+    },
+    {
+      "name": "numpy",
+      "version": "2.5.2",
+      "filename": "numpy-2.5.2-cp312-cp312-win_amd64.whl",
+      "size_bytes": 12464674,
+      "sha256": "28ac63476ec7651484215ee7fa15a1f78b57c14621f01e392afe17b9a1390ce4",
+      "source_url": "https://files.pythonhosted.org/packages/7f/b9/87fea2769fe1c47c1b5b01d8310772c9d1a85d485de7cf386ef7a3332b02/numpy-2.5.2-cp312-cp312-win_amd64.whl",
+      "license": "BSD-3-Clause",
+      "license_url": "https://github.com/numpy/numpy/blob/v2.5.2/LICENSE.txt"
+    }
+  ],
+  "packaging_gate": {
+    "complete_transitive_lock_required": true,
+    "wheel_hash_verification_required": true,
+    "wheel_license_inventory_required": true,
+    "opencv_third_party_notice_inventory_required": true,
+    "hidden_process_build_required": true,
+    "status": "private_evaluation_integration_required"
+  }
+}

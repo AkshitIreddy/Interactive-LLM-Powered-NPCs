@@ -348,6 +348,25 @@ export const CHARACTERS = [
 
 export const MODEL_PACKS: ModelPack[] = [
   {
+    id: "character-mouth-atlas",
+    name: "Character mouth atlas",
+    lane: "Performance",
+    purpose: "Presence",
+    size: "Prototype 287 KB compressed",
+    fit: "No resident visual AI model",
+    admission: "Unverified",
+    state: "candidate",
+    license: "Project artifact · teacher provenance required",
+    availability: "experimental",
+    access:
+      "Generated per confirmed character during enrollment; no downloadable runtime model",
+    latency:
+      "Native atlas warp measured 1.168 ms mean / 1.388 ms p95; portable Python audio lookup plus blend measured 2.464 ms mean / 2.984 ms p95; live game presentation is unmeasured",
+    decision:
+      "Preferred architecture. Add current-frame landmark warp, lighting adaptation, unseen-utterance sync, game coexistence, and installed-app evidence before enabling it.",
+    output: "8-state enrolled atlas → bounded current-frame mouth residual",
+  },
+  {
     id: "a2f3d-regression",
     name: "Audio2Face-3D regression",
     lane: "Performance",
@@ -387,21 +406,21 @@ export const MODEL_PACKS: ModelPack[] = [
   {
     id: "musetalk",
     name: "MuseTalk 1.5",
-    lane: "Offline comparator",
+    lane: "Performance",
     purpose: "Presence",
     size: "Manifest not provisioned",
-    fit: "Blocked for interactive use",
+    fit: "7,617 MiB peak before game · conflicts with coexistence envelope",
     admission: "Conflicts",
     state: "candidate",
     license: "Model + dependency review",
-    availability: "offline",
+    availability: "conditional",
     access:
-      "Public research artifacts; retained only as an isolated quality comparator",
+      "Public artifacts; no reviewed downloadable pack or complete app route exists",
     latency:
-      "Measured 102 s to render 1.58 s of speech in the standalone qualification",
+      "Corrected-crop persistent probe measured 7.66 FPS at batch 1 and 8.95 FPS best complete hot path",
     decision:
-      "Do not display its video in a live game. It may inform offline mouth-atlas experiments only.",
-    output: "Offline talking-head video · never a live route",
+      "Reject as a resident gameplay renderer on this device. Retain only as an optional offline enrollment teacher for the tiny mouth atlas.",
+    output: "Enrollment teacher frames → mouth atlas · unavailable",
   },
 ];
 

@@ -27,6 +27,10 @@ pub enum SteamParseError {
     MissingObject(&'static str),
     #[error("missing string field {0}")]
     MissingField(&'static str),
+    #[error("invalid Steam app ID")]
+    InvalidAppId,
+    #[error("Steam string field {0} is empty")]
+    EmptyField(&'static str),
     #[error("unsafe Steam install directory: {0}")]
     UnsafeInstallDirectory(#[from] StoreRelativePathError),
 }
@@ -85,7 +89,13 @@ pub fn parse_app_manifest(input: &str) -> Result<SteamApp, SteamParseError> {
             .ok_or(SteamParseError::MissingField(name))
     };
     let app_id = text("appid")?.to_string();
-    let name = text("name")?.to_string();
+    if app_id.is_empty() || !app_id.chars().all(|character| character.is_ascii_digit()) {
+        return Err(SteamParseError::InvalidAppId);
+    }
+    let name = text("name")?.trim().to_string();
+    if name.is_empty() {
+        return Err(SteamParseError::EmptyField("name"));
+    }
     let install_dir_name = normalize_store_relative(text("installdir")?)?
         .to_string_lossy()
         .into_owned();
@@ -169,6 +179,24 @@ mod tests {
                     Err(SteamParseError::UnsafeInstallDirectory(_))
                 ),
                 "accepted hostile installdir: {install_dir}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_blank_names_and_non_numeric_app_ids() {
+        for (appid, name, expected_app_id_error) in [
+            ("", "Game", true),
+            ("not-an-id", "Game", true),
+            ("42", " ", false),
+        ] {
+            let manifest = format!(
+                r#""AppState" {{ "appid" "{appid}" "name" "{name}" "installdir" "Game" }}"#
+            );
+            let error = parse_app_manifest(&manifest).unwrap_err();
+            assert_eq!(
+                matches!(error, SteamParseError::InvalidAppId),
+                expected_app_id_error
             );
         }
     }

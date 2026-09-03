@@ -70,6 +70,22 @@ template <typename DurationType>
     return left >= right ? left - right : right - left;
 }
 
+[[nodiscard]] bool same_material_geometry(const TargetGeometry& left,
+                                          const TargetGeometry& right) noexcept {
+    return left.window_bounds_px == right.window_bounds_px &&
+           left.client_bounds_px == right.client_bounds_px &&
+           left.captured_desktop_bounds_px == right.captured_desktop_bounds_px &&
+           left.captured_content_px == right.captured_content_px &&
+           left.monitor.stable_id == right.monitor.stable_id &&
+           left.monitor.desktop_bounds_px == right.monitor.desktop_bounds_px &&
+           left.monitor.work_area_px == right.monitor.work_area_px &&
+           left.monitor.dpi_x == right.monitor.dpi_x &&
+           left.monitor.dpi_y == right.monitor.dpi_y &&
+           left.monitor.color_space == right.monitor.color_space &&
+           left.monitor.rotation == right.monitor.rotation &&
+           left.minimized == right.minimized;
+}
+
 } // namespace
 
 MediaBroker::MediaBroker(std::unique_ptr<IMediaPlatform> platform,
@@ -152,6 +168,8 @@ void MediaBroker::stop() noexcept {
     diagnostics_.render_audio = AudioState::stopped;
     diagnostics_.target_state = TargetState::none;
     diagnostics_.pending_recovery = RecoveryAction::none;
+    diagnostics_.overlay_capture_excluded = false;
+    diagnostics_.overlay_visuals_allowed = false;
     running_ = false;
     publish();
 }
@@ -179,6 +197,14 @@ bool MediaBroker::select_target(GameTarget target) {
     target_geometry_.reset();
     overlay_geometry_.reset();
     target_ = std::move(target);
+    diagnostics_.selected_process_id = target_->process_id;
+    diagnostics_.selected_window = target_->native_window;
+    diagnostics_.selected_executable_name = target_->executable_name;
+    diagnostics_.geometry_epoch = 0;
+    diagnostics_.geometry_changes = 0;
+    diagnostics_.content_hash_changes = 0;
+    diagnostics_.nonadvancing_frames = 0;
+    reset_frame_evidence();
     diagnostics_.target_state = TargetState::selected;
     diagnostics_.last_failure.reset();
     diagnostics_.pending_recovery = RecoveryAction::none;
@@ -202,6 +228,12 @@ void MediaBroker::clear_target() noexcept {
     diagnostics_.capture_backend = CaptureBackend::none;
     diagnostics_.overlay_backend = OverlayBackend::none;
     diagnostics_.pending_recovery = RecoveryAction::none;
+    diagnostics_.selected_process_id = 0;
+    diagnostics_.selected_window = 0;
+    diagnostics_.selected_executable_name.clear();
+    diagnostics_.overlay_capture_excluded = false;
+    diagnostics_.overlay_visuals_allowed = false;
+    reset_frame_evidence();
     diagnostics_.state = running_ ? BrokerState::awaiting_target : BrokerState::stopped;
     publish();
 }
@@ -291,11 +323,28 @@ const Diagnostics& MediaBroker::diagnostics() const noexcept { return diagnostic
 IMediaPlatform& MediaBroker::platform() noexcept { return *platform_; }
 
 void MediaBroker::handle_frame(FrameDescriptor frame) {
-    if (!running_ || frame.device_generation != diagnostics_.device_generation) {
+    if (!running_ || frame.device_generation != diagnostics_.device_generation ||
+        !target_geometry_) {
         ++diagnostics_.frames_dropped;
         return;
     }
+    if (frame.geometry_epoch == 0) {
+        frame.geometry_epoch = diagnostics_.geometry_epoch;
+    }
+    if (frame.captured_qpc == 0) {
+        const auto portable_tick = static_cast<std::uint64_t>(frame.captured_at.time_since_epoch().count());
+        frame.captured_qpc = std::max(portable_tick, diagnostics_.latest_frame_qpc + 1);
+    }
+    if (frame.geometry_epoch != diagnostics_.geometry_epoch || frame.sequence == 0 ||
+        frame.sequence <= diagnostics_.latest_frame_sequence ||
+        frame.captured_qpc <= diagnostics_.latest_frame_qpc) {
+        ++diagnostics_.frames_dropped;
+        ++diagnostics_.nonadvancing_frames;
+        platform_->suppress_residual();
+        return;
+    }
     if (frame.protected_content) {
+        diagnostics_.target_state = TargetState::protected_content;
         handle_failure({FailureDomain::capture, FailureCode::protected_content, false,
                         "Capture backend reported protected content"});
         ++diagnostics_.frames_dropped;
@@ -303,6 +352,18 @@ void MediaBroker::handle_frame(FrameDescriptor frame) {
     }
     same_backend_retries_ = 0;
     diagnostics_.consecutive_failures = 0;
+    diagnostics_.latest_frame_sequence = frame.sequence;
+    diagnostics_.latest_frame_qpc = frame.captured_qpc;
+    diagnostics_.latest_content_size_px = frame.content_size_px;
+    if (frame.content_hash != 0) {
+        if (diagnostics_.initial_content_hash == 0) {
+            diagnostics_.initial_content_hash = frame.content_hash;
+        } else if (diagnostics_.latest_content_hash != 0 &&
+                   diagnostics_.latest_content_hash != frame.content_hash) {
+            ++diagnostics_.content_hash_changes;
+        }
+        diagnostics_.latest_content_hash = frame.content_hash;
+    }
     ++diagnostics_.frames_received;
     const auto result = frames_.push(std::move(frame));
     if (result.replaced_unread) {
@@ -339,6 +400,32 @@ void MediaBroker::handle_failure(Failure failure) {
         diagnostics_.capture_backend = CaptureBackend::none;
         fail(std::move(failure), BrokerState::degraded_audio_only, RecoveryAction::degrade_to_audio_only);
         break;
+    case FailureCode::exclusive_fullscreen:
+        diagnostics_.target_state = TargetState::exclusive_fullscreen;
+        platform_->stop_overlay();
+        platform_->stop_capture();
+        frames_.clear();
+        patches_.clear();
+        diagnostics_.overlay_backend = OverlayBackend::none;
+        diagnostics_.capture_backend = CaptureBackend::none;
+        diagnostics_.overlay_capture_excluded = false;
+        diagnostics_.overlay_visuals_allowed = false;
+        fail(std::move(failure), BrokerState::degraded_audio_only,
+             RecoveryAction::degrade_to_audio_only);
+        break;
+    case FailureCode::unsupported_path:
+        diagnostics_.target_state = TargetState::unsupported;
+        platform_->stop_overlay();
+        platform_->stop_capture();
+        frames_.clear();
+        patches_.clear();
+        diagnostics_.overlay_backend = OverlayBackend::none;
+        diagnostics_.capture_backend = CaptureBackend::none;
+        diagnostics_.overlay_capture_excluded = false;
+        diagnostics_.overlay_visuals_allowed = false;
+        fail(std::move(failure), BrokerState::degraded_audio_only,
+             RecoveryAction::degrade_to_audio_only);
+        break;
     case FailureCode::device_removed:
     case FailureCode::device_reset:
         fail(std::move(failure), BrokerState::recovering_device, RecoveryAction::recreate_graphics_device);
@@ -354,6 +441,7 @@ void MediaBroker::handle_failure(Failure failure) {
 }
 
 void MediaBroker::handle_target_state(const TargetState state, std::optional<TargetGeometry> geometry) {
+    const auto previous_state = diagnostics_.target_state;
     diagnostics_.target_state = state;
     if (state == TargetState::protected_content) {
         handle_failure({FailureDomain::target, FailureCode::protected_content, false, "Target exposes protected content"});
@@ -363,9 +451,29 @@ void MediaBroker::handle_target_state(const TargetState state, std::optional<Tar
         handle_failure({FailureDomain::target, FailureCode::target_lost, true, "Target window is unavailable"});
         return;
     }
+    if (state == TargetState::exclusive_fullscreen) {
+        handle_failure({FailureDomain::capture, FailureCode::exclusive_fullscreen, false,
+                        "Target is in an exclusive-fullscreen path that cannot be safely captured"});
+        return;
+    }
+    if (state == TargetState::unsupported) {
+        handle_failure({FailureDomain::capture, FailureCode::unsupported_path, false,
+                        "Target capture path is unsupported"});
+        return;
+    }
     if (state == TargetState::minimized) {
+        if (previous_state != TargetState::minimized && geometry) {
+            invalidate_geometry_epoch(*geometry);
+            target_geometry_ = std::move(geometry);
+        }
         platform_->stop_overlay();
+        platform_->suppress_residual();
+        frames_.clear();
+        patches_.clear();
+        occlusion_evidence_.reset();
         diagnostics_.overlay_backend = OverlayBackend::none;
+        diagnostics_.overlay_capture_excluded = false;
+        diagnostics_.overlay_visuals_allowed = false;
         diagnostics_.state = BrokerState::awaiting_target;
         publish();
         return;
@@ -375,6 +483,11 @@ void MediaBroker::handle_target_state(const TargetState state, std::optional<Tar
         return;
     }
 
+    if (!target_geometry_ || !same_material_geometry(*target_geometry_, *geometry)) {
+        invalidate_geometry_epoch(*geometry);
+    } else {
+        geometry->geometry_epoch = diagnostics_.geometry_epoch;
+    }
     target_geometry_ = std::move(geometry);
     overlay_geometry_ = calculate_overlay_geometry(*target_geometry_);
     if (!overlay_geometry_) {
@@ -384,6 +497,17 @@ void MediaBroker::handle_target_state(const TargetState state, std::optional<Tar
 
     Failure failure;
     platform_->stop_overlay();
+    diagnostics_.overlay_capture_excluded = false;
+    diagnostics_.overlay_visuals_allowed = false;
+    if (diagnostics_.capture_backend == CaptureBackend::desktop_duplication) {
+        // A top-level residual window is part of the duplicated desktop. Keep
+        // it fully disabled so the fallback cannot capture its own visuals.
+        overlay_geometry_.reset();
+        diagnostics_.overlay_backend = OverlayBackend::none;
+        diagnostics_.state = BrokerState::capturing_fallback;
+        publish();
+        return;
+    }
     if (!platform_->start_overlay(*target_geometry_, failure)) {
         if (policy_.permit_audio_only_fallback) {
             fail(std::move(failure), BrokerState::degraded_audio_only, RecoveryAction::degrade_to_audio_only);
@@ -392,11 +516,44 @@ void MediaBroker::handle_target_state(const TargetState state, std::optional<Tar
         }
         return;
     }
+    if (!platform_->overlay_capture_excluded()) {
+        platform_->stop_overlay();
+        diagnostics_.overlay_backend = OverlayBackend::none;
+        fail({FailureDomain::overlay, FailureCode::unsupported_path, false,
+              "Overlay could not be excluded from capture"},
+             BrokerState::degraded_audio_only, RecoveryAction::degrade_to_audio_only);
+        return;
+    }
     diagnostics_.overlay_backend = OverlayBackend::d3d11_direct_composition;
+    diagnostics_.overlay_capture_excluded = true;
+    diagnostics_.overlay_visuals_allowed = true;
     diagnostics_.state = diagnostics_.capture_backend == CaptureBackend::windows_graphics_capture
                              ? BrokerState::capturing_primary
                              : BrokerState::capturing_fallback;
     publish();
+}
+
+void MediaBroker::invalidate_geometry_epoch(TargetGeometry& geometry) {
+    const auto supplied = geometry.geometry_epoch;
+    diagnostics_.geometry_epoch = supplied > diagnostics_.geometry_epoch
+                                      ? supplied
+                                      : diagnostics_.geometry_epoch + 1;
+    geometry.geometry_epoch = diagnostics_.geometry_epoch;
+    ++diagnostics_.geometry_changes;
+    frames_.clear();
+    patches_.clear();
+    occlusion_evidence_.reset();
+    platform_->suppress_residual();
+    ++diagnostics_.overlays_suppressed;
+    reset_frame_evidence();
+}
+
+void MediaBroker::reset_frame_evidence() noexcept {
+    diagnostics_.latest_frame_sequence = 0;
+    diagnostics_.latest_frame_qpc = 0;
+    diagnostics_.initial_content_hash = 0;
+    diagnostics_.latest_content_hash = 0;
+    diagnostics_.latest_content_size_px = {};
 }
 
 void MediaBroker::attempt_recovery(const MonotonicTime now) {
@@ -414,6 +571,10 @@ void MediaBroker::attempt_recovery(const MonotonicTime now) {
         frames_.clear();
         patches_.clear();
         ++diagnostics_.device_generation;
+        if (target_geometry_) {
+            target_geometry_->geometry_epoch = 0;
+            invalidate_geometry_epoch(*target_geometry_);
+        }
         if (!platform_->recreate_graphics_device(diagnostics_.device_generation, failure)) {
             handle_failure(std::move(failure));
             return;
@@ -470,19 +631,27 @@ bool MediaBroker::activate_capture(const CaptureBackend backend) {
         return false;
     }
     Failure failure;
+    if (diagnostics_.device_generation == 0) {
+        constexpr std::uint64_t initial_device_generation = 1;
+        if (!platform_->recreate_graphics_device(initial_device_generation, failure)) {
+            handle_failure(std::move(failure));
+            return false;
+        }
+        diagnostics_.device_generation = initial_device_generation;
+    }
     platform_->stop_capture();
+    diagnostics_.capture_backend = backend;
     if (!platform_->start_capture(*target_, backend, failure)) {
-        diagnostics_.capture_backend = backend;
         if (backend == CaptureBackend::windows_graphics_capture &&
             policy_.permit_desktop_duplication_fallback &&
-            (failure.code == FailureCode::backend_unavailable || failure.code == FailureCode::access_denied)) {
+            (failure.code == FailureCode::backend_unavailable || failure.code == FailureCode::access_denied ||
+             failure.code == FailureCode::unsupported_path)) {
             diagnostics_.last_failure = failure;
             return activate_capture(CaptureBackend::desktop_duplication);
         }
         handle_failure(std::move(failure));
         return false;
     }
-    diagnostics_.capture_backend = backend;
     diagnostics_.state = backend == CaptureBackend::windows_graphics_capture
                              ? BrokerState::capturing_primary
                              : BrokerState::capturing_fallback;
@@ -540,6 +709,10 @@ CompositingDecision MediaBroker::decide_compositing(const FrameDescriptor& frame
     if (occlusion_evidence_->source_device_generation != frame.device_generation ||
         occlusion_evidence_->source_frame_sequence != frame.sequence) {
         return CompositingDecision::pristine_wrong_frame;
+    }
+    if (patch->selected_track_id != occlusion_evidence_->selected_track_id ||
+        patch->track_epoch != occlusion_evidence_->track_epoch) {
+        return CompositingDecision::pristine_wrong_track;
     }
     if (!meets_confidence(patch->confidence,
                           policy_.occlusion.minimum_patch_confidence, 0.82) ||
@@ -626,6 +799,7 @@ std::string_view to_string(const CompositingDecision decision) noexcept {
     case CompositingDecision::pristine_wrong_epoch: return "pristine_wrong_epoch";
     case CompositingDecision::pristine_wrong_frame: return "pristine_wrong_frame";
     case CompositingDecision::pristine_wrong_source_time: return "pristine_wrong_source_time";
+    case CompositingDecision::pristine_wrong_track: return "pristine_wrong_track";
     case CompositingDecision::pristine_unsafe_bounds: return "pristine_unsafe_bounds";
     case CompositingDecision::pristine_missing_texture: return "pristine_missing_texture";
     case CompositingDecision::patch: return "patch";

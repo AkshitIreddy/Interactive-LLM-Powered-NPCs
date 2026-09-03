@@ -1,0 +1,19 @@
+{
+  "schema": "npc.embedding-self-test-fixture/v1",
+  "visibility": "supervisor_only",
+  "mode": "passage",
+  "texts": [
+    "A blacksmith repairs a sword in the village forge.",
+    "The village smith fixes a damaged blade.",
+    "Saturn has an extensive ring system."
+  ],
+  "assertions": {
+    "dimensions": 384,
+    "finite_f32": true,
+    "l2_normalized_tolerance": 0.0001,
+    "near_pair": [0, 1],
+    "unrelated_pair": [0, 2],
+    "minimum_near_cosine": 0.5,
+    "near_must_exceed_unrelated": true
+  }
+}

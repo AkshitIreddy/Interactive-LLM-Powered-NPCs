@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://interactive-npcs.invalid/schemas/local-stt-protocol-v1.schema.json",
+  "title": "Supervised local STT control request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocolVersion",
+    "workerInstanceId",
+    "requestId",
+    "sequence",
+    "generation",
+    "deadlineUnixMs",
+    "operation",
+    "payload"
+  ],
+  "properties": {
+    "protocolVersion": { "const": "npc.local-stt/v1" },
+    "workerInstanceId": { "$ref": "#/$defs/id" },
+    "requestId": { "$ref": "#/$defs/id" },
+    "sequence": { "$ref": "#/$defs/u63" },
+    "generation": { "$ref": "#/$defs/u63" },
+    "deadlineUnixMs": { "$ref": "#/$defs/u63" },
+    "operation": {
+      "enum": [
+        "handshake",
+        "capabilities",
+        "health",
+        "warm",
+        "load",
+        "unload",
+        "session_start",
+        "pcm_commit",
+        "session_end",
+        "cancel",
+        "self_test",
+        "shutdown"
+      ]
+    },
+    "payload": { "type": "object" }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "u63": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9223372036854775807
+    }
+  }
+}

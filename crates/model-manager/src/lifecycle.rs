@@ -286,6 +286,12 @@ pub trait PackStorage {
         &self,
         staged: &StagedPack,
     ) -> Result<StagedContentBindingV1, StorageError>;
+    /// Atomically publishes verified extracted bytes as an immutable inactive
+    /// version. It must not create or change the active pointer. Backends that
+    /// cannot persist inactive versions may retain their staging transaction.
+    fn commit_inactive(&mut self, _staged: &StagedPack) -> Result<(), StorageError> {
+        Ok(())
+    }
     fn consume_attestation_replay_key(
         &mut self,
         replay_key: &Sha256Digest,
@@ -374,6 +380,16 @@ impl PackStorage for InMemoryPackStorage {
             .filter(|binding| binding.transaction_id == staged.transaction_id)
             .cloned()
             .ok_or_else(|| StorageError::new("staged content binding is missing"))
+    }
+
+    fn commit_inactive(&mut self, staged: &StagedPack) -> Result<(), StorageError> {
+        let inspection = self
+            .staged
+            .get(&staged.identity)
+            .cloned()
+            .ok_or_else(|| StorageError::new("staged transaction is missing"))?;
+        self.installed.insert(staged.identity.clone(), inspection);
+        Ok(())
     }
 
     fn consume_attestation_replay_key(
@@ -664,7 +680,49 @@ impl<S: PackStorage> ModelPackManager<S> {
             return Err(ManagerError::StorageIdentityMismatch);
         }
         self.staged.insert(identity.clone(), staged);
+        let staged = self
+            .staged
+            .get(identity)
+            .cloned()
+            .ok_or(ManagerError::MissingStagedTransaction)?;
+        if let Err(error) = self.storage.commit_inactive(&staged) {
+            record.state = InstallState::Quarantined {
+                phase: InstallPhase::Extraction,
+                reason: "verified staging could not be atomically committed inactive".to_owned(),
+                retryable: true,
+            };
+            return Err(ManagerError::Storage(error));
+        }
         record.state = InstallState::AwaitingSelfTest;
+        Ok(())
+    }
+
+    /// Upgrades an already installed-inactive explicit selection to an exact
+    /// loadout-bound activation authorization. This does not run a self-test or
+    /// activate anything; it only replaces the earlier install-only capability
+    /// after the resource governor has minted a covering admission receipt.
+    pub fn authorize_activation(
+        &mut self,
+        identity: &PackRevision,
+        selection: PackSelectionAuthorizationV1,
+    ) -> Result<(), ManagerError> {
+        let record = self
+            .records
+            .get_mut(identity)
+            .ok_or(ManagerError::UnknownRevision)?;
+        if record.state != InstallState::AwaitingSelfTest {
+            return Err(ManagerError::InvalidState(record.state.clone()));
+        }
+        if self.pending_self_tests.contains_key(identity) {
+            return Err(ManagerError::InvalidState(record.state.clone()));
+        }
+        selection.validate_for_manifest(&record.manifest)?;
+        if !selection.activation_allowed() {
+            return Err(ManagerError::Selection(
+                PackSelectionError::ActivationNotAuthorized,
+            ));
+        }
+        record.selection = selection;
         Ok(())
     }
 

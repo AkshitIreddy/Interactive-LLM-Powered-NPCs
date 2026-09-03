@@ -12,6 +12,9 @@ default = []
 # Developer-only speaker qualification. Production playback remains owned by the
 # native media broker and this feature is intentionally excluded from normal builds.
 dev-wasapi-audio = ["dep:cpal"]
+# Hermetic integration-test injection. Normal runtime builds never enable this
+# feature and always construct the platform credential vault themselves.
+test-fixture-vault = []
 
 [[bin]]
 name = "npc-runtime"
@@ -31,7 +34,9 @@ interactive-npcs-credential-vault = { path = "../../crates/credential-vault" }
 interactive-npcs-diagnostics = { path = "../../crates/diagnostics" }
 interactive-npcs-game-discovery = { path = "../../crates/game-discovery" }
 model-manager = { path = "../../crates/model-manager" }
+npc-character-db = { path = "../../crates/character-db" }
 npc-game-profile = { path = "../../crates/game-profile" }
+npc-identity-engine = { path = "../../crates/identity-engine" }
 npc-memory = { path = "../../crates/memory" }
 npc-protocol = { path = "../../crates/protocol" }
 npc-provider-catalog = { path = "../../crates/provider-catalog" }
@@ -40,6 +45,7 @@ npc-providers-retrieval = { path = "../../crates/providers-retrieval" }
 npc-providers-stt = { path = "../../crates/providers-stt" }
 npc-providers-tts = { path = "../../crates/providers-tts" }
 npc-runtime-core = { path = "../../crates/runtime-core" }
+npc-subtitle-engine = { path = "../../crates/subtitle-engine" }
 prost = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -48,6 +54,8 @@ thiserror = "2"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 uuid = { version = "1", features = ["v4"] }
+url = "2.5"
+zeroize = "1.8"
 
 [target.'cfg(windows)'.dependencies]
 cpal = { version = "0.15", optional = true }

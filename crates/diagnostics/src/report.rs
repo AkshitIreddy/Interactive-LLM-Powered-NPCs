@@ -1,4 +1,6 @@
-use crate::{DiagnosticStatus, RedactionFinding, Redactor};
+use crate::{
+    redaction::is_sensitive_field_name, DiagnosticStatus, RedactionFinding, RedactionKind, Redactor,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -42,6 +44,8 @@ pub enum ReportError {
     MissingIdentity(usize),
     #[error("diagnostic fact {0} exceeds content limits")]
     TooLarge(usize),
+    #[error("diagnostic report exceeds its fact count bound")]
+    TooManyFacts,
     #[error("failed to serialize diagnostic report: {0}")]
     Serialize(#[from] serde_json::Error),
 }
@@ -68,12 +72,23 @@ impl DiagnosticReportBuilder {
 
     pub fn push(&mut self, fact: DiagnosticFact) -> Result<(), ReportError> {
         let index = self.facts.len();
-        if fact.check_id.trim().is_empty() || fact.label.trim().is_empty() {
+        if self.facts.len() >= 256 {
+            return Err(ReportError::TooManyFacts);
+        }
+        if fact.check_id.trim().is_empty()
+            || fact.label.trim().is_empty()
+            || fact.check_id.len() > 128
+            || fact.label.len() > 240
+        {
             return Err(ReportError::MissingIdentity(index));
         }
         if fact.summary.len() > 2_000
             || fact.fix.as_ref().is_some_and(|value| value.len() > 2_000)
             || fact.metadata.len() > 32
+            || fact
+                .metadata
+                .iter()
+                .any(|(key, value)| key.is_empty() || key.len() > 128 || value.len() > 2_000)
         {
             return Err(ReportError::TooLarge(index));
         }
@@ -95,8 +110,16 @@ impl DiagnosticReportBuilder {
             if let Some(fix) = &mut fact.fix {
                 redact_field(&self.redactor, fix, &mut redactions);
             }
-            for value in fact.metadata.values_mut() {
-                redact_field(&self.redactor, value, &mut redactions);
+            for (key, value) in &mut fact.metadata {
+                if is_sensitive_field_name(key) {
+                    *value = "<REDACTED_FIELD>".into();
+                    redactions.push(RedactionFinding {
+                        kind: RedactionKind::SensitiveField,
+                        count: 1,
+                    });
+                } else {
+                    redact_field(&self.redactor, value, &mut redactions);
+                }
             }
         }
         report.redaction_summary = consolidate(redactions);
@@ -174,5 +197,27 @@ mod tests {
             2
         );
         assert_eq!(preview.sha256.len(), 64);
+    }
+
+    #[test]
+    fn legacy_report_redacts_short_credentials_by_metadata_key() {
+        let mut builder = DiagnosticReportBuilder::new("2026-08-28T00:00:00Z", "2.0.0");
+        builder
+            .push(DiagnosticFact {
+                check_id: "provider.auth".into(),
+                label: "Provider connection".into(),
+                status: DiagnosticStatus::Failed,
+                summary: "Authentication failed".into(),
+                fix: None,
+                metadata: BTreeMap::from([
+                    ("apiKey".into(), "abc".into()),
+                    ("safe_code".into(), "provider.auth_failed".into()),
+                ]),
+            })
+            .unwrap();
+        let (report, _) = builder.build();
+        let serialized = serde_json::to_string(&report).unwrap();
+        assert!(!serialized.contains("\"abc\""));
+        assert!(serialized.contains("provider.auth_failed"));
     }
 }

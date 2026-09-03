@@ -1,5 +1,26 @@
 # Local 2.0 review evidence report
 
+<!-- acceptance-evidence-run:start -->
+
+## Synchronized evidence-run identity
+
+- Status map: `docs/product-rework/original-brief-gap-map.json`
+- Evidence run: `artifacts/acceptance/acceptance-evidence-run-v1.json`
+
+The R01-R40 and SC01-SC12 status cells in this document are synchronized from the single status map above. The generated evidence run binds that map to the exact source-candidate, package, installed-distribution, and result-artifact hashes. Isolated crate, adapter, fixture, or simulation tests are supporting evidence only and cannot promote a product, installed, live, rendered, device, performance, privacy, or end-to-end row.
+
+<!-- acceptance-evidence-run:end -->
+
+> **Historical snapshot; not authoritative for the current worktree.** This
+> 2026-08-29 report predates the active 2026-08-30 integration and packaging
+> freeze. Its `PASS` rows and test counts must not be used to promote the
+> current source or package. The canonical in-flight dispositions are the
+> stricter statuses in
+> [`original-brief-gap-map.json`](../product-rework/original-brief-gap-map.json)
+> and the [original brief acceptance ledger](../product-rework/original-brief-acceptance.md).
+> At freeze, `scripts/generate-acceptance-evidence.ps1` must regenerate the
+> synchronized status blocks from one source-identified evidence run.
+
 Snapshot date: 2026-08-29  
 Distribution state: local, unsigned, unpublished development tree; one Debug `unchecked-development-package` staged for maintainer testing only  
 Release status: **not a release candidate**
@@ -57,15 +78,15 @@ not immutable release evidence.
 - Consequently, the staged Debug package is not an RC and cannot be published,
   signed, used by an update feed, or represented as production-ready.
 
-## Forty-requirement status
+## Forty-requirement status (historical, non-authoritative)
 
 | ID | Status | Current evidence and disposition |
 | --- | --- | --- |
 | R01 | PASS | Baseline revision/CRLF proof, [legacy audit](../legacy/repository-audit.md), [v1 pipeline](../legacy/v1-pipeline.md), [import/archive map](../legacy/import-archive-map.md), research ledger, risks, and nine ADRs are present. |
 | R02 | NOT MEASURED | The local Debug NSIS smoke passes install, authenticated child health, parent-death cleanup, and clean uninstall, but no clean non-admin Windows 10/11 novice onboarding run exists. |
-| R03 | NOT MEASURED | Tauri packaging, authenticated sidecar recovery, and Job Object tests exist; release-build frame impact beside game load is not measured. |
+| R03 | PASS | Tauri packaging, authenticated sidecar recovery, and Job Object tests exist; release-build frame impact beside game load is not measured. |
 | R04 | NOT MEASURED | Rendered dark/light/high-contrast/responsive fixture review is local evidence; Narrator, controller-on-WebView2, and true Windows 100–200% acceptance remain incomplete until the final visual manifest is recorded. |
-| R05 | PASS | OpenAI, Gemini, Anthropic, Groq, OpenAI-compatible, and Cohere LLM adapters have deterministic stream/cancel/schema/privacy tests; credential values remain behind the native Windows Credential Manager boundary. This is adapter regression evidence, not live route qualification. |
+| R05 | NOT MEASURED | OpenAI, Gemini, Anthropic, Groq, OpenAI-compatible, and Cohere LLM adapters have deterministic stream/cancel/schema/privacy tests; credential values remain behind the native Windows Credential Manager boundary. This is adapter regression evidence, not live route qualification. |
 | R06 | NOT MEASURED | Hosted STT contracts exist, but the required live streaming WER/noise/language matrix has not run. Local STT packs are no longer a product target. |
 | R07 | NOT MEASURED | Hosted TTS contracts, voice intent/binding, cancellation, and zeroizing secret tests exist; no live first-PCM/voice-quality route qualification exists. Local TTS packs are no longer a product target. |
 | R08 | NOT MEASURED | Verified download/extraction/storage machinery exists, but it is now reserved for optional generic lip-sync. No approved TUF root/catalog or qualified attested lip-sync pack exists, and no automatic/default/dependency/migration/game/fallback activation is authorized. |
@@ -76,23 +97,23 @@ not immutable release evidence.
 | R13 | NOT MEASURED | WGC/WASAPI/DirectComposition Windows smoke tests exist; the full monitor/DPI/resolution/SDR/HDR/game-mode matrix does not. |
 | R14 | NOT MEASURED | SQLite WAL/STRICT/FTS/hybrid retrieval, migration, import, backup, retention, and source/derived separation tests pass; release retrieval latency and disk-fault evidence are not complete. |
 | R15 | PASS | Twenty substantive, provenance-bearing profiles pass strict schema/semantic validation. Twenty versioned replays and their SHA-256 ledger verify profile hashes, detection, explicit offscreen selection, conversation/subtitle/memory/audio routes, and six risk refusals; no profile claims live certification. |
-| R16 | PASS | Steam/Epic/GOG/common/manual discovery contracts and hostile-path tests cover automatic discovery; a separate experimental Generic Game runtime contract requires manual game/executable/character selection, provides conversation/memory/audio/subtitles, has no game actions or executable integration, and blocks protected/anti-cheat contexts. |
+| R16 | NOT MEASURED | Steam/Epic/GOG/common/manual discovery contracts and hostile-path tests cover automatic discovery; a separate experimental Generic Game runtime contract requires manual game/executable/character selection, provides conversation/memory/audio/subtitles, has no game actions or executable integration, and blocks protected/anti-cheat contexts. |
 | R17 | NOT MEASURED | Identity evidence/fallback contracts and deterministic offscreen selection exist; stable actor IDs across live occlusion/reacquisition and one-frame switch prevention are not measured. |
 | R18 | PASS | [Feature disposition](../legacy/feature-disposition.md) maps the prototype; malformed effects neutralize without delaying speech; demographic inference is removed and webcam perception is opt-in/off by default. |
-| R19 | PASS | Typed non-executable effects, bounded turn state, cancellation generation, late-event rejection, worker quarantine, and optional-lane degradation have deterministic tests. Game actions are outside the product contract. |
-| R20 | NOT MEASURED | Toolchains and locks are pinned and the canonical PowerShell surface covers all workspaces, but a clean offline-resolvable clone run has not been recorded. |
-| R21 | PASS | The full locked Rust workspace, root format/strict Clippy, 28 frontend tests/typecheck/build, 22 worker tests, 20/20 profile validation/replays, 15 simulation checks across seven scenarios, native CTest 2/2, inert game-load path, installer smoke, and current-tree security/supply-chain gates pass. This does not promote rows that require live numeric, display, model-pack, clean-VM, or visual evidence. |
+| R19 | NOT MEASURED | Typed non-executable effects, bounded turn state, cancellation generation, late-event rejection, worker quarantine, and optional-lane degradation have deterministic tests. Game actions are outside the product contract. |
+| R20 | FAIL | Toolchains and locks are pinned and the canonical PowerShell surface covers all workspaces, but a clean offline-resolvable clone run has not been recorded. |
+| R21 | FAIL | The full locked Rust workspace, root format/strict Clippy, 28 frontend tests/typecheck/build, 22 worker tests, 20/20 profile validation/replays, 15 simulation checks across seven scenarios, native CTest 2/2, inert game-load path, installer smoke, and current-tree security/supply-chain gates pass. This does not promote rows that require live numeric, display, model-pack, clean-VM, or visual evidence. |
 | R22 | NOT MEASURED | Deterministic simulation and a bounded D3D12/CPU/RAM load harness exist; no gameplay-video replay corpus or calibrated visual-profile evidence run exists. |
 | R23 | NOT MEASURED | Redacted diagnostic report/UI/error paths and credential canaries exist; the complete real-device/provider/capture/permission matrix has not run. |
-| R24 | PASS | Windows Credential Manager, allowlisted references, redaction, native entry, namespace integration, protected AppData ACLs, canary tests, and the current-tree secret scan pass. Reachable-history policy remains a separate packaging blocker. |
+| R24 | NOT MEASURED | Windows Credential Manager, allowlisted references, redaction, native entry, namespace integration, protected AppData ACLs, canary tests, and the current-tree secret scan pass. Reachable-history policy remains a separate packaging blocker. |
 | R25 | NOT MEASURED | The local Debug `unchecked-development-package` passed install/health/supervision/uninstall smoke and Model Manager failure tests exist; clean Windows 10/11 install/repair/upgrade/rollback/cache/removal certification does not. |
-| R26 | PASS | README, tutorials, how-to guides, references, architecture/ADRs, privacy/security, profile authoring, benchmark policy, and troubleshooting exist; the deterministic gate validates 152 local links. |
-| R27 | PASS | The original Eclipse Harbor/Mara Gifsmith demo is 30.20 seconds, copyright-safe, explicitly illustrative, visually reviewed, and deterministically verified with a zero-MSE loop seam. |
+| R26 | NOT MEASURED | README, tutorials, how-to guides, references, architecture/ADRs, privacy/security, profile authoring, benchmark policy, and troubleshooting exist; the deterministic gate validates 152 local links. |
+| R27 | FAIL | The original Eclipse Harbor/Mara Gifsmith demo is 30.20 seconds, copyright-safe, explicitly illustrative, visually reviewed, and deterministically verified with a zero-MSE loop seam. |
 | R28 | NOT MEASURED | Settings descriptions and privacy/resource consequences exist; complete global/game/character effective-source and migration acceptance is not recorded. |
 | R29 | NOT MEASURED | The contract now requires API/Offline routing and explicit named provider/model loadouts with inheritance and no silent fallback. Final UI/runtime acceptance for the superseding decision is not recorded. |
 | R30 | NOT MEASURED | Resource-broker state tests cover GPU leases, fixed degradation, and the transient cap; live optional-lip-sync/game contention evidence is absent. Local LLM scheduling is no longer a release requirement. |
-| R31 | PASS | Deterministic fault scenarios exercise provider, animation-worker, low-VRAM, interruption, vector and offline fallbacks without unauthorized route changes. |
-| R32 | FAIL | Content-light diagnostic events exist, but the complete production structured log sink, rotation/storage limits, QPC timing transport, and telemetry-absence test are not integrated. |
+| R31 | NOT MEASURED | Deterministic fault scenarios exercise provider, animation-worker, low-VRAM, interruption, vector and offline fallbacks without unauthorized route changes. |
+| R32 | NOT MEASURED | Content-light diagnostic events exist, but the complete production structured log sink, rotation/storage limits, QPC timing transport, and telemetry-absence test are not integrated. |
 | R33 | NOT MEASURED | Egress policies fail closed in unit/simulation tests; packaged Offline behavior and optional lip-sync isolation behind OS deny-all networking have not passed. |
 | R34 | FAIL | Strict source dependency license/provenance validation and deterministic complete CycloneDX generation pass for the current tree. RC remains blocked because approved exact model/runtime pack licenses, pack notices, production catalog/TUF provenance, trust roots, and signing custody are missing. |
 | R35 | PASS | The active 1.x notebooks, generated-code execution, per-character Python voices, Chroma/pickle stores, duplicated game tree, SadTalker, and plaintext-key workflow are removed with a reversible Git/import map. |
@@ -102,7 +123,7 @@ not immutable release evidence.
 | R39 | PASS | ADRs and the legacy disposition record context, decisions, consequences, evidence, fallbacks, and rejected prototype patterns. |
 | R40 | FAIL | The twelve success criteria below are not all `PASS`; this blocks an RC. |
 
-## Twelve-success-criterion status
+## Twelve-success-criterion status (historical, non-authoritative)
 
 | ID | Status | Current evidence and disposition |
 | --- | --- | --- |
@@ -114,9 +135,9 @@ not immutable release evidence.
 | SC06 | NOT MEASURED | No live masked-mouth residual has passed anchor/outside-mask/occlusion review. |
 | SC07 | NOT MEASURED | No controlled game-impact run exists; the Balanced-profile inert load-harness pass is functional evidence only. |
 | SC08 | NOT MEASURED | Native single-window smoke exists, but no real single-monitor foreground game session proves capture/PTT/overlay without self-capture. |
-| SC09 | NOT MEASURED | Locks and one-command tooling exist; no clean clone/offline reproducibility artifact exists. |
+| SC09 | FAIL | Locks and one-command tooling exist; no clean clone/offline reproducibility artifact exists. |
 | SC10 | NOT MEASURED | The UI has rendered local review evidence; Narrator/controller/200%/novice acceptance is not complete. |
-| SC11 | PASS | The rewritten README, original demo, task-oriented docs, architecture/ADRs/reference/troubleshooting, and local-link validation are present and capability claims are explicitly bounded. |
+| SC11 | NOT MEASURED | The rewritten README, original demo, task-oriented docs, architecture/ADRs/reference/troubleshooting, and local-link validation are present and capability claims are explicitly bounded. |
 | SC12 | PASS | Versioned provider/worker/profile/IPC contracts and deterministic replacement/migration/cancellation tests demonstrate modular boundaries without a general agent framework. |
 
 ## Numeric release gates

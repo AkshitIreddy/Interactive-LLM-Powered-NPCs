@@ -3,6 +3,7 @@ use crate::domain::{
     SimulationEvent, SimulationSnapshot, SimulationStatus, StartSimulationRequest,
     StartSimulationResult,
 };
+use npc_provider_loadouts::{ResolvedProviderLoadoutV1, TurnRouteSnapshotV1};
 use std::fmt;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
@@ -94,6 +95,7 @@ impl SimulationController {
         &self,
         request: StartSimulationRequest,
         events: Channel<SimulationEvent>,
+        resolved_routes: ResolvedProviderLoadoutV1,
     ) -> Result<StartSimulationResult, StartError> {
         request.validate().map_err(StartError::InvalidRequest)?;
         let (cancellation, cancellation_rx) = watch::channel(false);
@@ -119,10 +121,12 @@ impl SimulationController {
         };
 
         let weak_state = Arc::downgrade(&self.state);
+        let route_snapshot = resolved_routes.pin_turn_routes(generation);
         self.bridge.spawn_turn(TurnLaunch {
             simulation_id: simulation_id.clone(),
             generation,
             request,
+            route_snapshot,
             events,
             cancellation: cancellation_rx,
             observer: TurnObserver { state: weak_state },
@@ -179,6 +183,8 @@ struct TurnLaunch {
     simulation_id: String,
     generation: u64,
     request: StartSimulationRequest,
+    #[allow(dead_code)]
+    route_snapshot: TurnRouteSnapshotV1,
     events: Channel<SimulationEvent>,
     cancellation: watch::Receiver<bool>,
     observer: TurnObserver,
@@ -329,6 +335,9 @@ async fn run_fixture_turn(mut launch: TurnLaunch) {
             fixture_first_audio_ms: Some(FIXTURE_FIRST_AUDIO_MS),
             runtime_fixture_only: true,
             delivered_text: fixture_reply_for(&launch.request),
+            turn_execution: None,
+            character_context: None,
+            visual_presentation: None,
         },
     );
     launch.observer.finish(launch.generation);
@@ -342,6 +351,8 @@ fn emit_cancelled(launch: &TurnLaunch, sequence: u64) {
             generation: launch.generation,
             sequence,
             reason: "Cancelled by the user; fixture dialogue was not committed.".into(),
+            turn_execution: None,
+            character_context: None,
         },
     );
 }

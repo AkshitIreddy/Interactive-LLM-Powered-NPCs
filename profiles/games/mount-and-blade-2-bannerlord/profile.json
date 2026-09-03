@@ -171,6 +171,8 @@
     }
   },
   "content": {
+    "character_data_readiness": "curated",
+    "character_data_readiness_notes": "Shipped named-character records have stable IDs and authored biography, personality, dialogue-style, prompt, voice-intent, explicit-selection identity, and provenance metadata; live visual identity is not certified.",
     "world_lore": "Calradia is fractured after imperial authority fails to produce an uncontested successor. Three imperial claimants compete while neighboring kingdoms pursue their own security, prestige, territory, and old grievances. Clan ties, oaths, influence, wealth, marriage, trade, raids, law, and military reputation reshape the political map during play. Because Bannerlord is a sandbox, no campaign has one canonical ruler, border, war, marriage, death, or clan alignment. This profile provides stable faction cultures and opening-era leaders, then treats every dynamic kingdom decision, settlement owner, relation score, army, companion, and quest as session state supplied by the game or user.",
     "spoiler_policy": "Use stable setting and opening-leader context by default. Dynamic campaign facts are never treated as canon without a current campaign snapshot. The main storyline tier exposes only milestones the user confirms; generated wars, deaths, marriages, defections, and holdings always come from current state.",
     "spoiler_tiers": [
@@ -583,7 +585,26 @@
       ]
     }
   },
+  "recommendations": {
+    "integration_mode": "external_only",
+    "provider_strategy": "api_first",
+    "local_activation_policy": "measured_whole_loadout_fit_required",
+    "game_resource_reserve_required": true,
+    "screen_space_lip_sync": "experimental_opt_in_after_exact_target_and_advancing_frame_qualification"
+  },
   "diagnostics": [
+    {
+      "id": "recommended-feature-loadout",
+      "severity": "info",
+      "check": "Keep a game-first resource reserve, prefer explicitly configured API routes for LLM, STT, TTS, and embeddings, and admit optional local models only after measured whole-loadout RAM and VRAM fit checks.",
+      "remediation": "Move optional language or speech roles to an explicitly selected hosted provider, unload nonessential local models, or increase the configured game reserve; keep experimental screen-space lip sync disabled until exact target binding, advancing-frame, and untouched-frame restore checks pass."
+    },
+    {
+      "id": "external-only-safety",
+      "severity": "error",
+      "check": "Confirm the selected target remains an eligible single-player top-level game window and that the session uses external capture, audio, and subtitles only, with no injection, hooks, automated input, or anti-cheat bypass.",
+      "remediation": "Stop on online, protection, process, PID, HWND, executable, or session-mode ambiguity; return to a clearly eligible single-player state and bind the exact game window again, otherwise use no game integration."
+    },
     {
       "id": "singleplayer-mode",
       "severity": "error",

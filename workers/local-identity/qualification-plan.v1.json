@@ -1,0 +1,229 @@
+{
+  "schema": "npc.identity-current-device-qualification-plan/v1",
+  "suite_revision": "identity-yunet-sface-windows-2026-08-30.v1",
+  "status": "prepared_not_executed",
+  "execution_gate": {
+    "serialized_ai_model_lane_required": true,
+    "root_release_required": true,
+    "one_time_parent_grant_required": true,
+    "parent_grant_token_required": true,
+    "cpu_inference_still_requires_gpu_lane": true,
+    "gpu_coordination_file_owned_by_harness": false,
+    "model_download_performed": false,
+    "model_inference_performed": false,
+    "allow_synthetic_measurements": false,
+    "allow_unsigned_admission": false
+  },
+  "bindings": {
+    "pack_id": "opencv-yunet-sface-private-eval",
+    "pack_revision": "zoo-47534e27-opencv-5.0.0.93",
+    "manifest_file_sha256": "a4af4874af77c4dc517fe41990371e96e68a4469ee6817102876b7b074302e67",
+    "runtime": "opencv-python-headless",
+    "runtime_revision": "cp312-opencv-5.0.0.93-numpy-2.5.2",
+    "backend": "opencv-dnn-cpu",
+    "detector_id": "opencv-zoo-yunet-2026may",
+    "detector_revision": "sha256:ebafce4e3c118d6554634be5c27ab333b4c047a9a8c3faf1d7cf93101c22f0f0",
+    "embedding_model_id": "sface-2021dec-mobilefacenet",
+    "embedding_revision": "sha256:0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
+    "preprocessing_revision": "opencv-face-recognizer-sf-aligncrop-bgr-112x112-l2-f32-v1",
+    "open_set_fixture_plan_sha256": "01c69867d816ac8a7e430a7a372fbf6133f804237fbb2c2bd9ea59d69fa3d980"
+  },
+  "environment_requirements": {
+    "operating_systems": ["windows10", "windows11"],
+    "architecture": "x86_64",
+    "current_device_fingerprint_required": true,
+    "target_game_required": true,
+    "game_frame_time_capture_required": true,
+    "desktop_and_game_vram_split_required": true,
+    "other_selected_local_models_loaded_run_required": true,
+    "online_or_anti_cheat_targets_forbidden": true,
+    "overlay_capture_exclusion_required": true
+  },
+  "runner_requirements": {
+    "operating_system": "windows_x86_64_only",
+    "hidden_children_required": true,
+    "create_no_window_required": true,
+    "kill_on_close_job_required": true,
+    "download_during_run_allowed": false,
+    "native_driver_source": "windows_graphics_capture_command_16_17",
+    "native_driver_sha256_required": true,
+    "advancing_frame_sequence_and_qpc_required": true,
+    "frozen_or_replayed_frames_rejected": true,
+    "unsigned_output_only": true,
+    "network_egress_allowed": false,
+    "gpu_coordination_file_may_be_changed": false
+  },
+  "performance_phases": [
+    {
+      "id": "cold_load",
+      "minimum_successful_samples": 20,
+      "precondition": "fresh_worker_and_cold_model",
+      "operation": "load",
+      "required_metrics": [
+        "duration_millis",
+        "process_private_bytes_delta",
+        "process_working_set_bytes_delta",
+        "process_cpu_millis_delta",
+        "dedicated_vram_bytes_delta",
+        "shared_gpu_bytes_delta"
+      ]
+    },
+    {
+      "id": "warm_reload",
+      "minimum_successful_samples": 20,
+      "precondition": "verified_unload_then_same_pack_reload",
+      "operation": "reload",
+      "required_metrics": [
+        "duration_millis",
+        "process_private_bytes_delta",
+        "process_cpu_millis_delta",
+        "dedicated_vram_bytes_delta"
+      ]
+    },
+    {
+      "id": "single_face_inference",
+      "minimum_successful_samples": 100,
+      "precondition": "advancing_wgc_frames_with_exactly_one_rights_cleared_face",
+      "operation": "infer",
+      "required_metrics": [
+        "duration_millis",
+        "wgc_copy_millis",
+        "mapping_open_and_hash_millis",
+        "detection_millis",
+        "alignment_and_embedding_millis",
+        "process_cpu_millis_delta",
+        "process_private_bytes_peak",
+        "dedicated_vram_bytes_peak",
+        "game_frame_time_millis"
+      ]
+    },
+    {
+      "id": "multi_face_inference",
+      "minimum_successful_samples": 100,
+      "precondition": "advancing_wgc_frames_with_two_to_eight_rights_cleared_faces",
+      "operation": "infer",
+      "required_metrics": [
+        "face_count",
+        "duration_millis",
+        "process_cpu_millis_delta",
+        "process_private_bytes_peak",
+        "dedicated_vram_bytes_peak",
+        "game_frame_time_millis"
+      ]
+    },
+    {
+      "id": "generation_cancel",
+      "minimum_successful_samples": 20,
+      "precondition": "inference_accepted_before_generation_advance",
+      "operation": "cancel",
+      "required_metrics": [
+        "cancel_to_barrier_millis",
+        "late_result_count",
+        "worker_exit_count",
+        "mapping_release_millis"
+      ]
+    },
+    {
+      "id": "unload",
+      "minimum_successful_samples": 20,
+      "precondition": "loaded_idle_worker",
+      "operation": "unload",
+      "required_metrics": [
+        "duration_millis",
+        "process_private_bytes_after",
+        "process_working_set_bytes_after",
+        "dedicated_vram_bytes_after"
+      ]
+    },
+    {
+      "id": "crash_restart",
+      "minimum_successful_samples": 20,
+      "precondition": "forced_worker_termination_with_active_or_idle_state",
+      "operation": "restart",
+      "required_metrics": [
+        "restart_to_handshake_millis",
+        "orphan_mapping_count",
+        "stale_result_count",
+        "crash_loop_suppression_state"
+      ]
+    }
+  ],
+  "aggregation": {
+    "required_quantiles": ["p50", "p95", "p99", "max"],
+    "raw_sample_retention_required": true,
+    "failed_sample_retention_required": true,
+    "outlier_deletion_allowed": false,
+    "cpu_resident_envelope_fields": [
+      "resident_ram_bytes",
+      "p99_total_ram_bytes",
+      "resident_vram_bytes",
+      "p99_workspace_vram_bytes",
+      "p99_load_millis",
+      "p99_reload_millis",
+      "p99_operation_millis"
+    ],
+    "resident_vram_bytes_expected_invariant": 0,
+    "expected_invariant_is_not_a_measurement": true
+  },
+  "open_set_quality": {
+    "rights_cleared_fixture_required": true,
+    "protected_trait_labels_forbidden": true,
+    "minimum_distinct_known_characters": 20,
+    "minimum_distinct_unknown_characters": 20,
+    "minimum_known_samples_per_character": 5,
+    "minimum_unknown_samples_per_character": 3,
+    "minimum_hard_negative_pairs": 100,
+    "minimum_multi_face_sequences": 10,
+    "minimum_tracking_frames_per_sequence": 60,
+    "required_metrics": [
+      "false_accept_rate",
+      "false_reject_rate",
+      "unknown_false_accept_rate",
+      "top1_top2_margin_distribution",
+      "ambiguity_rate",
+      "manual_correction_rate",
+      "identity_switches",
+      "association_accuracy",
+      "track_fragmentation",
+      "offscreen_continuity_errors",
+      "reacquisition_accuracy",
+      "reacquisition_failures",
+      "false_matches"
+    ],
+    "threshold_selection": {
+      "training_partition": "calibration_only",
+      "reporting_partition": "held_out_only",
+      "match_threshold_required": true,
+      "ambiguity_margin_required": true,
+      "multi_frame_consensus_required": true,
+      "frozen_frame_repetition_counts_as_consensus": false
+    }
+  },
+  "required_outputs": {
+    "raw_samples_schema": "npc.identity-qualification-raw-samples/v1",
+    "quality_report_schema": "npc.identity-open-set-quality-report/v1",
+    "resource_envelope_schema": "npc.measured-resource-envelope/v1",
+    "resource_envelope_minimum_sample_count": 20,
+    "resource_envelope_signature_required": true,
+    "self_test_attestation_schema": "npc.self-test-attestation/v1",
+    "cleanup_report_schema": "npc.identity-qualification-cleanup-report/v1",
+    "zero_network_egress_required": true,
+    "zero_orphan_processes_and_mappings_required": true,
+    "raw_pixels_and_embeddings_persisted": false,
+    "whole_loadout_admission_required": true
+  },
+  "admission": {
+    "ready": false,
+    "blocking_reasons": [
+      "serialized_ai_model_lane_not_released",
+      "model_artifacts_not_downloaded_or_verified_on_this_device",
+      "cpu_wgc_named_mapping_producer_not_yet_verified",
+      "rights_cleared_open_set_fixture_corpus_not_present",
+      "real_current_device_samples_not_present",
+      "trusted_measurement_signature_not_present",
+      "separate_opencv_numpy_runtime_admission_not_present",
+      "one_time_parent_model_run_grant_not_present",
+      "hash_pinned_native_qualification_driver_not_present"
+    ]
+  }
+}

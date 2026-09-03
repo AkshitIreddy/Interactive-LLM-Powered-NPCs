@@ -7,6 +7,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
+. (Join-Path $PSScriptRoot '../windows/node-tooling.ps1')
 
 if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
     $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
@@ -22,9 +23,9 @@ if ($null -eq $python) {
     Write-Error 'Python 3 is required for the pinned, dependency-free repository scanner; scanning was not skipped.'
     exit 2
 }
-$arguments = '"{0}" --root "{1}"' -f (Join-Path $PSScriptRoot 'scan_secrets.py'), $RepositoryRoot
-if ($IncludeUntracked) { $arguments += ' --include-untracked' }
-if ($NoHistory) { $arguments += ' --no-history' }
+$arguments = @((Join-Path $PSScriptRoot 'scan_secrets.py'), '--root', $RepositoryRoot)
+if ($IncludeUntracked) { $arguments += '--include-untracked' }
+if ($NoHistory) { $arguments += '--no-history' }
 $pythonPath = if ($python -is [System.IO.FileInfo]) { $python.FullName } else { $python.Source }
-$pythonProcess = Start-Process -FilePath $pythonPath -ArgumentList $arguments -NoNewWindow -Wait -PassThru
+$pythonProcess = Invoke-NpcHiddenProcess -FilePath $pythonPath -ArgumentList $arguments
 exit $pythonProcess.ExitCode

@@ -12,6 +12,17 @@ pub const MAX_SELF_TEST_ATTESTATION_LIFETIME_SECONDS: u64 = 15 * 60;
 pub struct CatalogInstallBindingV1 {
     pub catalog_payload_sha256: Sha256Digest,
     pub catalog_version: u64,
+    /// Release and local-review catalogs are deliberately different trust
+    /// domains. Dev evidence is cryptographically testable, but can never be
+    /// serialized or displayed as release-threshold evidence.
+    pub trust_domain: CatalogTrustDomainV1,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CatalogTrustDomainV1 {
+    ReleaseThreshold,
+    LocalReviewDevOnly,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -251,6 +262,7 @@ mod tests {
             catalog: CatalogInstallBindingV1 {
                 catalog_payload_sha256: digest.clone(),
                 catalog_version: 1,
+                trust_domain: CatalogTrustDomainV1::ReleaseThreshold,
             },
             staged: StagedContentBindingV1 {
                 identity,

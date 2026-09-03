@@ -123,6 +123,8 @@ pub enum TransportError {
     RateLimited { retry_after: Option<Duration> },
     #[error("transport protocol failure")]
     Protocol,
+    #[error("transport protocol failure at {0}")]
+    ProtocolStage(&'static str),
     #[error("transport was closed")]
     Closed,
 }

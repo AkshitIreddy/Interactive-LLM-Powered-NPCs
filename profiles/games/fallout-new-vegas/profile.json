@@ -218,6 +218,8 @@
     }
   },
   "content": {
+    "character_data_readiness": "curated",
+    "character_data_readiness_notes": "Shipped named-character records have stable IDs and authored biography, personality, dialogue-style, prompt, voice-intent, explicit-selection identity, and provenance metadata; live visual identity is not certified.",
     "world_lore": "The Mojave Wasteland is a frontier shaped by the ruins of the old world and a present struggle over water, electricity, territory, and legitimacy. The New California Republic extends institutions and supply lines eastward; Caesar's Legion expands through conquest and slavery; Robert House seeks a tightly controlled independent future for the Strip; smaller communities and factions pursue survival on their own terms. The Courier moves among these competing visions after surviving an attack tied to a powerful delivery. Reputation, allegiance, and consequence are central, so dialogue must follow the player's confirmed faction standing, companion history, location, and quest state rather than assuming one political route.",
     "spoiler_policy": "The Mojave's public factions, major settlements, and the Courier's opening predicament are enabled by default. Hidden motives, companion revelations, faction endgames, downloadable campaigns, and final outcomes remain locked.",
     "spoiler_tiers": [
@@ -760,7 +762,26 @@
       ]
     }
   },
+  "recommendations": {
+    "integration_mode": "external_only",
+    "provider_strategy": "api_first",
+    "local_activation_policy": "measured_whole_loadout_fit_required",
+    "game_resource_reserve_required": true,
+    "screen_space_lip_sync": "experimental_opt_in_after_exact_target_and_advancing_frame_qualification"
+  },
   "diagnostics": [
+    {
+      "id": "recommended-feature-loadout",
+      "severity": "info",
+      "check": "Keep a game-first resource reserve, prefer explicitly configured API routes for LLM, STT, TTS, and embeddings, and admit optional local models only after measured whole-loadout RAM and VRAM fit checks.",
+      "remediation": "Move optional language or speech roles to an explicitly selected hosted provider, unload nonessential local models, or increase the configured game reserve; keep experimental screen-space lip sync disabled until exact target binding, advancing-frame, and untouched-frame restore checks pass."
+    },
+    {
+      "id": "external-only-safety",
+      "severity": "error",
+      "check": "Confirm the selected target remains an eligible single-player top-level game window and that the session uses external capture, audio, and subtitles only, with no injection, hooks, automated input, or anti-cheat bypass.",
+      "remediation": "Stop on online, protection, process, PID, HWND, executable, or session-mode ambiguity; return to a clearly eligible single-player state and bind the exact game window again, otherwise use no game integration."
+    },
     {
       "id": "game-process",
       "severity": "error",

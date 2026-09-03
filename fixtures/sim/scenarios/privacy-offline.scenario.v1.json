@@ -29,7 +29,7 @@
   "faults": [],
   "expected": {
     "status": "completed",
-    "traceSha256": "d02952df825c747091180781adb5f342d0637d72b4042bca300fb71f3f287caa",
+    "traceSha256": "8c65575f6c5edd329ded268d6f4a192889695c2a2bb10d762651b46bb8b8c3a6",
     "firstAudioAtMs": 520,
     "speechEndToFirstAudioMs": 310,
     "networkAttempts": 0,

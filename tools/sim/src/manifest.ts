@@ -7,7 +7,7 @@ const { canonicalJson, sha256 } = require("./canonical.ts");
 const SCENARIO_VERSION = "npc.sim.scenario.v1";
 const RESOURCE_VERSION = "npc.sim.resource-profile.v1";
 const LEDGER_VERSION = "npc.sim.fixture-ledger.v1";
-const SOURCES = new Set(["stt", "identity", "memory", "llm", "tts", "animation", "control"]);
+const SOURCES = new Set(["input", "stt", "identity", "memory", "llm", "tts", "animation", "delivery", "control"]);
 const STREAM_KINDS = new Set([
   "partial",
   "final",
@@ -19,6 +19,24 @@ const STREAM_KINDS = new Set([
   "audio_chunk",
   "viseme",
   "barge_in",
+  "typed_input",
+  "ambiguous",
+  "missed",
+  "frame_patch",
+  "commit",
+  "manual_retry",
+  "runtime_restart",
+]);
+const SOURCE_KINDS = new Map([
+  ["input", new Set(["typed_input"])],
+  ["stt", new Set(["partial", "final"])],
+  ["identity", new Set(["resolved", "ambiguous", "missed"])],
+  ["memory", new Set(["retrieved"])],
+  ["llm", new Set(["token", "sentence", "complete"])],
+  ["tts", new Set(["audio_chunk", "complete"])],
+  ["animation", new Set(["viseme", "frame_patch", "complete"])],
+  ["delivery", new Set(["commit"])],
+  ["control", new Set(["barge_in", "manual_retry", "runtime_restart"])],
 ]);
 
 function findRepoRoot() {
@@ -50,6 +68,7 @@ function validateScenario(scenario, label = "scenario") {
   requireValue(scenario.turn?.sessionId && scenario.turn?.turnId, `${label}: turn identifiers are required`);
   requireValue(scenario.turn?.npc?.id && scenario.turn?.npc?.name, `${label}: NPC identity is required`);
   requireValue(["visible", "offscreen", "unknown"].includes(scenario.turn?.npc?.visibility), `${label}: invalid NPC visibility`);
+  requireValue([undefined, "speech", "typed"].includes(scenario.turn?.inputMode), `${label}: invalid input mode`);
   requireValue(["hosted", "hybrid", "fully_local", "offline"].includes(scenario.privacy?.mode), `${label}: invalid privacy mode`);
   requireValue(Array.isArray(scenario.stream), `${label}: stream must be an array`);
   requireValue(Array.isArray(scenario.faults), `${label}: faults must be an array`);
@@ -61,13 +80,15 @@ function validateScenario(scenario, label = "scenario") {
     previousAt = event.atMs;
     requireValue(SOURCES.has(event.source), `${label}: stream[${index}] has invalid source`);
     requireValue(STREAM_KINDS.has(event.kind), `${label}: stream[${index}] has invalid kind`);
+    requireValue(SOURCE_KINDS.get(event.source)?.has(event.kind), `${label}: stream[${index}] kind is invalid for source`);
     requireValue(event.payload && typeof event.payload === "object" && !Array.isArray(event.payload), `${label}: stream[${index}] payload must be an object`);
+    requireValue(event.generation === undefined || (Number.isSafeInteger(event.generation) && event.generation >= 0), `${label}: stream[${index}] has invalid generation`);
   }
 
   for (const [index, fault] of scenario.faults.entries()) {
     requireValue(Number.isSafeInteger(fault.atMs) && fault.atMs >= 0, `${label}: faults[${index}] has invalid atMs`);
-    requireValue(["stt", "identity", "memory", "llm", "tts", "animation", "resource"].includes(fault.target), `${label}: faults[${index}] has invalid target`);
-    requireValue(["provider_error", "worker_crash", "timeout", "low_vram"].includes(fault.kind), `${label}: faults[${index}] has invalid kind`);
+    requireValue(["stt", "identity", "memory", "llm", "tts", "animation", "resource", "runtime"].includes(fault.target), `${label}: faults[${index}] has invalid target`);
+    requireValue(["provider_error", "worker_crash", "timeout", "low_vram", "runtime_crash"].includes(fault.kind), `${label}: faults[${index}] has invalid kind`);
     requireValue(typeof fault.code === "string" && fault.code.length > 0, `${label}: faults[${index}] code is required`);
   }
 

@@ -1,10 +1,12 @@
 # Providers and credentials
 
+Provider facts last verified: **2026-08-30**
+
 ## Hosted integrations
 
 - LLM: OpenAI, Google Gemini, Anthropic, Groq, Cohere, NVIDIA NIM, and a best-effort configurable OpenAI-compatible endpoint
-- STT: Deepgram, AssemblyAI, ElevenLabs, OpenAI, and an implemented but not yet live-qualified NVIDIA Nemotron streaming-ASR route
-- TTS: Cartesia, ElevenLabs, Inworld, Deepgram, and experimental NVIDIA Magpie stock voices; its HTTP audio path has a synthetic smoke result while live gRPC streaming remains pending
+- STT: Deepgram, AssemblyAI, ElevenLabs, OpenAI, and an implemented NVIDIA Nemotron streaming-ASR route that remains disabled after two bounded live gRPC timeouts
+- TTS: Cartesia, ElevenLabs, Inworld, Deepgram, and experimental NVIDIA Magpie stock voices; Magpie HTTP discovery/synthesis and its concrete fixed-origin Riva gRPC stock-voice stream are live-qualified, while ordinary app-turn selection remains an integration gate
 - Retrieval: experimental NVIDIA NIM embeddings; NVIDIA hosted reranking is currently non-selectable because the tested routes were unavailable
 
 An entry in the catalog means a contract is modeled; [CHANGELOG.md](../../CHANGELOG.md) and runtime diagnostics determine whether an adapter is implemented and verified in the current build.
@@ -19,7 +21,7 @@ Select **Add key** for the provider. The Tauri shell opens a native Windows cred
 
 Do not use `apikeys.json`, `.env` files checked into the repository, command-line keys, or character/profile files for production credentials.
 
-For NVIDIA's one-account experimentation path, follow [Trying NVIDIA NIM](nvidia-nim.md). The app may recommend NIM as a convenient first provider to try, but it never chooses NIM, contacts it, or enables another NIM modality without explicit user selection and egress consent.
+For NVIDIA's one-account evaluation path, follow [Trying NVIDIA NIM](nvidia-nim.md). One account-bound key can authenticate entitled/available LLM, retrieval, vision, ASR, and TTS endpoints, but model availability, function IDs, trial limits, licenses, and egress consent remain route-specific. Free hosted access is for prototyping and may be time-, usage-, credit-, availability-, or rate-limited; production requires separately licensed service/deployment. The app may recommend NIM as a convenient first provider to try, but it never chooses NIM, contacts it, or enables another NIM modality without explicit user selection and egress consent.
 
 ## Validate without exposing the key
 

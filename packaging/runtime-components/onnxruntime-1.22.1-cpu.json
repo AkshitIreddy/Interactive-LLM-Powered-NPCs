@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "runtime_id": "onnxruntime-1.22.1-cpu",
+  "display_name": "ONNX Runtime 1.22.1 CPU",
+  "source_project": "https://github.com/microsoft/onnxruntime",
+  "source_revision": "v1.22.1",
+  "license": {
+    "spdx": "MIT",
+    "scope": "ONNX Runtime project code; the official binary archive also carries the separately pinned ThirdPartyNotices.txt terms",
+    "license_url": "https://github.com/microsoft/onnxruntime/blob/v1.22.1/LICENSE",
+    "source_license_sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c",
+    "archive_license_sha256": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674",
+    "archive_third_party_notices_sha256": "e00f828e0a33de591a355ae6606d2625f5758da7d2c844db7821c9dd3e3647b6",
+    "archive_third_party_notices_size_bytes": 333022
+  },
+  "archive": {
+    "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.22.1/onnxruntime-win-x64-1.22.1.zip",
+    "format": "zip",
+    "size_bytes": 73731806,
+    "sha256": "855276cd4be3cda14fe636c69eb038d75bf5bcd552bda1193a5d79c51f436dfe",
+    "strip_prefix": "onnxruntime-win-x64-1.22.1"
+  },
+  "extracted_allowlist": [
+    { "path": "GIT_COMMIT_ID", "size_bytes": 43, "sha256": "e0c601203df56aa8019689d2b66d8fe56d7a95de19d95bbd26dda348f3ead40e" },
+    { "path": "LICENSE", "size_bytes": 1094, "sha256": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674" },
+    { "path": "ThirdPartyNotices.txt", "size_bytes": 333022, "sha256": "e00f828e0a33de591a355ae6606d2625f5758da7d2c844db7821c9dd3e3647b6" },
+    { "path": "VERSION_NUMBER", "size_bytes": 8, "sha256": "54383439bcd62dac0ca2cb49c9ec23972fc5c67db741044e77969d4fcf637dc0" },
+    { "path": "lib/onnxruntime.dll", "size_bytes": 12416032, "sha256": "7788f3f38e9a339003f7d7e1bf47f928287cf409bb5273273149e1282fbf503f" },
+    { "path": "lib/onnxruntime_providers_shared.dll", "size_bytes": 22048, "sha256": "7a71dbee513692aeb0bd2346a50ae0edd28c8b34defc17254605a29e81c60569" }
+  ],
+  "installed_size_bytes": 12772247,
+  "distribution": "optional-user-download",
+  "redistributed_in_base_installer": false,
+  "activation_allowed": false,
+  "status": "pinned-artifact-blocked-pending-trusted-measurement-and-whole-loadout-admission",
+  "required_before_activation": [
+    "Verify the archive and every extracted allowlist member before atomic activation; reject every unlisted archive entry.",
+    "Install the archive MIT license and ThirdPartyNotices.txt alongside the runtime and reconcile both in the optional-pack SBOM.",
+    "Complete human legal review of the official archive ThirdPartyNotices terms before optional-runtime redistribution or activation.",
+    "Run static ONNX admission and the attested current-device self-test before first session creation.",
+    "Require a signed current-device measured resource envelope and whole-loadout admission."
+  ],
+  "consumers": ["openseeface-mnv3-lm1-mouth-signal"],
+  "notes": [
+    "This record is canonical optional-download coverage; the strict OpenSeeFace v2 pack manifest carries the same archive binding.",
+    "ONNX Runtime binaries are not bundled or mirrored by the base installer and remain inactive until every admission gate passes.",
+    "The official binary archive is not described solely by the ONNX Runtime project MIT license; its pinned ThirdPartyNotices.txt is mandatory distribution and activation evidence.",
+    "The source LICENSE hash and the release-archive LICENSE hash differ because the release archive uses different line endings; both byte sequences are pinned above."
+  ]
+}

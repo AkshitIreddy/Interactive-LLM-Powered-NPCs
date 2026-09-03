@@ -30,7 +30,19 @@ impl Default for SentenceSegmenterConfig {
 pub struct SentenceSegmenter {
     config: SentenceSegmenterConfig,
     buffer: String,
-    scan_from: usize,
+    buffer_source_start: usize,
+    next_sentence_id: u64,
+}
+
+/// A complete, sanitized sentence and its exact UTF-8 byte range in the original
+/// provider stream. The range is the authority used by delivered-only memory
+/// commits; callers never have to infer offsets from trimmed text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SentenceSpan {
+    pub sentence_id: u64,
+    pub text_start_bytes: usize,
+    pub text_end_bytes: usize,
+    pub text: String,
 }
 
 impl SentenceSegmenter {
@@ -41,16 +53,31 @@ impl SentenceSegmenter {
         Self {
             config,
             buffer: String::new(),
-            scan_from: 0,
+            buffer_source_start: 0,
+            next_sentence_id: 1,
         }
     }
 
     pub fn push(&mut self, delta: &str) -> Vec<String> {
+        self.push_spans(delta)
+            .into_iter()
+            .map(|span| span.text)
+            .collect()
+    }
+
+    pub fn push_spans(&mut self, delta: &str) -> Vec<SentenceSpan> {
         self.buffer.push_str(delta);
         self.extract(false)
     }
 
     pub fn finish(&mut self) -> Vec<String> {
+        self.finish_spans()
+            .into_iter()
+            .map(|span| span.text)
+            .collect()
+    }
+
+    pub fn finish_spans(&mut self) -> Vec<SentenceSpan> {
         self.extract(true)
     }
 
@@ -58,17 +85,26 @@ impl SentenceSegmenter {
         &self.buffer
     }
 
-    fn extract(&mut self, flush: bool) -> Vec<String> {
+    fn extract(&mut self, flush: bool) -> Vec<SentenceSpan> {
         let mut emitted = Vec::new();
         while let Some(boundary) = self.find_boundary(flush) {
             let remainder = self.buffer.split_off(boundary);
-            let sentence = std::mem::replace(&mut self.buffer, remainder);
-            let sentence = sentence.trim().to_owned();
-            self.scan_from = 0;
+            let raw_sentence = std::mem::replace(&mut self.buffer, remainder);
+            let leading = raw_sentence.len() - raw_sentence.trim_start().len();
+            let trimmed_end = raw_sentence.trim_end().len();
+            let sentence = raw_sentence[leading..trimmed_end].to_owned();
             if !sentence.is_empty() {
-                emitted.push(sentence);
+                emitted.push(SentenceSpan {
+                    sentence_id: self.next_sentence_id,
+                    text_start_bytes: self.buffer_source_start + leading,
+                    text_end_bytes: self.buffer_source_start + trimmed_end,
+                    text: sentence,
+                });
+                self.next_sentence_id += 1;
             }
+            self.buffer_source_start += boundary;
             if self.buffer.trim().is_empty() {
+                self.buffer_source_start += self.buffer.len();
                 self.buffer.clear();
                 break;
             }
@@ -83,8 +119,10 @@ impl SentenceSegmenter {
 
         let mut last_soft = None;
         let mut previous = None;
-        for (offset, ch) in self.buffer[self.scan_from..].char_indices() {
-            let byte = self.scan_from + offset;
+        // The buffer is deliberately rescanned. It is capped by hard_limit_chars,
+        // and rescanning is required when a punctuation mark arrives in one delta
+        // while its following whitespace arrives in the next delta.
+        for (byte, ch) in self.buffer.char_indices() {
             let end = byte + ch.len_utf8();
             let char_count = self.buffer[..end].chars().count();
 
@@ -92,20 +130,23 @@ impl SentenceSegmenter {
                 last_soft = Some(end);
             }
 
-            if matches!(ch, '!' | '?' | '\n')
-                && char_count >= self.config.min_sentence_chars
-                && self.followed_by_boundary(end)
-            {
-                return Some(self.consume_whitespace(end));
+            if matches!(ch, '!' | '?' | '\n') && char_count >= self.config.min_sentence_chars {
+                if ch == '\n' {
+                    return Some(self.consume_whitespace(end));
+                }
+                if let Some(boundary) = self.terminal_boundary(end) {
+                    return Some(boundary);
+                }
             }
 
             if ch == '.'
                 && char_count >= self.config.min_sentence_chars
                 && !self.is_decimal(byte, previous)
                 && !self.is_abbreviation(end)
-                && self.followed_by_boundary(end)
             {
-                return Some(self.consume_whitespace(end));
+                if let Some(boundary) = self.terminal_boundary(end) {
+                    return Some(boundary);
+                }
             }
 
             if char_count >= self.config.soft_boundary_chars {
@@ -118,16 +159,21 @@ impl SentenceSegmenter {
             }
             previous = Some(ch);
         }
-        self.scan_from = self.buffer.len();
         None
     }
 
-    fn followed_by_boundary(&self, end: usize) -> bool {
-        self.buffer[end..]
-            .chars()
-            .next()
-            .map(|next| next.is_whitespace() || matches!(next, '\"' | '\'' | ')' | ']'))
-            .unwrap_or(false)
+    fn terminal_boundary(&self, mut end: usize) -> Option<usize> {
+        for ch in self.buffer[end..].chars() {
+            if matches!(ch, '\"' | '\'' | ')' | ']' | '}') {
+                end += ch.len_utf8();
+                continue;
+            }
+            return ch.is_whitespace().then(|| self.consume_whitespace(end));
+        }
+        // End-of-buffer punctuation is held until either finish() or the next
+        // chunk proves the boundary. This avoids splitting abbreviations and
+        // keeps closing quotes attached to the spoken sentence.
+        None
     }
 
     fn consume_whitespace(&self, mut end: usize) -> usize {
@@ -184,6 +230,7 @@ impl Default for SentenceSegmenter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn segments_across_stream_chunks() {
@@ -194,6 +241,35 @@ mod tests {
             vec!["This is a complete sentence."]
         );
         assert_eq!(segmenter.finish(), vec!["Here is another one!"]);
+    }
+
+    #[test]
+    fn reconsiders_terminal_punctuation_when_whitespace_arrives_later() {
+        let mut segmenter = SentenceSegmenter::default();
+        assert!(segmenter
+            .push("This sentence ends exactly at a chunk boundary.")
+            .is_empty());
+        assert_eq!(
+            segmenter.push(" Next sentence"),
+            vec!["This sentence ends exactly at a chunk boundary."]
+        );
+        assert_eq!(segmenter.finish(), vec!["Next sentence"]);
+    }
+
+    #[test]
+    fn spans_preserve_utf8_offsets_and_closing_quotes() {
+        let mut segmenter = SentenceSegmenter::default();
+        let source = "  She said, \"Meet me by the 界 gate!\"  Then she left.";
+        let mut spans = segmenter.push_spans(source);
+        spans.extend(segmenter.finish_spans());
+        assert_eq!(spans.len(), 2);
+        for span in &spans {
+            assert_eq!(
+                &source[span.text_start_bytes..span.text_end_bytes],
+                span.text
+            );
+        }
+        assert_eq!(spans[0].text, "She said, \"Meet me by the 界 gate!\"");
     }
 
     #[test]
@@ -218,5 +294,34 @@ mod tests {
         assert!(output
             .iter()
             .all(|value| value.is_char_boundary(value.len())));
+    }
+
+    proptest! {
+        #[test]
+        fn segmentation_is_independent_of_provider_chunking(
+            words in prop::collection::vec("[A-Za-z]{1,10}", 4..60)
+        ) {
+            let mut source = String::new();
+            for (index, word) in words.iter().enumerate() {
+                source.push_str(word);
+                if index % 5 == 4 {
+                    source.push_str(". ");
+                } else {
+                    source.push(' ');
+                }
+            }
+
+            let mut one_chunk = SentenceSegmenter::default();
+            let mut expected = one_chunk.push(&source);
+            expected.extend(one_chunk.finish());
+
+            let mut character_chunks = SentenceSegmenter::default();
+            let mut actual = Vec::new();
+            for character in source.chars() {
+                actual.extend(character_chunks.push(&character.to_string()));
+            }
+            actual.extend(character_chunks.finish());
+            prop_assert_eq!(actual, expected);
+        }
     }
 }

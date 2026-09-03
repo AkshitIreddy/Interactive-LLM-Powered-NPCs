@@ -1,0 +1,243 @@
+{
+  "schema_version": 1,
+  "roles": [
+    {
+      "id": "subtitle_sans",
+      "system_families": [
+        {
+          "family": "Segoe UI",
+          "platforms": ["windows"],
+          "scripts": ["latin", "cyrillic", "greek", "hebrew", "arabic", "common"],
+          "source": "operating_system",
+          "license_id": "LicenseRef-Microsoft-System-Font",
+          "redistribute": false
+        },
+        {
+          "family": "Nirmala UI",
+          "platforms": ["windows"],
+          "scripts": ["devanagari", "bengali", "common"],
+          "source": "operating_system",
+          "license_id": "LicenseRef-Microsoft-System-Font",
+          "redistribute": false
+        },
+        {
+          "family": "Leelawadee UI",
+          "platforms": ["windows"],
+          "scripts": ["thai", "common"],
+          "source": "operating_system",
+          "license_id": "LicenseRef-Microsoft-System-Font",
+          "redistribute": false
+        },
+        {
+          "family": "Microsoft YaHei UI",
+          "platforms": ["windows"],
+          "scripts": ["han", "common"],
+          "source": "operating_system",
+          "license_id": "LicenseRef-Microsoft-System-Font",
+          "redistribute": false
+        },
+        {
+          "family": "Yu Gothic UI",
+          "platforms": ["windows"],
+          "scripts": ["han", "hiragana_katakana", "common"],
+          "source": "operating_system",
+          "license_id": "LicenseRef-Microsoft-System-Font",
+          "redistribute": false
+        },
+        {
+          "family": "Malgun Gothic",
+          "platforms": ["windows"],
+          "scripts": ["hangul", "common"],
+          "source": "operating_system",
+          "license_id": "LicenseRef-Microsoft-System-Font",
+          "redistribute": false
+        },
+        {
+          "family": "Segoe UI Emoji",
+          "platforms": ["windows"],
+          "scripts": ["emoji", "common"],
+          "source": "operating_system",
+          "license_id": "LicenseRef-Microsoft-System-Font",
+          "redistribute": false
+        },
+        {
+          "family": "Noto Sans",
+          "platforms": ["linux", "macos", "windows"],
+          "scripts": ["latin", "cyrillic", "greek", "common"],
+          "source": "operating_system",
+          "license_id": "OFL-1.1",
+          "redistribute": false
+        },
+        {
+          "family": "Noto Sans Arabic",
+          "platforms": ["linux", "macos", "windows"],
+          "scripts": ["arabic", "common"],
+          "source": "operating_system",
+          "license_id": "OFL-1.1",
+          "redistribute": false
+        },
+        {
+          "family": "Noto Sans Hebrew",
+          "platforms": ["linux", "macos", "windows"],
+          "scripts": ["hebrew", "common"],
+          "source": "operating_system",
+          "license_id": "OFL-1.1",
+          "redistribute": false
+        },
+        {
+          "family": "Noto Sans Devanagari",
+          "platforms": ["linux", "macos", "windows"],
+          "scripts": ["devanagari", "common"],
+          "source": "operating_system",
+          "license_id": "OFL-1.1",
+          "redistribute": false
+        },
+        {
+          "family": "Noto Sans Bengali",
+          "platforms": ["linux", "macos", "windows"],
+          "scripts": ["bengali", "common"],
+          "source": "operating_system",
+          "license_id": "OFL-1.1",
+          "redistribute": false
+        },
+        {
+          "family": "Noto Sans Thai",
+          "platforms": ["linux", "macos", "windows"],
+          "scripts": ["thai", "common"],
+          "source": "operating_system",
+          "license_id": "OFL-1.1",
+          "redistribute": false
+        },
+        {
+          "family": "Noto Sans CJK JP",
+          "platforms": ["linux", "macos", "windows"],
+          "scripts": ["han", "hiragana_katakana", "common"],
+          "source": "operating_system",
+          "license_id": "OFL-1.1",
+          "redistribute": false
+        },
+        {
+          "family": "Noto Sans CJK KR",
+          "platforms": ["linux", "macos", "windows"],
+          "scripts": ["han", "hangul", "common"],
+          "source": "operating_system",
+          "license_id": "OFL-1.1",
+          "redistribute": false
+        },
+        {
+          "family": "Noto Color Emoji",
+          "platforms": ["linux", "macos", "windows"],
+          "scripts": ["emoji", "common"],
+          "source": "operating_system",
+          "license_id": "OFL-1.1",
+          "redistribute": false
+        },
+        {
+          "family": "sans-serif",
+          "platforms": ["windows", "linux", "macos"],
+          "scripts": ["latin", "cyrillic", "greek", "common", "unknown"],
+          "source": "operating_system",
+          "license_id": "LicenseRef-Platform-Generic-Font",
+          "redistribute": false
+        }
+      ],
+      "generic_fallback": "sans_serif",
+      "shaping_features": ["kern", "liga", "clig", "calt", "mark", "mkmk"]
+    },
+    {
+      "id": "subtitle_sans_emphasis",
+      "system_families": [
+        {
+          "family": "Segoe UI Semibold",
+          "platforms": ["windows"],
+          "scripts": ["latin", "cyrillic", "greek", "hebrew", "arabic", "common"],
+          "source": "operating_system",
+          "license_id": "LicenseRef-Microsoft-System-Font",
+          "redistribute": false
+        },
+        {
+          "family": "Noto Sans",
+          "platforms": ["linux", "macos", "windows"],
+          "scripts": ["latin", "cyrillic", "greek", "common"],
+          "source": "operating_system",
+          "license_id": "OFL-1.1",
+          "redistribute": false
+        },
+        {
+          "family": "Noto Sans Arabic",
+          "platforms": ["linux", "macos", "windows"],
+          "scripts": ["arabic", "common"],
+          "source": "operating_system",
+          "license_id": "OFL-1.1",
+          "redistribute": false
+        },
+        {
+          "family": "Noto Sans Hebrew",
+          "platforms": ["linux", "macos", "windows"],
+          "scripts": ["hebrew", "common"],
+          "source": "operating_system",
+          "license_id": "OFL-1.1",
+          "redistribute": false
+        },
+        {
+          "family": "Noto Sans Devanagari",
+          "platforms": ["linux", "macos", "windows"],
+          "scripts": ["devanagari", "common"],
+          "source": "operating_system",
+          "license_id": "OFL-1.1",
+          "redistribute": false
+        },
+        {
+          "family": "Noto Sans Bengali",
+          "platforms": ["linux", "macos", "windows"],
+          "scripts": ["bengali", "common"],
+          "source": "operating_system",
+          "license_id": "OFL-1.1",
+          "redistribute": false
+        },
+        {
+          "family": "Noto Sans Thai",
+          "platforms": ["linux", "macos", "windows"],
+          "scripts": ["thai", "common"],
+          "source": "operating_system",
+          "license_id": "OFL-1.1",
+          "redistribute": false
+        },
+        {
+          "family": "Noto Sans CJK JP",
+          "platforms": ["linux", "macos", "windows"],
+          "scripts": ["han", "hiragana_katakana", "common"],
+          "source": "operating_system",
+          "license_id": "OFL-1.1",
+          "redistribute": false
+        },
+        {
+          "family": "Noto Sans CJK KR",
+          "platforms": ["linux", "macos", "windows"],
+          "scripts": ["han", "hangul", "common"],
+          "source": "operating_system",
+          "license_id": "OFL-1.1",
+          "redistribute": false
+        },
+        {
+          "family": "Noto Color Emoji",
+          "platforms": ["linux", "macos", "windows"],
+          "scripts": ["emoji", "common"],
+          "source": "operating_system",
+          "license_id": "OFL-1.1",
+          "redistribute": false
+        },
+        {
+          "family": "sans-serif",
+          "platforms": ["windows", "linux", "macos"],
+          "scripts": ["latin", "cyrillic", "greek", "common", "unknown"],
+          "source": "operating_system",
+          "license_id": "LicenseRef-Platform-Generic-Font",
+          "redistribute": false
+        }
+      ],
+      "generic_fallback": "sans_serif",
+      "shaping_features": ["kern", "liga", "clig", "calt", "mark", "mkmk"]
+    }
+  ]
+}

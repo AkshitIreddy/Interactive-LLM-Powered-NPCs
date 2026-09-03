@@ -103,4 +103,13 @@ impl RetrievalError {
     pub(crate) fn malformed(message: &'static str) -> Self {
         Self::new(RetrievalErrorKind::MalformedResponse, message)
     }
+
+    /// Constructs the only credential-resolution failure external trusted hosts may emit.
+    /// The fixed message cannot contain a vault target, provider body, or credential material.
+    pub fn credential_unavailable() -> Self {
+        Self::new(
+            RetrievalErrorKind::CredentialUnavailable,
+            "provider credential is unavailable",
+        )
+    }
 }

@@ -27,18 +27,26 @@ function Get-NpcShortCMakeBuildPath {
         [string]$Component
     )
 
-    $localAppData = $env:LOCALAPPDATA
-    if ([string]::IsNullOrWhiteSpace($localAppData)) {
-        $localAppData = [System.Environment]::GetFolderPath(
-            [System.Environment+SpecialFolder]::LocalApplicationData
-        )
-    }
-    if ([string]::IsNullOrWhiteSpace($localAppData)) {
-        throw 'LOCALAPPDATA could not be resolved for the disposable CMake build cache.'
-    }
-
     $canonicalRepository = [System.IO.Path]::GetFullPath($RepositoryRoot).TrimEnd('\', '/')
-    $buildBase = Join-Path $localAppData "InteractiveNPCs/build/$Component"
+    $largeArtifactRoot = $env:NPC_LARGE_ARTIFACT_ROOT
+    if ([string]::IsNullOrWhiteSpace($largeArtifactRoot)) {
+        $localAppData = $env:LOCALAPPDATA
+        if ([string]::IsNullOrWhiteSpace($localAppData)) {
+            $localAppData = [System.Environment]::GetFolderPath(
+                [System.Environment+SpecialFolder]::LocalApplicationData
+            )
+        }
+        if ([string]::IsNullOrWhiteSpace($localAppData)) {
+            throw 'LOCALAPPDATA could not be resolved for the disposable CMake build cache.'
+        }
+        $buildBase = Join-Path $localAppData "InteractiveNPCs/build/$Component"
+    }
+    else {
+        if (-not [System.IO.Path]::IsPathRooted($largeArtifactRoot)) {
+            throw 'NPC_LARGE_ARTIFACT_ROOT must be an absolute path.'
+        }
+        $buildBase = Join-Path $largeArtifactRoot "native-builds/cmake/$Component"
+    }
     $buildKey = Get-NpcRepositoryBuildKey -RepositoryRoot $canonicalRepository
     $buildPath = Join-Path $buildBase $buildKey
 

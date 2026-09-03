@@ -1,0 +1,55 @@
+{
+  "schema": "npc.local-llm.observational-control/v1",
+  "control_id": "lmstudio-cuda12-2.31.2",
+  "classification": "installed_third_party_observational_control_not_redistributable_not_admission_evidence",
+  "lm_studio_version": "0.4.13+1",
+  "cli": {
+    "path_template": "%USERPROFILE%\\.lmstudio\\bin\\lms.exe",
+    "commit": "0b2a176",
+    "size_bytes": 120741048,
+    "sha256": "c11b68cec1ac68213e33536b908cfe6ea2c303927a6cc84b9e1f2fe64df3d2af"
+  },
+  "engine": {
+    "alias": "llama.cpp-win-x86_64-nvidia-cuda12-avx2@2.31.2",
+    "directory_template": "%USERPROFILE%\\.lmstudio\\extensions\\backends\\llama.cpp-win-x86_64-nvidia-cuda12-avx2-2.31.2",
+    "engine_version": "2.31.2",
+    "llama_cpp_release": "b10662",
+    "llama_cpp_commit_prefix": "18443257a",
+    "cuda_label": "12.8",
+    "backend_manifest_sha256": "d433ca10e2743d396c0171dc79f0b6d939095ac8f9390ca231929237a8b4ed65",
+    "display_data_sha256": "f87af8d4e639d917a8902fe448976f50423da07cec8ee33c59db714b4b77ac8a",
+    "protocol_artifacts_sha256": "cbcfb9d921051732d47832f6053283322f3912d929c19cfd1b503e24e83a1204",
+    "files": [
+      {"path": "ggml-base.dll", "size_bytes": 808632, "sha256": "5f6c54b5628c3e52f633d22948cfa4a0c7d6911dbeffd802187a0d22e73d0b13"},
+      {"path": "ggml-cpu.dll", "size_bytes": 1058488, "sha256": "5c32ae4171272d2d4cda5c797e830561d1d7e68a5a2c2c78e21941aef61c1379"},
+      {"path": "ggml-cuda.dll", "size_bytes": 139214008, "sha256": "c3ccef5b2ee8ac7a8143d843cd8ae1a6abbff6ca61527b3df8d8e2796aeab586"},
+      {"path": "ggml_llamacpp.dll", "size_bytes": 95416, "sha256": "d6511a798c0e37601e61c7023b001173b4647f55b54aa903131b40b8b2664dd1"},
+      {"path": "llama-common.dll", "size_bytes": 5173432, "sha256": "8aa2001d4f8dd487c18c900f8ac4c22f145d4646605e032fafcbafc77ec89775"},
+      {"path": "llama-server-impl.dll", "size_bytes": 2958008, "sha256": "759801201fa55941226caff0273bdebca26fac3b574afb61d129df8fa3eb3e65"},
+      {"path": "llama-server.exe", "size_bytes": 20152, "sha256": "b35a35f7f9aa8b1ce09c8f822d4030de4781815727a111bdf9ee7d8401fce7f7"},
+      {"path": "llama.dll", "size_bytes": 2966712, "sha256": "9b43ce3a7c74aeeddd3f51c5c8c63fcde29da96f2f2955693c3782e6d331944d"},
+      {"path": "mtmd.dll", "size_bytes": 1726648, "sha256": "137a10668768f54bd934d423dfdc3a6475bea75011956150d2247f27e1f8f126"}
+    ]
+  },
+  "vendor_runtime": {
+    "directory_template": "%USERPROFILE%\\.lmstudio\\extensions\\backends\\vendor\\win-llama-cuda12-vendor-v2",
+    "files": [
+      {"path": "cublas64_12.dll", "size_bytes": 113716224, "sha256": "9513540e4ec4c51ee9e7304138c2cc255c29a8c181f9e80c38efa25738becd99"},
+      {"path": "cublasLt64_12.dll", "size_bytes": 674667520, "sha256": "b199d1ff892a81b7fd3d57ba1781549609b41500b36008fef326038393ad46c7"},
+      {"path": "cudart64_12.dll", "size_bytes": 573952, "sha256": "c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344"}
+    ]
+  },
+  "model_access": {
+    "mode": "temporary_symbolic_link_only",
+    "copy_model": false,
+    "copy_credentials_or_profile_state": false,
+    "dry_run_verified": true,
+    "dry_run_destination_template": "E:\\AI Models\\lmstudio\\interactive-npcs\\qwen3-4b-instruct-2507\\Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+    "cleanup_required": true
+  },
+  "limits": {
+    "samples": 10,
+    "p99_or_admission_claims_allowed": false,
+    "reason": "Different llama.cpp revision, CUDA runtime, load controls and host process prevent an apples-to-apples comparison."
+  }
+}

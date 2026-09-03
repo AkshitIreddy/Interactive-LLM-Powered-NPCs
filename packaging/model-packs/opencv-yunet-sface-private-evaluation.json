@@ -1,0 +1,225 @@
+{
+  "$schema": "./model-pack-manifest.schema.json",
+  "schema": "npc.model-pack/v2",
+  "pack_id": "opencv-yunet-sface-private-eval",
+  "revision": "zoo-47534e27-opencv-5.0.0.93",
+  "display_name": "OpenCV YuNet + SFace identity observations",
+  "description": "Optional explicit-download CPU face-detection and normalized appearance-embedding pack. The worker emits untrusted observations only and never selects a character. The exact YuNet directory is MIT; the exact SFace directory says all files are Apache-2.0; and the pinned OpenCV Zoo report says its model weights, including Area Chair-contributed SFace, were collected for use for any purpose including commercial use. Runtime wheels remain separate components with their own admission and notice obligations.",
+  "source": {
+    "project_url": "https://github.com/opencv/opencv_zoo",
+    "immutable_revision": "47534e27c9851bb1128ccc0102f1145e27f23f98",
+    "model_card_url": "https://github.com/opencv/opencv_zoo/tree/47534e27c9851bb1128ccc0102f1145e27f23f98/models"
+  },
+  "capability": {
+    "kind": "vision",
+    "scope": "generic"
+  },
+  "artifacts": [
+    {
+      "id": "yunet-2026may-onnx",
+      "role": "model_weights",
+      "kind": "file",
+      "archive_format": null,
+      "source_urls": [
+        "https://media.githubusercontent.com/media/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_detection_yunet/face_detection_yunet_2026may.onnx"
+      ],
+      "size_bytes": 229738,
+      "sha256": "ebafce4e3c118d6554634be5c27ab333b4c047a9a8c3faf1d7cf93101c22f0f0",
+      "destination": "models/face_detection_yunet_2026may.onnx",
+      "strip_prefix": null,
+      "required_paths": []
+    },
+    {
+      "id": "yunet-license",
+      "role": "license",
+      "kind": "file",
+      "archive_format": null,
+      "source_urls": [
+        "https://raw.githubusercontent.com/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_detection_yunet/LICENSE"
+      ],
+      "size_bytes": 1085,
+      "sha256": "c83b8120c50ccbd4c4f96edf53141bdd566ebb8f8e9227e415326aa1b1aba958",
+      "destination": "licenses/YUNET-MIT.txt",
+      "strip_prefix": null,
+      "required_paths": []
+    },
+    {
+      "id": "sface-2021dec-onnx",
+      "role": "model_weights",
+      "kind": "file",
+      "archive_format": null,
+      "source_urls": [
+        "https://media.githubusercontent.com/media/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_recognition_sface/face_recognition_sface_2021dec.onnx"
+      ],
+      "size_bytes": 38696353,
+      "sha256": "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
+      "destination": "models/face_recognition_sface_2021dec.onnx",
+      "strip_prefix": null,
+      "required_paths": []
+    },
+    {
+      "id": "sface-license",
+      "role": "license",
+      "kind": "file",
+      "archive_format": null,
+      "source_urls": [
+        "https://raw.githubusercontent.com/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_recognition_sface/LICENSE"
+      ],
+      "size_bytes": 11358,
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "destination": "licenses/SFACE-APACHE-2.0.txt",
+      "strip_prefix": null,
+      "required_paths": []
+    },
+    {
+      "id": "sface-model-card",
+      "role": "notice",
+      "kind": "file",
+      "archive_format": null,
+      "source_urls": [
+        "https://raw.githubusercontent.com/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_recognition_sface/README.md"
+      ],
+      "size_bytes": 2267,
+      "sha256": "e090e126f3fb5c0b0b2d84ee644b17e42a70b2e45a90616814970b811e91d063",
+      "destination": "licenses/SFACE-MODEL-CARD.md",
+      "strip_prefix": null,
+      "required_paths": []
+    },
+    {
+      "id": "opencv-zoo-commercial-use-report",
+      "role": "notice",
+      "kind": "file",
+      "archive_format": null,
+      "source_urls": [
+        "https://raw.githubusercontent.com/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/reports/2023-4.9.0/opencv_zoo_report-en-2023-4.9.0.md"
+      ],
+      "size_bytes": 4649,
+      "sha256": "bd1ccd892cfd306829fe219de9950b3d97847dbb7d5cfdf3453361701c089ec3",
+      "destination": "licenses/OPENCV-ZOO-COMMERCIAL-USE-REPORT.md",
+      "strip_prefix": null,
+      "required_paths": []
+    }
+  ],
+  "runtime": {
+    "runtime": "opencv-python-headless",
+    "immutable_revision": "cp312-opencv-5.0.0.93-numpy-2.5.2",
+    "abi": "npc-face-observation-v1",
+    "entrypoint": "workers/local-identity/worker.py",
+    "supported_platforms": ["windows10", "windows11"],
+    "supported_architectures": ["x86_64"],
+    "backends": ["opencv-dnn-cpu"],
+    "network_access_after_install": false
+  },
+  "hardware": {
+    "minimum_ram_bytes": 0,
+    "recommended_ram_bytes": 0,
+    "minimum_vram_bytes": 0,
+    "recommended_vram_bytes": 0,
+    "minimum_cpu_threads": 1,
+    "accelerators": ["cpu"],
+    "required_cpu_features": []
+  },
+  "resources": {
+    "storage_bytes": 38945450,
+    "peak_install_bytes": 77890900,
+    "planning_resident_ram_bytes": null,
+    "planning_resident_vram_bytes": null,
+    "planning_load_millis": null,
+    "planning_hardware": null,
+    "quality_tier": "experimental",
+    "languages": ["und"],
+    "measurement": {
+      "required_schema": "npc.measured-resource-envelope/v1",
+      "minimum_samples": 20,
+      "current_device_fingerprint_required": true,
+      "signed_evidence_required": true,
+      "p99_reload_required": true,
+      "manifest_values_not_for_admission": true
+    }
+  },
+  "license": {
+    "spdx_expression": "MIT AND Apache-2.0",
+    "license_name": "YuNet MIT and SFace Apache-2.0 model files",
+    "license_url": "https://github.com/opencv/opencv_zoo/tree/47534e27c9851bb1128ccc0102f1145e27f23f98/models",
+    "attribution": "YuNet contributors and SFace/OpenCV Zoo contributors. Retain the exact MIT and Apache-2.0 notices, SFace model card, and pinned OpenCV Zoo model-use report.",
+    "redistributable": true,
+    "commercial_use": "allowed",
+    "derivative_use": "allowed",
+    "acceptance_required": false,
+    "notices": [
+      "The application does not bundle or automatically download this optional pack; installation requires explicit user selection.",
+      "The exact SFace model card says all files in its directory are Apache-2.0. The pinned OpenCV Zoo report says the model weights were collected for any purpose including commercial use and identifies SFace as an OpenCV Area Chair contribution.",
+      "OpenCV and NumPy runtime wheels are not artifacts of this model pack. Their exact pins remain in the worker runtime lock and require separate extracted-file notice review and admission.",
+      "No current-device resource, latency, cancellation, open-set accuracy, or game-contention envelope exists yet."
+    ],
+    "components": [
+      {
+        "id": "yunet-model",
+        "component": "YuNet 2026may detector weight and notice",
+        "spdx_expression": "MIT",
+        "license_url": "https://github.com/opencv/opencv_zoo/blob/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_detection_yunet/LICENSE",
+        "immutable_source_revision": "47534e27c9851bb1128ccc0102f1145e27f23f98",
+        "redistributable": true,
+        "notice_required": true
+      },
+      {
+        "id": "sface-model-apache2",
+        "component": "SFace 2021dec pretrained weight and model card",
+        "spdx_expression": "Apache-2.0",
+        "license_url": "https://github.com/opencv/opencv_zoo/blob/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_recognition_sface/LICENSE",
+        "immutable_source_revision": "47534e27c9851bb1128ccc0102f1145e27f23f98",
+        "redistributable": true,
+        "notice_required": true
+      }
+    ]
+  },
+  "self_test": {
+    "kind": "identity-open-set-private-evaluation-v1",
+    "suite_revision": "identity-fixtures-2026-08-30",
+    "allowed_runtime_backends": ["opencv-dnn-cpu"],
+    "input_fixture": "fixtures/identity/identity-open-set-fixture-v1.json",
+    "input_fixture_sha256": "01c69867d816ac8a7e430a7a372fbf6133f804237fbb2c2bd9ea59d69fa3d980",
+    "expected_output_sha256": null,
+    "timeout_millis": 300000
+  },
+  "voices": [],
+  "extensions": {
+    "vision": {
+      "input_pixel_formats": ["b8g8r8a8_unorm"],
+      "output_signals": ["face_detection", "face_embedding_128_f32_l2_normalized_untrusted"],
+      "maximum_signal_rate_hz": null,
+      "identity_recognition": false
+    }
+  },
+  "lifecycle": {
+    "explicit_download_required": true,
+    "automatic_download_allowed": false,
+    "install_strategy": "verify_then_atomic_activate",
+    "repair_strategy": "verify_quarantine_reinstall",
+    "remove_requires_unreferenced": true,
+    "activation_gates": [
+      "explicit_user_approval",
+      "catalog_trust",
+      "artifact_integrity",
+      "license_acceptance",
+      "runtime_compatibility",
+      "self_test_attestation",
+      "current_device_measurement",
+      "whole_loadout_admission"
+    ]
+  },
+  "trust": {
+    "release_catalog_required": true,
+    "immutable_revision_required": true,
+    "artifact_sha256_required": true,
+    "self_test_attestation_required": true,
+    "measured_resource_envelope_required": true,
+    "unsigned_activation_allowed": false
+  },
+  "admission": {
+    "state": "blocked_pending_measurement",
+    "reason": "Exact model artifacts and their MIT/Apache-2.0 provenance are pinned. Activation remains blocked until the separately admitted runtime, attested self-test, signed current-device measurements, rights-cleared open-set calibration evidence, and whole-loadout admission are present.",
+    "allowed_residencies": ["cpu_resident"],
+    "unknowns_fail_closed": true
+  }
+}

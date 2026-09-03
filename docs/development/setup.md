@@ -17,11 +17,39 @@ From the repository root:
 
 `environment` reports prerequisites. `setup` never installs global tools; it restores only workspaces whose 2.0 manifests exist. Use `setup -Offline` only after all package caches/inputs are available.
 
+All Windows task children are launched with no console window and captured
+stdout/stderr. A failure still propagates its exact exit code and diagnostics;
+headless execution is not silent error suppression.
+
+The restore set is deliberately broader than the root workspaces: pnpm uses
+`pnpm-lock.yaml`, the reusable Rust crates/runtime use the root `Cargo.lock`,
+the Tauri shell uses its nested `apps/control/src-tauri/Cargo.lock`, and the
+README renderer uses `demo/readme/package-lock.json`. A cold machine should run
+`setup` once with network access, then run `setup -Offline`. The second command
+must restore all four graphs without network access; an incidental developer
+cache is not clean-checkout evidence.
+
+Windows setup also prepares the exact reviewed Microsoft WebView2 Evergreen
+Standalone Installer in a task-owned ignored cache. The online pass may download
+only the immutable resolved Microsoft GUID URL pinned by
+`packaging/security/installer-toolchain-provenance.json`, then verifies its size,
+SHA-256, version, and Authenticode signer. `setup -Offline` performs verification
+only and fails if the cache is absent or changed. Packaging never downloads it.
+
+The isolated README demo is restored during `setup`. Its `npm test` command does
+not reinstall dependencies or hide a missing setup behind an implicit cache.
+
 ## Run the development surface
 
 ```powershell
 ./dev.ps1 dev
 ```
+
+The canonical dev command always supplies
+`packaging/windows/tauri.dev.conf.json`, so its Tauri identifier and
+`app_config_dir` end in `.debug`. Debug development acknowledgement/state can
+never read or write the production identifier's config directory. Review
+installers use the separate `.review` identifier; production uses neither.
 
 The current development surface evolves during the rewrite. Read command output and [IMPLEMENTATION_STATUS.md](../../IMPLEMENTATION_STATUS.md); a successful frontend preview is not evidence that native capture, hosted providers, or game integration works.
 

@@ -1,0 +1,91 @@
+{
+  "schema": "npc.local-llm.backend-ab-benchmark/v1",
+  "benchmark_id": "qwen3-4b-q4km-b10689-vulkan-vs-cuda12.4",
+  "admission_evidence": false,
+  "model": {
+    "pack_id": "qwen3-4b-instruct-2507-q4-k-m",
+    "revision": "Qwen3-4B-Instruct-2507",
+    "size_bytes": 2497281120,
+    "sha256": "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597"
+  },
+  "runtime": {
+    "name": "llama.cpp",
+    "release_tag": "b10689",
+    "source_commit": "57291f2644af8c9df0dd8d44395881c5bdcf0ecd",
+    "backends": [
+      "vulkan",
+      "cuda"
+    ]
+  },
+  "fixture": {
+    "path": "workers/local-llm/fixtures/self-test.request.json",
+    "sha256": "47b6db56416a4476496a1cafdab77a4c64de11b5906b7b10ee227371a5bf9d64",
+    "chat_template": "gguf_embedded_jinja",
+    "seed": 424242,
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "greedy": true
+  },
+  "server_controls": {
+    "context_tokens": 8192,
+    "batch_tokens": 2048,
+    "ubatch_tokens": 512,
+    "cache_type_k": "f16",
+    "cache_type_v": "f16",
+    "flash_attention": "auto",
+    "gpu_layers": 99,
+    "cpu_threads": 8,
+    "cpu_threads_batch": 8,
+    "parallel_slots": 1,
+    "cache_prompt": false,
+    "reasoning_format": "none",
+    "offline": true
+  },
+  "sampling": {
+    "warmups_per_backend": 2,
+    "measured_samples_per_backend": 20,
+    "schedule": "alternating_abba_baab",
+    "minimum_signed_samples_for_each_p99": 20,
+    "structured_output_every_sample": true,
+    "cancellation_recovery_every_sample": true,
+    "unload_reload_every_sample": true,
+    "vram_return_every_sample": true,
+    "vram_return_tolerance_mib": 128,
+    "vram_return_timeout_seconds": 30
+  },
+  "game_matrix": {
+    "classification": "bounded_synthetic_host_load_not_real_game_frame_impact",
+    "repeats_per_backend_per_state": 5,
+    "states": [
+      {
+        "id": "baseline",
+        "fixture": null
+      },
+      {
+        "id": "idle",
+        "fixture": "eclipse_harbor_synthetic",
+        "width": 960,
+        "height": 600,
+        "frames_per_second": 1,
+        "muted": true
+      },
+      {
+        "id": "active",
+        "fixture": "eclipse_harbor_synthetic",
+        "width": 1920,
+        "height": 1080,
+        "frames_per_second": 60,
+        "muted": true
+      }
+    ],
+    "report_percentiles": false,
+    "reason": "Five repeats characterize bounded contention only; they cannot support p99 or real-game FPS claims."
+  },
+  "observational_control": {
+    "id": "lmstudio-cuda12-2.31.2",
+    "samples": 10,
+    "admission_evidence": false,
+    "p99_reporting_allowed": false,
+    "reason": "LM Studio uses llama.cpp b10662 and bundled CUDA 12.8 with different load controls; it is not an apples-to-apples runtime."
+  }
+}

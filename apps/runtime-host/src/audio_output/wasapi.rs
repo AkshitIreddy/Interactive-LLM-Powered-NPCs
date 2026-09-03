@@ -532,8 +532,12 @@ impl OutputThread {
 
 impl Drop for OutputThread {
     fn drop(&mut self) {
-        self.control.state.cancel();
         if !self.control.stopped.load(Ordering::Acquire) {
+            // An early drop is an authoritative stop. A normally joined output
+            // thread has already set `stopped`; marking that completed state as
+            // cancelled here would corrupt the receipt after successful endpoint
+            // drain and make Runtime Core cancel an otherwise delivered turn.
+            self.control.state.cancel();
             let (ack, _receiver) = mpsc::sync_channel(1);
             let _ = self.control.commands.send(OutputCommand::Stop(ack));
         }

@@ -28,6 +28,8 @@ Focused checks currently include:
 corepack pnpm run test:frontend
 corepack pnpm run test:sim
 corepack pnpm run sim:verify
+corepack pnpm run typecheck
+corepack pnpm run build
 cargo test --workspace --all-targets --all-features --locked --offline
 cargo test --manifest-path apps/control/src-tauri/Cargo.toml --all-targets --locked --offline
 python -m unittest discover -s workers/tests -p test_*.py -v
@@ -37,6 +39,12 @@ python -m unittest discover -s workers/tests -p test_*.py -v
 run the simulation package. The dispatcher invokes the simulator separately, once,
 then verifies its checked-in fixtures. It also enumerates `profiles/games/**/profile.json`,
 requires exactly 20 files, and passes all 20 to the `validate-profile` CLI.
+
+Root `typecheck` and `build` deliberately filter only `@npc2/control`; they do
+not use recursive `pnpm -r` or include the root package again. Canonical Windows
+checks start pnpm through the exact Node + Corepack resolver, normalize
+`.COM/.EXE/.BAT/.CMD` when WSL supplies an incomplete `PATHEXT`, and bound both
+commands so recursive re-entry fails closed.
 
 On Windows, the same command configures, builds, and runs the media-broker CMake
 runs the separately locked nested-Tauri tests and the media-broker CMake tests. It
@@ -51,11 +59,19 @@ marked `SKIP`; such a run is not Windows certification.
 
 `./dev.ps1 lint` runs frontend TypeScript checking and the package's real Prettier
 `--check` script, root and nested-Tauri Rustfmt, root and nested-Tauri Clippy with
-locked dependency graphs, all repository JSON parsing, and deterministic validation
-of local Markdown targets and anchors. Remote links are recognized but never
-requested. PSScriptAnalyzer remains optional and is reported as a warning when it is
-not installed. Nested Tauri Rustfmt remains host-independent, while nested Tauri
+locked dependency graphs, all repository JSON parsing, deterministic validation
+of local Markdown targets and anchors, and the built-in PowerShell parser across
+the checked-in command surfaces. Remote links are recognized but never requested.
+There is no optional PSScriptAnalyzer step whose absence can be mistaken for a
+completed gate. Nested Tauri Rustfmt remains host-independent, while nested Tauri
 Clippy is an explicit Windows gate and is marked `SKIP` elsewhere.
+
+The canonical benchmark writes two distinct artifacts: developer command timing
+and a strict `interactive-npcs-benchmark-report/v1` simulation with p50/p95/p99
+for all required pipeline metrics. The latter proves deterministic aggregation,
+not live product performance; its `acceptance_eligible` field is always false.
+Only a separately collected Windows `live + measured` report can become reviewable
+performance evidence.
 
 The repository's pinned Rust toolchain is always tried first. A known Windows rustup
 installation issue can make plain `cargo clippy` unavailable even when the component
@@ -70,6 +86,17 @@ Run the local-link validator directly without a network connection when editing 
 ```powershell
 ./scripts/check-doc-links.ps1
 ```
+
+Synchronize the canonical 52-row acceptance status map into both review ledgers
+and emit a source-identified in-progress evidence run with:
+
+```powershell
+./scripts/generate-acceptance-evidence.ps1 -Mode InProgress -UpdateDocuments
+```
+
+Frozen mode is intentionally stricter and requires exact package, installer,
+installed-distribution, and live/rendered/matrix artifact paths. See
+[`scripts/README.md`](../../scripts/README.md) for the complete invocation.
 
 Run the Response Console alone with `pnpm --filter @npc2/control dev`; Vite listens on `http://127.0.0.1:1420`.
 

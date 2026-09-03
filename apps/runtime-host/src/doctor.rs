@@ -7,11 +7,13 @@ use interactive_npcs_diagnostics::{
 use interactive_npcs_game_discovery::DiscoveryService;
 #[cfg(windows)]
 use interactive_npcs_game_discovery::WindowsStoreLocator;
-use model_manager::ModelPackManifestV1;
 use npc_memory::VectorSearchBackend;
 use serde::Serialize;
 
-use crate::{CatalogTrustState, HostState, APPLICATION_VERSION, REQUIRED_PROFILE_COUNT};
+use crate::{
+    CatalogTrustState, HostState, APPLICATION_VERSION, REQUIRED_AUTHORED_GAME_PROFILE_COUNT,
+    REQUIRED_PROFILE_COUNT, REQUIRED_SYNTHETIC_REVIEW_PROFILE_COUNT, SYNTHETIC_REVIEW_PROFILE_ID,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -27,6 +29,9 @@ pub struct DoctorReport {
     pub schema_version: String,
     pub status: DoctorStatus,
     pub profile_count: usize,
+    pub authored_game_profile_count: usize,
+    pub synthetic_review_profile_count: usize,
+    pub synthetic_review_profile_ids: Vec<String>,
     pub provider_count: usize,
     pub model_count: usize,
     pub catalog_trust: CatalogTrustState,
@@ -44,16 +49,31 @@ impl HostState {
     pub async fn doctor(&self) -> DoctorReport {
         let mut builder = DiagnosticReportBuilder::new(generated_at(), APPLICATION_VERSION);
         let profile_count = self.profiles.profiles().len();
+        let synthetic_review_profile_ids = self
+            .profiles
+            .profiles()
+            .iter()
+            .filter(|loaded| loaded.profile.id == SYNTHETIC_REVIEW_PROFILE_ID)
+            .map(|loaded| loaded.profile.id.clone())
+            .collect::<Vec<_>>();
+        let synthetic_review_profile_count = synthetic_review_profile_ids.len();
+        let authored_game_profile_count =
+            profile_count.saturating_sub(synthetic_review_profile_count);
+        let profile_corpus_complete = profile_count == REQUIRED_PROFILE_COUNT
+            && authored_game_profile_count == REQUIRED_AUTHORED_GAME_PROFILE_COUNT
+            && synthetic_review_profile_count == REQUIRED_SYNTHETIC_REVIEW_PROFILE_COUNT;
         push_fact(
             &mut builder,
             "profiles.corpus",
             "Game profile corpus",
-            if profile_count == REQUIRED_PROFILE_COUNT {
+            if profile_corpus_complete {
                 DiagnosticStatus::Ok
             } else {
                 DiagnosticStatus::Failed
             },
-            format!("{profile_count} validated declarative profiles loaded"),
+            format!(
+                "{authored_game_profile_count} authored game profiles plus {synthetic_review_profile_count} explicit synthetic review profile loaded"
+            ),
             None,
         );
         let (catalog_trust_status, catalog_trust_summary, catalog_trust_fix) =
@@ -184,6 +204,9 @@ impl HostState {
             schema_version: "1.0.0".to_owned(),
             status,
             profile_count,
+            authored_game_profile_count,
+            synthetic_review_profile_count,
+            synthetic_review_profile_ids,
             provider_count,
             model_count,
             catalog_trust: self.catalog_trust,
@@ -213,10 +236,10 @@ fn validate_example_manifest(state: &HostState) -> String {
     let Ok(bytes) = std::fs::read(path) else {
         return "unreadable".to_owned();
     };
-    let Ok(manifest) = serde_json::from_slice::<ModelPackManifestV1>(&bytes) else {
+    let Ok(manifest) = model_manager::parse_and_normalize_model_pack_manifest(&bytes) else {
         return "incompatible".to_owned();
     };
-    if manifest.validate().is_ok() {
+    if manifest.core_manifest.validate().is_ok() {
         "valid".to_owned()
     } else {
         "invalid".to_owned()
@@ -234,7 +257,12 @@ fn hosted_contracts() -> Vec<String> {
         "llm:openai,anthropic,gemini,groq,cohere,nvidia-nim,openai-compatible".to_owned(),
         "retrieval:nvidia-nim-embeddings-adapter,nvidia-nim-reranking-contract".to_owned(),
         "stt:deepgram,assemblyai,elevenlabs,nvidia-nim-asr,openai".to_owned(),
-        "tts:cartesia,elevenlabs,inworld,deepgram,nvidia-nim-magpie".to_owned(),
+        // Only providers with a production credential resolver, hosted
+        // transport, stock-voice policy, and broker-compatible PCM builder may
+        // be advertised at the runtime boundary. The generic command adapters
+        // for Cartesia, Deepgram, and Inworld remain quarantined.
+        "tts:elevenlabs".to_owned(),
+        "tts-private-evaluation:nvidia-nim-magpie".to_owned(),
     ]
 }
 
@@ -267,7 +295,7 @@ fn generated_at() -> String {
 #[cfg(test)]
 mod tests {
     use super::hosted_contracts;
-    use model_manager::ModelPackManifestV1;
+    use model_manager::{parse_and_normalize_model_pack_manifest, ModelPackNormalizationOriginV2};
     use std::path::PathBuf;
 
     #[test]
@@ -305,15 +333,41 @@ mod tests {
     }
 
     #[test]
+    fn hosted_tts_contracts_report_only_constructible_runtime_routes() {
+        let tts = hosted_contracts()
+            .into_iter()
+            .find(|contract| contract.starts_with("tts:"))
+            .expect("hosted TTS contract");
+        assert_eq!(tts, "tts:elevenlabs");
+        assert!(hosted_contracts()
+            .iter()
+            .any(|contract| contract == "tts-private-evaluation:nvidia-nim-magpie"));
+        for quarantined in ["cartesia", "deepgram", "inworld"] {
+            assert!(!tts
+                .split_once(':')
+                .expect("typed contract")
+                .1
+                .split(',')
+                .any(|candidate| candidate == quarantined));
+        }
+    }
+
+    #[test]
     fn packaged_example_manifest_matches_the_runtime_contract() {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../packaging/model-packs/model-pack-manifest.example.json");
         let bytes = std::fs::read(&path).expect("packaged example manifest must be readable");
-        let manifest = serde_json::from_slice::<ModelPackManifestV1>(&bytes)
-            .expect("packaged example manifest must deserialize into the runtime contract");
+        let manifest = parse_and_normalize_model_pack_manifest(&bytes)
+            .expect("packaged example manifest must normalize into the runtime contract");
 
         manifest
+            .core_manifest
             .validate()
             .expect("packaged example manifest must remain contract-valid");
+        assert_eq!(
+            manifest.origin,
+            ModelPackNormalizationOriginV2::CanonicalV2,
+            "the stable example must use the one canonical manifest schema"
+        );
     }
 }

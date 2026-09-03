@@ -1,0 +1,66 @@
+{
+  "schema": "interactive-npcs-installed-evidence-plan/v1",
+  "retained_pages": [
+    { "id": "session", "navigation_label": "Session deck" },
+    { "id": "world", "navigation_label": "World" },
+    { "id": "voice", "navigation_label": "Voice & models" },
+    { "id": "diagnostics", "navigation_label": "Diagnostics" },
+    { "id": "settings", "navigation_label": "Settings & guide" }
+  ],
+  "view_profiles": [
+    { "id": "normal-100", "layout_width": 1440, "layout_height": 900, "device_scale_factor": 1 },
+    { "id": "normal-150", "layout_width": 960, "layout_height": 600, "device_scale_factor": 1.5 },
+    { "id": "normal-200", "layout_width": 720, "layout_height": 450, "device_scale_factor": 2 },
+    { "id": "narrow-100", "layout_width": 720, "layout_height": 900, "device_scale_factor": 1 },
+    { "id": "narrow-150", "layout_width": 480, "layout_height": 600, "device_scale_factor": 1.5 },
+    { "id": "narrow-200", "layout_width": 360, "layout_height": 450, "device_scale_factor": 2 }
+  ],
+  "special_states": [
+    { "id": "session-completed-degradation", "page": "session", "trigger": { "kind": "click", "role": "button", "label_regex": "(?i)run a private simulation" }, "capture_when_regex": "(?i)(completed|manual retry|required)", "view_profiles": ["normal-100", "narrow-100"] },
+    { "id": "world-local-draft", "page": "world", "trigger": { "kind": "click", "role": "button", "label_regex": "(?i)(add local character draft|create editable copy)" }, "capture_when_regex": "(?i)(local draft|editable copy|local character)", "view_profiles": ["normal-100", "narrow-100"] },
+    { "id": "voice-advanced-fit", "page": "voice", "trigger": { "kind": "open_details", "label_regex": "(?i)advanced profiles" }, "capture_when_regex": "(?i)(advanced profiles|whole-loadout fit)", "view_profiles": ["normal-100", "narrow-100", "normal-150", "normal-200"] },
+    { "id": "stt-selected-blocked", "page": "session", "trigger": { "kind": "click", "role": "button", "label_regex": "(?i)push.to.talk" }, "capture_when_regex": "(?i)selected assemblyai push.to.talk", "view_profiles": ["normal-100", "narrow-100"] },
+    { "id": "stt-consent", "page": "session", "capture_when_regex": "(?i)i approve this assemblyai cloud stt attempt", "view_profiles": ["normal-100", "narrow-100"] },
+    { "id": "stt-arming", "page": "session", "trigger": { "kind": "arm_selected_stt" }, "capture_when_regex": "(?i)armed for physical f8", "post_capture_trigger": { "kind": "click", "role": "button", "label_regex": "(?i)cancel.*capture" }, "view_profiles": ["normal-100", "narrow-100"] },
+    { "id": "stt-capturing", "page": "session", "trigger": { "kind": "arm_selected_stt" }, "operator_checkpoint": "Press and hold physical F8 within the native 8-second arming window.", "capture_when_regex": "(?i)(is capturing|native capture allocated)", "wait_seconds": 12, "view_profiles": ["normal-100", "narrow-100"] },
+    { "id": "stt-receipt-ready", "page": "session", "operator_checkpoint": "Release physical F8 after speaking; no WebView-generated key event is accepted as proof.", "capture_when_regex": "(?i)(opaque receipt ready|receipt [0-9a-f-]{36})", "wait_seconds": 15, "view_profiles": ["normal-100", "narrow-100", "normal-150", "normal-200"] },
+    { "id": "stt-submitted-spent", "page": "session", "trigger": { "kind": "click", "role": "button", "label_regex": "(?i)send receipt.backed ptt turn" }, "capture_when_regex": "(?i)(receipt submitted once|already been submitted once|receipt spent)", "view_profiles": ["normal-100", "narrow-100"] },
+    { "id": "stt-rejected-recapture", "page": "session", "operator_checkpoint": "Run the separately provisioned one-time native rejection case; the collector never fabricates or replays a receipt.", "capture_when_regex": "(?i)(receipt rejected.*recapture|consumption rejected)", "wait_seconds": 20, "view_profiles": ["normal-100", "narrow-100"] },
+    { "id": "onboarding", "query": "?page=session&onboarding=1", "capture_when_regex": "(?i)(guided setup|system.*world.*voice.*test)", "view_profiles": ["normal-100", "narrow-100", "normal-150", "normal-200"] }
+  ],
+  "capture": {
+    "closeups_min": 4,
+    "closeups_max": 6,
+    "full_page": true,
+    "canonical_pixel_source": "webview-cdp",
+    "composited_video_note": "Display-composited evidence may include external dimming; it is not the canonical source for color or luminance judgments."
+  },
+  "required_native_claims": [
+    "audio_input_exact_endpoint_and_generation",
+    "unplugged_audio_input_disabled",
+    "routing_only_not_measured_facts",
+    "ptt_onboarding_requires_input_and_output",
+    "private_identity_not_admitted",
+    "consumed_route_modalities",
+    "route_receipt_configured_not_consumed",
+    "receipt_backed_audio_has_nonempty_receipt_id",
+    "local_lipsync_network_transmitted_data_empty",
+    "stt_receipt_schema_v3_perceived_brightness_caveat",
+    "stt_disclosure_assemblyai_u3_audio_optional_nonsecret_context",
+    "stt_disclosure_provider_handling_retention_native_vault_no_fallback",
+    "stt_receipt_never_displays_transcript_text"
+  ],
+  "control_rules": [
+    { "id": "navigation", "role": "button", "label_regex": "^(Session deck|World|Voice & models|Diagnostics|Settings & guide)$", "strategy": "navigate_restore" },
+    { "id": "reversible-toggle", "role": "button", "label_regex": "(?i)(subtitle|typed|push.to.talk|advanced|expand|scope|input|output|voice|profile|mode)", "strategy": "press_restore" },
+    { "id": "safe-native-action", "role": "button", "label_regex": "(?i)^(refresh|retry|review recovery|run a private simulation|run synthetic capture probe|clear synthetic target|view trace|edit|save|cancel|add local character draft|create editable copy|export diagnostics|open diagnostics).*$", "strategy": "press" },
+    { "id": "must-remain-disabled", "role": "button", "label_regex": "(?i)(install|activate|delete bundled|unplugged|unavailable)", "strategy": "assert_disabled" },
+    { "id": "reversible-input", "role": "textbox", "label_regex": ".*", "strategy": "edit_restore" },
+    { "id": "reversible-combobox", "role": "combobox", "label_regex": ".*", "strategy": "select_restore" },
+    { "id": "reversible-checkbox", "role": "checkbox", "label_regex": ".*", "strategy": "press_restore" },
+    { "id": "reversible-radio", "role": "radio", "label_regex": ".*", "strategy": "press_restore" }
+  ],
+  "forbidden_enabled_controls": [
+    "(?i)(publish|upload|download model|send telemetry|submit|uninstall|remove installation)"
+  ]
+}

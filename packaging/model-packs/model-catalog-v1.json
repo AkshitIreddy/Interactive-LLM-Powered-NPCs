@@ -1,0 +1,1113 @@
+{
+  "signed": {
+    "schema": "npc.model-catalog/v1",
+    "version": 4,
+    "generated_unix_seconds": 1788256810,
+    "expires_unix_seconds": 1790848810,
+    "entries": [
+      {
+        "manifest": {
+          "schema": "npc.model-pack/v1",
+          "pack_id": "bge-small-en-v1.5-onnx-fp32",
+          "revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a.1",
+          "display_name": "BGE Small English v1.5 (local CPU embeddings)",
+          "description": "Optional English memory and character-knowledge embeddings using the immutable official FP32 ONNX export. Activation requires a matching signed machine qualification envelope.",
+          "source_project": "https://huggingface.co/BAAI/bge-small-en-v1.5",
+          "source_revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
+          "capability": {
+            "kind": "embedding",
+            "scope": "generic"
+          },
+          "artifacts": [
+            {
+              "id": "bge-small-en-v1.5-onnx-fp32",
+              "kind": "file",
+              "source_urls": [
+                "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/onnx/model.onnx"
+              ],
+              "size_bytes": 133093490,
+              "sha256": "828e1496d7fabb79cfa4dcd84fa38625c0d3d21da474a00f08db0f559940cf35",
+              "destination": "model/model.onnx"
+            },
+            {
+              "id": "bge-small-en-v1.5-tokenizer-json",
+              "kind": "file",
+              "source_urls": [
+                "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/tokenizer.json"
+              ],
+              "size_bytes": 711396,
+              "sha256": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66",
+              "destination": "model/tokenizer.json"
+            },
+            {
+              "id": "bge-small-en-v1.5-model-card-license",
+              "kind": "file",
+              "source_urls": [
+                "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/README.md"
+              ],
+              "size_bytes": 94783,
+              "sha256": "ddb964361a55c6e5dfca6361615854b260c9c960205d04c7520151aaa1d75837",
+              "destination": "licenses/BGE-MODEL-CARD.md"
+            }
+          ],
+          "runtime": {
+            "runtime": "onnxruntime",
+            "abi": "bge-bert-cls-f32-v1",
+            "minimum_runtime_revision": "1.29.0",
+            "supported_platforms": [
+              "windows10",
+              "windows11"
+            ],
+            "supported_architectures": [
+              "x86_64"
+            ]
+          },
+          "hardware": {
+            "minimum_ram_bytes": 1073741824,
+            "recommended_ram_bytes": 2147483648,
+            "minimum_vram_bytes": 0,
+            "recommended_vram_bytes": 0,
+            "minimum_cpu_threads": 1,
+            "accelerators": [
+              "cpu"
+            ],
+            "required_cpu_features": []
+          },
+          "resources": {
+            "storage_bytes": 133899669,
+            "peak_install_bytes": 267799338,
+            "measured_ram_bytes": null,
+            "measured_vram_bytes": 0,
+            "measured_load_millis": null,
+            "benchmark_hardware": null,
+            "quality_tier": "fast",
+            "languages": [
+              "en"
+            ]
+          },
+          "license": {
+            "spdx_expression": "MIT",
+            "license_name": "MIT License",
+            "license_url": "https://huggingface.co/BAAI/bge-small-en-v1.5/blob/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/README.md",
+            "attribution": "BAAI, BGE Small English v1.5",
+            "redistributable": true,
+            "commercial_use": "allowed",
+            "derivative_use": "allowed",
+            "acceptance_required": false,
+            "notices": [
+              "Model license is declared MIT by the immutable upstream model card.",
+              "ONNX Runtime, NumPy, tokenizers, and transitive runtime notices ship separately."
+            ]
+          },
+          "self_test": {
+            "kind": "embedding_semantic_ordering",
+            "suite_revision": "bge-small-en-v1.5-hidden-v1",
+            "allowed_runtime_backends": [
+              "onnxruntime-cpu"
+            ],
+            "input_fixture": "workers/local-embedding/fixtures/self-test.request.json",
+            "expected_output_sha256": null,
+            "timeout_millis": 30000
+          }
+        },
+        "manifest_sha256": "f2be1c37d1fff448ca83574c83e6e26871aabeb06f69265f1ba3bde93b75394d",
+        "channels": [
+          "optional-local"
+        ],
+        "published_unix_seconds": 1788256810,
+        "revoked": false,
+        "revocation_reason": null
+      },
+      {
+        "manifest": {
+          "schema": "npc.model-pack/v1",
+          "pack_id": "local.tts.kokoro-v1.0-int8.sherpa-onnx-cpu.windows-x64",
+          "revision": "2026.08.30-r1",
+          "display_name": "Kokoro v1.0 INT8 English stock voices (Windows CPU)",
+          "description": "Optional explicit-download Kokoro-82M v1.0 INT8 speech-synthesis pack using the pinned sherpa-onnx 1.13.6 Windows x64 C runtime. It exposes 28 fixed American and British English stock voices and streams 24 kHz mono PCM. API TTS remains the default. Local activation is blocked until catalog trust, license acceptance, a real Windows self-test attestation, signed current-device measurements, and whole-loadout admission all pass.",
+          "source_project": "https://huggingface.co/hexgrad/Kokoro-82M",
+          "source_revision": "f3ff3571791e39611d31c381e3a41a3af07b4987",
+          "capability": {
+            "kind": "speech_synthesis",
+            "scope": "generic"
+          },
+          "artifacts": [
+            {
+              "id": "sherpa-runtime",
+              "kind": "archive",
+              "archive_format": "tar_bz2",
+              "source_urls": [
+                "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.6/sherpa-onnx-v1.13.6-win-x64-shared-MD-Release-lib.tar.bz2"
+              ],
+              "size_bytes": 7215482,
+              "sha256": "dca033829d3a7e74c127fc0d349a12257fb890fe5038a381ab1706e4b35cf0fa",
+              "destination": "runtime",
+              "strip_prefix": "sherpa-onnx-v1.13.6-win-x64-shared-MD-Release-lib",
+              "required_paths": [
+                "lib/sherpa-onnx-c-api.dll",
+                "lib/onnxruntime.dll"
+              ]
+            },
+            {
+              "id": "kokoro-model",
+              "kind": "archive",
+              "archive_format": "tar_bz2",
+              "source_urls": [
+                "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_0.tar.bz2"
+              ],
+              "size_bytes": 131839838,
+              "sha256": "75654a84864be26f345f020f4070c2c019e96dd1b7f9bf6e2ffd59efac6aa5a3",
+              "destination": "model",
+              "strip_prefix": "kokoro-int8-multi-lang-v1_0",
+              "required_paths": [
+                "model.int8.onnx",
+                "voices.bin",
+                "tokens.txt",
+                "lexicon-us-en.txt",
+                "espeak-ng-data/phondata",
+                "LICENSE"
+              ]
+            }
+          ],
+          "runtime": {
+            "runtime": "sherpa-onnx",
+            "abi": "npc-local-tts-sherpa-c-api-v1",
+            "minimum_runtime_revision": "1.13.6+1cb484af5e69d3c7803c1eb0b3b5ab8041e0e911+onnxruntime.1.27.1",
+            "supported_platforms": [
+              "windows10",
+              "windows11"
+            ],
+            "supported_architectures": [
+              "x86_64"
+            ]
+          },
+          "hardware": {
+            "minimum_ram_bytes": 0,
+            "recommended_ram_bytes": 0,
+            "minimum_vram_bytes": 0,
+            "recommended_vram_bytes": 0,
+            "minimum_cpu_threads": 1,
+            "accelerators": [
+              "cpu"
+            ],
+            "required_cpu_features": []
+          },
+          "resources": {
+            "storage_bytes": 139055320,
+            "peak_install_bytes": 1139055320,
+            "measured_ram_bytes": null,
+            "measured_vram_bytes": null,
+            "measured_load_millis": null,
+            "benchmark_hardware": null,
+            "quality_tier": "experimental",
+            "languages": [
+              "en-GB",
+              "en-US"
+            ]
+          },
+          "license": {
+            "spdx_expression": "Apache-2.0 AND MIT AND GPL-3.0-or-later AND CC-BY-3.0 AND CC-BY-4.0",
+            "license_name": "Composite Kokoro, sherpa-onnx, ONNX Runtime, piper-phonemize, eSpeak-NG, and training-data attribution terms",
+            "license_url": "https://huggingface.co/hexgrad/Kokoro-82M/blob/f3ff3571791e39611d31c381e3a41a3af07b4987/README.md",
+            "attribution": "Kokoro-82M v1.0 and its fixed stock voice embeddings are attributed to hexgrad and the upstream contributors. The runtime is sherpa-onnx by k2-fsa and contributors, with Microsoft ONNX Runtime, piper-phonemize, and eSpeak-NG. The Kokoro model card names CC-BY-licensed Koniwa tnc and SIWIS training-data portions whose attribution must be retained.",
+            "redistributable": false,
+            "commercial_use": "allowed",
+            "derivative_use": "allowed",
+            "acceptance_required": true,
+            "notices": [
+              "The pack is never bundled or silently downloaded; installation requires explicit user selection and acceptance of every component notice.",
+              "The two archive assets are fetched directly from their upstream GitHub release URLs. Project mirroring is prohibited until legal review approves the complete notice and corresponding-source delivery.",
+              "sherpa-onnx 1.x TTS links eSpeak-NG through piper phonemization. eSpeak-NG is GPL-3.0-or-later and carries notice and corresponding-source obligations.",
+              "Kokoro fixed voice embeddings are stock model data. Reference audio, arbitrary embeddings, performer cloning, and voice cloning are prohibited by this pack.",
+              "Only the 28 audited en-US and en-GB speaker entries are selectable even though the upstream archive contains additional embeddings.",
+              "Null planning RAM, VRAM, and load fields are unknown and non-admissible. CPU-only placement must still prove zero target-process VRAM in a signed current-device measurement."
+            ]
+          },
+          "self_test": {
+            "kind": "kokoro_structural_tts_v1",
+            "suite_revision": "2026.08.30.v1",
+            "allowed_runtime_backends": [
+              "sherpa-onnx-1.13.6-cpu"
+            ],
+            "input_fixture": "workers/local-tts/fixtures/self-test.txt",
+            "expected_output_sha256": null,
+            "timeout_millis": 300000
+          }
+        },
+        "manifest_sha256": "513d020d49e0eb778f2c465c969d75b8f7d38c79c520f126d19599d99572f3cf",
+        "channels": [
+          "optional-local"
+        ],
+        "published_unix_seconds": 1788256810,
+        "revoked": false,
+        "revocation_reason": null
+      },
+      {
+        "manifest": {
+          "schema": "npc.model-pack/v1",
+          "pack_id": "npc.stt.moonshine-v2-medium-streaming-en.win-x64",
+          "revision": "0.1.5-moonshine.234f60f",
+          "display_name": "Moonshine v2 Medium Streaming English (Windows CPU)",
+          "description": "Optional explicit-download streaming English speech recognition pack. The pinned upstream archive combines the Moonshine v0.1.5 Windows runtime, ONNX Runtime, headers and static libraries, the Medium Streaming English model, and the original Beckett speech fixture. API STT remains the default; activation is blocked until trusted self-test and signed current-device whole-loadout measurements pass.",
+          "source_project": "https://github.com/moonshine-ai/moonshine",
+          "source_revision": "234f60faa0eb388b01cdf7e60aca232af37aefda",
+          "capability": {
+            "kind": "speech_recognition",
+            "scope": "generic"
+          },
+          "artifacts": [
+            {
+              "id": "moonshine-v0.1.5-windows-cli-medium-streaming-en",
+              "kind": "archive",
+              "archive_format": "tar_gz",
+              "source_urls": [
+                "https://github.com/moonshine-ai/moonshine/releases/download/v0.1.5/windows-cli-transcriber.tar.gz"
+              ],
+              "size_bytes": 402991031,
+              "sha256": "a56bcd27765fefa4ab9a9b219cbb26e6de7d48b6536c88b92b6d24ffa7eb4c25",
+              "destination": "moonshine",
+              "strip_prefix": "cli-transcriber",
+              "required_paths": [
+                "beckett.wav",
+                "moonshine-voice-windows-x86_64/include/moonshine-c-api.h",
+                "moonshine-voice-windows-x86_64/lib/moonshine.lib",
+                "moonshine-voice-windows-x86_64/lib/bin-tokenizer.lib",
+                "moonshine-voice-windows-x86_64/lib/ort-utils.lib",
+                "moonshine-voice-windows-x86_64/lib/moonshine-utils.lib",
+                "moonshine-voice-windows-x86_64/lib/onnxruntime.lib",
+                "moonshine-voice-windows-x86_64/lib/onnxruntime.dll",
+                "models/medium-streaming-en/adapter.ort",
+                "models/medium-streaming-en/cross_kv.ort",
+                "models/medium-streaming-en/decoder_kv.ort",
+                "models/medium-streaming-en/decoder_kv_with_attention.ort",
+                "models/medium-streaming-en/encoder.ort",
+                "models/medium-streaming-en/frontend.model.ort",
+                "models/medium-streaming-en/frontend.weights.ort",
+                "models/medium-streaming-en/streaming_config.json",
+                "models/medium-streaming-en/tokenizer.bin"
+              ]
+            }
+          ],
+          "runtime": {
+            "runtime": "moonshine-voice",
+            "abi": "npc.local-stt.v1+bridge1",
+            "minimum_runtime_revision": "0.1.5+234f60f",
+            "supported_platforms": [
+              "windows10",
+              "windows11"
+            ],
+            "supported_architectures": [
+              "x86_64"
+            ]
+          },
+          "hardware": {
+            "minimum_ram_bytes": 0,
+            "recommended_ram_bytes": 0,
+            "minimum_vram_bytes": 0,
+            "recommended_vram_bytes": 0,
+            "minimum_cpu_threads": 1,
+            "accelerators": [
+              "cpu"
+            ],
+            "required_cpu_features": []
+          },
+          "resources": {
+            "storage_bytes": 402991031,
+            "peak_install_bytes": 1302991031,
+            "measured_ram_bytes": null,
+            "measured_vram_bytes": null,
+            "measured_load_millis": null,
+            "benchmark_hardware": null,
+            "quality_tier": "experimental",
+            "languages": [
+              "en"
+            ]
+          },
+          "license": {
+            "spdx_expression": "MIT",
+            "license_name": "MIT License",
+            "license_url": "https://github.com/moonshine-ai/moonshine/blob/234f60faa0eb388b01cdf7e60aca232af37aefda/LICENSE",
+            "attribution": "Moonshine Voice and all streaming speech-to-text models, including Medium Streaming English, Copyright (c) 2025 Useful Sensors, Inc. (dba Moonshine AI). The combined archive also contains Microsoft ONNX Runtime under MIT terms.",
+            "redistributable": true,
+            "commercial_use": "allowed",
+            "derivative_use": "allowed",
+            "acceptance_required": true,
+            "notices": [
+              "The model is never bundled or silently downloaded; installation requires an explicit user action.",
+              "All Moonshine streaming speech-to-text models and all English models are MIT. Legacy non-streaming models in named non-English languages are excluded from this pack.",
+              "The exact upstream Moonshine license is vendored at workers/local-stt/THIRD_PARTY_LICENSES/MOONSHINE-v0.1.5-LICENSE.txt with SHA-256 fa7d1174dd8af6a7cd280be20b80d10095ed4c19b5b20b61a7715c3ad790dc5f.",
+              "The retained archive is a combined upstream release asset; artifact role other does not imply ownership or a new redistribution grant."
+            ]
+          },
+          "self_test": {
+            "kind": "moonshine_streaming_stt_v1",
+            "suite_revision": "2026.08.30.v1",
+            "allowed_runtime_backends": [
+              "moonshine-v0.1.5-native-cpu"
+            ],
+            "input_fixture": "moonshine/beckett.wav",
+            "expected_output_sha256": null,
+            "timeout_millis": 300000
+          }
+        },
+        "manifest_sha256": "74c7bc79b5f163b17b0a0a510864377b3813857df3d605699f7b3976d7b097c5",
+        "channels": [
+          "optional-local"
+        ],
+        "published_unix_seconds": 1788256810,
+        "revoked": false,
+        "revocation_reason": null
+      },
+      {
+        "manifest": {
+          "schema": "npc.model-pack/v1",
+          "pack_id": "opencv-yunet-sface-private-eval",
+          "revision": "zoo-47534e27-opencv-5.0.0.93",
+          "display_name": "OpenCV YuNet + SFace identity observations",
+          "description": "Optional explicit-download CPU face-detection and normalized appearance-embedding pack. The worker emits untrusted observations only and never selects a character. The exact YuNet directory is MIT; the exact SFace directory says all files are Apache-2.0; and the pinned OpenCV Zoo report says its model weights, including Area Chair-contributed SFace, were collected for use for any purpose including commercial use. Runtime wheels remain separate components with their own admission and notice obligations.",
+          "source_project": "https://github.com/opencv/opencv_zoo",
+          "source_revision": "47534e27c9851bb1128ccc0102f1145e27f23f98",
+          "capability": {
+            "kind": "vision",
+            "scope": "generic"
+          },
+          "artifacts": [
+            {
+              "id": "yunet-2026may-onnx",
+              "kind": "file",
+              "source_urls": [
+                "https://media.githubusercontent.com/media/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_detection_yunet/face_detection_yunet_2026may.onnx"
+              ],
+              "size_bytes": 229738,
+              "sha256": "ebafce4e3c118d6554634be5c27ab333b4c047a9a8c3faf1d7cf93101c22f0f0",
+              "destination": "models/face_detection_yunet_2026may.onnx"
+            },
+            {
+              "id": "yunet-license",
+              "kind": "file",
+              "source_urls": [
+                "https://raw.githubusercontent.com/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_detection_yunet/LICENSE"
+              ],
+              "size_bytes": 1085,
+              "sha256": "c83b8120c50ccbd4c4f96edf53141bdd566ebb8f8e9227e415326aa1b1aba958",
+              "destination": "licenses/YUNET-MIT.txt"
+            },
+            {
+              "id": "sface-2021dec-onnx",
+              "kind": "file",
+              "source_urls": [
+                "https://media.githubusercontent.com/media/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_recognition_sface/face_recognition_sface_2021dec.onnx"
+              ],
+              "size_bytes": 38696353,
+              "sha256": "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
+              "destination": "models/face_recognition_sface_2021dec.onnx"
+            },
+            {
+              "id": "sface-license",
+              "kind": "file",
+              "source_urls": [
+                "https://raw.githubusercontent.com/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_recognition_sface/LICENSE"
+              ],
+              "size_bytes": 11358,
+              "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+              "destination": "licenses/SFACE-APACHE-2.0.txt"
+            },
+            {
+              "id": "sface-model-card",
+              "kind": "file",
+              "source_urls": [
+                "https://raw.githubusercontent.com/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_recognition_sface/README.md"
+              ],
+              "size_bytes": 2267,
+              "sha256": "e090e126f3fb5c0b0b2d84ee644b17e42a70b2e45a90616814970b811e91d063",
+              "destination": "licenses/SFACE-MODEL-CARD.md"
+            },
+            {
+              "id": "opencv-zoo-commercial-use-report",
+              "kind": "file",
+              "source_urls": [
+                "https://raw.githubusercontent.com/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/reports/2023-4.9.0/opencv_zoo_report-en-2023-4.9.0.md"
+              ],
+              "size_bytes": 4649,
+              "sha256": "bd1ccd892cfd306829fe219de9950b3d97847dbb7d5cfdf3453361701c089ec3",
+              "destination": "licenses/OPENCV-ZOO-COMMERCIAL-USE-REPORT.md"
+            }
+          ],
+          "runtime": {
+            "runtime": "opencv-python-headless",
+            "abi": "npc-face-observation-v1",
+            "minimum_runtime_revision": "cp312-opencv-5.0.0.93-numpy-2.5.2",
+            "supported_platforms": [
+              "windows10",
+              "windows11"
+            ],
+            "supported_architectures": [
+              "x86_64"
+            ]
+          },
+          "hardware": {
+            "minimum_ram_bytes": 0,
+            "recommended_ram_bytes": 0,
+            "minimum_vram_bytes": 0,
+            "recommended_vram_bytes": 0,
+            "minimum_cpu_threads": 1,
+            "accelerators": [
+              "cpu"
+            ],
+            "required_cpu_features": []
+          },
+          "resources": {
+            "storage_bytes": 38945450,
+            "peak_install_bytes": 77890900,
+            "measured_ram_bytes": null,
+            "measured_vram_bytes": null,
+            "measured_load_millis": null,
+            "benchmark_hardware": null,
+            "quality_tier": "experimental",
+            "languages": [
+              "und"
+            ]
+          },
+          "license": {
+            "spdx_expression": "MIT AND Apache-2.0",
+            "license_name": "YuNet MIT and SFace Apache-2.0 model files",
+            "license_url": "https://github.com/opencv/opencv_zoo/tree/47534e27c9851bb1128ccc0102f1145e27f23f98/models",
+            "attribution": "YuNet contributors and SFace/OpenCV Zoo contributors. Retain the exact MIT and Apache-2.0 notices, SFace model card, and pinned OpenCV Zoo model-use report.",
+            "redistributable": true,
+            "commercial_use": "allowed",
+            "derivative_use": "allowed",
+            "acceptance_required": false,
+            "notices": [
+              "The application does not bundle or automatically download this optional pack; installation requires explicit user selection.",
+              "The exact SFace model card says all files in its directory are Apache-2.0. The pinned OpenCV Zoo report says the model weights were collected for any purpose including commercial use and identifies SFace as an OpenCV Area Chair contribution.",
+              "OpenCV and NumPy runtime wheels are not artifacts of this model pack. Their exact pins remain in the worker runtime lock and require separate extracted-file notice review and admission.",
+              "No current-device resource, latency, cancellation, open-set accuracy, or game-contention envelope exists yet."
+            ]
+          },
+          "self_test": {
+            "kind": "identity-open-set-private-evaluation-v1",
+            "suite_revision": "identity-fixtures-2026-08-30",
+            "allowed_runtime_backends": [
+              "opencv-dnn-cpu"
+            ],
+            "input_fixture": "fixtures/identity/identity-open-set-fixture-v1.json",
+            "expected_output_sha256": null,
+            "timeout_millis": 300000
+          }
+        },
+        "manifest_sha256": "65dca5d94a43802fd914692769ba97c0fd1917d7b57f6afbd4b235c79a4a83bb",
+        "channels": [
+          "optional-local"
+        ],
+        "published_unix_seconds": 1788256810,
+        "revoked": false,
+        "revocation_reason": null
+      },
+      {
+        "manifest": {
+          "schema": "npc.model-pack/v1",
+          "pack_id": "openseeface-mnv3-lm1-mouth-signal",
+          "revision": "85aa70fc67582d046e771ea73625182a0d8f7475",
+          "display_name": "OpenSeeFace MNV3 + LM1 mouth signal",
+          "description": "Optional CPU-only face detector and 66-point landmark signal pack. It is not an identity model, talking-head generator, or complete lip-sync model and is disabled until its separate ONNX Runtime and current-device resource envelope are admitted.",
+          "source_project": "https://github.com/emilianavt/OpenSeeFace",
+          "source_revision": "85aa70fc67582d046e771ea73625182a0d8f7475",
+          "capability": {
+            "kind": "vision",
+            "scope": "generic"
+          },
+          "artifacts": [
+            {
+              "id": "mnv3-detection-opt",
+              "kind": "file",
+              "source_urls": [
+                "https://raw.githubusercontent.com/emilianavt/OpenSeeFace/85aa70fc67582d046e771ea73625182a0d8f7475/models/mnv3_detection_opt.onnx"
+              ],
+              "size_bytes": 568302,
+              "sha256": "0e8e4806766d85ab067a52c7af0dcb59eb7f9dfe580b44f20a8e6ab712d89809",
+              "destination": "models/mnv3_detection_opt.onnx"
+            },
+            {
+              "id": "lm-model1-opt",
+              "kind": "file",
+              "source_urls": [
+                "https://raw.githubusercontent.com/emilianavt/OpenSeeFace/85aa70fc67582d046e771ea73625182a0d8f7475/models/lm_model1_opt.onnx"
+              ],
+              "size_bytes": 4842329,
+              "sha256": "5bec42b298a24142cdb249a7256d65bc3fc0fbc673fa1752a64f4d7164719c9f",
+              "destination": "models/lm_model1_opt.onnx"
+            },
+            {
+              "id": "openseeface-license",
+              "kind": "file",
+              "source_urls": [
+                "https://raw.githubusercontent.com/emilianavt/OpenSeeFace/85aa70fc67582d046e771ea73625182a0d8f7475/LICENSE"
+              ],
+              "size_bytes": 1364,
+              "sha256": "28612834d7ca038a9009550e3869a67e6be3a87c238d997f58c0907e08744146",
+              "destination": "LICENSE"
+            },
+            {
+              "id": "onnxruntime-1.22.1-cpu-windows-x64",
+              "kind": "archive",
+              "archive_format": "zip",
+              "source_urls": [
+                "https://github.com/microsoft/onnxruntime/releases/download/v1.22.1/onnxruntime-win-x64-1.22.1.zip"
+              ],
+              "size_bytes": 73731806,
+              "sha256": "855276cd4be3cda14fe636c69eb038d75bf5bcd552bda1193a5d79c51f436dfe",
+              "destination": "runtime/onnxruntime-1.22.1-cpu",
+              "strip_prefix": "onnxruntime-win-x64-1.22.1",
+              "required_paths": [
+                "GIT_COMMIT_ID",
+                "LICENSE",
+                "ThirdPartyNotices.txt",
+                "VERSION_NUMBER",
+                "lib/onnxruntime.dll",
+                "lib/onnxruntime_providers_shared.dll"
+              ]
+            }
+          ],
+          "runtime": {
+            "runtime": "onnxruntime",
+            "abi": "onnxruntime-cpu-v1",
+            "minimum_runtime_revision": "1.22.1",
+            "supported_platforms": [
+              "windows10",
+              "windows11"
+            ],
+            "supported_architectures": [
+              "x86_64"
+            ]
+          },
+          "hardware": {
+            "minimum_ram_bytes": 268435456,
+            "recommended_ram_bytes": 536870912,
+            "minimum_vram_bytes": 0,
+            "recommended_vram_bytes": 0,
+            "minimum_cpu_threads": 1,
+            "accelerators": [
+              "cpu"
+            ],
+            "required_cpu_features": []
+          },
+          "resources": {
+            "storage_bytes": 79143801,
+            "peak_install_bytes": 91916048,
+            "measured_ram_bytes": 93265592,
+            "measured_vram_bytes": 0,
+            "measured_load_millis": 72,
+            "benchmark_hardware": "Synthetic Eclipse Harbor replay; CPUExecutionProvider, one intra-op thread; see docs/research/openseeface-visual-pack-qualification-2026-08-30.md",
+            "quality_tier": "experimental",
+            "languages": [
+              "language-independent-visual-signal"
+            ]
+          },
+          "license": {
+            "spdx_expression": "BSD-2-Clause AND MIT",
+            "license_name": "BSD 2-Clause and MIT",
+            "license_url": "https://github.com/emilianavt/OpenSeeFace/blob/85aa70fc67582d046e771ea73625182a0d8f7475/LICENSE",
+            "attribution": "OpenSeeFace by Emiliana Torrano; source and models pinned to revision 85aa70fc67582d046e771ea73625182a0d8f7475.",
+            "redistributable": true,
+            "commercial_use": "allowed",
+            "derivative_use": "allowed",
+            "acceptance_required": false,
+            "notices": [
+              "The application does not bundle this pack; it is fetched only after explicit user selection.",
+              "The BSD license file is itself a pinned, verified artifact.",
+              "ONNX Runtime project code is MIT-licensed; the pinned release archive also carries ThirdPartyNotices.txt and its bundled third-party terms.",
+              "ONNX Runtime is not included in the base installer and is acquired as a separately governed optional runtime only after explicit user approval.",
+              "Optional archive redistribution and activation require installation of the pinned LICENSE and ThirdPartyNotices.txt, closed-world SBOM reconciliation, and human legal review."
+            ]
+          },
+          "self_test": {
+            "kind": "openseeface-mouth-signal-v1",
+            "suite_revision": "2026-08-30",
+            "allowed_runtime_backends": [
+              "onnxruntime-1.22.1-cpu"
+            ],
+            "input_fixture": "docs/assets/demo/demo.mp4",
+            "expected_output_sha256": null,
+            "timeout_millis": 300000
+          }
+        },
+        "manifest_sha256": "0127b61113b1f838bf70bdc4127bd7d5f7f9a75fde95429c89c5e726751f0552",
+        "channels": [
+          "optional-local"
+        ],
+        "published_unix_seconds": 1788256810,
+        "revoked": false,
+        "revocation_reason": null
+      },
+      {
+        "manifest": {
+          "schema": "npc.model-pack/v1",
+          "pack_id": "qwen3-4b-instruct-2507-q4-k-m",
+          "revision": "Qwen3-4B-Instruct-2507",
+          "display_name": "Qwen3 4B Instruct 2507 Q4_K_M",
+          "description": "Optional, explicit-download local dialogue model. API providers remain the product default. This non-thinking Qwen3 checkpoint is intended for low-latency NPC dialogue; activation still requires signed-catalog authorization, a passing Windows self-test, and a current device-bound measured resource envelope.",
+          "source_project": "https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507",
+          "source_revision": "cdbee75f17c01a7cc42f958dc650907174af0554",
+          "capability": {
+            "kind": "language_model",
+            "scope": "generic"
+          },
+          "artifacts": [
+            {
+              "id": "qwen3-4b-instruct-2507-q4-k-m-gguf",
+              "kind": "file",
+              "source_urls": [
+                "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/a06e946bb6b655725eafa393f4a9745d460374c9/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
+              ],
+              "size_bytes": 2497281120,
+              "sha256": "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597",
+              "destination": "model/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
+            },
+            {
+              "id": "qwen-apache-license",
+              "kind": "file",
+              "source_urls": [
+                "https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507/resolve/cdbee75f17c01a7cc42f958dc650907174af0554/LICENSE"
+              ],
+              "size_bytes": 11343,
+              "sha256": "832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e",
+              "destination": "licenses/QWEN-APACHE-2.0.txt"
+            },
+            {
+              "id": "gguf-conversion-provenance",
+              "kind": "file",
+              "source_urls": [
+                "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/a06e946bb6b655725eafa393f4a9745d460374c9/README.md"
+              ],
+              "size_bytes": 11207,
+              "sha256": "c18c2d01645e709fcc0bfd593291d3dc43e51873f5af170a082c36ccd95988c3",
+              "destination": "notices/GGUF-CONVERSION-PROVENANCE.md"
+            }
+          ],
+          "runtime": {
+            "runtime": "llama.cpp",
+            "abi": "npc-llama-server-openai-v1+b10689+qwen3",
+            "minimum_runtime_revision": "b10689+57291f2644af8c9df0dd8d44395881c5bdcf0ecd",
+            "supported_platforms": [
+              "windows10",
+              "windows11"
+            ],
+            "supported_architectures": [
+              "x86_64"
+            ]
+          },
+          "hardware": {
+            "minimum_ram_bytes": 6442450944,
+            "recommended_ram_bytes": 8589934592,
+            "minimum_vram_bytes": 0,
+            "recommended_vram_bytes": 4294967296,
+            "minimum_cpu_threads": 4,
+            "accelerators": [
+              "cpu",
+              "vulkan"
+            ],
+            "required_cpu_features": []
+          },
+          "resources": {
+            "storage_bytes": 2497303670,
+            "peak_install_bytes": 4994607340,
+            "measured_ram_bytes": null,
+            "measured_vram_bytes": null,
+            "measured_load_millis": null,
+            "benchmark_hardware": null,
+            "quality_tier": "experimental",
+            "languages": [
+              "multilingual-100-plus"
+            ]
+          },
+          "license": {
+            "spdx_expression": "Apache-2.0",
+            "license_name": "Apache License 2.0",
+            "license_url": "https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507/blob/cdbee75f17c01a7cc42f958dc650907174af0554/LICENSE",
+            "attribution": "Qwen3-4B-Instruct-2507 by the Qwen Team; Q4_K_M GGUF conversion pinned from unsloth/Qwen3-4B-Instruct-2507-GGUF revision a06e946bb6b655725eafa393f4a9745d460374c9.",
+            "redistributable": true,
+            "commercial_use": "allowed",
+            "derivative_use": "allowed",
+            "acceptance_required": false,
+            "notices": [
+              "The model is not bundled with the application and is downloaded only after an explicit user action.",
+              "The llama.cpp runtime is a separately installed MIT-licensed trust unit pinned by workers/local-llm/runtime-bundle.b10689.json.",
+              "Resource figures in hardware are admission hints only. Null measured fields must remain non-admissible until a device-bound measurement is recorded."
+            ]
+          },
+          "self_test": {
+            "kind": "qwen3_structured_dialogue_v1",
+            "suite_revision": "qwen3-4b-self-test-2026-08-30.v1",
+            "allowed_runtime_backends": [
+              "llama.cpp-b10689-cpu",
+              "llama.cpp-b10689-vulkan"
+            ],
+            "input_fixture": "workers/local-llm/fixtures/self-test.request.json",
+            "expected_output_sha256": "2d3d276c32ad6b236fce56102ea44cdcaa4d643839504f87967f5f8d225cf518",
+            "timeout_millis": 120000
+          }
+        },
+        "manifest_sha256": "437f675be9d30dbfc6edfbb0d7ad17a293d0ddb855854a574073cb0e0d2ff228",
+        "channels": [
+          "optional-local"
+        ],
+        "published_unix_seconds": 1788256810,
+        "revoked": false,
+        "revocation_reason": null
+      }
+    ]
+  },
+  "signatures": [
+    {
+      "key_id": "automated-local-review-rev4-ephemeral-1",
+      "algorithm": "ed25519",
+      "signature": "ohgDaOt6pewTVV4pFGlxiRN9-7iZcYKm-vLZxGQKP82RgrSnOQYrFI1WolSbMzMIj8wiToBxDRdOU9ZFezKWAg"
+    },
+    {
+      "key_id": "automated-local-review-rev4-ephemeral-2",
+      "algorithm": "ed25519",
+      "signature": "KHXYgVqfjLVgPfZDhWaWjgdv80vbY7wq8ZvmLqqXqVgvvUDPpcgsbWS8xJQLJjdCu2rjGPK2M_yIEJpzarJyDg"
+    }
+  ],
+  "source_inventory": {
+    "schema": "npc.model-pack-source-inventory/v1",
+    "catalog_payload_sha256": "cce8abe6863b79fffd45f17161ea8acee56d601156dac52b051d5007178a0216",
+    "manifests": [
+      {
+        "identity": {
+          "pack_id": "bge-small-en-v1.5-onnx-fp32",
+          "revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a.1"
+        },
+        "file_name": "bge-small-en-v1.5-onnx-fp32.json",
+        "source_schema": "npc.model-pack/v2",
+        "raw_document_sha256": "6ce53ad1ec837c7bfcaf541f07973a344a38540a3cc3e6832bbdebfa4d0e0ebc",
+        "canonical_document_sha256": "7266b0c735e7273826bab9e4ba58e3c8f5563dd871590263b3562176df6fc57c",
+        "normalized_manifest_sha256": "f2be1c37d1fff448ca83574c83e6e26871aabeb06f69265f1ba3bde93b75394d",
+        "admission_state": "blocked_pending_measurement",
+        "admission_reason": "CPU embedding pack remains blocked until this exact manifest is catalog-trusted, the hidden self-test is attested, and at least 20 signed current-device load/reload/operation samples admit the whole game loadout.",
+        "allowed_residencies": [
+          "cpu_resident"
+        ],
+        "license": {
+          "spdx_expression": "MIT",
+          "license_name": "MIT License",
+          "license_url": "https://huggingface.co/BAAI/bge-small-en-v1.5/blob/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/README.md",
+          "redistributable": true,
+          "acceptance_required": false,
+          "component_ids": [
+            "bge-small-en-v1.5"
+          ]
+        },
+        "lifecycle": {
+          "explicit_download_required": true,
+          "automatic_download_allowed": false,
+          "install_strategy": "verify_then_atomic_activate",
+          "repair_strategy": "verify_quarantine_reinstall",
+          "remove_requires_unreferenced": true,
+          "activation_gates": [
+            "explicit_user_approval",
+            "catalog_trust",
+            "artifact_integrity",
+            "license_acceptance",
+            "runtime_compatibility",
+            "self_test_attestation",
+            "current_device_measurement",
+            "whole_loadout_admission"
+          ]
+        },
+        "review_evidence": [
+          {
+            "evidence_schema": "npc.embedding-qualification-report/v1",
+            "file_name": "out/evidence/local-embedding-bge-cpu-2026-08-30.json",
+            "evidence_sha256": "a2852d74ed08e93c5b02676cafeec21331ef5cfadfdfbf6a3301e2a3c5878463",
+            "signed_measurement_envelope": false,
+            "admission_eligible": false,
+            "blocker": "The real report lacks a trusted device fingerprint and threshold-signed QualifiedResourceEnvelope, so it cannot populate measured UI fields or authorize admission."
+          }
+        ],
+        "qualified_envelopes": [
+          {
+            "report_id": "bge-small-cpu-1788072826-3ab078433df7",
+            "device_fingerprint_sha256": "480a0ebfe9b7f9ce9edc0b5e98d97491c7c3a2c8e5d3e52bcb4d13f9e3a230ce",
+            "placement": "cpu_resident",
+            "envelope_sha256": "bdb0f3c44183f8956eb3ac51f39eac16a6881df691832406a2d88d1e03a3811d",
+            "source_evidence_sha256": "a2852d74ed08e93c5b02676cafeec21331ef5cfadfdfbf6a3301e2a3c5878463"
+          }
+        ]
+      },
+      {
+        "identity": {
+          "pack_id": "local.tts.kokoro-v1.0-int8.sherpa-onnx-cpu.windows-x64",
+          "revision": "2026.08.30-r1"
+        },
+        "file_name": "kokoro-sherpa-onnx-v1.0-int8-windows-x64.json",
+        "source_schema": "npc.model-pack/v2",
+        "raw_document_sha256": "0e2eebcfa75e50c3bcd484b9646dd0fbba79919632fc81a28c5895a45e000972",
+        "canonical_document_sha256": "a037f004b2849fc05a27dc66f3c801523867586c8f1c78cd81f66838f1ed3997",
+        "normalized_manifest_sha256": "513d020d49e0eb778f2c465c969d75b8f7d38c79c520f126d19599d99572f3cf",
+        "admission_state": "blocked_pending_measurement",
+        "admission_reason": "Artifact and license identities are pinned, but this CPU pack remains blocked until the exact manifest is catalog-trusted, a real Windows self-test is attested, at least 20 signed current-device load/reload/synthesis samples prove RAM, CPU, zero target-process VRAM, audio correctness and cancellation, and whole-loadout admission preserves the game reserve.",
+        "allowed_residencies": [
+          "cpu_resident"
+        ],
+        "license": {
+          "spdx_expression": "Apache-2.0 AND MIT AND GPL-3.0-or-later AND CC-BY-3.0 AND CC-BY-4.0",
+          "license_name": "Composite Kokoro, sherpa-onnx, ONNX Runtime, piper-phonemize, eSpeak-NG, and training-data attribution terms",
+          "license_url": "https://huggingface.co/hexgrad/Kokoro-82M/blob/f3ff3571791e39611d31c381e3a41a3af07b4987/README.md",
+          "redistributable": false,
+          "acceptance_required": true,
+          "component_ids": [
+            "espeak-ng-gpl-3.0-or-later",
+            "kokoro-model-apache-2.0",
+            "kokoro-training-attribution-cc",
+            "onnxruntime-mit",
+            "piper-phonemize-mit",
+            "sherpa-onnx-apache-2.0"
+          ]
+        },
+        "lifecycle": {
+          "explicit_download_required": true,
+          "automatic_download_allowed": false,
+          "install_strategy": "verify_then_atomic_activate",
+          "repair_strategy": "verify_quarantine_reinstall",
+          "remove_requires_unreferenced": true,
+          "activation_gates": [
+            "explicit_user_approval",
+            "catalog_trust",
+            "artifact_integrity",
+            "license_acceptance",
+            "runtime_compatibility",
+            "self_test_attestation",
+            "current_device_measurement",
+            "whole_loadout_admission"
+          ]
+        },
+        "review_evidence": [],
+        "qualified_envelopes": []
+      },
+      {
+        "identity": {
+          "pack_id": "npc.stt.moonshine-v2-medium-streaming-en.win-x64",
+          "revision": "0.1.5-moonshine.234f60f"
+        },
+        "file_name": "moonshine-v2-medium-streaming-en-win-x64-v0.1.5.json",
+        "source_schema": "npc.model-pack/v2",
+        "raw_document_sha256": "2eaef47dc00c7594c1466358f5e063b741a674e5fb0f9f3a6157ca1c32554a97",
+        "canonical_document_sha256": "3977e3f8b6ec4d8a9d4feb3842d3ad9c6bb21f1c623f7188e719e6f2a45e54c0",
+        "normalized_manifest_sha256": "74c7bc79b5f163b17b0a0a510864377b3813857df3d605699f7b3976d7b097c5",
+        "admission_state": "blocked_pending_measurement",
+        "admission_reason": "Artifact and license identities are pinned, but activation remains blocked until a trusted real-model self-test attestation, signed current-device measurements, and whole-loadout admission are present.",
+        "allowed_residencies": [
+          "cpu_resident"
+        ],
+        "license": {
+          "spdx_expression": "MIT",
+          "license_name": "MIT License",
+          "license_url": "https://github.com/moonshine-ai/moonshine/blob/234f60faa0eb388b01cdf7e60aca232af37aefda/LICENSE",
+          "redistributable": true,
+          "acceptance_required": true,
+          "component_ids": [
+            "moonshine-mit",
+            "onnxruntime-mit"
+          ]
+        },
+        "lifecycle": {
+          "explicit_download_required": true,
+          "automatic_download_allowed": false,
+          "install_strategy": "verify_then_atomic_activate",
+          "repair_strategy": "verify_quarantine_reinstall",
+          "remove_requires_unreferenced": true,
+          "activation_gates": [
+            "explicit_user_approval",
+            "catalog_trust",
+            "artifact_integrity",
+            "license_acceptance",
+            "runtime_compatibility",
+            "self_test_attestation",
+            "current_device_measurement",
+            "whole_loadout_admission"
+          ]
+        },
+        "review_evidence": [
+          {
+            "evidence_schema": "npc.non-qualifying-model-review-summary/v1",
+            "file_name": "packaging/model-packs/review-evidence/moonshine-non-qualifying-review-summary-v1.json",
+            "evidence_sha256": "1d9368f3c91d36430d787ba84474c380ca2904eb534029c1018d0ccd3cd7a96e",
+            "signed_measurement_envelope": false,
+            "admission_eligible": false,
+            "blocker": "Unsigned evidence fails low-latency admission: p50 RTF 3.376, approximately 80.7 percent total CPU, and first-final latency 4.96 seconds."
+          }
+        ],
+        "qualified_envelopes": []
+      },
+      {
+        "identity": {
+          "pack_id": "opencv-yunet-sface-private-eval",
+          "revision": "zoo-47534e27-opencv-5.0.0.93"
+        },
+        "file_name": "opencv-yunet-sface-private-evaluation.json",
+        "source_schema": "npc.model-pack/v2",
+        "raw_document_sha256": "a4af4874af77c4dc517fe41990371e96e68a4469ee6817102876b7b074302e67",
+        "canonical_document_sha256": "5460431f9267865dc796caf5f7aa71f162e307fa38a3be376c739899e8930831",
+        "normalized_manifest_sha256": "65dca5d94a43802fd914692769ba97c0fd1917d7b57f6afbd4b235c79a4a83bb",
+        "admission_state": "blocked_pending_measurement",
+        "admission_reason": "Exact model artifacts and their MIT/Apache-2.0 provenance are pinned. Activation remains blocked until the separately admitted runtime, attested self-test, signed current-device measurements, rights-cleared open-set calibration evidence, and whole-loadout admission are present.",
+        "allowed_residencies": [
+          "cpu_resident"
+        ],
+        "license": {
+          "spdx_expression": "MIT AND Apache-2.0",
+          "license_name": "YuNet MIT and SFace Apache-2.0 model files",
+          "license_url": "https://github.com/opencv/opencv_zoo/tree/47534e27c9851bb1128ccc0102f1145e27f23f98/models",
+          "redistributable": true,
+          "acceptance_required": false,
+          "component_ids": [
+            "sface-model-apache2",
+            "yunet-model"
+          ]
+        },
+        "lifecycle": {
+          "explicit_download_required": true,
+          "automatic_download_allowed": false,
+          "install_strategy": "verify_then_atomic_activate",
+          "repair_strategy": "verify_quarantine_reinstall",
+          "remove_requires_unreferenced": true,
+          "activation_gates": [
+            "explicit_user_approval",
+            "catalog_trust",
+            "artifact_integrity",
+            "license_acceptance",
+            "runtime_compatibility",
+            "self_test_attestation",
+            "current_device_measurement",
+            "whole_loadout_admission"
+          ]
+        },
+        "review_evidence": [],
+        "qualified_envelopes": []
+      },
+      {
+        "identity": {
+          "pack_id": "openseeface-mnv3-lm1-mouth-signal",
+          "revision": "85aa70fc67582d046e771ea73625182a0d8f7475"
+        },
+        "file_name": "openseeface-mnv3-lm1-mouth-signal.json",
+        "source_schema": "npc.model-pack/v2",
+        "raw_document_sha256": "2d10e01c1b1ab5177d594375f94dbc62ccd926b4fa82f75b35cda33c27e38dae",
+        "canonical_document_sha256": "f430962ca08a6f93684b8bad82a6ae3ed966815e7c672dd1560095a7964a65bf",
+        "normalized_manifest_sha256": "0127b61113b1f838bf70bdc4127bd7d5f7f9a75fde95429c89c5e726751f0552",
+        "admission_state": "blocked_pending_measurement",
+        "admission_reason": "The model and exact ONNX Runtime archive are pinned and a current-device candidate measurement passed, but its ephemeral signature is not release-trusted. Activation remains blocked until extracted runtime allowlist verification, ThirdPartyNotices and optional-runtime legal reconciliation, release-catalog trust, attested self-test, a trusted signed current-device envelope, and whole-loadout admission all pass.",
+        "allowed_residencies": [
+          "cpu_resident"
+        ],
+        "license": {
+          "spdx_expression": "BSD-2-Clause AND MIT",
+          "license_name": "BSD 2-Clause and MIT",
+          "license_url": "https://github.com/emilianavt/OpenSeeFace/blob/85aa70fc67582d046e771ea73625182a0d8f7475/LICENSE",
+          "redistributable": true,
+          "acceptance_required": false,
+          "component_ids": [
+            "onnxruntime-1.22.1-cpu",
+            "openseeface-models"
+          ]
+        },
+        "lifecycle": {
+          "explicit_download_required": true,
+          "automatic_download_allowed": false,
+          "install_strategy": "verify_then_atomic_activate",
+          "repair_strategy": "verify_quarantine_reinstall",
+          "remove_requires_unreferenced": true,
+          "activation_gates": [
+            "explicit_user_approval",
+            "catalog_trust",
+            "artifact_integrity",
+            "license_acceptance",
+            "runtime_compatibility",
+            "self_test_attestation",
+            "current_device_measurement",
+            "whole_loadout_admission"
+          ]
+        },
+        "review_evidence": [
+          {
+            "evidence_schema": "npc.openseeface-manifest-measurement-derivation/v1",
+            "file_name": "out/qualification/openseeface-mnv3-lm1/evidence/openseeface-final-manifest-no-inference-derivation.candidate.json",
+            "evidence_sha256": "34a2c799110642d4493bc64e5efa355051caeb10866ff76f5dfd3c729fe431ae",
+            "signed_measurement_envelope": false,
+            "admission_eligible": false,
+            "blocker": "The immutable no-inference derivation is non-authoritative evidence only; activation requires a separately threshold-signed exact-manifest current-device envelope plus live whole-loadout admission."
+          }
+        ],
+        "qualified_envelopes": [
+          {
+            "report_id": "openseeface-1788075067-final-manifest-review-rebind",
+            "device_fingerprint_sha256": "480a0ebfe9b7f9ce9edc0b5e98d97491c7c3a2c8e5d3e52bcb4d13f9e3a230ce",
+            "placement": "cpu_resident",
+            "envelope_sha256": "00cd2e723d3eae1687f075e2d811c821302850c2370f06d75c57f0e5705d8235",
+            "source_evidence_sha256": "34a2c799110642d4493bc64e5efa355051caeb10866ff76f5dfd3c729fe431ae"
+          }
+        ]
+      },
+      {
+        "identity": {
+          "pack_id": "qwen3-4b-instruct-2507-q4-k-m",
+          "revision": "Qwen3-4B-Instruct-2507"
+        },
+        "file_name": "qwen3-4b-instruct-2507-q4-k-m.json",
+        "source_schema": "npc.model-pack/v2",
+        "raw_document_sha256": "b17aa18054478eb8394d2d98f38e3411340bd0673a54b278c7ed124f510c0ed9",
+        "canonical_document_sha256": "86498fe5f59cfe386a761d67a0c3b9d5c06663351956aaf0f92e904fd876f1eb",
+        "normalized_manifest_sha256": "437f675be9d30dbfc6edfbb0d7ad17a293d0ddb855854a574073cb0e0d2ff228",
+        "admission_state": "blocked_pending_measurement",
+        "admission_reason": "Optional local model remains blocked until a trusted catalog authorizes this exact manifest, its structured self-test is attested, and at least 20 signed current-device samples qualify the whole selected game loadout.",
+        "allowed_residencies": [
+          "cpu_resident",
+          "gpu_resident"
+        ],
+        "license": {
+          "spdx_expression": "Apache-2.0",
+          "license_name": "Apache License 2.0",
+          "license_url": "https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507/blob/cdbee75f17c01a7cc42f958dc650907174af0554/LICENSE",
+          "redistributable": true,
+          "acceptance_required": false,
+          "component_ids": [
+            "qwen3-4b-instruct-2507",
+            "qwen3-4b-instruct-2507-gguf-conversion"
+          ]
+        },
+        "lifecycle": {
+          "explicit_download_required": true,
+          "automatic_download_allowed": false,
+          "install_strategy": "verify_then_atomic_activate",
+          "repair_strategy": "verify_quarantine_reinstall",
+          "remove_requires_unreferenced": true,
+          "activation_gates": [
+            "explicit_user_approval",
+            "catalog_trust",
+            "artifact_integrity",
+            "license_acceptance",
+            "runtime_compatibility",
+            "self_test_attestation",
+            "current_device_measurement",
+            "whole_loadout_admission"
+          ]
+        },
+        "review_evidence": [],
+        "qualified_envelopes": []
+      }
+    ]
+  },
+  "source_inventory_signatures": [
+    {
+      "key_id": "automated-local-review-rev4-ephemeral-1",
+      "algorithm": "ed25519",
+      "signature": "lkaOy1UEeROQi4zc8kE6EMKxYQ0Jqd8r1UqfrCYhXIo-3Cij7_Dnrk0g7Kg-yIzXdYrZciyG9W44tZ796O7gBg"
+    },
+    {
+      "key_id": "automated-local-review-rev4-ephemeral-2",
+      "algorithm": "ed25519",
+      "signature": "XOP5RYXctxIjErYAJngZsRbtGEhWS9nghgxzqiXhASGqILcN552_iO7rBtgX8wURbJoHwW6uHdr--BBU5N8KBQ"
+    }
+  ]
+}

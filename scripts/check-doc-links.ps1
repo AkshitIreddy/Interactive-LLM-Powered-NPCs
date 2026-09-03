@@ -10,7 +10,7 @@ if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
     $RepositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 }
 $repositoryPath = (Resolve-Path -LiteralPath $RepositoryRoot).Path
-$excludedDirectories = @('.git', '.secrets', '.pnpm-store', '.render-work', 'node_modules', 'target', 'out', 'dist', 'coverage')
+$excludedDirectories = @('.git', '.secrets', '.pnpm-store', '.render-work', 'artifacts', 'node_modules', 'target', 'out', 'dist', 'coverage')
 $markdownFiles = New-Object 'System.Collections.Generic.List[System.IO.FileInfo]'
 $pendingDirectories = New-Object 'System.Collections.Generic.Stack[string]'
 $pendingDirectories.Push($repositoryPath)

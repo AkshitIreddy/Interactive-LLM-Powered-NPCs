@@ -29,6 +29,93 @@ public:
     virtual void stop_capture() noexcept = 0;
     [[nodiscard]] virtual bool start_overlay(const TargetGeometry& geometry, Failure& failure) = 0;
     virtual void stop_overlay() noexcept = 0;
+    [[nodiscard]] virtual bool overlay_capture_excluded() const noexcept = 0;
+    // The default keeps portable/simulated platforms fail-closed. Windows is
+    // the sole implementation that duplicates and opens worker GPU resources.
+    [[nodiscard]] virtual bool import_shared_residual(const SharedResidualLease&,
+                                                      std::uintptr_t& native_texture,
+                                                      Failure& failure) {
+        native_texture = 0;
+        failure = {FailureDomain::overlay, FailureCode::unsupported_path, false,
+                   "Cross-process residual import is unavailable on this platform"};
+        return false;
+    }
+    virtual void release_shared_residual() noexcept {}
+    [[nodiscard]] virtual bool shared_residual_active() const noexcept { return false; }
+    [[nodiscard]] virtual bool allocate_visual_source(const VisualSourceLeaseRequest&,
+                                                      VisualSourceLease& lease,
+                                                      Failure& failure) {
+        lease = {};
+        failure = {FailureDomain::capture, FailureCode::unsupported_path, false,
+                   "Current-frame visual source leasing is unavailable on this platform"};
+        return false;
+    }
+    [[nodiscard]] virtual bool release_visual_source(std::uint32_t,
+                                                     std::uint64_t,
+                                                     std::uint64_t) noexcept {
+        return false;
+    }
+    virtual void cancel_visual_source_leases() noexcept {}
+    [[nodiscard]] virtual bool allocate_identity_frame(const IdentityFrameLeaseRequest&,
+                                                       IdentityFrameLease& lease,
+                                                       Failure& failure) {
+        lease = {};
+        failure = {FailureDomain::capture, FailureCode::unsupported_path, false,
+                   "CPU identity frame leasing is unavailable on this platform"};
+        return false;
+    }
+    [[nodiscard]] virtual bool release_identity_frame(std::uint32_t,
+                                                      std::string_view,
+                                                      std::string_view) noexcept {
+        return false;
+    }
+    virtual void cancel_identity_frame_leases() noexcept {}
+    [[nodiscard]] virtual bool allocate_identity_reference_import(
+        const IdentityReferenceImportRequest&,
+        IdentityReferenceImportLease& lease,
+        Failure& failure) {
+        lease = {};
+        failure = {FailureDomain::capture, FailureCode::unsupported_path, false,
+                   "Native identity reference import is unavailable on this platform"};
+        return false;
+    }
+    [[nodiscard]] virtual bool release_identity_reference_import(
+        std::uint32_t, std::string_view, std::string_view) noexcept {
+        return false;
+    }
+    [[nodiscard]] virtual bool begin_manual_actor_picker(
+        const ManualActorPickerRequest&,
+        ManualActorPickerReceipt& receipt,
+        Failure& failure) {
+        receipt = {};
+        failure = {FailureDomain::overlay, FailureCode::unsupported_path, false,
+                   "Native manual actor selection is unavailable on this platform"};
+        return false;
+    }
+    [[nodiscard]] virtual bool query_manual_actor_picker(
+        std::string_view,
+        ManualActorPickerReceipt& receipt,
+        Failure& failure) {
+        receipt = {};
+        failure = {FailureDomain::overlay, FailureCode::unsupported_path, false,
+                   "Native manual actor selection is unavailable on this platform"};
+        return false;
+    }
+    [[nodiscard]] virtual bool cancel_manual_actor_picker(
+        std::string_view,
+        ManualActorPickerReceipt& receipt,
+        Failure& failure) {
+        receipt = {};
+        failure = {FailureDomain::overlay, FailureCode::unsupported_path, false,
+                   "Native manual actor selection is unavailable on this platform"};
+        return false;
+    }
+    virtual void cancel_manual_actor_picker() noexcept {}
+    [[nodiscard]] virtual bool present_shared_residual(const MouthPatch&, Failure& failure) {
+        failure = {FailureDomain::overlay, FailureCode::unsupported_path, false,
+                   "Cross-process residual presentation is unavailable on this platform"};
+        return false;
+    }
     [[nodiscard]] virtual bool initialize_audio(Failure& failure) = 0;
     virtual void shutdown_audio() noexcept = 0;
     [[nodiscard]] virtual bool register_ptt_hotkey(std::uint32_t virtual_key, Failure& failure) = 0;
@@ -72,6 +159,7 @@ public:
     void stop_capture() noexcept override;
     [[nodiscard]] bool start_overlay(const TargetGeometry& geometry, Failure& failure) override;
     void stop_overlay() noexcept override;
+    [[nodiscard]] bool overlay_capture_excluded() const noexcept override;
     [[nodiscard]] bool initialize_audio(Failure& failure) override;
     void shutdown_audio() noexcept override;
     [[nodiscard]] bool register_ptt_hotkey(std::uint32_t virtual_key, Failure& failure) override;

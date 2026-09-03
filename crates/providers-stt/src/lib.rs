@@ -1,8 +1,8 @@
 //! Provider-neutral streaming STT contracts and hosted provider protocol adapters.
 //!
-//! This crate deliberately contains no WebSocket implementation. The application injects a
-//! [`TransportFactory`], which keeps credentials in the trusted native process and makes every
-//! provider protocol deterministically testable without network access.
+//! Provider protocols remain independently testable through [`TransportFactory`]. Production
+//! callers can use the bounded, destination-pinned [`HostedWebSocketTransportFactory`]; credential
+//! material is borrowed only while constructing the authenticated upgrade request.
 
 mod contract;
 mod error;
@@ -10,6 +10,7 @@ mod hosted;
 mod nvidia;
 mod providers;
 mod transport;
+mod websocket;
 
 pub use contract::*;
 pub use error::*;
@@ -20,3 +21,4 @@ pub use providers::{
     ProviderSessionProtocol, WireEvent, WireTranscript,
 };
 pub use transport::*;
+pub use websocket::*;

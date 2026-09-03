@@ -498,7 +498,10 @@ struct ProviderResponse {
     #[serde(default, alias = "normalizedAlignment")]
     normalized_alignment: Option<CharacterAlignment>,
     #[serde(default, alias = "isFinal")]
-    is_final: bool,
+    // Current ElevenLabs audio frames carry `isFinal: null`; only the terminal
+    // frame carries `true`. `Option<bool>` accepts that documented live shape
+    // without treating an ordinary audio frame as malformed JSON.
+    is_final: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -515,22 +518,28 @@ fn decode_response(
     max_message_bytes: usize,
 ) -> Result<VecDeque<WireEvent>, TransportError> {
     if bytes.len() > max_message_bytes {
-        return Err(TransportError::Protocol);
+        return Err(TransportError::ProtocolStage(
+            "elevenlabs_response_too_large",
+        ));
     }
-    let response: ProviderResponse =
-        serde_json::from_slice(bytes).map_err(|_| TransportError::Protocol)?;
+    let response: ProviderResponse = serde_json::from_slice(bytes)
+        .map_err(|_| TransportError::ProtocolStage("elevenlabs_response_json_invalid"))?;
     let mut events = VecDeque::new();
     if let Some(audio) = response.audio {
         let audio = Zeroizing::new(audio);
         let max_encoded = MAX_AUDIO_CHUNK_BYTES.saturating_mul(4).div_ceil(3) + 4;
         if audio.len() > max_encoded {
-            return Err(TransportError::Protocol);
+            return Err(TransportError::ProtocolStage(
+                "elevenlabs_audio_base64_too_large",
+            ));
         }
         let decoded = BASE64
             .decode(audio.as_bytes())
-            .map_err(|_| TransportError::Protocol)?;
+            .map_err(|_| TransportError::ProtocolStage("elevenlabs_audio_base64_invalid"))?;
         if decoded.len() > MAX_AUDIO_CHUNK_BYTES {
-            return Err(TransportError::Protocol);
+            return Err(TransportError::ProtocolStage(
+                "elevenlabs_audio_chunk_too_large",
+            ));
         }
         if !decoded.is_empty() {
             events.push_back(WireEvent::Audio(decoded));
@@ -542,11 +551,13 @@ fn decode_response(
             events.push_back(WireEvent::Alignment(words));
         }
     }
-    if response.is_final {
+    if response.is_final == Some(true) {
         events.push_back(WireEvent::Complete);
     }
     if events.is_empty() {
-        return Err(TransportError::Protocol);
+        return Err(TransportError::ProtocolStage(
+            "elevenlabs_response_has_no_events",
+        ));
     }
     Ok(events)
 }
@@ -561,7 +572,9 @@ fn word_alignment(alignment: CharacterAlignment) -> Result<Vec<WordAlignment>, T
             .iter()
             .any(|value| value.chars().count() != 1)
     {
-        return Err(TransportError::Protocol);
+        return Err(TransportError::ProtocolStage(
+            "elevenlabs_alignment_shape_invalid",
+        ));
     }
 
     let mut previous_start = 0;
@@ -573,14 +586,18 @@ fn word_alignment(alignment: CharacterAlignment) -> Result<Vec<WordAlignment>, T
         .enumerate()
     {
         let Some(end) = start.checked_add(duration) else {
-            return Err(TransportError::Protocol);
+            return Err(TransportError::ProtocolStage(
+                "elevenlabs_alignment_timing_invalid",
+            ));
         };
         if start > MAX_ALIGNMENT_TIMESTAMP_MS
             || duration > MAX_CHARACTER_DURATION_MS
             || end > MAX_ALIGNMENT_TIMESTAMP_MS
             || (index > 0 && (start < previous_start || end < previous_end))
         {
-            return Err(TransportError::Protocol);
+            return Err(TransportError::ProtocolStage(
+                "elevenlabs_alignment_timing_invalid",
+            ));
         }
         previous_start = start;
         previous_end = end;
@@ -731,14 +748,24 @@ mod tests {
             char_start_times_ms: vec![0],
             char_durations_ms: vec![10],
         };
-        assert_eq!(word_alignment(multi_scalar), Err(TransportError::Protocol));
+        assert_eq!(
+            word_alignment(multi_scalar),
+            Err(TransportError::ProtocolStage(
+                "elevenlabs_alignment_shape_invalid"
+            ))
+        );
 
         let non_monotonic = CharacterAlignment {
             chars: vec!["a".to_owned(), "b".to_owned()],
             char_start_times_ms: vec![100, 90],
             char_durations_ms: vec![10, 10],
         };
-        assert_eq!(word_alignment(non_monotonic), Err(TransportError::Protocol));
+        assert_eq!(
+            word_alignment(non_monotonic),
+            Err(TransportError::ProtocolStage(
+                "elevenlabs_alignment_timing_invalid"
+            ))
+        );
 
         let excessive_duration = CharacterAlignment {
             chars: vec!["a".to_owned()],
@@ -747,7 +774,9 @@ mod tests {
         };
         assert_eq!(
             word_alignment(excessive_duration),
-            Err(TransportError::Protocol)
+            Err(TransportError::ProtocolStage(
+                "elevenlabs_alignment_timing_invalid"
+            ))
         );
 
         let excessive_timestamp = CharacterAlignment {
@@ -757,7 +786,9 @@ mod tests {
         };
         assert_eq!(
             word_alignment(excessive_timestamp),
-            Err(TransportError::Protocol)
+            Err(TransportError::ProtocolStage(
+                "elevenlabs_alignment_timing_invalid"
+            ))
         );
     }
 

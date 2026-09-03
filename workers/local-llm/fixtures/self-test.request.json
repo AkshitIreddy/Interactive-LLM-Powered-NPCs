@@ -1,0 +1,46 @@
+{
+  "schema": "npc.local-llm.self-test/v1",
+  "model_id": "qwen3-4b-instruct-2507-q4-k-m",
+  "messages": [
+    {
+      "role": "system",
+      "content": "Return only JSON that satisfies the supplied schema."
+    },
+    {
+      "role": "user",
+      "content": "Report the local NPC dialogue model self-test status."
+    }
+  ],
+  "sampling": {
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "seed": 424242,
+    "max_tokens": 64
+  },
+  "response_json_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "schema_version",
+      "pack_id",
+      "status"
+    ],
+    "properties": {
+      "schema_version": {
+        "const": "npc.local-llm.self-test-output/v1"
+      },
+      "pack_id": {
+        "const": "qwen3-4b-instruct-2507-q4-k-m"
+      },
+      "status": {
+        "const": "ready"
+      }
+    }
+  },
+  "expected_canonical_output": {
+    "schema_version": "npc.local-llm.self-test-output/v1",
+    "pack_id": "qwen3-4b-instruct-2507-q4-k-m",
+    "status": "ready"
+  }
+}

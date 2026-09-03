@@ -39,6 +39,7 @@ async fn fixed_broker_authenticates_reports_health_and_shuts_down() {
         MediaBrokerLaunchConfig {
             executable,
             development_fixture_allowed: false,
+            audio_output_selection_path: app_data.path().join("audio-output-selection-v1.json"),
             debug_synthetic_metadata_path: app_data
                 .path()
                 .join("debug-synthetic-replay-target.json"),
@@ -53,6 +54,30 @@ async fn fixed_broker_authenticates_reports_health_and_shuts_down() {
     assert_eq!(health.protocol_version, Some(1));
 
     let diagnostics = supervisor.diagnostics().await.expect("broker diagnostics");
+    let outputs = supervisor
+        .enumerate_audio_outputs()
+        .await
+        .expect("real Windows audio outputs");
+    assert!(outputs.catalog_generation > 0);
+    assert!(!outputs.endpoints.is_empty());
+    let selected = supervisor
+        .select_audio_output(
+            interactive_npcs_control_lib::media_broker::AudioOutputSelection::SystemDefault,
+        )
+        .await
+        .expect("explicitly persist system-default output");
+    assert!(selected.resolved.system_default);
+    assert!(selected.resolved.generation > 0);
+    assert_eq!(
+        supervisor
+            .selected_audio_output()
+            .await
+            .expect("selected output query")
+            .expect("persisted selection")
+            .resolved
+            .endpoint_id,
+        selected.resolved.endpoint_id
+    );
     assert_ne!(diagnostics.state, "unknown");
     supervisor.shutdown().await;
     assert!(!supervisor.health().connected);

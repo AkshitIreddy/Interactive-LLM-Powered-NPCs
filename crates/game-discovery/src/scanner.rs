@@ -49,6 +49,7 @@ impl DiscoveryService {
         }
 
         let mut candidates: Vec<_> = merged.into_values().collect();
+        reconcile_moved_or_duplicate_store_installs(&mut candidates);
         candidates.sort_by(|left, right| {
             right
                 .confidence()
@@ -57,6 +58,70 @@ impl DiscoveryService {
         });
         (candidates, errors)
     }
+}
+
+fn reconcile_moved_or_duplicate_store_installs(candidates: &mut Vec<InstallationCandidate>) {
+    let mut identities = BTreeMap::<String, Vec<usize>>::new();
+    for (index, candidate) in candidates.iter().enumerate() {
+        let Some(store_id) = candidate.edition.store_id.as_deref() else {
+            continue;
+        };
+        identities
+            .entry(format!(
+                "{:?}:{}",
+                candidate.store,
+                store_id.to_ascii_lowercase()
+            ))
+            .or_default()
+            .push(index);
+    }
+    let mut removed = std::collections::BTreeSet::new();
+    for indexes in identities.values().filter(|indexes| indexes.len() > 1) {
+        let verified = indexes
+            .iter()
+            .copied()
+            .filter(|index| candidates[*index].has_verified_executable())
+            .collect::<Vec<_>>();
+        if verified.len() == 1 {
+            let destination = verified[0];
+            for source in indexes
+                .iter()
+                .copied()
+                .filter(|index| *index != destination)
+            {
+                if candidates[source].has_verified_executable() {
+                    continue;
+                }
+                let stale = candidates[source].clone();
+                candidates[destination].merge(stale);
+                candidates[destination].warnings.insert(
+                    "stale or moved store location was ignored in favor of one verified executable"
+                        .into(),
+                );
+                removed.insert(source);
+            }
+        } else if verified.len() > 1 {
+            for index in indexes {
+                candidates[*index].warnings.insert(
+                    "multiple verified installations share one store identity; select one explicitly"
+                        .into(),
+                );
+            }
+        } else {
+            for index in indexes {
+                candidates[*index].warnings.insert(
+                    "multiple unverified store locations share one store identity; rescan or select the executable manually"
+                        .into(),
+                );
+            }
+        }
+    }
+    let mut index = 0usize;
+    candidates.retain(|_| {
+        let keep = !removed.contains(&index);
+        index += 1;
+        keep
+    });
 }
 
 #[cfg(test)]
@@ -98,6 +163,19 @@ mod tests {
         }
     }
 
+    fn candidate_at(
+        path: &str,
+        source: DetectionSource,
+        confidence: Confidence,
+    ) -> InstallationCandidate {
+        let mut candidate = candidate(source, confidence);
+        candidate.install_dir = PathBuf::from(path);
+        if source == DetectionSource::VerifiedExecutable {
+            candidate.executable = Some(candidate.install_dir.join("game.exe"));
+        }
+        candidate
+    }
+
     #[test]
     fn merges_duplicate_store_evidence() {
         let service = DiscoveryService::new()
@@ -114,5 +192,52 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].evidence.len(), 2);
         assert_eq!(items[0].confidence(), Confidence::Verified);
+    }
+
+    #[test]
+    fn moved_store_install_prefers_the_only_verified_location() {
+        let service = DiscoveryService::new()
+            .with_scanner(FixedScanner(vec![candidate_at(
+                "D:/OldLibrary/Example",
+                DetectionSource::StoreManifest,
+                Confidence::High,
+            )]))
+            .with_scanner(FixedScanner(vec![candidate_at(
+                "E:/CurrentLibrary/Example",
+                DetectionSource::VerifiedExecutable,
+                Confidence::Verified,
+            )]));
+        let (items, errors) = service.discover();
+        assert!(errors.is_empty());
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            items[0].install_dir,
+            PathBuf::from("E:/CurrentLibrary/Example")
+        );
+        assert!(items[0].has_verified_executable());
+        assert!(items[0].warnings.contains(
+            "stale or moved store location was ignored in favor of one verified executable"
+        ));
+    }
+
+    #[test]
+    fn duplicate_verified_installs_require_explicit_selection() {
+        let service = DiscoveryService::new()
+            .with_scanner(FixedScanner(vec![candidate_at(
+                "D:/Library/Example",
+                DetectionSource::VerifiedExecutable,
+                Confidence::Verified,
+            )]))
+            .with_scanner(FixedScanner(vec![candidate_at(
+                "E:/Library/Example",
+                DetectionSource::VerifiedExecutable,
+                Confidence::Verified,
+            )]));
+        let (items, errors) = service.discover();
+        assert!(errors.is_empty());
+        assert_eq!(items.len(), 2);
+        assert!(items.iter().all(|item| item.warnings.contains(
+            "multiple verified installations share one store identity; select one explicitly"
+        )));
     }
 }

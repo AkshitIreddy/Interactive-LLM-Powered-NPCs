@@ -95,10 +95,11 @@ impl InstallationCandidate {
     }
 
     pub fn has_verified_executable(&self) -> bool {
-        self.evidence.iter().any(|item| {
-            item.source == DetectionSource::VerifiedExecutable
-                && item.confidence == Confidence::Verified
-        })
+        self.executable.is_some()
+            && self.evidence.iter().any(|item| {
+                item.source == DetectionSource::VerifiedExecutable
+                    && item.confidence == Confidence::Verified
+            })
     }
 
     /// Return the canonical executable only when it is backed by verified
@@ -128,8 +129,36 @@ impl InstallationCandidate {
     }
 
     pub fn merge(&mut self, other: Self) {
-        if self.executable.is_none() {
-            self.executable = other.executable;
+        const EXECUTABLE_CONFLICT: &str =
+            "conflicting verified executable evidence; select the game window explicitly";
+        let self_verified = self.has_verified_executable();
+        let other_verified = other.has_verified_executable();
+        let conflicting_verified_executables = self.warnings.contains(EXECUTABLE_CONFLICT)
+            || other.warnings.contains(EXECUTABLE_CONFLICT)
+            || (self_verified
+                && other_verified
+                && self
+                    .executable
+                    .as_ref()
+                    .map(|path| normalized_path_key(path))
+                    != other
+                        .executable
+                        .as_ref()
+                        .map(|path| normalized_path_key(path)));
+
+        if conflicting_verified_executables {
+            // Never let evidence for one file authorize another file. Store
+            // databases can be stale while an edition is moved or updated.
+            self.executable = None;
+            self.evidence
+                .retain(|item| item.source != DetectionSource::VerifiedExecutable);
+            self.warnings.insert(EXECUTABLE_CONFLICT.into());
+        } else if other_verified && !self_verified {
+            self.executable = other.executable.clone();
+            self.install_dir = other.install_dir.clone();
+            self.display_name = other.display_name.clone();
+        } else if self.executable.is_none() && !other_verified {
+            self.executable = other.executable.clone();
         }
         if self.edition.edition_id.is_none() {
             self.edition.edition_id = other.edition.edition_id;
@@ -141,11 +170,79 @@ impl InstallationCandidate {
             self.edition.build_id = other.edition.build_id;
         }
         for evidence in other.evidence {
+            if conflicting_verified_executables
+                && evidence.source == DetectionSource::VerifiedExecutable
+            {
+                continue;
+            }
             if !self.evidence.contains(&evidence) {
                 self.evidence.push(evidence);
             }
         }
         self.warnings.extend(other.warnings);
         self.evidence.sort_by_key(|item| item.source);
+    }
+}
+
+fn normalized_path_key(path: &std::path::Path) -> String {
+    path.to_string_lossy()
+        .replace('/', "\\")
+        .to_ascii_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn candidate(executable: Option<&str>, verified: bool) -> InstallationCandidate {
+        InstallationCandidate {
+            store: StoreKind::Epic,
+            display_name: "Example".into(),
+            install_dir: PathBuf::from(r"C:\Games\Example"),
+            executable: executable.map(PathBuf::from),
+            edition: EditionEvidence {
+                edition_id: Some("example".into()),
+                store_id: Some("42".into()),
+                build_id: None,
+            },
+            evidence: vec![InstallationEvidence {
+                source: if verified {
+                    DetectionSource::VerifiedExecutable
+                } else {
+                    DetectionSource::StoreManifest
+                },
+                confidence: if verified {
+                    Confidence::Verified
+                } else {
+                    Confidence::High
+                },
+                detail: "fixture".into(),
+            }],
+            warnings: BTreeSet::new(),
+        }
+    }
+
+    #[test]
+    fn merge_moves_the_executable_with_its_verified_evidence() {
+        let mut store_only = candidate(None, false);
+        store_only.merge(candidate(Some(r"C:\Games\Example\game.exe"), true));
+        assert!(store_only.has_verified_executable());
+        let expected = PathBuf::from(r"C:\Games\Example\game.exe");
+        assert_eq!(store_only.verified_executable(), Some(expected.as_path()));
+    }
+
+    #[test]
+    fn merge_fails_closed_on_conflicting_verified_executables() {
+        let mut first = candidate(Some(r"C:\Games\Example\game.exe"), true);
+        first.merge(candidate(Some(r"C:\Games\Example\stale-game.exe"), true));
+        assert!(!first.has_verified_executable());
+        assert!(first.verified_executable().is_none());
+        assert!(first.warnings.contains(
+            "conflicting verified executable evidence; select the game window explicitly"
+        ));
+
+        first.merge(candidate(Some(r"C:\Games\Example\game.exe"), true));
+        assert!(!first.has_verified_executable());
+        assert!(first.verified_executable().is_none());
     }
 }

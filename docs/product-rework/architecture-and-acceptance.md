@@ -79,9 +79,32 @@ Configuration has one source of truth and explicit inheritance:
 global loadout → game override → character override
 ```
 
+The default experience is API-first. Its preferred screen-space lip-sync design
+uses a per-character mouth atlas and tiny CPU/provider viseme driver, so no
+heavy visual AI model is expected to remain resident during gameplay. A local
+enrollment teacher or tiny residual refiner is optional and must be separately
+admitted. Fully local and mixed-local
+loadouts remain supported, but activation is conditional on a measured
+co-residency plan. The plan subtracts current game/desktop VRAM, the user's game
+reserve, every resident model, p99 transient workspace, and a safety margin.
+Unknown envelopes do not fit by definition.
+
+Model residency has three deliberate policies: keep warm when reload cost is
+larger than the expected idle interval; keep weights in system RAM while the
+GPU copy is cold when the engine supports it; or unload completely. Foreground
+speech/LLM work outranks retrieval and vision. Lip-sync is a deadline-bound
+visual burst: stale frames are dropped, never allowed to form a latency queue.
+
 Each effective route records provider, endpoint kind, model ID, stock voice ID,
 metadata timestamp, credential-reference presence, privacy/cost disclosure,
 and last bounded test result. Credentials never enter the WebView.
+
+NVIDIA NIM may be recommended as a one-account development route only for
+modalities proven reachable with the user's key. "Free endpoint" means a
+development service with model-specific availability and limits, not unlimited
+or production entitlement. Audio2Face-3D returns avatar blendshape animation;
+it does not directly edit arbitrary captured game pixels and therefore cannot
+replace the generic current-frame mouth-residual worker by itself.
 
 ## Visual direction
 
@@ -175,4 +198,3 @@ No installer becomes a user-review candidate until:
 6. full frames plus 4–6 inspected close-ups exist for every retained screen at
    normal, narrow, 150%, and 200% scaling;
 7. the exact installed binary is rerun from a clean local state.
-

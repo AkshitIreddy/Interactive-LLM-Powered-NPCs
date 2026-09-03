@@ -1,0 +1,257 @@
+{
+  "schema_version": 1,
+  "policy": "An override is allowed only when an exact locked package declares a license but its published archive omits the referenced body. The body must be hash-locked and come from the package's pinned primary-source VCS revision; only when that pinned tree declares a standard license but contains no body may the exact component use the licensor's official standard text.",
+  "license_files": {
+    "nugine-simd-d74c030-mit": {
+      "path": "docs/legal/licenses/Nugine-simd-d74c030-MIT.txt",
+      "sha256": "14e66de892a0e218a4d60b2cc41a17a28080c46621d812fa2471983d8c524748",
+      "upstream_sha256": "71674605ec4c087fe9eb534e3e4f9e26eb2e4aabcd76a29fd156c6a844d44b3d",
+      "normalization": "Appended one final LF; the pinned upstream blob has no final newline. Removing exactly the final LF reproduces upstream_sha256.",
+      "spdx": "MIT",
+      "source_url": "https://raw.githubusercontent.com/Nugine/simd/d74c030d9dc4f3cae02146d1f497ff62726ef09a/LICENSE",
+      "source_revision": "d74c030d9dc4f3cae02146d1f497ff62726ef09a",
+      "redistribution_conclusion": "permitted-with-copyright-and-license-inclusion"
+    },
+    "dropbox-alloc-no-stdlib-ae42d22-bsd-3-clause": {
+      "path": "docs/legal/licenses/Dropbox-rust-alloc-no-stdlib-ae42d22-BSD-3-Clause.txt",
+      "sha256": "c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae",
+      "spdx": "BSD-3-Clause",
+      "source_kind": "pinned-vcs-blob",
+      "source_url": "https://raw.githubusercontent.com/dropbox/rust-alloc-no-stdlib/ae42d22078b98549e987d2f03d12df7b984fde47/LICENSE",
+      "source_revision": "ae42d22078b98549e987d2f03d12df7b984fde47",
+      "redistribution_conclusion": "permitted-with-copyright-license-conditions-and-disclaimer-inclusion"
+    },
+    "mozilla-mpl-2.0-official": {
+      "path": "docs/legal/licenses/Mozilla-MPL-2.0.txt",
+      "sha256": "fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85",
+      "spdx": "MPL-2.0",
+      "source_kind": "official-standard-license-text",
+      "standard_id": "MPL-2.0",
+      "source_url": "https://www.mozilla.org/media/MPL/2.0/index.815ca599c9df.txt",
+      "source_revision": "MPL-2.0",
+      "redistribution_conclusion": "permitted-subject-to-mpl-2.0-source-form-and-notice-obligations"
+    },
+    "rust-unic-5878605-mit": {
+      "path": "docs/legal/licenses/rust-unic-0.9.0-MIT.txt",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "spdx": "MIT",
+      "source_kind": "pinned-vcs-blob",
+      "source_url": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-MIT",
+      "source_revision": "5878605364af97a3358368a6eaef02104af2e016",
+      "redistribution_conclusion": "permitted-with-copyright-and-license-inclusion"
+    },
+    "rust-unic-5878605-apache-2.0": {
+      "path": "docs/legal/licenses/rust-unic-0.9.0-APACHE-2.0.txt",
+      "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "spdx": "Apache-2.0",
+      "source_kind": "pinned-vcs-blob",
+      "source_url": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-APACHE",
+      "source_revision": "5878605364af97a3358368a6eaef02104af2e016",
+      "redistribution_conclusion": "permitted-subject-to-apache-2.0-conditions"
+    },
+    "rust-unic-5878605-copyright": {
+      "path": "docs/legal/licenses/rust-unic-0.9.0-COPYRIGHT.md",
+      "sha256": "1e9513293e5999956cfbb2c76a7a746c907c4ba5699474ab3484db27e604ea90",
+      "upstream_sha256": "f5c342c49f3ac804f3e8e7bb62a8040a44c50d47bb36902b1abd13f66a1adf8b",
+      "normalization": "Rewrote only the three relative Markdown link targets so they resolve to the exact prefixed companion files in source and collected component directories.",
+      "markdown_link_rewrites": [
+        {"upstream": "AUTHORS", "vendored": "rust-unic-0.9.0-AUTHORS"},
+        {"upstream": "LICENSE-APACHE", "vendored": "rust-unic-0.9.0-APACHE-2.0.txt"},
+        {"upstream": "LICENSE-MIT", "vendored": "rust-unic-0.9.0-MIT.txt"}
+      ],
+      "spdx": "MIT OR Apache-2.0",
+      "source_kind": "pinned-vcs-blob",
+      "source_url": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/COPYRIGHT.md",
+      "source_revision": "5878605364af97a3358368a6eaef02104af2e016",
+      "redistribution_conclusion": "attribution-and-license-linkage-record"
+    },
+    "rust-unic-5878605-authors": {
+      "path": "docs/legal/licenses/rust-unic-0.9.0-AUTHORS",
+      "sha256": "2748c1a1fba7616917c61d455e8d715ab952671ead63f2026ad0124410596b09",
+      "spdx": "MIT OR Apache-2.0",
+      "source_kind": "pinned-vcs-blob",
+      "source_url": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/AUTHORS",
+      "source_revision": "5878605364af97a3358368a6eaef02104af2e016",
+      "redistribution_conclusion": "upstream-author-attribution-record"
+    },
+    "rust-unic-8a6ce83-mit": {
+      "path": "docs/legal/licenses/rust-unic-0.9.0-MIT.txt",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "spdx": "MIT",
+      "source_kind": "pinned-vcs-blob",
+      "source_url": "https://raw.githubusercontent.com/open-i18n/rust-unic/8a6ce83063d90b91ae2ce59eddb803edd393fca9/LICENSE-MIT",
+      "source_revision": "8a6ce83063d90b91ae2ce59eddb803edd393fca9",
+      "redistribution_conclusion": "permitted-with-copyright-and-license-inclusion"
+    },
+    "rust-unic-8a6ce83-apache-2.0": {
+      "path": "docs/legal/licenses/rust-unic-0.9.0-APACHE-2.0.txt",
+      "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "spdx": "Apache-2.0",
+      "source_kind": "pinned-vcs-blob",
+      "source_url": "https://raw.githubusercontent.com/open-i18n/rust-unic/8a6ce83063d90b91ae2ce59eddb803edd393fca9/LICENSE-APACHE",
+      "source_revision": "8a6ce83063d90b91ae2ce59eddb803edd393fca9",
+      "redistribution_conclusion": "permitted-subject-to-apache-2.0-conditions"
+    },
+    "rust-unic-8a6ce83-copyright": {
+      "path": "docs/legal/licenses/rust-unic-0.9.0-COPYRIGHT.md",
+      "sha256": "1e9513293e5999956cfbb2c76a7a746c907c4ba5699474ab3484db27e604ea90",
+      "upstream_sha256": "f5c342c49f3ac804f3e8e7bb62a8040a44c50d47bb36902b1abd13f66a1adf8b",
+      "normalization": "Rewrote only the three relative Markdown link targets so they resolve to the exact prefixed companion files in source and collected component directories.",
+      "markdown_link_rewrites": [
+        {"upstream": "AUTHORS", "vendored": "rust-unic-0.9.0-AUTHORS"},
+        {"upstream": "LICENSE-APACHE", "vendored": "rust-unic-0.9.0-APACHE-2.0.txt"},
+        {"upstream": "LICENSE-MIT", "vendored": "rust-unic-0.9.0-MIT.txt"}
+      ],
+      "spdx": "MIT OR Apache-2.0",
+      "source_kind": "pinned-vcs-blob",
+      "source_url": "https://raw.githubusercontent.com/open-i18n/rust-unic/8a6ce83063d90b91ae2ce59eddb803edd393fca9/COPYRIGHT.md",
+      "source_revision": "8a6ce83063d90b91ae2ce59eddb803edd393fca9",
+      "redistribution_conclusion": "attribution-and-license-linkage-record"
+    },
+    "rust-unic-8a6ce83-authors": {
+      "path": "docs/legal/licenses/rust-unic-0.9.0-AUTHORS",
+      "sha256": "2748c1a1fba7616917c61d455e8d715ab952671ead63f2026ad0124410596b09",
+      "spdx": "MIT OR Apache-2.0",
+      "source_kind": "pinned-vcs-blob",
+      "source_url": "https://raw.githubusercontent.com/open-i18n/rust-unic/8a6ce83063d90b91ae2ce59eddb803edd393fca9/AUTHORS",
+      "source_revision": "8a6ce83063d90b91ae2ce59eddb803edd393fca9",
+      "redistribution_conclusion": "upstream-author-attribution-record"
+    },
+    "webview2-rs-b74dc5e-mit": {
+      "path": "docs/legal/licenses/webview2-rs-0.38.2-MIT.txt",
+      "sha256": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73",
+      "spdx": "MIT",
+      "source_kind": "pinned-vcs-blob",
+      "source_url": "https://raw.githubusercontent.com/wravery/webview2-rs/b74dc5e2b394044bea5191052868ce7a106c202c/LICENSE",
+      "source_revision": "b74dc5e2b394044bea5191052868ce7a106c202c",
+      "redistribution_conclusion": "permitted-with-copyright-and-license-inclusion"
+    },
+    "webview2-rs-dffa41a-mit": {
+      "path": "docs/legal/licenses/webview2-rs-0.38.2-MIT.txt",
+      "sha256": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73",
+      "spdx": "MIT",
+      "source_kind": "pinned-vcs-blob",
+      "source_url": "https://raw.githubusercontent.com/wravery/webview2-rs/dffa41a8a46d3f5565eefbff2de57d38d399f158/LICENSE",
+      "source_revision": "dffa41a8a46d3f5565eefbff2de57d38d399f158",
+      "redistribution_conclusion": "permitted-with-copyright-and-license-inclusion"
+    }
+  },
+  "components": {
+    "pkg:cargo/uuid-simd@0.8.0": {
+      "declared_spdx": "MIT",
+      "license_file_id": "nugine-simd-d74c030-mit",
+      "crate_source_revision": "d74c030d9dc4f3cae02146d1f497ff62726ef09a",
+      "vcs_path": "crates/uuid-simd",
+      "crate_vcs_info_sha256": "9235ab068fdb6b50a2b0fdad57df40ed34461ea3a81e7d3a1584962f3f84e5a9",
+      "cargo_toml_orig_sha256": "c403470724eee7edf65a6596ffb86f12814724cd67d4d34423b77e91a9a148e4",
+      "readme_sha256": "7ab240fee8858bc5f779430196578adbddd80dc74725bb37d2ddb5ea590cdb30",
+      "linkage": "README ../../LICENSE plus .cargo_vcs_info.json path_in_vcs crates/uuid-simd at the pinned revision"
+    },
+    "pkg:cargo/vsimd@0.8.0": {
+      "declared_spdx": "MIT",
+      "license_file_id": "nugine-simd-d74c030-mit",
+      "crate_source_revision": "d74c030d9dc4f3cae02146d1f497ff62726ef09a",
+      "vcs_path": "crates/vsimd",
+      "crate_vcs_info_sha256": "b6a479e65704d09745d31e0d86d23ca44ba673b01ddd0da81cc8ba619a92b2aa",
+      "cargo_toml_orig_sha256": "cc626a72f9f89509460429bc40702d4b1d65118392790dea3e2cbf852884843d",
+      "readme_sha256": "f0accc1732bf72b4635825e7d55e37b3bfe46c56d3d933bdd88b68787666fba9",
+      "linkage": "README ../../LICENSE plus .cargo_vcs_info.json path_in_vcs crates/vsimd at the pinned revision"
+    },
+    "pkg:cargo/alloc-stdlib@0.2.4": {
+      "declared_spdx": "BSD-3-Clause",
+      "license_file_ids": ["dropbox-alloc-no-stdlib-ae42d22-bsd-3-clause"],
+      "crate_source_revision": "ae42d22078b98549e987d2f03d12df7b984fde47",
+      "vcs_path": "alloc-stdlib",
+      "crate_vcs_info_sha256": "5d07554db80324e6f09a3074928e6ae0e7cea58248f4c1db3f32d9ce0ec85efb",
+      "cargo_toml_orig_sha256": "77cff698112ee833c7c2e2b42c2b51677502ee04ca4a0c213155e3494a80fec3",
+      "readme_sha256": "4857caaabcb6eb367687e6671d70fef3b8dcbab1276999612b71f9f4cd6190b0",
+      "linkage": "Cargo.toml.orig declares BSD-3-Clause; .cargo_vcs_info.json binds alloc-stdlib to the pinned repository revision whose root LICENSE is vendored exactly"
+    },
+    "pkg:cargo/selectors@0.36.1": {
+      "declared_spdx": "MPL-2.0",
+      "license_file_ids": ["mozilla-mpl-2.0-official"],
+      "crate_source_revision": "635e1a19d02960588a00e189bd4bd5bdb150ec3d",
+      "vcs_path": "selectors",
+      "crate_vcs_info_sha256": "b9b619f8e31f591cd1326578b87ccb14b4f3687af65b505674522513ed4d276d",
+      "cargo_toml_orig_sha256": "be6ed6441d04b710178c3b50052672755e15e5cf3780060ca9fdd2c8aba1d392",
+      "readme_sha256": "c0a9128170286f7c593f0c316f00d4a9c8671140bbd9d59f7e6c001d696b2810",
+      "linkage": "Cargo.toml.orig at the pinned selectors revision declares MPL-2.0; that repository tree omits a license body, so this exact component alone receives Mozilla's official MPL-2.0 text"
+    },
+    "pkg:cargo/unic-char-property@0.9.0": {
+      "declared_spdx": "MIT OR Apache-2.0",
+      "license_file_ids": ["rust-unic-5878605-mit", "rust-unic-5878605-apache-2.0", "rust-unic-5878605-copyright", "rust-unic-5878605-authors"],
+      "crate_source_revision": "5878605364af97a3358368a6eaef02104af2e016",
+      "vcs_path": "",
+      "crate_vcs_info_sha256": "72a0e361aab8e7af18af799a6046b290a930d94b76c551bf0667e0726f9d42d1",
+      "cargo_toml_orig_sha256": "132a2ace33bbc5f54a2c4a4b522f96b7260c9e0fdb7756a753b4017e101e86d0",
+      "linkage": "Cargo.toml.orig and .cargo_vcs_info.json bind the published crate to the pinned rust-unic revision; both license alternatives and the upstream copyright record are included"
+    },
+    "pkg:cargo/unic-char-range@0.9.0": {
+      "declared_spdx": "MIT OR Apache-2.0",
+      "license_file_ids": ["rust-unic-5878605-mit", "rust-unic-5878605-apache-2.0", "rust-unic-5878605-copyright", "rust-unic-5878605-authors"],
+      "crate_source_revision": "5878605364af97a3358368a6eaef02104af2e016",
+      "vcs_path": "",
+      "crate_vcs_info_sha256": "72a0e361aab8e7af18af799a6046b290a930d94b76c551bf0667e0726f9d42d1",
+      "cargo_toml_orig_sha256": "d176bfd5d70a75b4b8b27ee24e9a8bdd3138aaa3bf0903a7f58497b4e4490f59",
+      "linkage": "Cargo.toml.orig and .cargo_vcs_info.json bind the published crate to the pinned rust-unic revision; both license alternatives and the upstream copyright record are included"
+    },
+    "pkg:cargo/unic-common@0.9.0": {
+      "declared_spdx": "MIT OR Apache-2.0",
+      "license_file_ids": ["rust-unic-5878605-mit", "rust-unic-5878605-apache-2.0", "rust-unic-5878605-copyright", "rust-unic-5878605-authors"],
+      "crate_source_revision": "5878605364af97a3358368a6eaef02104af2e016",
+      "vcs_path": "",
+      "crate_vcs_info_sha256": "72a0e361aab8e7af18af799a6046b290a930d94b76c551bf0667e0726f9d42d1",
+      "cargo_toml_orig_sha256": "5c74ebf8b8eede95170fbef14b6050735ce8993ce265978f41562386cb0c2bb9",
+      "readme_sha256": "54c3f5551f27720e50315ba3ed76b2bf47db4692de1e6bdc12434022971b5ee3",
+      "linkage": "Cargo.toml.orig, README, and .cargo_vcs_info.json bind the published crate to the pinned rust-unic revision; both license alternatives and the upstream copyright record are included"
+    },
+    "pkg:cargo/unic-ucd-ident@0.9.0": {
+      "declared_spdx": "MIT OR Apache-2.0",
+      "license_file_ids": ["rust-unic-8a6ce83-mit", "rust-unic-8a6ce83-apache-2.0", "rust-unic-8a6ce83-copyright", "rust-unic-8a6ce83-authors"],
+      "crate_source_revision": "8a6ce83063d90b91ae2ce59eddb803edd393fca9",
+      "vcs_path": "",
+      "crate_vcs_info_sha256": "64e154b113a16828624a2baedc6e70e8e6ea8f5c8cf8455d2c255762c0f43a8a",
+      "cargo_toml_orig_sha256": "9c1c7cfc028e70f52a6a5bdc126c9348837783e5e3e059429c05fadb9af8ec8d",
+      "linkage": "Cargo.toml.orig and .cargo_vcs_info.json bind the published crate to the pinned rust-unic revision; both license alternatives and the upstream copyright record are included"
+    },
+    "pkg:cargo/unic-ucd-version@0.9.0": {
+      "declared_spdx": "MIT OR Apache-2.0",
+      "license_file_ids": ["rust-unic-5878605-mit", "rust-unic-5878605-apache-2.0", "rust-unic-5878605-copyright", "rust-unic-5878605-authors"],
+      "crate_source_revision": "5878605364af97a3358368a6eaef02104af2e016",
+      "vcs_path": "",
+      "crate_vcs_info_sha256": "72a0e361aab8e7af18af799a6046b290a930d94b76c551bf0667e0726f9d42d1",
+      "cargo_toml_orig_sha256": "6411d1d10e5bf720a19366db6ab5f4c84cf1156c7033fafbd941f64729bd027c",
+      "linkage": "Cargo.toml.orig and .cargo_vcs_info.json bind the published crate to the pinned rust-unic revision; both license alternatives and the upstream copyright record are included"
+    },
+    "pkg:cargo/webview2-com@0.38.2": {
+      "declared_spdx": "MIT",
+      "license_file_ids": ["webview2-rs-b74dc5e-mit"],
+      "crate_source_revision": "b74dc5e2b394044bea5191052868ce7a106c202c",
+      "vcs_path": "crates/webview2-com",
+      "crate_vcs_info_sha256": "cd98f3865caa97f47155b4238ea574245680de51fc689ab117b29ccac7566221",
+      "cargo_toml_orig_sha256": "104bce84b453f732f4bd571e7c604d271380b02890d70f1c753af9d58063c7a4",
+      "readme_sha256": "e894f9d5fa60b009b9840a3a5340f6c9c8fd92f53c1b147dd1a41d9a3eb573d0",
+      "linkage": "Cargo.toml.orig, README, and .cargo_vcs_info.json bind the crate to crates/webview2-com at the pinned repository revision whose root MIT body is vendored exactly"
+    },
+    "pkg:cargo/webview2-com-macros@0.8.1": {
+      "declared_spdx": "MIT",
+      "license_file_ids": ["webview2-rs-dffa41a-mit"],
+      "crate_source_revision": "dffa41a8a46d3f5565eefbff2de57d38d399f158",
+      "vcs_path": "crates/callback-macros",
+      "crate_vcs_info_sha256": "c24c2646f52e6cb4c1f382afc69fa99c0dc78d6d8e4316ade7e51707b4f9af8e",
+      "cargo_toml_orig_sha256": "a615e325d5acebc64f6553724028cd5e3639397e534cef107f172540cb78d0fd",
+      "readme_sha256": "94f2342f8b689e65aed07e90f52acf08a5705b8aeae57c68db9ea51610d68cf2",
+      "linkage": "Cargo.toml.orig, README, and .cargo_vcs_info.json bind the crate to crates/callback-macros at the pinned repository revision whose root MIT body is vendored exactly"
+    },
+    "pkg:cargo/webview2-com-sys@0.38.2": {
+      "declared_spdx": "MIT",
+      "license_file_ids": ["webview2-rs-b74dc5e-mit"],
+      "crate_source_revision": "b74dc5e2b394044bea5191052868ce7a106c202c",
+      "vcs_path": "crates/bindings",
+      "crate_vcs_info_sha256": "8af502bd8832383dc1dd8bbd7fb00eb76a72b111688bc492e110bbac44cb005f",
+      "cargo_toml_orig_sha256": "00229c125c597e4f0ddb9e598738ee5b38a9086fd59eea6d2577cdda5f8e5875",
+      "readme_sha256": "09bfd4b6c33a7fcf46e88a24489856be8a9b10733054e8c7455307e82e537248",
+      "linkage": "Cargo.toml.orig, README, and .cargo_vcs_info.json bind the crate to crates/bindings at the pinned repository revision whose root MIT body is vendored exactly"
+    }
+  }
+}

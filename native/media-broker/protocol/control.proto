@@ -36,6 +36,28 @@ enum CommandKind {
   CANCEL = 8;
   DIAGNOSTICS = 9;
   SHUTDOWN = 10;
+  CAPTURE_EVIDENCE = 11;
+  ALLOCATE_PLAYBACK_STREAM = 12;
+  CANCEL_PLAYBACK = 13;
+  ALLOCATE_VISUAL_SOURCE = 14;
+  RELEASE_VISUAL_SOURCE = 15;
+  ALLOCATE_IDENTITY_FRAME = 16;
+  RELEASE_IDENTITY_FRAME = 17;
+  ENUMERATE_AUDIO_OUTPUTS = 18;
+  SELECT_AUDIO_OUTPUT = 19;
+  SELECTED_AUDIO_OUTPUT = 20;
+  // Append-only central command registry shared by independently owned lanes.
+  ALLOCATE_IDENTITY_REFERENCE_IMPORT = 21;
+  RELEASE_IDENTITY_REFERENCE_IMPORT = 22;
+  TRUSTED_SUBTITLE_PRESENTATION_CONTEXT = 23;
+  ENUMERATE_AUDIO_INPUTS = 24;
+  SELECT_AUDIO_INPUT = 25;
+  SELECTED_AUDIO_INPUT = 26;
+  ALLOCATE_AUDIO_INPUT_REHEARSAL = 27;
+  CANCEL_AUDIO_INPUT_REHEARSAL = 28;
+  QUERY_VISUAL_AUDIO_ENVELOPE = 29;
+  QUERY_PTT_ACTIVATION_STATE = 30;
+  MANUAL_ACTOR_PICKER = 31;
 }
 
 enum StatusCode {
@@ -56,6 +78,10 @@ enum StatusCode {
 
 message Empty {}
 
+// Empty request. The response is a versioned fixed-width evidence record plus
+// the exact executable basename; the existing Diagnostics payload is unchanged.
+message CaptureEvidence {}
+
 message SelectTarget {
   uint64 native_window = 1;
   uint32 expected_process_id = 2;
@@ -63,6 +89,485 @@ message SelectTarget {
 }
 
 message ConfigurePtt { uint32 virtual_key = 1; }
+
+message SelectAudioOutput {
+  enum Mode {
+    MODE_UNSPECIFIED = 0;
+    SYSTEM_DEFAULT = 1;
+    ENDPOINT_ID = 2;
+  }
+  Mode mode = 1;
+  string endpoint_id = 2; // empty only for explicit SYSTEM_DEFAULT
+}
+
+message AudioOutputEndpoint {
+  string endpoint_id = 1; // opaque stable Windows endpoint identity
+  string friendly_name = 2;
+  uint32 state = 3; // active=1, disabled=2, not_present=3, unplugged=4
+  bool system_default = 4;
+  uint64 generation = 5;
+}
+
+message AudioOutputSnapshot {
+  uint32 schema_version = 1;
+  uint64 catalog_generation = 2;
+  repeated AudioOutputEndpoint endpoints = 3;
+}
+
+message SelectAudioInput {
+  SelectAudioOutput.Mode mode = 1;
+  string endpoint_id = 2;
+}
+
+message AudioInputEndpoint {
+  string endpoint_id = 1;
+  string friendly_name = 2;
+  uint32 state = 3;
+  bool system_default = 4;
+  uint64 generation = 5;
+}
+
+message AudioInputSnapshot {
+  uint32 schema_version = 1;
+  uint64 catalog_generation = 2;
+  repeated AudioInputEndpoint endpoints = 3;
+}
+
+message SelectedAudioInput {
+  uint32 schema_version = 1;
+  SelectAudioOutput.Mode mode = 2;
+  string requested_endpoint_id = 3;
+  AudioInputEndpoint resolved = 4;
+}
+
+message AllocateAudioInputRehearsal {
+  enum ActivationSource {
+    ACTIVATION_UNSPECIFIED = 0;
+    EXPLICIT_REHEARSAL = 1; // test/diagnostic only
+    PUSH_TO_TALK = 2; // broker-attested production source
+  }
+  string session_id = 1;
+  string turn_id = 2;
+  uint64 generation = 3;
+  uint32 duration_ms = 4;
+  uint32 sample_rate = 5;
+  uint32 channels = 6;
+  uint64 max_frames = 7;
+  uint32 expected_producer_process_id = 8;
+  ActivationSource activation_source = 9;
+}
+
+message CancelAudioInputRehearsal {
+  string stream_id = 1;
+  uint64 generation = 2;
+}
+
+message QueryVisualAudioEnvelope {
+  string session_id = 1;
+  string turn_id = 2;
+  uint64 generation = 3;
+  string stream_id = 4;
+  string segment_id = 5;
+}
+
+// Read-only, causal post-WASAPI-ReleaseBuffer evidence. No PCM or shared-memory
+// capability is exposed. The latest value is unavailable after drain/cancel/device loss.
+message VisualAudioEnvelope {
+  uint32 schema_version = 1;
+  string session_id = 2;
+  string turn_id = 3;
+  uint64 generation = 4;
+  string stream_id = 5;
+  string segment_id = 6;
+  uint64 source_sample_start = 7;
+  uint32 source_sample_count = 8;
+  uint32 sample_rate = 9;
+  uint32 channels = 10;
+  uint64 device_write_qpc = 11;
+  uint64 qpc_frequency = 12;
+  uint64 source_frames = 13;
+  uint64 device_frames = 14;
+  repeated uint32 mono_rms_q15 = 15;  // exactly 8 causal bins
+  repeated uint32 mono_peak_q15 = 16; // exactly 8 causal bins
+  bool active = 17;
+  bool draining = 18;
+  bool cancelled = 19;
+}
+
+message QueryPttActivationState {}
+
+// Native-only transaction. The Control backend may request begin/poll/cancel,
+// but candidate rectangles must come directly from the qualified native visual
+// authority and must never be serialized through the WebView bridge.
+message ManualActorPicker {
+  enum Action {
+    ACTION_UNSPECIFIED = 0;
+    BEGIN = 1;
+    POLL = 2;
+    CANCEL = 3;
+  }
+  message DetectedActorRoi {
+    uint64 actor_id = 1;
+    uint64 track_id = 2;
+    uint64 track_epoch = 3;
+    double left = 4;
+    double top = 5;
+    double right = 6;
+    double bottom = 7;
+  }
+  Action action = 1;
+  string request_id = 2;
+  uint64 source_device_generation = 3;
+  uint64 source_geometry_epoch = 4;
+  uint64 source_frame_sequence = 5;
+  uint64 source_frame_qpc = 6;
+  uint32 timeout_ms = 7;
+  repeated DetectedActorRoi candidates = 8;
+}
+
+// The terminal receipt contains no captured pixels, pointer coordinate, or ROI
+// coordinate. candidate_set_sha256 binds it to the native candidate set without
+// disclosing that geometry to presentation code. clicked_qpc is the consumed
+// matching button-up timestamp; single_hardware_pointer_click attests one
+// hardware-origin down/up pair with matching button/pointer kind and same ROI,
+// with no extra pointer or button in the transaction.
+message ManualActorPickerReceipt {
+  uint32 schema_version = 1;
+  string request_id = 2;
+  uint32 status = 3;
+  fixed64 receipt_nonce_high = 4;
+  fixed64 receipt_nonce_low = 5;
+  string capture_session_id = 6;
+  uint64 cancellation_generation = 7;
+  uint32 selected_process_id = 8;
+  fixed64 selected_window_handle = 9;
+  string selected_executable_name = 10;
+  uint64 source_device_generation = 11;
+  uint64 source_geometry_epoch = 12;
+  uint64 source_frame_sequence = 13;
+  uint64 source_frame_qpc = 14;
+  uint64 selected_actor_id = 15;
+  uint64 selected_track_id = 16;
+  uint64 selected_track_epoch = 17;
+  uint32 candidate_count = 18;
+  string candidate_set_sha256 = 19;
+  uint64 began_qpc = 20;
+  uint64 clicked_qpc = 21;
+  uint64 attested_at_qpc = 22;
+  uint64 qpc_frequency = 23;
+  uint32 pointer_kind = 24;
+  bool frozen_wgc_frame_verified = 25;
+  bool overlay_capture_excluded = 26;
+  bool overlay_nonactivating = 27;
+  bool single_hardware_pointer_click = 28;
+  bool pixels_withheld_from_webview = 29;
+  bool coordinates_withheld_from_webview = 30;
+}
+
+// Native-only read-only snapshot. Control records a baseline and may poll at
+// no more than 40 Hz for a strictly newer pressed transition before command27.
+message PttActivationState {
+  uint32 schema_version = 1;
+  uint32 virtual_key = 2;
+  uint32 state = 3; // released=0, pressed=1
+  uint64 transition_sequence = 4;
+  uint64 transition_qpc = 5;
+  uint64 release_transition_sequence = 6;
+  uint64 released_qpc = 7;
+}
+
+message AudioInputRehearsalLease {
+  uint32 schema_version = 1;
+  string stream_id = 2;
+  string producer_endpoint = 3;
+  bytes one_time_token = 4;
+  string session_id = 5;
+  string turn_id = 6;
+  uint64 generation = 7;
+  uint32 duration_ms = 8;
+  uint32 sample_rate = 9;
+  uint32 channels = 10;
+  uint64 max_frames = 11;
+  uint32 max_chunk_bytes = 12;
+  uint64 expires_qpc = 13;
+  uint64 qpc_frequency = 14;
+  SelectAudioOutput.Mode input_selection_mode = 15;
+  string input_endpoint_id = 16;
+  uint64 input_endpoint_generation = 17;
+  AllocateAudioInputRehearsal.ActivationSource activation_source = 18;
+  uint32 ptt_virtual_key = 19;
+  uint64 ptt_press_transition_sequence = 20;
+  uint64 ptt_pressed_qpc = 21;
+}
+
+message SelectedAudioOutput {
+  uint32 schema_version = 1;
+  SelectAudioOutput.Mode mode = 2;
+  string requested_endpoint_id = 3;
+  AudioOutputEndpoint resolved = 4;
+}
+
+// Empty request. The response is bound to the broker's currently advancing
+// selected-target capture. Availability bits distinguish proven Windows
+// display evidence from fields the current OS/driver cannot report.
+message TrustedSubtitlePresentationContext {
+  uint32 schema_version = 1;
+  uint32 selected_process_id = 2;
+  fixed64 selected_window = 3;
+  uint64 capture_device_generation = 4;
+  uint64 geometry_epoch = 5;
+  uint64 source_frame_sequence = 6;
+  uint64 source_frame_qpc = 7;
+  sint32 window_left_px = 8;
+  sint32 window_top_px = 9;
+  sint32 window_right_px = 10;
+  sint32 window_bottom_px = 11;
+  sint32 client_left_px = 12;
+  sint32 client_top_px = 13;
+  sint32 client_right_px = 14;
+  sint32 client_bottom_px = 15;
+  uint32 captured_width_px = 16;
+  uint32 captured_height_px = 17;
+  string monitor_id = 18;
+  sint32 monitor_left_px = 19;
+  sint32 monitor_top_px = 20;
+  sint32 monitor_right_px = 21;
+  sint32 monitor_bottom_px = 22;
+  sint32 work_left_px = 23;
+  sint32 work_top_px = 24;
+  sint32 work_right_px = 25;
+  sint32 work_bottom_px = 26;
+  bool dpi_available = 27;
+  uint32 dpi_x = 28;
+  uint32 dpi_y = 29;
+  bool hdr_evidence_available = 30;
+  bool hdr_supported = 31;
+  bool hdr_user_enabled = 32;
+  bool hdr_active = 33;
+  bool advanced_color_active = 34;
+  uint32 active_color_mode = 35;
+  bool color_encoding_available = 36;
+  uint32 color_encoding = 37;
+  uint32 bits_per_color_channel = 38;
+  bool sdr_white_level_available = 39;
+  double sdr_white_level_nits = 40;
+  uint32 capture_backend = 41; // WGC=1, desktop duplication=2
+  uint32 capture_scope = 42; // exact_game_hwnd_wgc=1, monitor_region_crop=2
+  bool overlay_capture_excluded = 43;
+  bool overlay_visuals_allowed = 44;
+  string selected_executable_name = 45;
+  bool target_color_space_available = 46;
+  uint32 target_color_space = 47; // sRGB=0, SDR scRGB=1, HDR10 PQ=2, HDR scRGB=3
+  uint64 attested_at_qpc = 48;
+  uint64 qpc_frequency = 49;
+  uint64 attestation_id = 50;
+}
+
+message AllocatePlaybackStream {
+  string session_id = 1;
+  string turn_id = 2;
+  uint64 generation = 3;
+  uint32 sample_rate = 4;
+  uint32 channels = 5;
+  uint64 max_frames = 6;
+  uint32 expected_producer_process_id = 7;
+}
+
+message AllocateVisualSource {
+  uint32 worker_process_id = 1;
+  fixed64 worker_process_creation_time = 2;
+  string worker_executable_name = 3;
+  uint64 actor_id = 4;
+  uint64 track_id = 5;
+  uint64 track_epoch = 6;
+}
+
+// Acknowledges that the worker consumed and closed its transferred source
+// handle. The broker drops only lease metadata and never closes the remote
+// numeric handle after ownership transfer, avoiding handle-value reuse races.
+message ReleaseVisualSource {
+  uint32 worker_process_id = 1;
+  fixed64 lease_nonce_high = 2;
+  fixed64 lease_nonce_low = 3;
+}
+
+message AllocateIdentityFrame {
+  uint32 worker_process_id = 1;
+  fixed64 worker_process_creation_time = 2;
+  string worker_executable_name = 3;
+  uint32 crop_left = 4;
+  uint32 crop_top = 5;
+  uint32 crop_right = 6;
+  uint32 crop_bottom = 7;
+}
+
+message ReleaseIdentityFrame {
+  uint32 worker_process_id = 1;
+  string lease_id = 2;
+  string lease_nonce = 3;
+}
+
+enum IdentityReferenceSourceClass {
+  IDENTITY_REFERENCE_SOURCE_UNSPECIFIED = 0;
+  USER_PRIVATE = 1;
+  ORIGINAL_SYNTHETIC = 2;
+}
+
+// Starts a native system-picker flow. The selected path and encoded/raw bytes
+// remain broker-owned and never enter this request or the WebView.
+message AllocateIdentityReferenceImport {
+  uint32 worker_process_id = 1;
+  fixed64 worker_process_creation_time = 2;
+  string worker_executable_name = 3;
+  string picker_consent_token = 4;
+  string game_profile_id = 5;
+  string character_id = 6;
+  string subject_id = 7;
+  string reference_id = 8;
+  string subject_display_name = 9;
+  IdentityReferenceSourceClass source_class = 10;
+  string owner_user_id = 11;
+  string original_work_license = 12;
+  bool explicit_user_consent = 13;
+  bool local_only = 14;
+  uint64 imported_at_unix_ms = 15;
+}
+
+// Single-consume terminal acknowledgement. Exact worker/lease/nonce binding
+// prevents a caller from releasing or reusing another worker's private pixels.
+message ReleaseIdentityReferenceImport {
+  uint32 worker_process_id = 1;
+  string lease_id = 2;
+  string lease_nonce = 3;
+}
+
+message IdentityReferenceImportLease {
+  uint32 schema_version = 1;
+  uint32 worker_process_id = 2;
+  fixed64 worker_process_creation_time = 3;
+  string worker_executable_name = 4;
+  string lease_id = 5;
+  string shared_memory_name = 6;
+  string lease_nonce = 7;
+  uint64 byte_length = 8;
+  uint32 width = 9;
+  uint32 height = 10;
+  uint32 stride_bytes = 11;
+  string pixel_format = 12;
+  string content_sha256 = 13;
+  string source_asset_sha256 = 14;
+  string source_media_type = 15;
+  uint64 expires_qpc = 16;
+  uint64 qpc_frequency = 17;
+  uint64 cancellation_generation = 18;
+  string capture_session_id = 19;
+  uint32 selected_process_id = 20;
+  fixed64 selected_window_handle = 21;
+  string selected_executable_name = 22;
+  uint64 source_device_generation = 23;
+  uint64 source_geometry_epoch = 24;
+  string picker_consent_token = 25;
+  string game_profile_id = 26;
+  string character_id = 27;
+  string subject_id = 28;
+  string reference_id = 29;
+  string subject_display_name = 30;
+  IdentityReferenceSourceClass source_class = 31;
+  string owner_user_id = 32;
+  string original_work_license = 33;
+  bool explicit_user_consent = 34;
+  bool local_only = 35;
+  uint64 imported_at_unix_ms = 36;
+}
+
+// The capability-bearing mapping fields are consumed only by the hidden native
+// controller/worker pipe and are never serialized to the WebView.
+message IdentityFrameLease {
+  uint32 schema_version = 1;
+  uint32 worker_process_id = 2;
+  fixed64 worker_process_creation_time = 3;
+  string worker_executable_name = 4;
+  string lease_id = 5;
+  string shared_memory_name = 6;
+  string lease_nonce = 7;
+  uint64 byte_length = 8;
+  uint32 width = 9;
+  uint32 height = 10;
+  uint32 stride_bytes = 11;
+  string pixel_format = 12;
+  string content_sha256 = 13;
+  uint64 expires_qpc = 14;
+  uint64 qpc_frequency = 15;
+  uint64 cancellation_generation = 16;
+  string capture_session_id = 17;
+  uint32 selected_process_id = 18;
+  fixed64 selected_window_handle = 19;
+  string selected_executable_name = 20;
+  uint64 source_device_generation = 21;
+  uint64 source_geometry_epoch = 22;
+  uint64 source_frame_sequence = 23;
+  uint64 source_frame_qpc = 24;
+  uint64 captured_at_unix_ms = 25;
+  bool advancing_frame_verified = 26;
+  bool overlay_capture_excluded = 27;
+  bool protected_online_detected = 28;
+  bool anti_cheat_detected = 29;
+  uint32 crop_left = 30;
+  uint32 crop_top = 31;
+  uint32 crop_right = 32;
+  uint32 crop_bottom = 33;
+  uint32 source_width = 34;
+  uint32 source_height = 35;
+}
+
+message VisualSourceLease {
+  uint32 schema_version = 1;
+  uint32 broker_process_id = 2;
+  fixed64 broker_process_creation_time = 3;
+  string broker_executable_name = 4;
+  uint32 worker_process_id = 5;
+  fixed64 worker_process_creation_time = 6;
+  string worker_executable_name = 7;
+  fixed64 worker_handle_value = 8;
+  fixed64 lease_nonce_high = 9;
+  fixed64 lease_nonce_low = 10;
+  fixed64 adapter_luid = 11;
+  fixed64 keyed_mutex_acquire_key = 12;
+  fixed64 keyed_mutex_release_key = 13;
+  uint32 width = 14;
+  uint32 height = 15;
+  uint32 stride_bytes = 16;
+  uint32 dxgi_format = 17;
+  uint32 alpha_mode = 18;
+  uint64 expires_qpc = 19;
+  uint64 qpc_frequency = 20;
+  uint64 cancellation_generation = 21;
+  uint64 source_device_generation = 22;
+  uint64 source_geometry_epoch = 23;
+  uint64 source_frame_sequence = 24;
+  uint64 source_frame_qpc = 25;
+  uint64 actor_id = 26;
+  uint64 track_id = 27;
+  uint64 track_epoch = 28;
+}
+
+message PlaybackLease {
+  uint32 schema_version = 1;
+  string stream_id = 2;
+  string producer_endpoint = 3;
+  bytes one_time_token = 4; // exactly 32 bytes; never log or expose to WebView
+  string session_id = 5;
+  string turn_id = 6;
+  uint64 generation = 7;
+  uint32 sample_rate = 8;
+  uint32 channels = 9;
+  uint64 max_frames = 10;
+  uint32 max_chunk_bytes = 11;
+  uint64 expires_qpc = 12;
+  SelectAudioOutput.Mode output_selection_mode = 13;
+  string output_endpoint_id = 14;
+  uint64 output_endpoint_generation = 15;
+}
 
 message SubmitOcclusion {
   double face_confidence = 1;
@@ -72,6 +577,12 @@ message SubmitOcclusion {
   uint64 measured_qpc = 5;
   uint64 source_frame_sequence = 6;
   uint64 source_device_generation = 7;
+  string legacy_selected_track_id = 8 [deprecated = true];
+  uint64 track_epoch = 9;
+  uint64 actor_id = 10;
+  uint64 track_id = 11;
+  uint64 source_geometry_epoch = 12;
+  uint64 source_frame_qpc = 13;
 }
 
 message SharedTextureDescriptor {
@@ -82,6 +593,17 @@ message SharedTextureDescriptor {
   uint32 width = 5;
   uint32 height = 6;
   uint32 dxgi_format = 7;
+  uint32 schema_version = 8;
+  bytes session_nonce = 9;
+  string session_id = 10;
+  fixed64 lease_nonce_high = 11;
+  fixed64 lease_nonce_low = 12;
+  uint32 worker_process_id = 13;
+  fixed64 worker_process_creation_time = 14;
+  string worker_executable_name = 15;
+  uint32 stride_bytes = 16;
+  uint32 alpha_mode = 17; // 1 = premultiplied
+  uint64 expires_qpc = 18;
 }
 
 message SubmitPatch {
@@ -96,6 +618,11 @@ message SubmitPatch {
   optional SharedTextureDescriptor shared_texture = 9;
   uint64 source_device_generation = 10;
   uint64 source_frame_qpc = 11;
+  string legacy_selected_track_id = 12 [deprecated = true];
+  uint64 track_epoch = 13;
+  uint64 actor_id = 14;
+  uint64 track_id = 15;
+  uint64 source_geometry_epoch = 16;
 }
 
 message Cancel { uint64 new_generation = 1; }

@@ -41,7 +41,7 @@
     },
     {
       "id": "nvidia-ar-sdk-lipsync",
-      "display_name": "NVIDIA AR SDK LipSync",
+      "display_name": "NVIDIA LipSync AR SDK",
       "implementation_kind": "generic_current_frame_audio_conditioned",
       "status": "conditional_private_access",
       "source_access": "private_ngc",
@@ -50,13 +50,14 @@
       "offline_selectable": false,
       "requires_private_access": true,
       "requirements": [
-        "User confirms private NGC access; an ordinary NVIDIA NIM API key is not sufficient.",
+        "User confirms NVIDIA AI for Media private access; an ordinary hosted NVIDIA API key is not sufficient.",
         "A separately installed and verified Windows pack passes local qualification.",
-        "The media broker supplies 16 kHz audio and the required 14 source-frame pre-roll.",
+        "The media broker supplies the exact PCM format and source-frame window required by the entitled SDK release.",
         "The exact SDK and model licenses are accepted before pack activation."
       ],
       "constraints": [
-        "Conditional candidate only; private access and Windows qualification are unresolved for general users.",
+        "Conditional candidate only; the current NVIDIA build page requires private AI for Media access and is not a general hosted one-key endpoint.",
+        "The current model card supports one complete human face. Stylized, animal, occluded, partial, and multi-face game scenes remain outside the proven domain.",
         "No SDK, model, download URL, credential, or resource estimate is included in this descriptor."
       ]
     },
@@ -67,7 +68,7 @@
       "status": "public_experimental",
       "source_access": "public_upstream",
       "supported_platforms": ["windows_x64"],
-      "live_selectable": true,
+      "live_selectable": false,
       "offline_selectable": true,
       "requires_private_access": false,
       "requirements": [
@@ -75,7 +76,8 @@
         "Output is constrained to a tracked mouth residual bound to the exact current source frame."
       ],
       "constraints": [
-        "Experimental candidate; public source availability does not imply live-game qualification.",
+        "Offline comparator only: the realistic Mara Venn qualification rendered 39 frames / 1.56 seconds but took 87.873 seconds wall time and peaked at 7,836 MiB GPU memory on this RTX 4080 Laptop GPU.",
+        "The result proves human-face visual compatibility for that fixture, not a persistent current-frame renderer, stylized-face coverage, or beside-game latency.",
         "No repository, model, download URL, or resource estimate is included in this descriptor."
       ]
     },

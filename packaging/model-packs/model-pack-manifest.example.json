@@ -1,12 +1,15 @@
 {
   "$schema": "./model-pack-manifest.schema.json",
-  "schema": "npc.model-pack/v1",
+  "schema": "npc.model-pack/v2",
   "pack_id": "example-generic-lip-sync",
   "revision": "0.0.0-example",
   "display_name": "Non-installable generic lip-sync example",
-  "description": "Shape-only generic lip-sync fixture used to validate the ModelPackManifestV1 boundary.",
-  "source_project": "https://example.invalid/model-source",
-  "source_revision": "0000000-example-only",
+  "description": "Shape-only generic lip-sync fixture used to validate the strict ModelPackManifestV2 boundary.",
+  "source": {
+    "project_url": "https://example.invalid/model-source",
+    "immutable_revision": "0000000-example-only",
+    "model_card_url": "https://example.invalid/model-card"
+  },
   "capability": {
     "kind": "lip_sync",
     "scope": "generic"
@@ -14,26 +17,26 @@
   "artifacts": [
     {
       "id": "example-model-file",
+      "role": "model_weights",
       "kind": "file",
-      "source_urls": [
-        "https://example.invalid/model.example"
-      ],
+      "archive_format": null,
+      "source_urls": ["https://example.invalid/model.example"],
       "size_bytes": 1,
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-      "destination": "model/model.example"
+      "destination": "model/model.example",
+      "strip_prefix": null,
+      "required_paths": []
     }
   ],
   "runtime": {
     "runtime": "example-runtime",
+    "immutable_revision": "example-runtime-r1",
     "abi": "example-only",
-    "minimum_runtime_revision": null,
-    "supported_platforms": [
-      "windows10",
-      "windows11"
-    ],
-    "supported_architectures": [
-      "x86_64"
-    ]
+    "entrypoint": "bin/example-worker.exe",
+    "supported_platforms": ["windows10", "windows11"],
+    "supported_architectures": ["x86_64"],
+    "backends": ["example-cpu"],
+    "network_access_after_install": false
   },
   "hardware": {
     "minimum_ram_bytes": 1,
@@ -41,22 +44,26 @@
     "minimum_vram_bytes": null,
     "recommended_vram_bytes": null,
     "minimum_cpu_threads": 1,
-    "accelerators": [
-      "cpu"
-    ],
+    "accelerators": ["cpu"],
     "required_cpu_features": []
   },
   "resources": {
     "storage_bytes": 1,
     "peak_install_bytes": 2,
-    "measured_ram_bytes": null,
-    "measured_vram_bytes": null,
-    "measured_load_millis": null,
-    "benchmark_hardware": null,
+    "planning_resident_ram_bytes": null,
+    "planning_resident_vram_bytes": null,
+    "planning_load_millis": null,
+    "planning_hardware": null,
     "quality_tier": "experimental",
-    "languages": [
-      "en"
-    ]
+    "languages": ["en"],
+    "measurement": {
+      "required_schema": "npc.measured-resource-envelope/v1",
+      "minimum_samples": 20,
+      "current_device_fingerprint_required": true,
+      "signed_evidence_required": true,
+      "p99_reload_required": true,
+      "manifest_values_not_for_admission": true
+    }
   },
   "license": {
     "spdx_expression": "LicenseRef-Example-Only",
@@ -67,18 +74,57 @@
     "commercial_use": "prohibited",
     "derivative_use": "prohibited",
     "acceptance_required": true,
-    "notices": [
-      "This fixture contains no model or executable payload."
-    ]
+    "notices": ["This fixture contains no model or executable payload."],
+    "components": []
   },
   "self_test": {
     "kind": "deterministic_fixture",
     "suite_revision": "example-only",
-    "allowed_runtime_backends": [
-      "fixture"
-    ],
+    "allowed_runtime_backends": ["example-cpu"],
     "input_fixture": "fixtures/self-test.json",
     "expected_output_sha256": null,
     "timeout_millis": 1000
+  },
+  "voices": [],
+  "extensions": {
+    "lip_sync": {
+      "audio_sample_formats": ["pcm_s16le_16000_mono"],
+      "output_signals": ["viseme_weights"],
+      "causal": true,
+      "maximum_queue_depth": 1,
+      "stale_generation_drop_required": true,
+      "stale_frame_drop_required": true
+    }
+  },
+  "lifecycle": {
+    "explicit_download_required": true,
+    "automatic_download_allowed": false,
+    "install_strategy": "verify_then_atomic_activate",
+    "repair_strategy": "verify_quarantine_reinstall",
+    "remove_requires_unreferenced": true,
+    "activation_gates": [
+      "explicit_user_approval",
+      "catalog_trust",
+      "artifact_integrity",
+      "license_acceptance",
+      "runtime_compatibility",
+      "self_test_attestation",
+      "current_device_measurement",
+      "whole_loadout_admission"
+    ]
+  },
+  "trust": {
+    "release_catalog_required": true,
+    "immutable_revision_required": true,
+    "artifact_sha256_required": true,
+    "self_test_attestation_required": true,
+    "measured_resource_envelope_required": true,
+    "unsigned_activation_allowed": false
+  },
+  "admission": {
+    "state": "candidate_unqualified",
+    "reason": "Shape-only fixture has no release catalog entry, installed content, self-test attestation, or signed current-device measurement.",
+    "allowed_residencies": ["cpu_resident"],
+    "unknowns_fail_closed": true
   }
 }

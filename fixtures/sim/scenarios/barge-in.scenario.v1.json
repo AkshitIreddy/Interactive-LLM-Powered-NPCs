@@ -22,6 +22,7 @@
     { "atMs": 420, "source": "tts", "kind": "audio_chunk", "payload": { "chunkIndex": 0, "sampleCount": 1440, "sampleRateHz": 24000, "networkRequest": true, "provider": "mock-elevenlabs" } },
     { "atMs": 430, "source": "animation", "kind": "viseme", "payload": { "id": "W", "durationMs": 90 } },
     { "atMs": 460, "source": "control", "kind": "barge_in", "payload": { "reason": "player_started_speaking" } },
+    { "atMs": 470, "source": "delivery", "kind": "commit", "payload": { "sentenceId": "stale-barge-in", "deliveredText": "We found the shipment." } },
     { "atMs": 480, "source": "llm", "kind": "token", "payload": { "text": " but—" } },
     { "atMs": 510, "source": "tts", "kind": "audio_chunk", "payload": { "chunkIndex": 1, "sampleCount": 960, "sampleRateHz": 24000 } },
     { "atMs": 550, "source": "animation", "kind": "viseme", "payload": { "id": "B", "durationMs": 80 } },
@@ -32,10 +33,13 @@
   "faults": [],
   "expected": {
     "status": "cancelled",
-    "traceSha256": "0cc8e00373e60bb7871063ccb4eb3dc4d857b4232eac928b53bcb202b6fdfe6a",
+    "traceSha256": "787f13343afa6176910fbe763022acae1944def788786029f4521ec6fa6993fb",
     "firstAudioAtMs": 420,
     "speechEndToFirstAudioMs": 250,
     "networkAttempts": 3,
-    "degradationReasons": []
+    "degradationReasons": [],
+    "metrics": { "deliveryCommitCount": 0, "rejectedDeliveryCommitCount": 0 },
+    "eventCounts": { "delivery.committed": 0 },
+    "minimumEventCounts": { "late_event.ignored": 6 }
   }
 }

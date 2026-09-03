@@ -3,101 +3,21 @@ use crate::domain::{
     ProfileSafety, ProviderCredentialSummary,
 };
 use interactive_npcs_credential_vault::{CredentialVault, SecretValue, VaultError};
+use npc_provider_catalog::{
+    CatalogDocument, ExecutionLocation, Lifecycle, Modality, RouteAvailability,
+};
 use std::path::{Path, PathBuf};
 
 /// Shared with `apps/runtime-host/src/bootstrap.rs`. Both processes must resolve
 /// the identical Windows Credential Manager target namespace.
 pub(crate) const CREDENTIAL_NAMESPACE: &str = "interactive-npcs/v2";
 
-#[derive(Debug, Clone, Copy)]
-struct ProviderDeclaration {
-    id: &'static str,
-    name: &'static str,
-    credential_reference: Option<&'static str>,
-}
+const BUNDLED_PROVIDER_CATALOG: &[u8] = include_bytes!("../../../../catalog/v1/catalog.json");
 
-const PROVIDERS: &[ProviderDeclaration] = &[
-    ProviderDeclaration {
-        id: "openai",
-        name: "OpenAI",
-        credential_reference: Some("providers/openai"),
-    },
-    ProviderDeclaration {
-        id: "gemini",
-        name: "Google Gemini",
-        credential_reference: Some("providers/gemini"),
-    },
-    ProviderDeclaration {
-        id: "anthropic",
-        name: "Anthropic",
-        credential_reference: Some("providers/anthropic"),
-    },
-    ProviderDeclaration {
-        id: "groq",
-        name: "Groq",
-        credential_reference: Some("providers/groq"),
-    },
-    ProviderDeclaration {
-        id: "cohere",
-        name: "Cohere",
-        credential_reference: Some("providers/cohere"),
-    },
-    ProviderDeclaration {
-        id: "nvidia-nim",
-        name: "NVIDIA NIM",
-        credential_reference: Some("providers/nvidia-nim"),
-    },
-    ProviderDeclaration {
-        id: "openai-compatible",
-        name: "OpenAI-compatible endpoint",
-        credential_reference: Some("providers/openai-compatible"),
-    },
-    ProviderDeclaration {
-        id: "deepgram",
-        name: "Deepgram",
-        credential_reference: Some("providers/deepgram"),
-    },
-    ProviderDeclaration {
-        id: "assemblyai",
-        name: "AssemblyAI",
-        credential_reference: Some("providers/assemblyai"),
-    },
-    ProviderDeclaration {
-        id: "elevenlabs",
-        name: "ElevenLabs",
-        credential_reference: Some("providers/elevenlabs"),
-    },
-    ProviderDeclaration {
-        id: "cartesia",
-        name: "Cartesia",
-        credential_reference: Some("providers/cartesia"),
-    },
-    ProviderDeclaration {
-        id: "inworld",
-        name: "Inworld",
-        credential_reference: Some("providers/inworld"),
-    },
-    ProviderDeclaration {
-        id: "llamacpp-local",
-        name: "llama.cpp local",
-        credential_reference: None,
-    },
-    ProviderDeclaration {
-        id: "moonshine-local",
-        name: "Moonshine local",
-        credential_reference: None,
-    },
-    ProviderDeclaration {
-        id: "whispercpp-local",
-        name: "whisper.cpp local",
-        credential_reference: None,
-    },
-    ProviderDeclaration {
-        id: "kokoro-local",
-        name: "Kokoro local",
-        credential_reference: None,
-    },
-];
+fn bundled_provider_catalog() -> CatalogDocument {
+    CatalogDocument::parse(BUNDLED_PROVIDER_CATALOG)
+        .expect("the bundled provider catalog must remain schema-valid")
+}
 
 pub trait CredentialPresence: Send + Sync + std::fmt::Debug {
     fn status(&self, reference: &str) -> CredentialReferenceStatus;
@@ -195,34 +115,44 @@ impl CredentialPresence for SystemCredentialPresence {
 }
 
 pub fn provider_summaries(presence: &dyn CredentialPresence) -> Vec<ProviderCredentialSummary> {
-    PROVIDERS
-        .iter()
-        .map(|provider| match provider.credential_reference {
-            Some(reference) => {
-                let status = presence.status(reference);
-                let detail = match status {
-                    CredentialReferenceStatus::Present => "A credential reference is available.",
-                    CredentialReferenceStatus::Missing => {
-                        "No credential is saved for this provider."
+    bundled_provider_catalog()
+        .content
+        .providers
+        .into_iter()
+        .map(|provider| {
+            let reference = provider
+                .credential
+                .required
+                .then(|| format!("providers/{}", provider.id));
+            match reference {
+                Some(reference) => {
+                    let status = presence.status(&reference);
+                    let detail = match status {
+                        CredentialReferenceStatus::Present => {
+                            "A credential reference is available."
+                        }
+                        CredentialReferenceStatus::Missing => {
+                            "No credential is saved for this provider."
+                        }
+                        CredentialReferenceStatus::Unavailable => presence.availability_detail(),
+                        CredentialReferenceStatus::NotRequired => "No credential is required.",
+                    };
+                    ProviderCredentialSummary {
+                        provider_id: provider.id,
+                        display_name: provider.display_name,
+                        credential_reference: Some(format!("{CREDENTIAL_NAMESPACE}/{reference}")),
+                        status,
+                        detail: detail.into(),
                     }
-                    CredentialReferenceStatus::Unavailable => presence.availability_detail(),
-                    CredentialReferenceStatus::NotRequired => "No credential is required.",
-                };
-                ProviderCredentialSummary {
-                    provider_id: provider.id.into(),
-                    display_name: provider.name.into(),
-                    credential_reference: Some(format!("{CREDENTIAL_NAMESPACE}/{reference}")),
-                    status,
-                    detail: detail.into(),
                 }
+                None => ProviderCredentialSummary {
+                    provider_id: provider.id,
+                    display_name: provider.display_name,
+                    credential_reference: None,
+                    status: CredentialReferenceStatus::NotRequired,
+                    detail: "This local provider does not require a cloud credential.".into(),
+                },
             }
-            None => ProviderCredentialSummary {
-                provider_id: provider.id.into(),
-                display_name: provider.name.into(),
-                credential_reference: None,
-                status: CredentialReferenceStatus::NotRequired,
-                detail: "This local provider does not require a cloud credential.".into(),
-            },
         })
         .collect()
 }
@@ -329,120 +259,183 @@ impl ResourceCatalog {
             .collect()
     }
 
-    fn profile_exists(&self, id: &str) -> bool {
-        let installed = self.installed_resource_root.as_ref().map(|root| {
-            root.join("profiles")
-                .join("games")
-                .join(id)
-                .join("profile.json")
-        });
-        let development = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../profiles/games")
-            .join(id)
-            .join("profile.json");
-        installed.as_ref().is_some_and(|path| path.is_file()) || development.is_file()
+    /// Load one bundled profile through a fixed catalog identity. The WebView
+    /// never supplies a path and a missing/linked/oversized resource fails
+    /// closed before deserialization.
+    pub fn load_game_profile(
+        &self,
+        id: &str,
+    ) -> Result<npc_game_profile::GameProfileV2, ResourceProfileError> {
+        if !GAMES.iter().any(|game| game.id == id) {
+            return Err(ResourceProfileError::UnknownProfile);
+        }
+        self.load_fixed_game_profile(id)
     }
+
+    /// The synthetic review profile is deliberately excluded from the twenty
+    /// product game summaries, but the debug-only native capture command still
+    /// needs to load its immutable process/window policy. Keeping this entry
+    /// point separate prevents the fixture from appearing as a supported game.
+    #[cfg(debug_assertions)]
+    pub(crate) fn load_debug_synthetic_review_profile(
+        &self,
+    ) -> Result<npc_game_profile::GameProfileV2, ResourceProfileError> {
+        self.load_fixed_game_profile("eclipse-harbor")
+    }
+
+    fn load_fixed_game_profile(
+        &self,
+        id: &str,
+    ) -> Result<npc_game_profile::GameProfileV2, ResourceProfileError> {
+        let path = self
+            .profile_paths(id)
+            .into_iter()
+            .find(|path| path.is_file())
+            .ok_or(ResourceProfileError::Missing)?;
+        let metadata = std::fs::symlink_metadata(&path).map_err(ResourceProfileError::Io)?;
+        if !metadata.is_file()
+            || metadata.file_type().is_symlink()
+            || metadata.len() > 4 * 1024 * 1024
+        {
+            return Err(ResourceProfileError::UnsafeResource);
+        }
+        let bytes = std::fs::read(path).map_err(ResourceProfileError::Io)?;
+        let profile: npc_game_profile::GameProfileV2 =
+            serde_json::from_slice(&bytes).map_err(ResourceProfileError::Decode)?;
+        if profile.id != id {
+            return Err(ResourceProfileError::IdentityMismatch);
+        }
+        let report = profile.validate();
+        if !report.is_valid() {
+            return Err(ResourceProfileError::InvalidProfile);
+        }
+        Ok(profile)
+    }
+
+    fn profile_paths(&self, id: &str) -> Vec<PathBuf> {
+        let mut paths = Vec::with_capacity(2);
+        if let Some(root) = &self.installed_resource_root {
+            paths.push(
+                root.join("profiles")
+                    .join("games")
+                    .join(id)
+                    .join("profile.json"),
+            );
+        }
+        paths.push(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../profiles/games")
+                .join(id)
+                .join("profile.json"),
+        );
+        paths
+    }
+
+    fn profile_exists(&self, id: &str) -> bool {
+        self.profile_paths(id)
+            .into_iter()
+            .any(|path| path.is_file())
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ResourceProfileError {
+    #[error("unknown game profile")]
+    UnknownProfile,
+    #[error("game profile is missing from the application bundle")]
+    Missing,
+    #[error("game profile resource is linked, oversized, or not a regular file")]
+    UnsafeResource,
+    #[error("game profile identity does not match its catalog entry")]
+    IdentityMismatch,
+    #[error("game profile failed schema validation")]
+    InvalidProfile,
+    #[error("game profile could not be read: {0}")]
+    Io(std::io::Error),
+    #[error("game profile JSON is invalid: {0}")]
+    Decode(serde_json::Error),
 }
 
 pub fn model_summaries() -> Vec<ModelSummary> {
-    [
-        model(
-            "moonshine.stt.medium",
-            "Moonshine Medium",
-            "Speech in",
-            "local",
-            "qualificationRequired",
-            ModelInstallation::CatalogOnly,
-            Some("Windows CPU latency, WER, and exact artifact license must pass qualification."),
-        ),
-        model(
-            "whispercpp.stt.user-selected",
-            "Imported whisper.cpp model",
-            "Speech in",
-            "local",
-            "qualificationRequired",
-            ModelInstallation::UserImportRequired,
-            Some("A validated pack manifest and runtime self-test are required."),
-        ),
-        model(
-            "local.llm.custom-gguf",
-            "Imported llama.cpp GGUF",
-            "Thinking",
-            "local",
-            "stable",
-            ModelInstallation::UserImportRequired,
-            Some("Each model's license, hash, and measured resource envelope must be reviewed."),
-        ),
-        model(
-            "kokoro.tts.onnx",
-            "Kokoro ONNX",
-            "Voice out",
-            "local",
-            "qualificationRequired",
-            ModelInstallation::CatalogOnly,
-            Some(
-                "Windows CPU latency, quality, and exact artifact license must pass qualification.",
-            ),
-        ),
-        model(
-            "local.embedding.custom-onnx-int8",
-            "Imported INT8 ONNX embedding model",
-            "Memory",
-            "local",
-            "stable",
-            ModelInstallation::UserImportRequired,
-            Some("A validated pack manifest and runtime self-test are required."),
-        ),
-        model(
-            "musetalk.presence.candidate",
-            "MuseTalk screen-space candidate",
-            "Presence",
-            "local",
-            "experimental",
-            ModelInstallation::CatalogOnly,
-            Some("It remains experimental until visual, latency, and 12 GB contention gates pass."),
-        ),
-    ]
-    .into_iter()
-    .collect()
-}
-
-fn model(
-    id: &'static str,
-    display_name: &'static str,
-    purpose: &'static str,
-    execution: &'static str,
-    lifecycle: &'static str,
-    installation: ModelInstallation,
-    qualification_note: Option<&'static str>,
-) -> ModelSummary {
-    ModelSummary {
-        id: id.into(),
-        display_name: display_name.into(),
-        purpose: purpose.into(),
-        execution: execution.into(),
-        lifecycle: lifecycle.into(),
-        installation,
-        qualification_note: qualification_note.map(str::to_owned),
-    }
+    let catalog = bundled_provider_catalog();
+    let executions = catalog
+        .content
+        .providers
+        .iter()
+        .map(|provider| (provider.id.as_str(), provider.execution))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    catalog
+        .content
+        .models
+        .into_iter()
+        .map(|model| {
+            let installation =
+                match model.availability {
+                    RouteAvailability::PackCandidateUnqualified
+                        if model.upstream_id.starts_with("$user_") =>
+                    {
+                        ModelInstallation::UserImportRequired
+                    }
+                    RouteAvailability::PackCandidateUnqualified
+                    | RouteAvailability::CatalogOnly => ModelInstallation::CatalogOnly,
+                    RouteAvailability::ImplementedAdapter
+                    | RouteAvailability::InstalledQualified => ModelInstallation::NotInspected,
+                };
+            ModelSummary {
+                id: model.id,
+                display_name: model.display_name,
+                purpose: match model.modality {
+                    Modality::Llm => "Thinking",
+                    Modality::Stt => "Speech in",
+                    Modality::Tts => "Voice out",
+                    Modality::Embedding | Modality::Rerank => "Memory",
+                }
+                .into(),
+                execution: match executions.get(model.provider_id.as_str()).copied() {
+                    Some(ExecutionLocation::Hosted) => "hosted",
+                    Some(ExecutionLocation::Local) => "local",
+                    Some(ExecutionLocation::ExternalLocal) => "externalLocal",
+                    None => "unknown",
+                }
+                .into(),
+                lifecycle: match model.lifecycle {
+                    Lifecycle::Stable => "stable",
+                    Lifecycle::Experimental => "experimental",
+                    Lifecycle::QualificationRequired => "qualificationRequired",
+                    Lifecycle::Deprecated => "deprecated",
+                }
+                .into(),
+                installation,
+                qualification_note: Some(model.availability_note),
+            }
+        })
+        .collect()
 }
 
 pub fn is_known_provider(id: &str) -> bool {
-    PROVIDERS.iter().any(|provider| provider.id == id)
+    bundled_provider_catalog()
+        .content
+        .providers
+        .iter()
+        .any(|provider| provider.id == id)
 }
 
-pub fn credential_reference_for(provider_id: &str) -> Option<&'static str> {
-    PROVIDERS
-        .iter()
-        .find(|provider| provider.id == provider_id)
-        .and_then(|provider| provider.credential_reference)
+pub fn credential_reference_for(provider_id: &str) -> Option<String> {
+    bundled_provider_catalog()
+        .content
+        .providers
+        .into_iter()
+        .find(|provider| provider.id == provider_id && provider.credential.required)
+        .map(|provider| format!("providers/{}", provider.id))
 }
 
-pub fn credential_provider_name(provider_id: &str) -> Option<&'static str> {
-    PROVIDERS
-        .iter()
-        .find(|provider| provider.id == provider_id && provider.credential_reference.is_some())
-        .map(|provider| provider.name)
+pub fn credential_provider_name(provider_id: &str) -> Option<String> {
+    bundled_provider_catalog()
+        .content
+        .providers
+        .into_iter()
+        .find(|provider| provider.id == provider_id && provider.credential.required)
+        .map(|provider| provider.display_name)
 }
 
 #[cfg(test)]
@@ -488,15 +481,58 @@ mod tests {
     }
 
     #[test]
+    fn product_provider_and_model_summaries_are_exact_canonical_catalog_adapters() {
+        let canonical = bundled_provider_catalog();
+        let provider_ids = provider_summaries(&FixedPresence)
+            .into_iter()
+            .map(|provider| provider.provider_id)
+            .collect::<std::collections::BTreeSet<_>>();
+        let canonical_provider_ids = canonical
+            .content
+            .providers
+            .iter()
+            .map(|provider| provider.id.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(provider_ids, canonical_provider_ids);
+        assert!(provider_ids.contains("nemotron-local"));
+        assert!(provider_ids.contains("chatterbox-local"));
+        assert!(provider_ids.contains("qwen-tts-local"));
+        assert!(provider_ids.contains("onnx-embedding-local"));
+
+        let model_ids = model_summaries()
+            .into_iter()
+            .map(|model| model.id)
+            .collect::<std::collections::BTreeSet<_>>();
+        let canonical_model_ids = canonical
+            .content
+            .models
+            .iter()
+            .map(|model| model.id.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(model_ids, canonical_model_ids);
+    }
+
+    #[test]
     fn exactly_twenty_locked_profiles_are_declared() {
-        let summaries = ResourceCatalog::new(None).game_summaries();
+        let resources = ResourceCatalog::new(None);
+        let summaries = resources.game_summaries();
         assert_eq!(summaries.len(), 20);
+        assert!(!summaries.iter().any(|game| game.id == "eclipse-harbor"));
         assert_eq!(
             summaries
                 .iter()
                 .filter(|game| game.safety == ProfileSafety::OfflineOnly)
                 .count(),
             3
+        );
+
+        let synthetic = resources
+            .load_debug_synthetic_review_profile()
+            .expect("hidden synthetic review profile");
+        assert_eq!(synthetic.id, "eclipse-harbor");
+        assert_eq!(
+            synthetic.detection.processes[0].executable,
+            "EclipseHarbor.exe"
         );
     }
 

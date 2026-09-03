@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "reviewed_at": "2026-08-30",
+  "purpose": "Immutable primary-source and binary-input evidence for the Windows installer toolchain. Generated installer and uninstaller hashes remain mandatory in the extracted-distribution manifest.",
+  "tauri_cli": {
+    "version": "2.11.4",
+    "npm_purl": "pkg:npm/%40tauri-apps/cli@2.11.4",
+    "npm_integrity": "sha512-R8xGtMpwyetawSqm9kYOuMmEqkhUbvcUy8n0aNXIxollKBLESUu5f4Fx+64hgASYm1H+jSWq6jCW6zqTnH6hqQ==",
+    "windows_native_purl": "pkg:npm/%40tauri-apps/cli-win32-x64-msvc@2.11.4",
+    "windows_native_integrity": "sha512-+vDiqBIU5dMISg/wNvX3sF+ZHfgJGJ5T0AcO+EHNXV9GGAG+P5fzodlDXD3QdKCRgZxMoCm5PPvj3BqLNjBthw==",
+    "windows_native_sha256": "37c4d79256120893f2c12c1385bce5f7510b5063afdeb09b40a9effec28d0208",
+    "source_tag": "tauri-cli-v2.11.4",
+    "nsis_bundler_source": {
+      "url": "https://raw.githubusercontent.com/tauri-apps/tauri/tauri-cli-v2.11.4/crates/tauri-bundler/src/bundle/windows/nsis/mod.rs",
+      "sha256": "b1c6db4e8a9bcc55ed6a739fe73a64a18801600bbefc76083f7449db4fb87a0f"
+    },
+    "windows_utility_source": {
+      "url": "https://raw.githubusercontent.com/tauri-apps/tauri/tauri-cli-v2.11.4/crates/tauri-bundler/src/bundle/windows/util.rs",
+      "sha256": "2a3be006fee604cb75ea6d847d561a32e31d82006e2e1ddf3c476fad3e2028fd"
+    },
+    "spdx": "Apache-2.0 OR MIT"
+  },
+  "nsis_3_11": {
+    "binary_archive": {
+      "url": "https://github.com/tauri-apps/binary-releases/releases/download/nsis-3.11/nsis-3.11.zip",
+      "bytes": 2361546,
+      "tauri_embedded_sha1": "ef7ff767e5cbd9edd22add3a32c9b8f4500bb10d",
+      "reviewed_sha256": "c7d27f780ddb6cffb4730138cd1591e841f4b7edb155856901cdf5f214394fa1"
+    },
+    "corresponding_source_archive": {
+      "url": "https://downloads.sourceforge.net/project/nsis/NSIS%203/3.11/nsis-3.11-src.tar.bz2",
+      "bytes": 1817928,
+      "sha256": "19e72062676ebdc67c11dc032ba80b979cdbffd3886c60b04bb442cdd401ff4b"
+    },
+    "license": {
+      "spdx": "LicenseRef-NSIS-zlib-libpng AND LicenseRef-bzip2-1.0.6 AND LicenseRef-CPL-1.0-with-NSIS-LZMA-exception",
+      "archive_copying_sha256": "e7dd514003ab96cb3ddccbc028fe5c795fccf57dc41f21cfb9d4dd16ead23bf5",
+      "archive_copying_bytes": 15632,
+      "vendored_path": "docs/legal/licenses/NSIS-3.11-COPYING.txt",
+      "vendored_sha256": "dc0f74a312c08ffc900548a67ae9a3670ed28ad25a3afda1fe0504da16f89361",
+      "normalization": "CRLF converted to LF; text otherwise byte-identical"
+    },
+    "reviewed_required_payloads": {
+      "makensis.exe": {"bytes": 2560, "sha256": "f497e92deb9f179f7b8f7553fcb3bd04f511bb2949e5e4a2aee80a10f7b20431"},
+      "Bin/makensis.exe": {"bytes": 468992, "sha256": "42850802704ecb11163f7e0329d35ee54bd288953200d4966e226d572848cfc5"},
+      "Stubs/lzma-x86-unicode": {"bytes": 38400, "sha256": "e916a205c5421f4287411d402fe1d2cb37e3df93db00ff4cfbacec3b8ec8877e"},
+      "Stubs/lzma_solid-x86-unicode": {"bytes": 38912, "sha256": "a0d065b62d34be5f0aaaf7c162e101a5e25d7cd3eb10a13fdb37f91b02ebfce2"},
+      "Plugins/x86-unicode/NSISdl.dll": {"bytes": 15360, "sha256": "ddf40229dd9d6b268902d8dea88c8a04aacf1af218dd29f6dcd35babc54ac08d"},
+      "Plugins/x86-unicode/StartMenu.dll": {"bytes": 7680, "sha256": "fe330320459637d8dd2b5d84d07925c38ec264152ffd3b1760a4d44d76536caa"},
+      "Plugins/x86-unicode/System.dll": {"bytes": 12288, "sha256": "8b4c47c4cf5e76ec57dd5a050d5acd832a0d532ee875d7b44f6cdaf68f90d37c"},
+      "Plugins/x86-unicode/nsDialogs.dll": {"bytes": 9728, "sha256": "b1350f487692057c8ffde75dcc55287a52a3272240d4d4912f24464b27551fc0"}
+    }
+  },
+  "nsis_tauri_utils_0_5_3": {
+    "binary": {
+      "url": "https://github.com/tauri-apps/nsis-tauri-utils/releases/download/nsis_tauri_utils-v0.5.3/nsis_tauri_utils.dll",
+      "bytes": 34304,
+      "tauri_embedded_sha1": "75197fee3c6a814fe035788d1c34ead39349b860",
+      "reviewed_sha256": "5ba143b5db4a87d32d6e7802e033330aae56cbceabe0d1e3ba41948385ad4709"
+    },
+    "source": {
+      "tag": "nsis_tauri_utils-v0.5.3",
+      "commit": "13d9edd27b69310e108d6fbd49f90992f8a05390",
+      "archive_url": "https://github.com/tauri-apps/nsis-tauri-utils/archive/refs/tags/nsis_tauri_utils-v0.5.3.tar.gz",
+      "archive_bytes": 20032,
+      "archive_sha256": "34150c4cee737baca022a18d4b0483c5e8f684924249f0580fbef3d6dfe970d4"
+    },
+    "spdx": "Apache-2.0 OR MIT",
+    "license_files": [
+      {"path": "docs/legal/licenses/nsis-tauri-utils-v0.5.3-APACHE-2.0.txt", "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"},
+      {"path": "docs/legal/licenses/nsis-tauri-utils-v0.5.3-MIT.txt", "sha256": "1c1020fa10a6bf318717e82c911bcc54ebdfb9bb280460ae332bcb2f82f57fbe"}
+    ]
+  },
+  "webview2_evergreen_standalone_x64": {
+    "configured_mode": "skip",
+    "packaging_contract": "customPinnedOfflineInstaller",
+    "tauri_url": "https://go.microsoft.com/fwlink/?linkid=2124701",
+    "resolved_url": "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/b7e683e6-e94c-4576-bfe5-34852785a4d6/MicrosoftEdgeWebView2RuntimeInstallerX64.exe",
+    "canonical_filename": "MicrosoftEdgeWebView2RuntimeInstallerX64.exe",
+    "canonical_cache_path": "%LOCALAPPDATA%\\InteractiveNPCs\\toolchain\\webview2\\1.3.263.3\\987a9d8b3107e84f9b53b4a077d28ae4814fc3d964d5a55c559e7334bbf24d61\\MicrosoftEdgeWebView2RuntimeInstallerX64.exe",
+    "bytes": 258438352,
+    "sha256": "987a9d8b3107e84f9b53b4a077d28ae4814fc3d964d5a55c559e7334bbf24d61",
+    "file_version": "1.3.263.3",
+    "product_version": "1.3.263.3",
+    "last_modified": "2026-08-28T02:59:51Z",
+    "authenticode": {
+      "status": "Valid",
+      "signer_subject": "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+      "signer_thumbprint": "4028CAD637509D4744B17EC5B42AED8D7A31E6AF"
+    },
+    "distribution_authorization": {
+      "official_guidance": "https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution",
+      "official_download_page": "https://developer.microsoft.com/en-us/microsoft-edge/webview2",
+      "review_conclusion": "Microsoft's official WebView2 distribution guidance expressly lists packaging the Evergreen Standalone Installer with an application for offline deployment. Microsoft proprietary terms continue to govern the installer and runtime."
+    },
+    "redistributed": true,
+    "release_status": "reviewed-exact-input-custom-offline-embedding-verification-required",
+    "required_final_evidence": ["same sha256 in canonical isolated cache", "valid Microsoft Authenticode signature", "offline package manifest entry", "no package-time network acquisition"]
+  },
+  "generated_outputs": {
+    "installer_and_uninstaller": "The final package manifest must independently hash the generated installer and installed uninstall.exe; input provenance does not predict those generated hashes.",
+    "release_status": "pending-final-package-and-extracted-distribution-reconciliation"
+  }
+}

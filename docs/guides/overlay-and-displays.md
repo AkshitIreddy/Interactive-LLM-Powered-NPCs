@@ -4,13 +4,19 @@
 
 The C++/WinRT media broker targets Windows Graphics Capture by game window, D3D11 textures, per-monitor DPI/HDR/content-rect mapping, and DirectComposition presentation. DXGI Desktop Duplication is a declared fallback where appropriate.
 
-The current `native/media-broker` foundation implements/test-drives the coordinator, policy/recovery/cancellation state, validated HWND/process target, Desktop Duplication opening, D3D11/DirectComposition device setup, WASAPI device discovery, global non-hooking PTT polling, geometry, latest-frame mailbox, and fail-open compositing gates. It does **not** yet link the WinRT WGC frame pool, shared D3D IPC, DirectComposition visual/swap-chain presentation, event-driven audio clients/PCM rings, or validated HDR shader path. Those capabilities report unavailable rather than simulating success.
+The current `native/media-broker` implements the authenticated coordinator, policy/recovery/cancellation state, validated PID/HWND target, exact-HWND WinRT WGC frame pool, D3D11 source leases for bounded worker crops, a premultiplied DirectComposition residual visual, event-driven shared-mode WASAPI clients, and authenticated one-use PCM playback transport. Command 23 exposes broker-owned client geometry, frame/device generations, DPI, and Windows advanced-color/SDR-white evidence with explicit availability bits. Missing or stale evidence reports unavailable; Control must not replace it with WebView measurements or fixed planning values.
+
+These seams have portable contract tests and Windows native/synthetic-target proofs. They are not evidence that every game, exclusive-fullscreen mode, protected surface, HDR driver, monitor transition, or installed-machine matrix has passed. Release claims remain limited to the exact synthetic and live matrices recorded in the verification ledger.
 
 Windowed and borderless modes are the reliable external-overlay targets. True exclusive fullscreen, protected content, minimized windows, and unsupported swapchains fall back to audio/subtitles when policy permits; there is no native/injected adapter path.
 
 ## Display changes
 
 Capture and overlay must recover from resize, alt-tab, monitor move, negative desktop origins, DPI changes, 720p–4K, ultrawide, SDR/HDR transitions, and device loss. Coordinates are transformed from captured content—not hard-coded to 1920×1080.
+
+## External dimmers and perceived brightness
+
+External desktop dimmer overlays are separate display/perception effects. They may change what a person sees or what a desktop screenshot contains, but they are never accepted as the game's HDR mode, color encoding, SDR-white level, capture luminance, or subtitle tone-mapping truth. The broker derives those fields from the selected HWND's monitor and Windows display-path evidence. Product evidence records the generic perceived-brightness caveat without enumerating, naming, counting, focusing, or reconfiguring overlay applications. If native evidence is unavailable, subtitles use the explicitly unavailable console fallback; the app does not infer color truth from a dimmer's opacity or presence.
 
 ## Visual animation safety
 

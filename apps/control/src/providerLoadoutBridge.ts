@@ -7,7 +7,14 @@ import {
   type RouteChoice,
 } from "./providerLoadouts";
 
-type NativeRole = "llm" | "stt" | "tts" | "retrieval" | "lipsync";
+type NativeRole =
+  | "llm"
+  | "stt"
+  | "tts"
+  | "embeddings"
+  | "vision"
+  | "lipsync"
+  | "retrieval";
 type NativeScope =
   | { kind: "global" }
   | { kind: "game"; game_id: string }
@@ -32,7 +39,8 @@ interface NativeDisclosure {
 interface NativeModelRoute {
   provider_id: string;
   model_id: string;
-  credential: null;
+  voice_id?: string | null;
+  credential: { provider_id: string; reference_id: string } | null;
   disclosure: NativeDisclosure;
   explicit_user_selection: boolean;
 }
@@ -72,6 +80,7 @@ export interface NativeLoadoutDocument {
 
 export interface NativeLoadoutSnapshot {
   document: NativeLoadoutDocument;
+  catalogRevision: number;
   persistenceHealth:
     | "healthy"
     | "firstRun"
@@ -82,35 +91,117 @@ export interface NativeLoadoutSnapshot {
   networkRequestPerformed: false;
 }
 
+export interface NativeProviderPrivateEvaluationAcknowledgement {
+  schemaVersion: 1;
+  providerId: "nvidia-nim";
+  mode: "privateEvaluationOnly";
+  termsRevision: string;
+  catalogRevision: number;
+  applicationNamespace:
+    | "io.github.akshitireddy.interactive-npcs.debug"
+    | "io.github.akshitireddy.interactive-npcs.review";
+  acknowledgedAtEpochMs: number;
+  promotionSupported: false;
+  publicationSupported: false;
+}
+
+export interface NativeProviderPrivateEvaluationPolicy {
+  schemaVersion: 1;
+  providerId: "nvidia-nim";
+  mode: "privateEvaluationOnly";
+  termsRevision: string;
+  termsUrl: string;
+  catalogRevision: number;
+  applicationNamespace: string;
+  namespaceEligible: boolean;
+  trialPurposesOnly: true;
+  productionUseSupported: false;
+  promotionSupported: false;
+  publicationSupported: false;
+  confidentialSensitiveOrPersonalDataSupported: false;
+  limitsApply: true;
+  separateSubscriptionRequiredForProduction: true;
+  accessScope: string;
+  rateLimitNote: string;
+  prohibitedData: Array<
+    "confidential" | "controlled_or_sensitive" | "personal" | "game_secrets"
+  >;
+  securityAbuseLogging: boolean;
+  productImprovementCollectionDisclosed: boolean;
+  serviceSpecificDisclosuresApply: boolean;
+  exactModelTermsApply: boolean;
+  acknowledgement: NativeProviderPrivateEvaluationAcknowledgement | null;
+}
+
+export interface NativeResolvedProviderLoadout {
+  schema_version: number;
+  leaf_loadout_id: string;
+  inheritance_chain: string[];
+  roles: Partial<Record<Exclude<NativeRole, "retrieval">, NativeRoleRoute>>;
+}
+
+export interface NativeProviderLoadoutReview {
+  resolved: NativeResolvedProviderLoadout;
+  offline: boolean;
+  credentialsChecked: false;
+  networkRequestPerformed: false;
+  detail: string;
+}
+
+export interface NativeTtsStockVoiceDiscovery {
+  schemaVersion: number;
+  providerId: "nvidia-nim-magpie";
+  modelId: "magpie-tts-multilingual";
+  status: "available" | "unavailable";
+  voices: Array<{
+    voiceId: string;
+    displayName: string;
+    language: string;
+    styles: string[];
+    provenance: "providerStockDiscovery";
+  }>;
+  provenance: "providerStockDiscovery";
+  refresh: {
+    requested: boolean;
+    performed: boolean;
+    cacheHit: boolean;
+    refreshedAtEpochMs?: number;
+    expiresAtEpochMs?: number;
+  };
+  error?: { code: string; detail: string; retryable: boolean };
+}
+
 export type LoadoutSource =
   | { kind: "browser"; detail: string }
   | { kind: "native"; snapshot: NativeLoadoutSnapshot };
 
 const hasTauri = () => "__TAURI_INTERNALS__" in window;
+export const BROWSER_CATALOG_REVISION = 7;
 const nativeRole = (role: ProviderRole): NativeRole =>
   role === "lipSync" ? "lipsync" : role;
 
 function routeDisclosure(
   role: ProviderRole,
   route: RouteChoice,
+  catalogRevision: number,
 ): NativeDisclosure {
   const provider = providerFor(role, route.providerId);
   const transmitted: NativeDisclosure["transmitted_data"] =
-    role === "stt"
-      ? ["microphone_audio"]
-      : role === "tts"
-        ? ["response_text"]
-        : role === "retrieval"
-          ? provider.execution === "Cloud"
+    provider.execution !== "Cloud"
+      ? []
+      : role === "stt"
+        ? ["microphone_audio"]
+        : role === "tts"
+          ? ["response_text"]
+          : role === "embeddings"
             ? ["game_context", "memory_context"]
-            : []
-          : role === "lipSync"
-            ? provider.execution === "Local"
-              ? ["image", "response_text"]
-              : []
-            : ["transcript", "game_context", "memory_context"];
+            : role === "vision"
+              ? ["image", "game_context"]
+              : role === "lipSync"
+                ? []
+                : ["transcript", "game_context", "memory_context"];
   return {
-    catalog_revision: 6,
+    catalog_revision: catalogRevision,
     execution: provider.execution === "Cloud" ? "hosted" : "local",
     egress: provider.execution === "Cloud" ? "provider_cloud" : "none",
     privacy_summary: provider.privacy,
@@ -122,12 +213,26 @@ function routeDisclosure(
 function toNativeRoute(
   role: ProviderRole,
   route: RouteChoice,
+  existing?: NativeModelRoute,
+  catalogRevision = BROWSER_CATALOG_REVISION,
 ): NativeModelRoute {
+  const provider = providerFor(role, route.providerId);
+  const credentialProviderId = route.providerId.startsWith("nvidia-nim")
+    ? "nvidia-nim"
+    : route.providerId;
   return {
     provider_id: route.providerId,
     model_id: route.modelId,
-    credential: null,
-    disclosure: routeDisclosure(role, route),
+    voice_id:
+      role === "tts" ? (route.voiceId ?? existing?.voice_id ?? null) : null,
+    credential:
+      provider.execution === "Cloud"
+        ? (existing?.credential ?? {
+            provider_id: credentialProviderId,
+            reference_id: "personal",
+          })
+        : null,
+    disclosure: routeDisclosure(role, route, catalogRevision),
     explicit_user_selection: true,
   };
 }
@@ -140,6 +245,20 @@ function toNativeScope(loadout: ProviderLoadout): NativeScope {
     loadout.targetId ?? "eclipse-harbor/mara-venn"
   ).split("/");
   return { kind: "character", game_id: gameId, character_id: characterId };
+}
+
+function contextFor(loadout: ProviderLoadout) {
+  const scope = toNativeScope(loadout);
+  if (scope.kind === "global") {
+    return { game_id: null, character_id: null };
+  }
+  if (scope.kind === "game") {
+    return { game_id: scope.game_id, character_id: null };
+  }
+  return {
+    game_id: scope.game_id,
+    character_id: scope.character_id,
+  };
 }
 
 function parentFor(loadout: ProviderLoadout, document: NativeLoadoutDocument) {
@@ -155,23 +274,47 @@ export function toNativeLoadout(
   loadout: ProviderLoadout,
   document: NativeLoadoutDocument,
   existing?: NativeProviderLoadout,
+  catalogRevision = BROWSER_CATALOG_REVISION,
 ): NativeProviderLoadout {
   const roles: NativeProviderLoadout["roles"] = {};
   for (const role of ROLE_ORDER) {
     const route = loadout.routes[role];
-    if (role === "lipSync" && route.providerId === "disabled") {
-      roles.lipsync = { mode: "disabled" };
+    if (
+      (role === "lipSync" || role === "vision") &&
+      route.providerId === "disabled"
+    ) {
+      roles[nativeRole(role)] = { mode: "disabled" };
       continue;
     }
     const fallback = loadout.fallbacks[role];
+    const existingOverride =
+      existing?.roles[nativeRole(role)] ??
+      (role === "embeddings" ? existing?.roles.retrieval : undefined);
+    const existingRoute =
+      existingOverride?.mode === "route" ? existingOverride.route : undefined;
+    const existingFallback = existingRoute?.fallbacks.find(
+      (candidate) =>
+        candidate.route.provider_id === fallback?.providerId &&
+        candidate.route.model_id === fallback?.modelId,
+    );
     roles[nativeRole(role)] = {
       mode: "route",
       route: {
-        primary: toNativeRoute(role, route),
+        primary: toNativeRoute(
+          role,
+          route,
+          existingRoute?.primary,
+          catalogRevision,
+        ),
         fallbacks: fallback?.authorized
           ? [
               {
-                route: toNativeRoute(role, fallback),
+                route: toNativeRoute(
+                  role,
+                  fallback,
+                  existingFallback?.route,
+                  catalogRevision,
+                ),
                 activation: "manual_only",
                 user_authorized: true,
               },
@@ -237,7 +380,9 @@ function inheritedRole(
   if (seen.has(id)) return undefined;
   seen.add(id);
   const loadout = document.loadouts[id];
-  const override = loadout?.roles[nativeRole(role)];
+  const override =
+    loadout?.roles[nativeRole(role)] ??
+    (role === "embeddings" ? loadout?.roles.retrieval : undefined);
   if (override && override.mode !== "inherit") return override;
   return loadout?.parent
     ? inheritedRole(loadout.parent, role, document, seen)
@@ -247,8 +392,13 @@ function inheritedRole(
 const safeDefaults: Record<ProviderRole, RouteChoice> = {
   llm: { providerId: "openai", modelId: "gpt-4.1-mini" },
   stt: { providerId: "openai", modelId: "gpt-4o-mini-transcribe" },
-  tts: { providerId: "elevenlabs", modelId: "eleven-flash-v2.5" },
-  retrieval: { providerId: "fts-only", modelId: "sqlite-fts5" },
+  tts: {
+    providerId: "elevenlabs",
+    modelId: "eleven_flash_v2_5",
+    voiceId: "EXAVITQu4vr4xnSDxMaL",
+  },
+  embeddings: { providerId: "fts-only", modelId: "sqlite-fts5" },
+  vision: { providerId: "disabled", modelId: "disabled" },
   lipSync: { providerId: "disabled", modelId: "disabled" },
 };
 
@@ -277,11 +427,17 @@ export function fromNativeSnapshot(
         routes[role] = {
           providerId: override.route.primary.provider_id,
           modelId: override.route.primary.model_id,
+          ...(role === "tts" && override.route.primary.voice_id
+            ? { voiceId: override.route.primary.voice_id }
+            : {}),
         };
         const fallback = toBrowserFallback(role, override.route.fallbacks[0]);
         if (fallback) fallbacks[role] = fallback;
-      } else if (role === "lipSync" && override?.mode === "disabled") {
-        routes.lipSync = { providerId: "disabled", modelId: "disabled" };
+      } else if (
+        (role === "lipSync" || role === "vision") &&
+        override?.mode === "disabled"
+      ) {
+        routes[role] = { providerId: "disabled", modelId: "disabled" };
       }
     }
     return {
@@ -312,9 +468,10 @@ export async function nativeSnapshot(): Promise<NativeLoadoutSnapshot | null> {
 export async function nativeCreate(
   loadout: ProviderLoadout,
   document: NativeLoadoutDocument,
+  catalogRevision: number,
 ) {
   return invoke<NativeLoadoutSnapshot>("create_provider_loadout", {
-    loadout: toNativeLoadout(loadout, document),
+    loadout: toNativeLoadout(loadout, document, undefined, catalogRevision),
   });
 }
 
@@ -345,13 +502,64 @@ export async function nativeActivate(id: string) {
   return invoke<NativeLoadoutSnapshot>("activate_provider_loadout", { id });
 }
 
+export async function nativeDeactivateScope(loadout: ProviderLoadout) {
+  if (loadout.scope === "global") {
+    throw new Error("The global provider route cannot be deactivated");
+  }
+  return invoke<NativeLoadoutSnapshot>("deactivate_provider_loadout_scope", {
+    scope: toNativeScope(loadout),
+  });
+}
+
+export async function nativeReview(loadout: ProviderLoadout, offline: boolean) {
+  return invoke<NativeProviderLoadoutReview>("review_provider_loadout", {
+    context: contextFor(loadout),
+    offline,
+  });
+}
+
+export async function nativeDiscoverTtsStockVoices(forceRefresh: boolean) {
+  return invoke<NativeTtsStockVoiceDiscovery>("discover_tts_stock_voices", {
+    forceRefresh,
+  });
+}
+
+export async function nativePrivateEvaluationAcknowledgement() {
+  if (!hasTauri()) return null;
+  return invoke<NativeProviderPrivateEvaluationAcknowledgement | null>(
+    "provider_private_evaluation_acknowledgement",
+  );
+}
+
+export async function nativePrivateEvaluationPolicy() {
+  return invoke<NativeProviderPrivateEvaluationPolicy>(
+    "provider_private_evaluation_policy",
+  );
+}
+
+export async function nativeAcknowledgePrivateEvaluation(
+  termsRevision: string,
+) {
+  return invoke<NativeProviderPrivateEvaluationAcknowledgement>(
+    "acknowledge_provider_private_evaluation",
+    {
+      request: {
+        providerId: "nvidia-nim",
+        termsRevision,
+        explicitUserConfirmation: true,
+      },
+    },
+  );
+}
+
 export async function nativeUpdate(
   loadout: ProviderLoadout,
   document: NativeLoadoutDocument,
+  catalogRevision: number,
 ) {
   const existing = document.loadouts[loadout.id];
   return invoke<NativeLoadoutSnapshot>("update_provider_loadout", {
     id: loadout.id,
-    loadout: toNativeLoadout(loadout, document, existing),
+    loadout: toNativeLoadout(loadout, document, existing, catalogRevision),
   });
 }

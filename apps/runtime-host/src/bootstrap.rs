@@ -1,4 +1,9 @@
-use std::{fs, path::PathBuf, sync::Arc};
+use std::{
+    collections::VecDeque,
+    fs,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
 use interactive_npcs_credential_vault::CredentialVault;
 #[cfg(not(windows))]
@@ -15,7 +20,9 @@ use npc_provider_catalog::{
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::{profiles::ProfileCorpus, supervisor::ChildSupervisor};
+use crate::{
+    profiles::ProfileCorpus, supervisor::ChildSupervisor, tts_bridge::TtsVoiceDiscoveryService,
+};
 
 const MAX_CATALOG_BYTES: u64 = 2 * 1024 * 1024;
 
@@ -94,18 +101,40 @@ pub struct HostState {
     pub catalog_trust: CatalogTrustState,
     pub memory: MemoryStore,
     pub vault: Arc<dyn CredentialVault>,
+    pub tts_voice_discovery: Arc<TtsVoiceDiscoveryService>,
     pub children: ChildSupervisor,
+    pub(crate) consumed_selected_stt_receipts: Arc<Mutex<VecDeque<String>>>,
 }
 
 impl HostState {
     pub async fn initialize(config: HostConfig) -> Result<Self, BootstrapError> {
+        let vault = platform_vault()?;
+        Self::initialize_with_resolved_vault(config, vault).await
+    }
+
+    /// Hermetic integration-test seam. It is absent from normal runtime builds
+    /// so production callers cannot replace the platform-owned credential
+    /// boundary.
+    #[cfg(feature = "test-fixture-vault")]
+    #[doc(hidden)]
+    pub async fn initialize_with_test_vault(
+        config: HostConfig,
+        vault: Arc<dyn CredentialVault>,
+    ) -> Result<Self, BootstrapError> {
+        Self::initialize_with_resolved_vault(config, vault).await
+    }
+
+    async fn initialize_with_resolved_vault(
+        config: HostConfig,
+        vault: Arc<dyn CredentialVault>,
+    ) -> Result<Self, BootstrapError> {
         ensure_private_app_data(&config.app_data)?;
         let profiles = ProfileCorpus::load(config.profiles_root())?;
         let (catalog, catalog_trust) = load_catalog_for_current_build(&config.catalog_path())?;
         let memory = MemoryStore::open(config.database_path())
             .await
             .map_err(|_| BootstrapError::Memory)?;
-        let vault = platform_vault()?;
+        let tts_voice_discovery = Arc::new(TtsVoiceDiscoveryService::hosted(Arc::clone(&vault)));
         Ok(Self {
             config,
             profiles,
@@ -113,7 +142,9 @@ impl HostState {
             catalog_trust,
             memory,
             vault,
+            tts_voice_discovery,
             children: ChildSupervisor::new(),
+            consumed_selected_stt_receipts: Arc::new(Mutex::new(VecDeque::new())),
         })
     }
 }

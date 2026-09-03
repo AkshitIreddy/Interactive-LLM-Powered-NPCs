@@ -22,10 +22,23 @@ function simulate(scenario, resourceProfile) {
   let sequence = 0;
   let terminalStatus = "running";
   let speechEndMs = null;
+  let inputReadyMs = null;
   let firstAudioMs = null;
+  let lastFailureMs = null;
+  let lastRecoveryMs = null;
   let networkAttempts = 0;
   let animationDisabled = scenario.turn.npc.visibility !== "visible";
   let animationExpected = scenario.stream.some((entry) => entry.source === "animation");
+  let audioCompleted = false;
+  let activeTrackId = null;
+  let activeTrackEpoch = null;
+  let deliveryCommitCount = 0;
+  let rejectedDeliveryCommitCount = 0;
+  let manualRetryCount = 0;
+  let runtimeRestartCount = 0;
+  let identityAmbiguityCount = 0;
+  let identityMissCount = 0;
+  let staleLipSyncDropCount = 0;
 
   /** @param {string} kind @param {string} source @param {Record<string, unknown>} payload @param {string | null} [stage] */
   function emit(kind, source, payload, stage = null) {
@@ -59,9 +72,54 @@ function simulate(scenario, resourceProfile) {
     emit("runtime.degraded", "resource_broker", { reason, ...details });
   }
 
+  /** @param {string} reason */
+  function resetTurnAttempt(reason) {
+    audioCompleted = false;
+    for (const stage of SPINE) stageStatus.set(stage, "pending");
+    emit("turn.attempt_reset", "runtime", { reason, generation: generation.value });
+  }
+
   /** @param {string} source @param {string} kind @param {Record<string, unknown>} payload */
   function handleStream(source, kind, payload) {
-    if (terminalStatus === "cancelled" || terminalStatus === "failed") {
+    if (source === "control" && kind === "manual_retry") {
+      if (terminalStatus !== "failed") {
+        emit("turn.retry_rejected", "control", { reason: "turn_not_retryable", status: terminalStatus });
+        return;
+      }
+      const previousGeneration = generation.value;
+      generation.value += 1;
+      manualRetryCount += 1;
+      terminalStatus = "running";
+      lastRecoveryMs = clock.nowMs;
+      resetTurnAttempt("manual_retry");
+      emit("turn.retry_started", "control", {
+        previousGeneration,
+        generation: generation.value,
+        reason: payload.reason || "manual_retry",
+      });
+      return;
+    }
+
+    if (source === "control" && kind === "runtime_restart") {
+      if (terminalStatus !== "crashed") {
+        emit("runtime.restart_rejected", "control", { reason: "runtime_not_crashed", status: terminalStatus });
+        return;
+      }
+      const previousGeneration = generation.value;
+      generation.value += 1;
+      runtimeRestartCount += 1;
+      terminalStatus = "running";
+      lastRecoveryMs = clock.nowMs;
+      resetTurnAttempt("runtime_restart");
+      emit("runtime.restarted", "control", {
+        previousGeneration,
+        generation: generation.value,
+        recoveredFrom: payload.recoveredFrom || "runtime_crash",
+      });
+      return;
+    }
+
+    if (["cancelled", "failed", "crashed"].includes(terminalStatus)) {
       emit("late_event.ignored", source, { kind, reason: terminalStatus, originalPayload: payload });
       return;
     }
@@ -81,6 +139,15 @@ function simulate(scenario, resourceProfile) {
       return;
     }
 
+    if (source === "input" && kind === "typed_input") {
+      inputReadyMs = clock.nowMs;
+      emit("input.typed", "input", payload);
+      transition("listening", "skipped", { reason: "typed_input" });
+      transition("transcribing", "skipped", { reason: "typed_input" });
+      transition("identifying", "active");
+      return;
+    }
+
     if (source === "stt" && kind === "partial") {
       emit("transcript.partial", "stt", payload, "transcribing");
       transition("transcribing", "active");
@@ -97,6 +164,8 @@ function simulate(scenario, resourceProfile) {
     }
 
     if (source === "identity" && kind === "resolved") {
+      activeTrackId = payload.actorTrackId || scenario.turn.npc.id;
+      activeTrackEpoch = payload.trackEpoch ?? 0;
       emit("identity.resolved", "identity", {
         npcId: scenario.turn.npc.id,
         npcName: scenario.turn.npc.name,
@@ -109,6 +178,20 @@ function simulate(scenario, resourceProfile) {
         animationDisabled = true;
         transition("animating", "skipped", { reason: "npc_not_visible", fallback: "audio_and_subtitles" });
       }
+      return;
+    }
+
+    if (source === "identity" && kind === "ambiguous") {
+      identityAmbiguityCount += 1;
+      emit("identity.ambiguous", "identity", payload, "identifying");
+      if (stageStatus.get("identifying") === "pending") transition("identifying", "active");
+      return;
+    }
+
+    if (source === "identity" && kind === "missed") {
+      identityMissCount += 1;
+      emit("identity.missed", "identity", payload, "identifying");
+      if (stageStatus.get("identifying") === "pending") transition("identifying", "active");
       return;
     }
 
@@ -143,11 +226,30 @@ function simulate(scenario, resourceProfile) {
     }
 
     if (source === "tts" && kind === "complete") {
+      audioCompleted = true;
       emit("audio.complete", "tts", payload, "voicing");
       transition("voicing", "completed");
       if (!animationExpected || animationDisabled) {
         if (stageStatus.get("animating") === "pending") transition("animating", "skipped", { reason: "animation_not_requested" });
       }
+      return;
+    }
+
+    if (source === "delivery" && kind === "commit") {
+      if (!audioCompleted) {
+        rejectedDeliveryCommitCount += 1;
+        emit("delivery.commit_rejected", "delivery", {
+          reason: "audio_not_completed",
+          sentenceId: payload.sentenceId || null,
+        });
+        return;
+      }
+      deliveryCommitCount += 1;
+      emit("delivery.committed", "delivery", {
+        sentenceId: payload.sentenceId || null,
+        deliveredText: payload.deliveredText || null,
+        generation: generation.value,
+      });
       return;
     }
 
@@ -158,6 +260,28 @@ function simulate(scenario, resourceProfile) {
       }
       if (stageStatus.get("animating") === "pending") transition("animating", "active");
       emit("animation.viseme", "animation", payload, "animating");
+      return;
+    }
+
+    if (source === "animation" && kind === "frame_patch") {
+      if (animationDisabled) {
+        emit("animation.patch_dropped", "animation", { reason: "visuals_disabled", ...payload }, "animating");
+        return;
+      }
+      const dropReason = payload.actorTrackId !== activeTrackId
+        ? "actor_track_mismatch"
+        : payload.trackEpoch !== activeTrackEpoch
+          ? "actor_track_epoch_mismatch"
+          : payload.frameId !== payload.currentFrameId
+            ? "captured_frame_not_current"
+            : null;
+      if (dropReason) {
+        staleLipSyncDropCount += 1;
+        emit("animation.patch_dropped", "animation", { reason: dropReason, ...payload }, "animating");
+        return;
+      }
+      if (stageStatus.get("animating") === "pending") transition("animating", "active");
+      emit("animation.patch_applied", "animation", payload, "animating");
       return;
     }
 
@@ -177,7 +301,7 @@ function simulate(scenario, resourceProfile) {
 
   /** @param {any} fault */
   function handleFault(fault) {
-    if (terminalStatus === "cancelled" || terminalStatus === "failed") {
+    if (["cancelled", "failed", "crashed"].includes(terminalStatus)) {
       emit("fault.ignored", "fault_injector", { target: fault.target, kind: fault.kind, code: fault.code, reason: terminalStatus });
       return;
     }
@@ -212,7 +336,18 @@ function simulate(scenario, resourceProfile) {
       return;
     }
 
+    if (fault.kind === "runtime_crash" && fault.target === "runtime") {
+      lastFailureMs = clock.nowMs;
+      terminalStatus = "crashed";
+      emit("runtime.crashed", "runtime", { code: fault.code, generation: generation.value });
+      for (const stage of SPINE) {
+        if (stageStatus.get(stage) === "active") transition(stage, "cancelled", { reason: "runtime_crash" });
+      }
+      return;
+    }
+
     terminalStatus = "failed";
+    lastFailureMs = clock.nowMs;
     const stage = fault.target === "stt" ? "transcribing"
       : fault.target === "llm" ? "responding"
       : fault.target === "tts" ? "voicing"
@@ -242,7 +377,7 @@ function simulate(scenario, resourceProfile) {
     networkAllowed: scenario.privacy.networkAllowed,
     providers: scenario.providers,
   });
-  transition("listening", "active");
+  if (scenario.turn.inputMode !== "typed") transition("listening", "active");
 
   // Faults are queued first so a fault at the same virtual instant prevents a mocked
   // provider event from being observed. This ordering is part of the v1 contract.
@@ -250,7 +385,7 @@ function simulate(scenario, resourceProfile) {
     clock.schedule(fault.atMs, `fault:${fault.target}:${fault.kind}`, () => handleFault(fault));
   }
   for (const [index, entry] of scenario.stream.entries()) {
-    const scheduledGeneration = generation.value;
+    const scheduledGeneration = entry.generation ?? generation.value;
     clock.schedule(entry.atMs, `stream:${index}:${entry.source}:${entry.kind}`, () => {
       if (scheduledGeneration !== generation.value) {
         emit("late_event.ignored", entry.source, { kind: entry.kind, reason: "stale_cancellation_generation", scheduledGeneration });
@@ -278,9 +413,20 @@ function simulate(scenario, resourceProfile) {
 
   const metrics = {
     speechEndMs,
+    inputReadyMs,
     firstAudioMs,
     speechEndToFirstAudioMs: speechEndMs !== null && firstAudioMs !== null ? firstAudioMs - speechEndMs : null,
+    inputReadyToFirstAudioMs: inputReadyMs !== null && firstAudioMs !== null ? firstAudioMs - inputReadyMs : null,
+    failureToRecoveryMs: lastFailureMs !== null && lastRecoveryMs !== null ? lastRecoveryMs - lastFailureMs : null,
+    recoveryToFirstAudioMs: lastRecoveryMs !== null && firstAudioMs !== null ? firstAudioMs - lastRecoveryMs : null,
     networkAttempts,
+    deliveryCommitCount,
+    rejectedDeliveryCommitCount,
+    manualRetryCount,
+    runtimeRestartCount,
+    identityAmbiguityCount,
+    identityMissCount,
+    staleLipSyncDropCount,
     eventCountBeforeSummary: events.length,
   };
   emit("scenario.finished", "simulator", {
@@ -304,30 +450,48 @@ function simulate(scenario, resourceProfile) {
 }
 
 /** @param {any} scenario @param {ReturnType<typeof simulate>} result */
-function assertExpected(scenario, result) {
-  const errors = [];
-  if (scenario.expected.status !== result.status) {
-    errors.push(`status: expected ${scenario.expected.status}, received ${result.status}`);
+function evaluateExpected(scenario, result) {
+  /** @type {{name: string, expected: unknown, actual: unknown, passed: boolean}[]} */
+  const assertions = [];
+  const record = (name, expected, actual) => assertions.push({
+    name,
+    expected,
+    actual,
+    passed: JSON.stringify(expected) === JSON.stringify(actual),
+  });
+
+  record("status", scenario.expected.status, result.status);
+  if (scenario.expected.traceSha256) record("traceSha256", scenario.expected.traceSha256, result.traceSha256);
+  if (scenario.expected.firstAudioAtMs !== undefined) record("firstAudioAtMs", scenario.expected.firstAudioAtMs, result.metrics.firstAudioMs);
+  if (scenario.expected.speechEndToFirstAudioMs !== undefined) {
+    record("speechEndToFirstAudioMs", scenario.expected.speechEndToFirstAudioMs, result.metrics.speechEndToFirstAudioMs);
   }
-  if (scenario.expected.traceSha256 && scenario.expected.traceSha256 !== result.traceSha256) {
-    errors.push(`traceSha256: expected ${scenario.expected.traceSha256}, received ${result.traceSha256}`);
-  }
-  if (scenario.expected.firstAudioAtMs !== undefined && scenario.expected.firstAudioAtMs !== result.metrics.firstAudioMs) {
-    errors.push(`firstAudioAtMs: expected ${scenario.expected.firstAudioAtMs}, received ${result.metrics.firstAudioMs}`);
-  }
-  if (scenario.expected.speechEndToFirstAudioMs !== undefined && scenario.expected.speechEndToFirstAudioMs !== result.metrics.speechEndToFirstAudioMs) {
-    errors.push(`speechEndToFirstAudioMs: expected ${scenario.expected.speechEndToFirstAudioMs}, received ${result.metrics.speechEndToFirstAudioMs}`);
-  }
-  if (scenario.expected.networkAttempts !== undefined && scenario.expected.networkAttempts !== result.metrics.networkAttempts) {
-    errors.push(`networkAttempts: expected ${scenario.expected.networkAttempts}, received ${result.metrics.networkAttempts}`);
-  }
+  if (scenario.expected.networkAttempts !== undefined) record("networkAttempts", scenario.expected.networkAttempts, result.metrics.networkAttempts);
   if (scenario.expected.degradationReasons) {
-    const expected = [...scenario.expected.degradationReasons].sort();
-    if (JSON.stringify(expected) !== JSON.stringify(result.degradationReasons)) {
-      errors.push(`degradationReasons: expected ${JSON.stringify(expected)}, received ${JSON.stringify(result.degradationReasons)}`);
-    }
+    record("degradationReasons", [...scenario.expected.degradationReasons].sort(), result.degradationReasons);
   }
-  if (errors.length > 0) throw new Error(`${scenario.id} expectation failure:\n- ${errors.join("\n- ")}`);
+  for (const [name, expected] of Object.entries(scenario.expected.metrics || {})) {
+    record(`metrics.${name}`, expected, result.metrics[name]);
+  }
+  for (const [kind, expected] of Object.entries(scenario.expected.eventCounts || {})) {
+    record(`eventCounts.${kind}`, expected, result.events.filter((event) => event.kind === kind).length);
+  }
+  for (const [kind, minimum] of Object.entries(scenario.expected.minimumEventCounts || {})) {
+    const actual = result.events.filter((event) => event.kind === kind).length;
+    assertions.push({ name: `minimumEventCounts.${kind}`, expected: minimum, actual, passed: actual >= minimum });
+  }
+  for (const [stage, expected] of Object.entries(scenario.expected.spine || {})) {
+    record(`spine.${stage}`, expected, result.spine[stage]);
+  }
+  return assertions;
 }
 
-module.exports = { EVENT_VERSION, SPINE, simulate, assertExpected };
+/** @param {any} scenario @param {ReturnType<typeof simulate>} result */
+function assertExpected(scenario, result) {
+  const failures = evaluateExpected(scenario, result).filter((assertion) => !assertion.passed);
+  if (failures.length > 0) {
+    throw new Error(`${scenario.id} expectation failure:\n- ${failures.map((failure) => `${failure.name}: expected ${JSON.stringify(failure.expected)}, received ${JSON.stringify(failure.actual)}`).join("\n- ")}`);
+  }
+}
+
+module.exports = { EVENT_VERSION, SPINE, simulate, evaluateExpected, assertExpected };

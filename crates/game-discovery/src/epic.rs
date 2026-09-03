@@ -26,6 +26,8 @@ pub enum EpicParseError {
     Empty,
     #[error("Epic manifest record is missing {0}")]
     Missing(&'static str),
+    #[error("Epic manifest has an invalid install location")]
+    InvalidInstallLocation,
     #[error("Epic manifest has an unsafe launch executable: {0}")]
     UnsafeLaunchExecutable(#[from] StoreRelativePathError),
 }
@@ -74,28 +76,37 @@ pub fn parse_launcher_installed(input: &str) -> Result<Vec<EpicInstall>, EpicPar
     if parsed.installation_list.is_empty() {
         return Err(EpicParseError::Empty);
     }
-    Ok(parsed
+    parsed
         .installation_list
         .into_iter()
-        .map(|record| EpicInstall {
-            display_name: record.app_name.clone(),
-            app_name: record.app_name,
-            install_location: PathBuf::from(record.install_location),
-            launch_executable: None,
-            catalog_namespace: None,
-            catalog_item_id: None,
-            artifact_id: record.artifact_id,
-            main_game_app_name: None,
-            app_version: record.app_version,
+        .map(|record| {
+            require_text(&record.app_name, "AppName")?;
+            require_text(&record.install_location, "InstallLocation")?;
+            validate_install_location(&record.install_location)?;
+            Ok(EpicInstall {
+                display_name: record.app_name.clone(),
+                app_name: record.app_name,
+                install_location: PathBuf::from(record.install_location),
+                launch_executable: None,
+                catalog_namespace: None,
+                catalog_item_id: None,
+                artifact_id: record.artifact_id,
+                main_game_app_name: None,
+                app_version: record.app_version,
+            })
         })
-        .collect())
+        .collect()
 }
 
 pub fn parse_epic_item(input: &str) -> Result<Option<EpicInstall>, EpicParseError> {
     let record: ItemRecord = serde_json::from_str(input)?;
-    if record.b_is_application == Some(false) && record.main_game_app_name.is_some() {
+    if record.b_is_application == Some(false) {
         return Ok(None);
     }
+    require_text(&record.app_name, "AppName")?;
+    require_text(&record.display_name, "DisplayName")?;
+    require_text(&record.install_location, "InstallLocation")?;
+    validate_install_location(&record.install_location)?;
     let install_location = PathBuf::from(&record.install_location);
     let launch_executable = record
         .launch_executable
@@ -115,6 +126,34 @@ pub fn parse_epic_item(input: &str) -> Result<Option<EpicInstall>, EpicParseErro
     }))
 }
 
+fn require_text(value: &str, field: &'static str) -> Result<(), EpicParseError> {
+    if value.trim().is_empty() {
+        Err(EpicParseError::Missing(field))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_install_location(value: &str) -> Result<(), EpicParseError> {
+    let bytes = value.as_bytes();
+    let windows_drive_absolute = bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'/' | b'\\');
+    let windows_device =
+        value.starts_with(r"\\?\") || value.starts_with(r"\\.\") || value.starts_with(r"\??\");
+    let unc_absolute = value.starts_with(r"\\") && !windows_device;
+    let platform_absolute = std::path::Path::new(value).is_absolute();
+    if windows_device
+        || value.chars().any(char::is_control)
+        || !(windows_drive_absolute || unc_absolute || platform_absolute)
+    {
+        Err(EpicParseError::InvalidInstallLocation)
+    } else {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,11 +169,44 @@ mod tests {
 
     #[test]
     fn filters_non_application_components() {
-        let item = parse_epic_item(
+        for item in [
             r#"{"AppName":"DLC","DisplayName":"DLC","InstallLocation":"D:\\Game","MainGameAppName":"Game","bIsApplication":false}"#,
-        )
-        .unwrap();
-        assert!(item.is_none());
+            r#"{"AppName":"Prerequisite","DisplayName":"Prerequisite","InstallLocation":"D:\\Game","bIsApplication":false}"#,
+        ] {
+            assert!(parse_epic_item(item).unwrap().is_none());
+        }
+    }
+
+    #[test]
+    fn rejects_blank_launcher_and_item_identity_fields() {
+        assert!(matches!(
+            parse_launcher_installed(
+                r#"{"InstallationList":[{"InstallLocation":"D:\\Game","AppName":" "}]}"#
+            ),
+            Err(EpicParseError::Missing("AppName"))
+        ));
+        assert!(matches!(
+            parse_epic_item(
+                r#"{"AppName":"Game","DisplayName":" ","InstallLocation":"D:\\Game","bIsApplication":true}"#
+            ),
+            Err(EpicParseError::Missing("DisplayName"))
+        ));
+    }
+
+    #[test]
+    fn rejects_relative_device_and_control_character_install_locations() {
+        for install_location in ["Games/Game", r"\\?\C:\Games\Game", "D:\\Games\\Game\n"] {
+            let item = serde_json::json!({
+                "AppName": "Game",
+                "DisplayName": "Game",
+                "InstallLocation": install_location,
+                "bIsApplication": true
+            });
+            assert!(matches!(
+                parse_epic_item(&item.to_string()),
+                Err(EpicParseError::InvalidInstallLocation)
+            ));
+        }
     }
 
     #[test]

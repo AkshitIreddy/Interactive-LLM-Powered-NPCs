@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "default_style_id": "cinematic_glass",
+  "styles": [
+    {
+      "id": "cinematic_glass",
+      "typography": {
+        "body_font_role": "subtitle_sans",
+        "speaker_font_role": "subtitle_sans_emphasis",
+        "body_size_dp": 22.0,
+        "speaker_size_dp": 14.0,
+        "line_height": 1.28,
+        "speaker_tracking_em": 0.055,
+        "max_body_lines": 4
+      },
+      "geometry": {
+        "max_width_fraction": 0.56,
+        "min_width_dp": 220.0,
+        "max_width_dp": 760.0,
+        "padding_x_dp": 22.0,
+        "padding_y_dp": 16.0,
+        "speaker_gap_dp": 7.0,
+        "safe_margin_dp": 32.0,
+        "head_gap_dp": 20.0,
+        "candidate_gap_dp": 12.0,
+        "fallback_bottom_dp": 34.0,
+        "corner_radius_dp": 14.0
+      },
+      "effects": {
+        "outline": {
+          "enabled": true,
+          "width_dp": 1.35,
+          "color": { "r": 0.01, "g": 0.012, "b": 0.018, "a": 0.96 }
+        },
+        "shadow": {
+          "enabled": true,
+          "offset_x_dp": 0.0,
+          "offset_y_dp": 3.0,
+          "blur_dp": 10.0,
+          "color": { "r": 0.0, "g": 0.0, "b": 0.0, "a": 0.68 }
+        },
+        "backplate": {
+          "enabled": true,
+          "blur_behind_dp": 14.0,
+          "border_width_dp": 1.0,
+          "fill": { "r": 0.018, "g": 0.024, "b": 0.039, "a": 0.82 },
+          "border": { "r": 0.75, "g": 0.82, "b": 0.94, "a": 0.22 }
+        }
+      },
+      "animation": {
+        "enabled": true,
+        "enter_ms": 180,
+        "exit_ms": 150,
+        "initial_offset_y_dp": 9.0,
+        "initial_scale": 0.975,
+        "reveal_delay_ms": 50,
+        "reveal_ms_per_grapheme": 11
+      },
+      "colors": {
+        "body": { "r": 0.965, "g": 0.975, "b": 0.99, "a": 1.0 },
+        "speaker": { "r": 0.40, "g": 0.84, "b": 1.0, "a": 1.0 },
+        "encoding": "srgb",
+        "hdr": {
+          "target_spaces": ["srgb", "scrgb", "rec2020_pq"],
+          "source_surface": "bgra8_srgb_premultiplied",
+          "sdr_white_mapping": "windows_compositor_managed",
+          "tone_map": "none_in_renderer",
+          "custom_pq_or_scrgb_shader": false
+        }
+      },
+      "behavior": {
+        "head_confidence_threshold": 0.72,
+        "max_track_age_ms": 180,
+        "collision_search_steps": 8,
+        "prefer_head_anchor": true
+      }
+    },
+    {
+      "id": "accessibility_high_contrast",
+      "typography": {
+        "body_font_role": "subtitle_sans",
+        "speaker_font_role": "subtitle_sans_emphasis",
+        "body_size_dp": 26.0,
+        "speaker_size_dp": 17.0,
+        "line_height": 1.34,
+        "speaker_tracking_em": 0.035,
+        "max_body_lines": 5
+      },
+      "geometry": {
+        "max_width_fraction": 0.68,
+        "min_width_dp": 260.0,
+        "max_width_dp": 900.0,
+        "padding_x_dp": 25.0,
+        "padding_y_dp": 18.0,
+        "speaker_gap_dp": 8.0,
+        "safe_margin_dp": 38.0,
+        "head_gap_dp": 24.0,
+        "candidate_gap_dp": 14.0,
+        "fallback_bottom_dp": 42.0,
+        "corner_radius_dp": 11.0
+      },
+      "effects": {
+        "outline": {
+          "enabled": true,
+          "width_dp": 2.25,
+          "color": { "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0 }
+        },
+        "shadow": {
+          "enabled": true,
+          "offset_x_dp": 0.0,
+          "offset_y_dp": 3.0,
+          "blur_dp": 7.0,
+          "color": { "r": 0.0, "g": 0.0, "b": 0.0, "a": 0.9 }
+        },
+        "backplate": {
+          "enabled": true,
+          "blur_behind_dp": 0.0,
+          "border_width_dp": 2.0,
+          "fill": { "r": 0.0, "g": 0.0, "b": 0.0, "a": 0.94 },
+          "border": { "r": 1.0, "g": 1.0, "b": 1.0, "a": 0.82 }
+        }
+      },
+      "animation": {
+        "enabled": true,
+        "enter_ms": 100,
+        "exit_ms": 100,
+        "initial_offset_y_dp": 4.0,
+        "initial_scale": 1.0,
+        "reveal_delay_ms": 0,
+        "reveal_ms_per_grapheme": 0
+      },
+      "colors": {
+        "body": { "r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0 },
+        "speaker": { "r": 1.0, "g": 0.84, "b": 0.20, "a": 1.0 },
+        "encoding": "srgb",
+        "hdr": {
+          "target_spaces": ["srgb", "scrgb", "rec2020_pq"],
+          "source_surface": "bgra8_srgb_premultiplied",
+          "sdr_white_mapping": "windows_compositor_managed",
+          "tone_map": "none_in_renderer",
+          "custom_pq_or_scrgb_shader": false
+        }
+      },
+      "behavior": {
+        "head_confidence_threshold": 0.78,
+        "max_track_age_ms": 150,
+        "collision_search_steps": 10,
+        "prefer_head_anchor": true
+      }
+    }
+  ]
+}

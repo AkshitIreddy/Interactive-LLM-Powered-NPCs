@@ -7,26 +7,294 @@
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::Arc,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use async_trait::async_trait;
 use interactive_npcs_credential_vault::{CredentialVault, SecretValue, VaultError};
 use npc_providers_tts::{
-    AudioFormat, CredentialResolveError, HostedTtsProviderId, PcmChunk, PcmEncoding,
-    ProviderCredentialResolver, SemanticClausePolicy, SensitiveString, SessionIdentity,
-    StreamingTtsProvider, StreamingTtsSession, TtsError, TtsErrorKind, TtsEvent, TtsSessionRequest,
+    AudioFormat, CredentialResolveError, HostedTtsProviderId, NvidiaNimMagpie, NvidiaStockVoice,
+    PcmChunk, PcmEncoding, ProviderCredentialResolver, ReqwestNvidiaNimHttpTransport,
+    SemanticClausePolicy, SensitiveString, SessionIdentity, StreamingTtsProvider,
+    StreamingTtsSession, TonicNvidiaNimGrpcTransport, TtsError, TtsErrorKind, TtsEvent,
+    TtsSessionRequest, VoiceBindings, NVIDIA_MAGPIE_MODEL_ID,
 };
 use npc_runtime_core::{
     AlignmentEvent, AudioChunk, DataClass, ProviderDescriptor, ProviderError, ProviderErrorKind,
     ProviderLocation, ProviderModality, SpeechRequest, SpeechStream, SpeechStreamItem, TtsProvider,
     TtsSession, TurnIdentity,
 };
+use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
 pub const ELEVENLABS_CREDENTIAL_TARGET: &str = "providers/elevenlabs";
-const REQUIRED_SAMPLE_RATE_HZ: u32 = 24_000;
+pub const NVIDIA_NIM_CREDENTIAL_TARGET: &str = "providers/nvidia-nim";
 const REQUIRED_CHANNELS: u16 = 1;
+const VOICE_DISCOVERY_SCHEMA_VERSION: u32 = 1;
+const MAX_DISCOVERED_STOCK_VOICES: usize = 1024;
+const RUNTIME_VOICE_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TtsVoiceDiscoveryRequest {
+    pub schema_version: u32,
+    pub provider_id: String,
+    pub model_id: String,
+    #[serde(default)]
+    pub force_refresh: bool,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum TtsVoiceDiscoveryStatus {
+    Available,
+    Unavailable,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum TtsVoiceProvenance {
+    ProviderStockDiscovery,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveredStockVoice {
+    pub voice_id: String,
+    pub display_name: String,
+    pub language: String,
+    pub styles: Vec<String>,
+    pub provenance: TtsVoiceProvenance,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TtsVoiceRefreshEvidence {
+    pub requested: bool,
+    pub performed: bool,
+    pub cache_hit: bool,
+    pub refreshed_at_epoch_ms: Option<u64>,
+    pub expires_at_epoch_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TtsVoiceDiscoveryError {
+    pub code: String,
+    pub detail: String,
+    pub retryable: bool,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TtsVoiceDiscoveryResult {
+    pub schema_version: u32,
+    pub provider_id: String,
+    pub model_id: String,
+    pub status: TtsVoiceDiscoveryStatus,
+    pub voices: Vec<DiscoveredStockVoice>,
+    pub provenance: TtsVoiceProvenance,
+    pub refresh: TtsVoiceRefreshEvidence,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<TtsVoiceDiscoveryError>,
+}
+
+#[async_trait]
+trait RuntimeStockVoiceSource: Send + Sync {
+    async fn discover(&self) -> Result<Vec<NvidiaStockVoice>, TtsError>;
+}
+
+struct HostedNvidiaStockVoiceSource {
+    vault: Arc<dyn CredentialVault>,
+}
+
+#[async_trait]
+impl RuntimeStockVoiceSource for HostedNvidiaStockVoiceSource {
+    async fn discover(&self) -> Result<Vec<NvidiaStockVoice>, TtsError> {
+        let grpc = TonicNvidiaNimGrpcTransport::connect().await.map_err(|_| {
+            TtsError::new(
+                HostedTtsProviderId::NvidiaNimMagpie.as_str(),
+                TtsErrorKind::Unavailable,
+                "nvidia_grpc_transport_unavailable",
+                true,
+            )
+        })?;
+        let http = ReqwestNvidiaNimHttpTransport::new().map_err(|_| {
+            TtsError::new(
+                HostedTtsProviderId::NvidiaNimMagpie.as_str(),
+                TtsErrorKind::Unavailable,
+                "nvidia_http_transport_unavailable",
+                true,
+            )
+        })?;
+        let provider = NvidiaNimMagpie::new(
+            Arc::new(grpc),
+            Arc::new(http),
+            Arc::new(VaultTtsCredentialResolver::new(Arc::clone(&self.vault))),
+            VoiceBindings::default(),
+        );
+        provider.discover_stock_voices().await
+    }
+}
+
+#[derive(Clone)]
+struct CachedStockVoices {
+    voices: Vec<DiscoveredStockVoice>,
+    refreshed_at_epoch_ms: u64,
+    expires_at_epoch_ms: u64,
+    expires_at: tokio::time::Instant,
+}
+
+pub struct TtsVoiceDiscoveryService {
+    source: Arc<dyn RuntimeStockVoiceSource>,
+    cache: tokio::sync::Mutex<Option<CachedStockVoices>>,
+}
+
+impl TtsVoiceDiscoveryService {
+    #[must_use]
+    pub fn hosted(vault: Arc<dyn CredentialVault>) -> Self {
+        Self {
+            source: Arc::new(HostedNvidiaStockVoiceSource { vault }),
+            cache: tokio::sync::Mutex::new(None),
+        }
+    }
+
+    pub async fn discover(&self, request: TtsVoiceDiscoveryRequest) -> TtsVoiceDiscoveryResult {
+        let requested = request.force_refresh;
+        if request.schema_version != VOICE_DISCOVERY_SCHEMA_VERSION
+            || request.provider_id != HostedTtsProviderId::NvidiaNimMagpie.as_str()
+            || request.model_id != NVIDIA_MAGPIE_MODEL_ID
+        {
+            return discovery_failure(
+                request,
+                "unsupported_tts_voice_route",
+                "Voice discovery is available only for the private-evaluation NVIDIA Magpie stock route.",
+                false,
+            );
+        }
+        let mut cache = self.cache.lock().await;
+        if !request.force_refresh {
+            if let Some(cached) = cache
+                .as_ref()
+                .filter(|cached| cached.expires_at > tokio::time::Instant::now())
+            {
+                return discovery_success(request, cached.clone(), requested, false, true);
+            }
+        }
+
+        let voices = match self.source.discover().await {
+            Ok(voices) => voices,
+            Err(error) => {
+                return discovery_failure(
+                    request,
+                    error.code,
+                    "The provider stock-voice catalog could not be refreshed.",
+                    error.retryable,
+                )
+            }
+        };
+        if voices.is_empty() || voices.len() > MAX_DISCOVERED_STOCK_VOICES {
+            return discovery_failure(
+                request,
+                "invalid_stock_voice_catalog",
+                "The provider returned an empty or oversized stock-voice catalog.",
+                true,
+            );
+        }
+        let mut mapped = Vec::with_capacity(voices.len());
+        let mut ids = std::collections::BTreeSet::new();
+        for voice in voices {
+            if voice.validate().is_err() || !ids.insert(voice.id.clone()) {
+                return discovery_failure(
+                    request,
+                    "invalid_stock_voice_catalog",
+                    "The provider returned an invalid stock-voice catalog.",
+                    true,
+                );
+            }
+            mapped.push(DiscoveredStockVoice {
+                voice_id: voice.id,
+                display_name: voice.display_name,
+                language: voice.locale,
+                styles: Vec::new(),
+                provenance: TtsVoiceProvenance::ProviderStockDiscovery,
+            });
+        }
+        mapped.sort_by(|left, right| left.voice_id.cmp(&right.voice_id));
+        let refreshed_at_epoch_ms = unix_epoch_ms();
+        let expires_at_epoch_ms =
+            refreshed_at_epoch_ms.saturating_add(RUNTIME_VOICE_CACHE_TTL.as_millis() as u64);
+        let cached = CachedStockVoices {
+            voices: mapped,
+            refreshed_at_epoch_ms,
+            expires_at_epoch_ms,
+            expires_at: tokio::time::Instant::now() + RUNTIME_VOICE_CACHE_TTL,
+        };
+        *cache = Some(cached.clone());
+        discovery_success(request, cached, requested, true, false)
+    }
+}
+
+fn unix_epoch_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
+}
+
+fn discovery_success(
+    request: TtsVoiceDiscoveryRequest,
+    cached: CachedStockVoices,
+    requested: bool,
+    performed: bool,
+    cache_hit: bool,
+) -> TtsVoiceDiscoveryResult {
+    TtsVoiceDiscoveryResult {
+        schema_version: VOICE_DISCOVERY_SCHEMA_VERSION,
+        provider_id: request.provider_id,
+        model_id: request.model_id,
+        status: TtsVoiceDiscoveryStatus::Available,
+        voices: cached.voices,
+        provenance: TtsVoiceProvenance::ProviderStockDiscovery,
+        refresh: TtsVoiceRefreshEvidence {
+            requested,
+            performed,
+            cache_hit,
+            refreshed_at_epoch_ms: Some(cached.refreshed_at_epoch_ms),
+            expires_at_epoch_ms: Some(cached.expires_at_epoch_ms),
+        },
+        error: None,
+    }
+}
+
+fn discovery_failure(
+    request: TtsVoiceDiscoveryRequest,
+    code: impl Into<String>,
+    detail: impl Into<String>,
+    retryable: bool,
+) -> TtsVoiceDiscoveryResult {
+    TtsVoiceDiscoveryResult {
+        schema_version: VOICE_DISCOVERY_SCHEMA_VERSION,
+        provider_id: request.provider_id,
+        model_id: request.model_id,
+        status: TtsVoiceDiscoveryStatus::Unavailable,
+        voices: Vec::new(),
+        provenance: TtsVoiceProvenance::ProviderStockDiscovery,
+        refresh: TtsVoiceRefreshEvidence {
+            requested: request.force_refresh,
+            performed: false,
+            cache_hit: false,
+            refreshed_at_epoch_ms: None,
+            expires_at_epoch_ms: None,
+        },
+        error: Some(TtsVoiceDiscoveryError {
+            code: code.into(),
+            detail: detail.into(),
+            retryable,
+        }),
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct RuntimeTtsBridgeConfig {
@@ -45,6 +313,22 @@ impl RuntimeTtsBridgeConfig {
             descriptor,
             voice_intent_id: "dev.elevenlabs.stock".to_owned(),
             output: AudioFormat::default(),
+            request_alignment: true,
+            request_visemes: false,
+            clause_policy: SemanticClausePolicy::default(),
+        }
+    }
+
+    #[must_use]
+    pub fn selected_stock(
+        descriptor: ProviderDescriptor,
+        voice_intent_id: impl Into<String>,
+        output: AudioFormat,
+    ) -> Self {
+        Self {
+            descriptor,
+            voice_intent_id: voice_intent_id.into(),
+            output,
             request_alignment: true,
             request_visemes: false,
             clause_policy: SemanticClausePolicy::default(),
@@ -75,7 +359,7 @@ impl RuntimeTtsBridgeConfig {
             return Err(BridgeConfigError::InvalidVoiceIntent);
         }
         if self.output.encoding != PcmEncoding::PcmS16Le
-            || self.output.sample_rate_hz != REQUIRED_SAMPLE_RATE_HZ
+            || !(8_000..=96_000).contains(&self.output.sample_rate_hz)
             || self.output.channels != REQUIRED_CHANNELS
         {
             return Err(BridgeConfigError::UnsupportedOutput);
@@ -102,7 +386,7 @@ pub enum BridgeConfigError {
     TranscriptEgressNotDeclared,
     #[error("voice intent id is invalid")]
     InvalidVoiceIntent,
-    #[error("runtime speech output must be mono 24 kHz PCM s16le")]
+    #[error("runtime speech output must be curated mono PCM s16le")]
     UnsupportedOutput,
     #[error("semantic clause policy is invalid")]
     InvalidClausePolicy,
@@ -309,7 +593,12 @@ impl TtsSession for RuntimeTtsSession {
             return Err(map_upstream_error(&provider_id, error));
         }
 
-        Ok(validated_stream(upstream, cancellation, provider_id))
+        Ok(validated_stream(
+            upstream,
+            cancellation,
+            provider_id,
+            self.config.output,
+        ))
     }
 }
 
@@ -317,6 +606,7 @@ fn validated_stream(
     mut upstream: Box<dyn StreamingTtsSession>,
     cancellation: CancellationToken,
     provider_id: String,
+    expected_output: AudioFormat,
 ) -> SpeechStream {
     Box::pin(async_stream::stream! {
         let mut expected_sequence = 0_u64;
@@ -355,7 +645,12 @@ fn validated_stream(
 
             match event {
                 TtsEvent::Audio(chunk) => {
-                    if let Err(error) = validate_pcm_chunk(&provider_id, &chunk, expected_sequence) {
+                    if let Err(error) = validate_pcm_chunk(
+                        &provider_id,
+                        &chunk,
+                        expected_sequence,
+                        expected_output,
+                    ) {
                         cancel_authoritatively(upstream.as_mut()).await;
                         yield Err(error);
                         break;
@@ -432,6 +727,7 @@ fn validate_pcm_chunk(
     provider_id: &str,
     chunk: &PcmChunk,
     expected_sequence: u64,
+    expected_output: AudioFormat,
 ) -> Result<(), ProviderError> {
     if chunk.sequence != expected_sequence {
         return Err(bridge_error(
@@ -441,10 +737,7 @@ fn validate_pcm_chunk(
             false,
         ));
     }
-    if chunk.format.encoding != PcmEncoding::PcmS16Le
-        || chunk.format.sample_rate_hz != REQUIRED_SAMPLE_RATE_HZ
-        || chunk.format.channels != REQUIRED_CHANNELS
-    {
+    if chunk.format != expected_output {
         return Err(bridge_error(
             provider_id,
             ProviderErrorKind::Protocol,
@@ -465,7 +758,10 @@ fn validate_pcm_chunk(
 
 fn core_audio(chunk: PcmChunk, end_of_stream: bool) -> AudioChunk {
     AudioChunk {
-        sequence: chunk.sequence,
+        // Hosted TTS transports use a zero-based sequence internally, while
+        // every runtime audio sink reserves zero as an invalid/uninitialized
+        // wire value. Normalize exactly once at this trust boundary.
+        sequence: chunk.sequence.saturating_add(1),
         sample_rate_hz: chunk.format.sample_rate_hz,
         channels: chunk.format.channels,
         pcm_s16le: chunk.data,
@@ -533,13 +829,14 @@ impl ProviderCredentialResolver for VaultTtsCredentialResolver {
         &self,
         provider_id: HostedTtsProviderId,
     ) -> Result<SensitiveString, CredentialResolveError> {
-        if provider_id != HostedTtsProviderId::ElevenLabs {
-            return Err(CredentialResolveError::Missing);
-        }
-        let secret = self
-            .vault
-            .get(ELEVENLABS_CREDENTIAL_TARGET)
-            .map_err(map_vault_error)?;
+        let target = match provider_id {
+            HostedTtsProviderId::ElevenLabs => ELEVENLABS_CREDENTIAL_TARGET,
+            HostedTtsProviderId::NvidiaNimMagpie => NVIDIA_NIM_CREDENTIAL_TARGET,
+            HostedTtsProviderId::Cartesia
+            | HostedTtsProviderId::Inworld
+            | HostedTtsProviderId::Deepgram => return Err(CredentialResolveError::Missing),
+        };
+        let secret = self.vault.get(target).map_err(map_vault_error)?;
         sensitive_utf8_from_vault(secret)
     }
 }
@@ -583,7 +880,7 @@ mod tests {
     use futures_util::{StreamExt, TryStreamExt};
     use interactive_npcs_credential_vault::{SecretValue, VaultError};
     use npc_providers_tts::{
-        ProviderCapabilities, PushOutcome, SessionState, TtsEvent, WordAlignment,
+        NvidiaVoiceOrigin, ProviderCapabilities, PushOutcome, SessionState, TtsEvent, WordAlignment,
     };
 
     #[derive(Clone)]
@@ -818,9 +1115,9 @@ mod tests {
                 })
                 .collect();
             assert_eq!(audio.len(), 2);
-            assert_eq!(audio[0].sequence, 0);
+            assert_eq!(audio[0].sequence, 1);
             assert!(!audio[0].end_of_stream);
-            assert_eq!(audio[1].sequence, 1);
+            assert_eq!(audio[1].sequence, 2);
             assert!(audio[1].end_of_stream);
         }
 
@@ -867,7 +1164,7 @@ mod tests {
         assert!(matches!(
             &output[1],
             SpeechStreamItem::Audio(AudioChunk {
-                sequence: 0,
+                sequence: 1,
                 end_of_stream: true,
                 ..
             })
@@ -999,7 +1296,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn vault_resolver_reads_only_the_fixed_elevenlabs_target() {
+    async fn vault_resolver_reads_only_fixed_hosted_tts_targets() {
         let vault = Arc::new(RecordingVault::default());
         let resolver =
             VaultTtsCredentialResolver::new(Arc::clone(&vault) as Arc<dyn CredentialVault>);
@@ -1013,12 +1310,23 @@ mod tests {
             "fixture-only-token"
         );
         assert_eq!(
+            resolver
+                .resolve(HostedTtsProviderId::NvidiaNimMagpie)
+                .await
+                .expect("fixture credential")
+                .expose(),
+            "fixture-only-token"
+        );
+        assert_eq!(
             resolver.resolve(HostedTtsProviderId::Cartesia).await,
             Err(CredentialResolveError::Missing)
         );
         assert_eq!(
             *vault.reads.lock().expect("vault mutex poisoned"),
-            vec![ELEVENLABS_CREDENTIAL_TARGET.to_owned()]
+            vec![
+                ELEVENLABS_CREDENTIAL_TARGET.to_owned(),
+                NVIDIA_NIM_CREDENTIAL_TARGET.to_owned()
+            ]
         );
     }
 
@@ -1041,7 +1349,7 @@ mod tests {
         });
         let upstream: Arc<dyn StreamingTtsProvider> = Arc::new(FakeProvider { state });
         let mut config = RuntimeTtsBridgeConfig::dev_elevenlabs_stock(descriptor());
-        config.output.sample_rate_hz = 48_000;
+        config.output.sample_rate_hz = 7_999;
         assert!(matches!(
             RuntimeTtsBridge::new(Arc::clone(&upstream), config),
             Err(BridgeConfigError::UnsupportedOutput)
@@ -1104,5 +1412,96 @@ mod tests {
                 .map(String::as_str),
             Some("true")
         );
+    }
+
+    struct FixtureVoiceSource {
+        calls: AtomicUsize,
+        voices: Vec<NvidiaStockVoice>,
+    }
+
+    #[async_trait]
+    impl RuntimeStockVoiceSource for FixtureVoiceSource {
+        async fn discover(&self) -> Result<Vec<NvidiaStockVoice>, TtsError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(self.voices.clone())
+        }
+    }
+
+    fn magpie_discovery_request(force_refresh: bool) -> TtsVoiceDiscoveryRequest {
+        TtsVoiceDiscoveryRequest {
+            schema_version: VOICE_DISCOVERY_SCHEMA_VERSION,
+            provider_id: HostedTtsProviderId::NvidiaNimMagpie.as_str().into(),
+            model_id: NVIDIA_MAGPIE_MODEL_ID.into(),
+            force_refresh,
+        }
+    }
+
+    #[tokio::test]
+    async fn voice_discovery_is_bounded_cached_and_preserves_stock_provenance() {
+        let source = Arc::new(FixtureVoiceSource {
+            calls: AtomicUsize::new(0),
+            voices: vec![NvidiaStockVoice {
+                id: "Magpie-Multilingual.EN-US.Aria".into(),
+                display_name: "Aria".into(),
+                locale: "en-US".into(),
+                origin: NvidiaVoiceOrigin::ProviderStock,
+            }],
+        });
+        let service = TtsVoiceDiscoveryService {
+            source: Arc::clone(&source) as Arc<dyn RuntimeStockVoiceSource>,
+            cache: tokio::sync::Mutex::new(None),
+        };
+
+        let first = service.discover(magpie_discovery_request(false)).await;
+        assert_eq!(first.status, TtsVoiceDiscoveryStatus::Available);
+        assert!(first.refresh.performed);
+        assert!(!first.refresh.cache_hit);
+        assert_eq!(first.voices.len(), 1);
+        assert_eq!(first.voices[0].voice_id, "Magpie-Multilingual.EN-US.Aria");
+        assert_eq!(first.voices[0].display_name, "Aria");
+        assert_eq!(first.voices[0].language, "en-US");
+        assert!(first.voices[0].styles.is_empty());
+        assert_eq!(
+            first.voices[0].provenance,
+            TtsVoiceProvenance::ProviderStockDiscovery
+        );
+        assert!(first.error.is_none());
+
+        let cached = service.discover(magpie_discovery_request(false)).await;
+        assert!(cached.refresh.cache_hit);
+        assert!(!cached.refresh.performed);
+        assert_eq!(source.calls.load(Ordering::SeqCst), 1);
+
+        let refreshed = service.discover(magpie_discovery_request(true)).await;
+        assert!(refreshed.refresh.requested);
+        assert!(refreshed.refresh.performed);
+        assert_eq!(source.calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn voice_discovery_rejects_unqualified_routes_without_contacting_source() {
+        let source = Arc::new(FixtureVoiceSource {
+            calls: AtomicUsize::new(0),
+            voices: Vec::new(),
+        });
+        let service = TtsVoiceDiscoveryService {
+            source: Arc::clone(&source) as Arc<dyn RuntimeStockVoiceSource>,
+            cache: tokio::sync::Mutex::new(None),
+        };
+        let result = service
+            .discover(TtsVoiceDiscoveryRequest {
+                schema_version: VOICE_DISCOVERY_SCHEMA_VERSION,
+                provider_id: "cartesia".into(),
+                model_id: "sonic".into(),
+                force_refresh: false,
+            })
+            .await;
+        assert_eq!(result.status, TtsVoiceDiscoveryStatus::Unavailable);
+        assert_eq!(result.voices, Vec::new());
+        assert_eq!(
+            result.error.as_ref().map(|error| error.code.as_str()),
+            Some("unsupported_tts_voice_route")
+        );
+        assert_eq!(source.calls.load(Ordering::SeqCst), 0);
     }
 }

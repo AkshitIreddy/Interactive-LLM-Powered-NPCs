@@ -160,6 +160,8 @@
     }
   },
   "content": {
+    "character_data_readiness": "curated",
+    "character_data_readiness_notes": "Shipped named-character records have stable IDs and authored biography, personality, dialogue-style, prompt, voice-intent, explicit-selection identity, and provenance metadata; live visual identity is not certified.",
     "world_lore": "In 1899, the United States is rapidly closing the spaces where outlaw bands once lived beyond ordinary authority. Railways, private industry, federal agents, local posses, and expanding towns press against people who built their identities around mobility and refusal. The Van der Linde gang survives as a tense found family: idealism, affection, fear, and criminal necessity all compete inside one camp. This profile centers conversations on loyalty, freedom, survival, guilt, work, and the changing frontier. It never assumes honor level, camp losses, mission outcomes, or the epilogue; those become available only through explicit progress state.",
     "spoiler_policy": "Use chapter-aware knowledge. The default tier knows the 1899 setting, gang relationships visible at the opening, and public local context. Never mention later betrayals, deaths, illnesses, destinations, or epilogue roles unless the user explicitly unlocks the matching chapter tier.",
     "spoiler_tiers": [
@@ -519,7 +521,26 @@
       ]
     }
   },
+  "recommendations": {
+    "integration_mode": "external_only",
+    "provider_strategy": "api_first",
+    "local_activation_policy": "measured_whole_loadout_fit_required",
+    "game_resource_reserve_required": true,
+    "screen_space_lip_sync": "experimental_opt_in_after_exact_target_and_advancing_frame_qualification"
+  },
   "diagnostics": [
+    {
+      "id": "recommended-feature-loadout",
+      "severity": "info",
+      "check": "Keep a game-first resource reserve, prefer explicitly configured API routes for LLM, STT, TTS, and embeddings, and admit optional local models only after measured whole-loadout RAM and VRAM fit checks.",
+      "remediation": "Move optional language or speech roles to an explicitly selected hosted provider, unload nonessential local models, or increase the configured game reserve; keep experimental screen-space lip sync disabled until exact target binding, advancing-frame, and untouched-frame restore checks pass."
+    },
+    {
+      "id": "external-only-safety",
+      "severity": "error",
+      "check": "Confirm the selected target remains an eligible single-player top-level game window and that the session uses external capture, audio, and subtitles only, with no injection, hooks, automated input, or anti-cheat bypass.",
+      "remediation": "Stop on online, protection, process, PID, HWND, executable, or session-mode ambiguity; return to a clearly eligible single-player state and bind the exact game window again, otherwise use no game integration."
+    },
     {
       "id": "story-mode-proof",
       "severity": "error",

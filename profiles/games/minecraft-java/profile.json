@@ -197,6 +197,8 @@
     }
   },
   "content": {
+    "character_data_readiness": "curated",
+    "character_data_readiness_notes": "Shipped named-character records have stable IDs and authored biography, personality, dialogue-style, prompt, voice-intent, explicit-selection identity, and provenance metadata; live visual identity is not certified.",
     "world_lore": "Minecraft's world is a mutable sandbox of biomes, settlements, ruins, creatures, resources, weather, and player-made structures. Its sparse narrative leaves room for interpretation but does not authorize the system to declare one definitive hidden history. Villagers organize communities around homes, work sites, trade, and defense; other beings follow distinct behaviors and environments. Conversation in this profile is an optional imaginative translation of an entity's likely priorities. It should remain anchored to observed surroundings and established mechanics, avoid pretending to be official canon, and never invent facts about the player's world seed, builds, inventory, advancements, or past actions.",
     "spoiler_policy": "Overworld survival and common village concepts are enabled by default. Nether progression, End progression, rare structures, advanced systems, and version-specific discoveries require explicit tiers.",
     "spoiler_tiers": [
@@ -674,7 +676,26 @@
       ]
     }
   },
+  "recommendations": {
+    "integration_mode": "external_only",
+    "provider_strategy": "api_first",
+    "local_activation_policy": "measured_whole_loadout_fit_required",
+    "game_resource_reserve_required": true,
+    "screen_space_lip_sync": "experimental_opt_in_after_exact_target_and_advancing_frame_qualification"
+  },
   "diagnostics": [
+    {
+      "id": "recommended-feature-loadout",
+      "severity": "info",
+      "check": "Keep a game-first resource reserve, prefer explicitly configured API routes for LLM, STT, TTS, and embeddings, and admit optional local models only after measured whole-loadout RAM and VRAM fit checks.",
+      "remediation": "Move optional language or speech roles to an explicitly selected hosted provider, unload nonessential local models, or increase the configured game reserve; keep experimental screen-space lip sync disabled until exact target binding, advancing-frame, and untouched-frame restore checks pass."
+    },
+    {
+      "id": "external-only-safety",
+      "severity": "error",
+      "check": "Confirm the selected target remains an eligible single-player top-level game window and that the session uses external capture, audio, and subtitles only, with no injection, hooks, automated input, or anti-cheat bypass.",
+      "remediation": "Stop on online, protection, process, PID, HWND, executable, or session-mode ambiguity; return to a clearly eligible single-player state and bind the exact game window again, otherwise use no game integration."
+    },
     {
       "id": "minecraft-window",
       "severity": "error",

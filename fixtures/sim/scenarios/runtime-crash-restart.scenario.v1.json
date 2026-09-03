@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "npc.sim.scenario.v1",
+  "id": "runtime-crash-restart",
+  "description": "A runtime crash invalidates the old generation, rejects its delayed commit, and permits one valid post-restart delivery.",
+  "seed": 3003,
+  "resourceProfile": "reference-balanced-12gb",
+  "privacy": { "mode": "hybrid", "networkAllowed": true },
+  "providers": { "llm": "mock-nvidia-nim", "tts": "mock-local" },
+  "turn": {
+    "sessionId": "session-runtime-restart",
+    "turnId": "turn-runtime-restart-001",
+    "inputMode": "typed",
+    "npc": { "id": "skyrim-lydia", "name": "Lydia", "visibility": "offscreen" }
+  },
+  "stream": [
+    { "atMs": 0, "source": "input", "kind": "typed_input", "payload": { "text": "Are you there?" } },
+    { "atMs": 20, "source": "identity", "kind": "resolved", "payload": { "strategy": "explicit_name", "confidence": 1 } },
+    { "atMs": 45, "source": "memory", "kind": "retrieved", "payload": { "episodicCount": 1, "factCount": 2, "latencyMs": 25 } },
+    { "atMs": 100, "source": "llm", "kind": "sentence", "payload": { "text": "Right behind you." } },
+    { "atMs": 260, "source": "control", "kind": "runtime_restart", "payload": { "recoveredFrom": "runtime_process_exit" } },
+    { "atMs": 270, "source": "delivery", "kind": "commit", "generation": 0, "payload": { "sentenceId": "stale-pre-crash", "deliveredText": "Right behind you." } },
+    { "atMs": 280, "source": "input", "kind": "typed_input", "generation": 1, "payload": { "text": "Are you there?" } },
+    { "atMs": 300, "source": "identity", "kind": "resolved", "generation": 1, "payload": { "strategy": "explicit_name", "confidence": 1 } },
+    { "atMs": 325, "source": "memory", "kind": "retrieved", "generation": 1, "payload": { "episodicCount": 1, "factCount": 2, "latencyMs": 25 } },
+    { "atMs": 390, "source": "llm", "kind": "sentence", "generation": 1, "payload": { "text": "Still right behind you." } },
+    { "atMs": 520, "source": "tts", "kind": "audio_chunk", "generation": 1, "payload": { "chunkIndex": 0, "sampleCount": 1440, "sampleRateHz": 24000 } },
+    { "atMs": 560, "source": "llm", "kind": "complete", "generation": 1, "payload": { "finishReason": "stop", "text": "Still right behind you." } },
+    { "atMs": 620, "source": "tts", "kind": "complete", "generation": 1, "payload": { "chunks": 1, "deliveredText": "Still right behind you." } },
+    { "atMs": 630, "source": "delivery", "kind": "commit", "generation": 1, "payload": { "sentenceId": "post-restart", "deliveredText": "Still right behind you." } }
+  ],
+  "faults": [
+    { "atMs": 180, "target": "runtime", "kind": "runtime_crash", "code": "runtime_process_exit", "retryable": true }
+  ],
+  "expected": {
+    "status": "completed",
+    "traceSha256": "54626a3bca90aaac3de71d3cbfc5e7ee8184d651f28fa7120f50d4c08f861b8d",
+    "firstAudioAtMs": 520,
+    "networkAttempts": 0,
+    "degradationReasons": [],
+    "metrics": { "runtimeRestartCount": 1, "deliveryCommitCount": 1, "rejectedDeliveryCommitCount": 0, "failureToRecoveryMs": 80, "recoveryToFirstAudioMs": 260 },
+    "eventCounts": { "runtime.crashed": 1, "runtime.restarted": 1, "delivery.committed": 1 },
+    "minimumEventCounts": { "late_event.ignored": 1 }
+  }
+}

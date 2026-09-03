@@ -15,7 +15,11 @@ use crate::{
         EffectsProvider, LanguageModelProvider, ProviderError, RuntimeDependencies,
         RuntimeDependencyError, TtsProvider, TtsSession,
     },
-    sentence::{SentenceSegmenter, SentenceSegmenterConfig},
+    sentence::{SentenceSegmenterConfig, SentenceSpan},
+    structured_response::{
+        NpcResponseEnvelopeV1, ResponseValidationPolicy, StreamingResponseAdapterV1,
+        StreamingResponseError, StreamingResponseFormatV1,
+    },
     timing::{SpanOutcome, TimingCollector},
     types::{
         CharacterIdentity, Degradation, DeliveredSentence, DeliveryMode, EffectsRequest,
@@ -67,6 +71,8 @@ enum SupervisorError {
     },
     #[error("provider stream failed after output began: {0}")]
     StreamFailed(ProviderError),
+    #[error("provider response contract failed: {0}")]
+    InvalidProviderResponse(#[from] StreamingResponseError),
     #[error("runtime dependency failed: {0}")]
     Dependency(#[from] RuntimeDependencyError),
 }
@@ -86,6 +92,11 @@ impl SupervisorError {
             },
             Self::ProvidersExhausted { .. } => TurnFailure {
                 code: "providers_exhausted".into(),
+                message: self.to_string(),
+                retryable: true,
+            },
+            Self::InvalidProviderResponse(_) => TurnFailure {
+                code: "provider_response_invalid".into(),
                 message: self.to_string(),
                 retryable: true,
             },
@@ -274,6 +285,7 @@ impl TurnSupervisor {
             identity: identity.clone(),
             lifecycle: TurnLifecycle::Accepted,
             full_response: String::new(),
+            structured_response: None,
             effects: NpcEffectsV1::neutral(),
             delivered: Vec::new(),
             degradations: Vec::new(),
@@ -511,6 +523,7 @@ impl TurnSupervisor {
 
         let llm = llm_result?;
         outcome.full_response = llm.full_text;
+        outcome.structured_response = llm.structured_response;
         outcome.selected_llm_provider = Some(llm.provider_id);
         outcome.degradations.extend(llm.degradations);
         emitter
@@ -663,12 +676,15 @@ impl EventEmitter {
 
     async fn emit_terminal(&self, outcome: TurnOutcome) {
         // Terminal state must be observable even after cooperative cancellation.
-        let _ = self.tx.try_send(TurnEvent::Terminal { outcome });
+        let _ = self.tx.try_send(TurnEvent::Terminal {
+            outcome: Box::new(outcome),
+        });
     }
 }
 
 struct LlmLaneResult {
     full_text: String,
+    structured_response: Option<NpcResponseEnvelopeV1>,
     provider_id: String,
     degradations: Vec<Degradation>,
     terminal_error: Option<SupervisorError>,
@@ -683,9 +699,14 @@ async fn run_llm_lane(
     emitter: EventEmitter,
     circuits: CircuitRegistry,
     sentence_config: SentenceSegmenterConfig,
-    sentence_tx: mpsc::Sender<(u64, String)>,
+    sentence_tx: mpsc::Sender<SentenceSpan>,
     timing: &TimingCollector,
 ) -> Result<LlmLaneResult, SupervisorError> {
+    // Missing metadata is the compatibility behavior for existing fixture/local
+    // routes. Hosted route snapshots should set the key explicitly; importantly,
+    // a selected structured route can never fall back to legacy parsing.
+    let response_format = StreamingResponseFormatV1::from_route_metadata(&request.metadata)?
+        .unwrap_or(StreamingResponseFormatV1::LegacyPlainText);
     let candidates = allowed_llm_candidates(&providers, &routing);
     if candidates.is_empty() {
         return Err(SupervisorError::NoAuthorizedProvider(
@@ -735,9 +756,13 @@ async fn run_llm_lane(
             }
         };
 
-        let mut full_text = String::new();
-        let mut segmenter = SentenceSegmenter::new(sentence_config.clone());
-        let mut sentence_id = 0u64;
+        let mut provider_output = String::new();
+        let mut response_adapter = StreamingResponseAdapterV1::new(
+            response_format,
+            ResponseValidationPolicy::default(),
+            sentence_config.clone(),
+            generation.generation(),
+        );
         let mut first_delta = true;
 
         loop {
@@ -763,37 +788,70 @@ async fn run_llm_lane(
                         .await?;
                         first_delta = false;
                     }
-                    full_text.push_str(&delta.text);
+                    let update = match response_adapter.push_delta(
+                        generation.generation(),
+                        delta.sequence,
+                        &delta.text,
+                    ) {
+                        Ok(update) => update,
+                        Err(error) => {
+                            permit.failure();
+                            drop(sentence_tx);
+                            return Ok(LlmLaneResult {
+                                full_text: if response_format
+                                    == StreamingResponseFormatV1::LegacyPlainText
+                                {
+                                    provider_output
+                                } else {
+                                    String::new()
+                                },
+                                structured_response: None,
+                                provider_id: provider.descriptor().id.clone(),
+                                degradations: Vec::new(),
+                                terminal_error: Some(SupervisorError::InvalidProviderResponse(
+                                    error,
+                                )),
+                            });
+                        }
+                    };
+                    provider_output.push_str(&delta.text);
                     emitter
                         .emit(TurnEvent::TextDelta {
                             identity: request.identity.clone(),
                             delta: delta.clone(),
                         })
                         .await?;
-                    for sentence in segmenter.push(&delta.text) {
-                        sentence_id += 1;
+                    for sentence in update.ready_sentences {
                         emitter
                             .emit(TurnEvent::SentenceReady {
                                 identity: request.identity.clone(),
-                                sentence_id,
-                                text: sentence.clone(),
+                                sentence_id: sentence.sentence_id,
+                                text_start_bytes: sentence.text_start_bytes,
+                                text_end_bytes: sentence.text_end_bytes,
+                                text: sentence.text.clone(),
                             })
                             .await?;
                         sentence_tx
-                            .send((sentence_id, sentence))
+                            .send(sentence)
                             .await
                             .map_err(|_| SupervisorError::Cancelled)?;
                     }
                 }
                 Some(Err(error)) => {
                     permit.failure();
-                    if full_text.is_empty() {
+                    if provider_output.is_empty() {
                         last_error = error.to_string();
                         break;
                     }
                     drop(sentence_tx);
                     return Ok(LlmLaneResult {
-                        full_text,
+                        full_text: if response_format == StreamingResponseFormatV1::LegacyPlainText
+                        {
+                            provider_output
+                        } else {
+                            String::new()
+                        },
+                        structured_response: None,
                         provider_id: provider.descriptor().id.clone(),
                         degradations: Vec::new(),
                         terminal_error: Some(SupervisorError::StreamFailed(error)),
@@ -816,17 +874,40 @@ async fn run_llm_lane(
                         last_error = "empty model response".into();
                         break;
                     }
-                    for sentence in segmenter.finish() {
-                        sentence_id += 1;
+                    let finalized = match response_adapter.finish(generation.generation()) {
+                        Ok(finalized) => finalized,
+                        Err(error) => {
+                            permit.failure();
+                            drop(sentence_tx);
+                            return Ok(LlmLaneResult {
+                                full_text: if response_format
+                                    == StreamingResponseFormatV1::LegacyPlainText
+                                {
+                                    provider_output
+                                } else {
+                                    String::new()
+                                },
+                                structured_response: None,
+                                provider_id: provider.descriptor().id.clone(),
+                                degradations: Vec::new(),
+                                terminal_error: Some(SupervisorError::InvalidProviderResponse(
+                                    error,
+                                )),
+                            });
+                        }
+                    };
+                    for sentence in finalized.ready_sentences {
                         emitter
                             .emit(TurnEvent::SentenceReady {
                                 identity: request.identity.clone(),
-                                sentence_id,
-                                text: sentence.clone(),
+                                sentence_id: sentence.sentence_id,
+                                text_start_bytes: sentence.text_start_bytes,
+                                text_end_bytes: sentence.text_end_bytes,
+                                text: sentence.text.clone(),
                             })
                             .await?;
                         sentence_tx
-                            .send((sentence_id, sentence))
+                            .send(sentence)
                             .await
                             .map_err(|_| SupervisorError::Cancelled)?;
                     }
@@ -848,7 +929,10 @@ async fn run_llm_lane(
                         Vec::new()
                     };
                     return Ok(LlmLaneResult {
-                        full_text,
+                        full_text: finalized.response.spoken_response.text.clone(),
+                        structured_response: (response_format
+                            == StreamingResponseFormatV1::StructuredV1)
+                            .then_some(finalized.response),
                         provider_id: provider.descriptor().id.clone(),
                         degradations,
                         terminal_error: None,
@@ -999,7 +1083,7 @@ struct SpeechLaneResult {
 
 #[allow(clippy::too_many_arguments)]
 async fn run_speech_lane(
-    mut sentences: mpsc::Receiver<(u64, String)>,
+    mut sentences: mpsc::Receiver<SentenceSpan>,
     identity: TurnIdentity,
     locale: String,
     routing: RoutingPlan,
@@ -1022,10 +1106,16 @@ async fn run_speech_lane(
     let mut degradations = Vec::new();
     let mut announced_voicing = false;
 
-    while let Some((sentence_id, text)) = tokio::select! {
+    while let Some(sentence_span) = tokio::select! {
         _ = generation.cancelled() => return Err(SupervisorError::Cancelled),
         value = sentences.recv() => value,
     } {
+        let SentenceSpan {
+            sentence_id,
+            text_start_bytes,
+            text_end_bytes,
+            text,
+        } = sentence_span;
         if !announced_voicing {
             emitter.lifecycle(TurnLifecycle::Voicing).await?;
             announced_voicing = true;
@@ -1147,6 +1237,8 @@ async fn run_speech_lane(
         let sentence = if let Some(receipt) = delivered_audio {
             DeliveredSentence {
                 sentence_id,
+                text_start_bytes,
+                text_end_bytes,
                 text,
                 delivery: DeliveryMode::Audio,
                 audible_frames: receipt.audible_frames,
@@ -1165,6 +1257,8 @@ async fn run_speech_lane(
             }
             DeliveredSentence {
                 sentence_id,
+                text_start_bytes,
+                text_end_bytes,
                 text,
                 delivery: DeliveryMode::Subtitle,
                 audible_frames: 0,
@@ -1615,6 +1709,96 @@ mod tests {
         let commits = memory.commits.lock().await;
         assert_eq!(commits.len(), 1);
         assert_eq!(commits[0], outcome.delivered);
+    }
+
+    #[tokio::test]
+    async fn structured_route_validates_before_tts_and_propagates_exact_spans() {
+        let structured = r#"{
+            "schema_version":"npc_response.v1",
+            "spoken_response":{"text":"The 界 gate is open. We should leave now."},
+            "emotion":{"kind":"concern","valence":-0.2,"arousal":0.6,"intensity":0.5},
+            "voice_style":{"kind":"tense","speaking_rate":1.1,"pitch_semitones":0.0,"energy":1.1},
+            "animation_cues":[],
+            "memory_proposals":[],
+            "interruption_behavior":"barge_in_allowed",
+            "actions":[]
+        }"#;
+        let llm: Arc<dyn LanguageModelProvider> = Arc::new(FakeLlm {
+            descriptor: descriptor(
+                "llm-structured",
+                ProviderModality::LanguageModel,
+                ProviderLocation::Local,
+            ),
+            behavior: LlmBehavior::Text(structured.into()),
+        });
+        let (supervisor, memory, _) = supervisor(vec![llm], false, true);
+        let mut turn_request = request("turn-structured", "Is the gate open?");
+        turn_request.metadata.insert(
+            StreamingResponseFormatV1::ROUTE_METADATA_KEY.into(),
+            "structured_v1".into(),
+        );
+        let outcome = supervisor
+            .start_turn(turn_request)
+            .await
+            .unwrap()
+            .outcome()
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.lifecycle, TurnLifecycle::Completed);
+        assert_eq!(
+            outcome.full_response,
+            "The 界 gate is open. We should leave now."
+        );
+        assert!(outcome.structured_response.is_some());
+        assert_eq!(outcome.delivered.len(), 2);
+        for sentence in &outcome.delivered {
+            assert_eq!(
+                outcome
+                    .full_response
+                    .get(sentence.text_start_bytes..sentence.text_end_bytes),
+                Some(sentence.text.as_str())
+            );
+            assert!(!sentence.text.contains("schema_version"));
+        }
+        assert_eq!(memory.commits.lock().await.as_slice(), &[outcome.delivered]);
+    }
+
+    #[tokio::test]
+    async fn malformed_structured_route_never_sends_json_to_tts_or_delivery() {
+        let llm: Arc<dyn LanguageModelProvider> = Arc::new(FakeLlm {
+            descriptor: descriptor(
+                "llm-structured-bad",
+                ProviderModality::LanguageModel,
+                ProviderLocation::Local,
+            ),
+            behavior: LlmBehavior::Text(
+                r#"{"schema_version":"npc_response.v1","spoken_response":{"text":"Never speak this."},"unsupported":true}"#
+                    .into(),
+            ),
+        });
+        let (supervisor, _, _) = supervisor(vec![llm], false, true);
+        let mut turn_request = request("turn-structured-bad", "Status?");
+        turn_request.metadata.insert(
+            StreamingResponseFormatV1::ROUTE_METADATA_KEY.into(),
+            "structured_v1".into(),
+        );
+        let outcome = supervisor
+            .start_turn(turn_request)
+            .await
+            .unwrap()
+            .outcome()
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.lifecycle, TurnLifecycle::Failed);
+        assert!(outcome.full_response.is_empty());
+        assert!(outcome.structured_response.is_none());
+        assert!(outcome.delivered.is_empty());
+        assert_eq!(
+            outcome.error.as_ref().map(|error| error.code.as_str()),
+            Some("provider_response_invalid")
+        );
     }
 
     #[tokio::test]

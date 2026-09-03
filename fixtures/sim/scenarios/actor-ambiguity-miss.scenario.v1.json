@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "npc.sim.scenario.v1",
+  "id": "actor-ambiguity-miss",
+  "description": "Ambiguous and missed visual identity evidence never guesses an actor; explicit manual targeting safely resumes the turn.",
+  "seed": 3004,
+  "resourceProfile": "reference-balanced-12gb",
+  "privacy": { "mode": "fully_local", "networkAllowed": false },
+  "providers": { "llm": "mock-local", "tts": "mock-local" },
+  "turn": {
+    "sessionId": "session-actor-ambiguity",
+    "turnId": "turn-actor-ambiguity-001",
+    "inputMode": "typed",
+    "npc": { "id": "manual-target-npc", "name": "Selected NPC", "visibility": "visible" }
+  },
+  "stream": [
+    { "atMs": 0, "source": "input", "kind": "typed_input", "payload": { "text": "Can you hear me?" } },
+    { "atMs": 25, "source": "identity", "kind": "ambiguous", "payload": { "bestCandidateId": "candidate-a", "runnerUpId": "candidate-b", "margin": 0.03, "requiredMargin": 0.1, "action": "do_not_guess" } },
+    { "atMs": 55, "source": "identity", "kind": "missed", "payload": { "reason": "track_lost", "action": "require_manual_target" } },
+    { "atMs": 90, "source": "identity", "kind": "resolved", "payload": { "strategy": "manual_target", "confidence": 1, "actorTrackId": "track-manual", "trackEpoch": 2 } },
+    { "atMs": 115, "source": "memory", "kind": "retrieved", "payload": { "episodicCount": 0, "factCount": 1, "latencyMs": 25 } },
+    { "atMs": 170, "source": "llm", "kind": "sentence", "payload": { "text": "I can hear you now." } },
+    { "atMs": 230, "source": "tts", "kind": "audio_chunk", "payload": { "chunkIndex": 0, "sampleCount": 1440, "sampleRateHz": 24000 } },
+    { "atMs": 280, "source": "llm", "kind": "complete", "payload": { "finishReason": "stop", "text": "I can hear you now." } },
+    { "atMs": 320, "source": "tts", "kind": "complete", "payload": { "chunks": 1, "deliveredText": "I can hear you now." } },
+    { "atMs": 330, "source": "delivery", "kind": "commit", "payload": { "sentenceId": "sentence-actor-1", "deliveredText": "I can hear you now." } }
+  ],
+  "faults": [],
+  "expected": {
+    "status": "completed",
+    "traceSha256": "20b69e4ddcaf7407de4b5e171800cceef262b0af51eddbb8589748c1e2b282d9",
+    "firstAudioAtMs": 230,
+    "networkAttempts": 0,
+    "degradationReasons": [],
+    "metrics": { "identityAmbiguityCount": 1, "identityMissCount": 1, "deliveryCommitCount": 1 },
+    "eventCounts": { "identity.ambiguous": 1, "identity.missed": 1, "identity.resolved": 1, "delivery.committed": 1 }
+  }
+}

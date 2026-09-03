@@ -30,10 +30,13 @@
   ],
   "expected": {
     "status": "degraded",
-    "traceSha256": "adb7bdac2f82bf19b2d8902445398b2428305727216723def82549aff997a623",
+    "traceSha256": "1a99a69f640dd11725ae8d44ac8279f9f81c9129abeb9394fc9060c242b54dcc",
     "firstAudioAtMs": 450,
     "speechEndToFirstAudioMs": 285,
     "networkAttempts": 0,
-    "degradationReasons": ["continuous_vision_disabled", "low_vram", "screen_space_lipsync_disabled"]
+    "degradationReasons": ["continuous_vision_disabled", "low_vram", "screen_space_lipsync_disabled"],
+    "metrics": { "deliveryCommitCount": 0, "staleLipSyncDropCount": 0 },
+    "eventCounts": { "runtime.degraded": 3, "animation.patch_applied": 0 },
+    "spine": { "voicing": "completed", "animating": "skipped" }
   }
 }

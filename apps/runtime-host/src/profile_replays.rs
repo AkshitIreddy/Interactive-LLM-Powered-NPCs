@@ -15,7 +15,9 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::{
-    simulation::SimulationSafetyContext, HostState, SimulationRequest, REQUIRED_PROFILE_COUNT,
+    simulation::{SimulationSafetyContext, SimulationSafetyEvidenceState},
+    HostState, SimulationRequest, REQUIRED_AUTHORED_GAME_PROFILE_COUNT, REQUIRED_PROFILE_COUNT,
+    REQUIRED_SYNTHETIC_REVIEW_PROFILE_COUNT, SYNTHETIC_REVIEW_PROFILE_ID,
 };
 
 const REPLAY_SCHEMA_VERSION: &str = "1.0.0";
@@ -38,6 +40,8 @@ pub struct ProfileReplayReport {
     pub schema_version: &'static str,
     pub valid: bool,
     pub authored_profile_count: usize,
+    pub synthetic_review_profile_count: usize,
+    pub profile_count: usize,
     pub replay_count: usize,
     pub integrity_entries_verified: usize,
     pub detection_assertions_passed: usize,
@@ -56,6 +60,7 @@ struct IntegrityLedgerV1 {
     schema_version: String,
     hash_algorithm: String,
     authored_profile_count: usize,
+    synthetic_review_profile_count: usize,
     entries: Vec<IntegrityEntryV1>,
 }
 
@@ -151,7 +156,8 @@ impl ProfileReplayCorpus {
         let ledger: IntegrityLedgerV1 = read_json(&ledger_path, MAX_LEDGER_BYTES)?;
         if ledger.schema_version != REPLAY_SCHEMA_VERSION
             || ledger.hash_algorithm != "sha256"
-            || ledger.authored_profile_count != REQUIRED_PROFILE_COUNT
+            || ledger.authored_profile_count != REQUIRED_AUTHORED_GAME_PROFILE_COUNT
+            || ledger.synthetic_review_profile_count != REQUIRED_SYNTHETIC_REVIEW_PROFILE_COUNT
             || ledger.entries.len() != REQUIRED_PROFILE_COUNT
         {
             return Err(ProfileReplayError::InvalidLedger);
@@ -199,10 +205,23 @@ impl ProfileReplayCorpus {
         &self,
         state: &HostState,
     ) -> Result<ProfileReplayReport, ProfileReplayError> {
+        let synthetic_review_profile_count = state
+            .profiles
+            .profiles()
+            .iter()
+            .filter(|loaded| loaded.profile.id == SYNTHETIC_REVIEW_PROFILE_ID)
+            .count();
+        let authored_profile_count = state
+            .profiles
+            .profiles()
+            .len()
+            .saturating_sub(synthetic_review_profile_count);
         let mut report = ProfileReplayReport {
             schema_version: REPLAY_SCHEMA_VERSION,
             valid: true,
-            authored_profile_count: state.profiles.profiles().len(),
+            authored_profile_count,
+            synthetic_review_profile_count,
+            profile_count: state.profiles.profiles().len(),
             replay_count: self.replays.len(),
             integrity_entries_verified: self.replays.len(),
             detection_assertions_passed: 0,
@@ -227,7 +246,7 @@ impl ProfileReplayCorpus {
             report.detection_assertions_passed += 1;
 
             let first = state
-                .simulate_turn(replay.request(1, SimulationSafetyContext::default()))
+                .simulate_turn(replay.request(1, SimulationSafetyContext::verified_safe()))
                 .await
                 .map_err(|_| ProfileReplayError::Assertion(replay.profile_id.clone()))?;
             if first.outcome.lifecycle != TurnLifecycle::Completed {
@@ -273,7 +292,7 @@ impl ProfileReplayCorpus {
             }
             if replay.assertions.routes.memory {
                 let second = state
-                    .simulate_turn(replay.request(2, SimulationSafetyContext::default()))
+                    .simulate_turn(replay.request(2, SimulationSafetyContext::verified_safe()))
                     .await
                     .map_err(|_| ProfileReplayError::Assertion(replay.profile_id.clone()))?;
                 let recalled = second.events.iter().any(|event| {
@@ -288,10 +307,16 @@ impl ProfileReplayCorpus {
             if replay.assertions.refusal.risk_gated_profile {
                 for context in [
                     SimulationSafetyContext {
+                        evidence_state: SimulationSafetyEvidenceState::Blocked,
+                        profile_policy: Default::default(),
+                        visuals_allowed: false,
                         protected_online_detected: true,
                         anti_cheat_detected: false,
                     },
                     SimulationSafetyContext {
+                        evidence_state: SimulationSafetyEvidenceState::Blocked,
+                        profile_policy: Default::default(),
+                        visuals_allowed: false,
                         protected_online_detected: false,
                         anti_cheat_detected: true,
                     },
@@ -322,12 +347,21 @@ impl ProfileReplayV1 {
             turn_id: format!("{}-{ordinal}", self.simulation.turn_id),
             game_id: self.profile_id.clone(),
             character_id: Some(self.assertions.selection.character_id.clone()),
+            native_identity_decision: None,
+            enabled_spoiler_tiers: Vec::new(),
             generic_selection: None,
             safety_context,
+            application_namespace: None,
             transcript: self.simulation.transcript.clone(),
             locale: self.simulation.locale.clone(),
             execution_mode: None,
             dev_live_tts: None,
+            route_snapshot: None,
+            input: Default::default(),
+            delivery: Default::default(),
+            audio_playback_leases: Vec::new(),
+            private_evaluation_acknowledgements: Vec::new(),
+            subtitle_presentation_context: None,
         }
     }
 }

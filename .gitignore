@@ -74,4 +74,7 @@ video_temp/*
 artifacts/
 packages/
 sbom/
+/out/
 tools/game-load/out/
+apps/control/src-tauri/generated-resources/
+apps/control/src-tauri/generated-installer-inputs/

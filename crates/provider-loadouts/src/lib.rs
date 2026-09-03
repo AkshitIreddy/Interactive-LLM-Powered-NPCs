@@ -15,7 +15,16 @@ const REQUIRED_ROLES: [ProviderRole; 4] = [
     ProviderRole::Llm,
     ProviderRole::Stt,
     ProviderRole::Tts,
-    ProviderRole::Retrieval,
+    ProviderRole::Embeddings,
+];
+
+pub const ALL_PROVIDER_ROLES: [ProviderRole; 6] = [
+    ProviderRole::Llm,
+    ProviderRole::Stt,
+    ProviderRole::Tts,
+    ProviderRole::Embeddings,
+    ProviderRole::Vision,
+    ProviderRole::Lipsync,
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -456,7 +465,9 @@ pub enum ProviderRole {
     Llm,
     Stt,
     Tts,
-    Retrieval,
+    #[serde(rename = "embeddings", alias = "retrieval")]
+    Embeddings,
+    Vision,
     Lipsync,
 }
 
@@ -517,6 +528,8 @@ impl RoleRouteV1 {
 pub struct ProviderModelRouteV1 {
     pub provider_id: String,
     pub model_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice_id: Option<String>,
     pub credential: Option<CredentialReferenceV1>,
     pub disclosure: CatalogDisclosureV1,
     /// Required for local lip-sync because it is a separately downloaded,
@@ -533,9 +546,12 @@ impl ProviderModelRouteV1 {
     fn validate_shape(&self) -> Result<(), LoadoutError> {
         validate_id(&self.provider_id, "provider id")?;
         validate_id(&self.model_id, "model id")?;
+        if let Some(voice_id) = &self.voice_id {
+            validate_voice_id(voice_id)?;
+        }
         if let Some(credential) = &self.credential {
             credential.validate()?;
-            if credential.provider_id != self.provider_id {
+            if credential.provider_id != credential_target_provider_id(&self.provider_id) {
                 return Err(LoadoutError::CredentialProviderMismatch);
             }
         }
@@ -564,6 +580,19 @@ impl ProviderModelRouteV1 {
             return Err(LoadoutError::LipsyncRequiresExplicitSelection);
         }
         Ok(())
+    }
+}
+
+/// Returns the canonical credential owner for a runtime adapter route.
+///
+/// Most adapters own a credential directly. The NVIDIA speech adapters are
+/// deliberately separate runtime provider IDs while sharing the one NVIDIA NIM
+/// credential target. Keeping this allowlist exact prevents a persisted route
+/// from declaring an arbitrary cross-provider credential alias.
+pub fn credential_target_provider_id(route_provider_id: &str) -> &str {
+    match route_provider_id {
+        "nvidia-nim-asr" | "nvidia-nim-magpie" | "nvidia-nim-vision" => "nvidia-nim",
+        provider_id => provider_id,
     }
 }
 
@@ -753,12 +782,31 @@ impl ResolvedProviderLoadoutV1 {
         TurnRouteSnapshotV1 {
             schema_version: SCHEMA_VERSION,
             source_loadout_id: self.leaf_loadout_id.clone(),
+            inheritance_chain: self.inheritance_chain.clone(),
             generation,
             cancelled: false,
-            selected: self
-                .roles
-                .iter()
-                .map(|(role, route)| (*role, route.primary.clone()))
+            roles: ALL_PROVIDER_ROLES
+                .into_iter()
+                .map(|role| {
+                    let snapshot = self.roles.get(&role).map_or_else(
+                        || TurnRoleRouteSnapshotV1 {
+                            state: TurnRouteStateV1::Disabled,
+                            primary: None,
+                            fallbacks: Vec::new(),
+                            degradation: Some(TurnRouteDegradationV1 {
+                                code: TurnRouteDegradationCodeV1::NotConfigured,
+                                retryable: false,
+                            }),
+                        },
+                        |route| TurnRoleRouteSnapshotV1 {
+                            state: TurnRouteStateV1::Ready,
+                            primary: Some(route.primary.clone()),
+                            fallbacks: route.fallbacks.clone(),
+                            degradation: None,
+                        },
+                    );
+                    (role, snapshot)
+                })
                 .collect(),
         }
     }
@@ -787,14 +835,72 @@ impl ResolvedProviderLoadoutV1 {
 pub struct TurnRouteSnapshotV1 {
     pub schema_version: u32,
     pub source_loadout_id: LoadoutId,
+    pub inheritance_chain: Vec<LoadoutId>,
     pub generation: u64,
     pub cancelled: bool,
-    selected: BTreeMap<ProviderRole, ProviderModelRouteV1>,
+    pub roles: BTreeMap<ProviderRole, TurnRoleRouteSnapshotV1>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TurnRoleRouteSnapshotV1 {
+    pub state: TurnRouteStateV1,
+    pub primary: Option<ProviderModelRouteV1>,
+    pub fallbacks: Vec<ExplicitFallbackV1>,
+    pub degradation: Option<TurnRouteDegradationV1>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnRouteStateV1 {
+    Ready,
+    Disabled,
+    Degraded,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TurnRouteDegradationV1 {
+    pub code: TurnRouteDegradationCodeV1,
+    pub retryable: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnRouteDegradationCodeV1 {
+    NotConfigured,
+    CredentialUnavailable,
+    ProviderUnavailable,
+    ModelUnavailable,
+    PolicyBlocked,
+    ResourceUnavailable,
 }
 
 impl TurnRouteSnapshotV1 {
     pub fn route(&self, role: ProviderRole) -> Option<&ProviderModelRouteV1> {
-        self.selected.get(&role)
+        self.roles
+            .get(&role)
+            .and_then(|snapshot| snapshot.primary.as_ref())
+    }
+
+    pub fn role(&self, role: ProviderRole) -> Option<&TurnRoleRouteSnapshotV1> {
+        self.roles.get(&role)
+    }
+
+    pub fn manual_fallback_candidate(
+        &self,
+        role: ProviderRole,
+        index: usize,
+    ) -> Result<&ProviderModelRouteV1, LoadoutError> {
+        let fallback = self
+            .roles
+            .get(&role)
+            .and_then(|snapshot| snapshot.fallbacks.get(index))
+            .ok_or(LoadoutError::FallbackNotFound(role, index))?;
+        if fallback.activation != FallbackActivationV1::ManualOnly || !fallback.user_authorized {
+            return Err(LoadoutError::FallbackNotExplicit(role));
+        }
+        Ok(&fallback.route)
     }
 
     pub fn cancel(&mut self) {
@@ -846,7 +952,7 @@ pub enum LoadoutError {
     InvalidSummary(&'static str),
     #[error("invalid credential reference")]
     InvalidCredentialReference,
-    #[error("credential reference provider does not match route provider")]
+    #[error("credential reference provider does not match the route credential target")]
     CredentialProviderMismatch,
     #[error("catalog revision must be nonzero")]
     InvalidCatalogRevision,
@@ -962,6 +1068,22 @@ fn validate_opaque_reference(value: &str) -> Result<(), LoadoutError> {
     }
 }
 
+fn validate_voice_id(value: &str) -> Result<(), LoadoutError> {
+    let valid = !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'));
+    if valid {
+        Ok(())
+    } else {
+        Err(LoadoutError::InvalidId {
+            field: "voice id",
+            value: value.to_owned(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -989,6 +1111,7 @@ mod tests {
         ProviderModelRouteV1 {
             provider_id: provider.to_owned(),
             model_id: model.to_owned(),
+            voice_id: None,
             credential: (!local).then(|| CredentialReferenceV1 {
                 provider_id: provider.to_owned(),
                 reference_id: "personal".to_owned(),
@@ -1023,7 +1146,7 @@ mod tests {
                     role_route("elevenlabs", "flash-v2.5", false),
                 ),
                 (
-                    ProviderRole::Retrieval,
+                    ProviderRole::Embeddings,
                     role_route("local-onnx", "bge-small-en", true),
                 ),
             ]),
@@ -1063,10 +1186,16 @@ mod tests {
                 game_id: "cyberpunk-2077".to_owned(),
             },
             parent: Some(id("global-balanced")),
-            roles: BTreeMap::from([(
-                ProviderRole::Llm,
-                role_route("groq", "llama-3.3-70b", false),
-            )]),
+            roles: BTreeMap::from([
+                (
+                    ProviderRole::Llm,
+                    role_route("groq", "llama-3.3-70b", false),
+                ),
+                (
+                    ProviderRole::Vision,
+                    role_route("local-vision", "retinaface-onnx", true),
+                ),
+            ]),
         };
         document.insert(game).expect("game insert");
         let character = ProviderLoadoutV1 {
@@ -1077,7 +1206,23 @@ mod tests {
                 character_id: "judy-alvarez".to_owned(),
             },
             parent: Some(id("cyberpunk-fast")),
-            roles: BTreeMap::from([(ProviderRole::Tts, role_route("cartesia", "sonic-3", false))]),
+            roles: BTreeMap::from([
+                (ProviderRole::Tts, role_route("cartesia", "sonic-3", false)),
+                (
+                    ProviderRole::Embeddings,
+                    role_route("local-onnx", "character-bge", true),
+                ),
+                (
+                    ProviderRole::Lipsync,
+                    RoleOverrideV1::Route(Box::new(RoleRouteV1 {
+                        primary: ProviderModelRouteV1 {
+                            explicit_user_selection: true,
+                            ..route("local-lipsync", "musetalk-1.5", true)
+                        },
+                        fallbacks: Vec::new(),
+                    })),
+                ),
+            ]),
         };
         document.insert(character).expect("character insert");
         document
@@ -1112,6 +1257,18 @@ mod tests {
         assert_eq!(
             resolved.roles[&ProviderRole::Stt].primary.provider_id,
             "deepgram"
+        );
+        assert_eq!(
+            resolved.roles[&ProviderRole::Embeddings].primary.model_id,
+            "character-bge"
+        );
+        assert_eq!(
+            resolved.roles[&ProviderRole::Vision].primary.provider_id,
+            "local-vision"
+        );
+        assert_eq!(
+            resolved.roles[&ProviderRole::Lipsync].primary.provider_id,
+            "local-lipsync"
         );
     }
 
@@ -1154,6 +1311,23 @@ mod tests {
             ),
             Err(LoadoutError::InvalidCredentialReference)
         ));
+    }
+
+    #[test]
+    fn legacy_retrieval_role_migrates_to_canonical_embeddings_serialization() {
+        let canonical = serde_json::to_string(&document()).expect("serialize canonical document");
+        assert!(canonical.contains("\"embeddings\""));
+        assert!(!canonical.contains("\"retrieval\""));
+
+        let legacy = canonical.replacen("\"embeddings\"", "\"retrieval\"", 1);
+        let migrated: ProviderLoadoutDocumentV1 =
+            serde_json::from_str(&legacy).expect("deserialize legacy retrieval role");
+        assert!(migrated.loadouts[&id("global-balanced")]
+            .roles
+            .contains_key(&ProviderRole::Embeddings));
+        let reserialized = serde_json::to_string(&migrated).expect("reserialize migration");
+        assert!(reserialized.contains("\"embeddings\""));
+        assert!(!reserialized.contains("\"retrieval\""));
     }
 
     #[test]
@@ -1202,6 +1376,76 @@ mod tests {
         assert_eq!(
             snapshot.automatic_fallback(ProviderRole::Llm),
             Err(LoadoutError::AutomaticFallbackForbidden(ProviderRole::Llm))
+        );
+        assert_eq!(
+            snapshot
+                .manual_fallback_candidate(ProviderRole::Llm, 0)
+                .expect("pinned manual fallback")
+                .provider_id,
+            "anthropic"
+        );
+    }
+
+    #[test]
+    fn turn_snapshot_covers_all_roles_and_pins_voice_without_secret_values() {
+        let mut global = global_loadout();
+        let RoleOverrideV1::Route(tts) = global.roles.get_mut(&ProviderRole::Tts).expect("tts")
+        else {
+            panic!("expected route")
+        };
+        tts.primary.voice_id = Some("EXAVITQu4vr4xnSDxMaL".into());
+        let resolved = ProviderLoadoutDocumentV1::new(global)
+            .expect("voice-aware loadout")
+            .resolve(&LoadoutContextV1::global(), &ValidationContextV1::online())
+            .expect("resolve voice-aware loadout");
+        let snapshot = resolved.pin_turn_routes(23);
+
+        assert_eq!(snapshot.roles.len(), ALL_PROVIDER_ROLES.len());
+        assert_eq!(
+            snapshot
+                .route(ProviderRole::Tts)
+                .and_then(|route| route.voice_id.as_deref()),
+            Some("EXAVITQu4vr4xnSDxMaL")
+        );
+        for optional in [ProviderRole::Vision, ProviderRole::Lipsync] {
+            let role = snapshot.role(optional).expect("optional role state");
+            assert_eq!(role.state, TurnRouteStateV1::Disabled);
+            assert_eq!(
+                role.degradation.map(|state| state.code),
+                Some(TurnRouteDegradationCodeV1::NotConfigured)
+            );
+        }
+        let wire = serde_json::to_string(&snapshot).expect("serialize turn snapshot");
+        assert!(!wire.contains("api_key"));
+        assert!(!wire.contains("secret"));
+        assert!(wire.contains("EXAVITQu4vr4xnSDxMaL"));
+    }
+
+    #[test]
+    fn vision_can_be_configured_independently_without_enabling_lipsync() {
+        let mut global = global_loadout();
+        global.roles.insert(
+            ProviderRole::Vision,
+            role_route("local-vision", "retinaface-onnx", true),
+        );
+        let resolved = ProviderLoadoutDocumentV1::new(global)
+            .expect("vision-aware loadout")
+            .resolve(&LoadoutContextV1::global(), &ValidationContextV1::online())
+            .expect("resolve vision-aware loadout");
+        let snapshot = resolved.pin_turn_routes(31);
+        assert_eq!(
+            snapshot
+                .route(ProviderRole::Vision)
+                .expect("vision route")
+                .provider_id,
+            "local-vision"
+        );
+        assert_eq!(
+            snapshot
+                .role(ProviderRole::Lipsync)
+                .expect("lipsync state")
+                .state,
+            TurnRouteStateV1::Disabled
         );
     }
 
@@ -1342,5 +1586,28 @@ mod tests {
             document.deactivate_scope(&LoadoutScopeV1::Global),
             Err(LoadoutError::GlobalCannotBeDeactivated)
         );
+    }
+
+    #[test]
+    fn credential_targets_allow_only_declared_adapter_aliases() {
+        let mut magpie = route("nvidia-nim-magpie", "magpie-tts-multilingual", false);
+        magpie.credential.as_mut().expect("credential").provider_id = "nvidia-nim".into();
+        magpie.validate_shape().expect("declared NVIDIA alias");
+
+        let mut arbitrary = route("elevenlabs", "eleven_flash_v2_5", false);
+        arbitrary
+            .credential
+            .as_mut()
+            .expect("credential")
+            .provider_id = "nvidia-nim".into();
+        assert_eq!(
+            arbitrary.validate_shape(),
+            Err(LoadoutError::CredentialProviderMismatch)
+        );
+        assert_eq!(
+            credential_target_provider_id("nvidia-nim-magpie"),
+            "nvidia-nim"
+        );
+        assert_eq!(credential_target_provider_id("elevenlabs"), "elevenlabs");
     }
 }

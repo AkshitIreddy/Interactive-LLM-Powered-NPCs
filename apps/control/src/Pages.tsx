@@ -23,11 +23,7 @@ import {
   Toggle,
 } from "./components";
 import { ProviderSettings } from "./ProviderSettings";
-import { SyntheticReplayCaptureControl } from "./SyntheticReplayCaptureControl";
-import {
-  syntheticReplayCaptureAvailability,
-  type NativeBootstrapHealth,
-} from "./tauriBridge";
+import type { NativeBootstrapHealth } from "./tauriBridge";
 import {
   simulationEvidenceLabel,
   isRetainedDeliveredNativeTurn,
@@ -162,8 +158,6 @@ function HomePage({
   const desktopAuthenticated = Boolean(
     nativeSnapshot?.runtime.connected && nativeSnapshot.mediaBroker.connected,
   );
-  const debugCaptureEnabled =
-    nativeSnapshot?.capabilities?.debugSyntheticReplayCapture === true;
   return (
     <div className="page page--home">
       <section
@@ -306,11 +300,6 @@ function HomePage({
           </div>
         </div>
       </section>
-      {debugCaptureEnabled && (
-        <SyntheticReplayCaptureControl
-          availability={syntheticReplayCaptureAvailability(true)}
-        />
-      )}
       <section className="home-strip">
         <div>
           <span className="home-strip__label">ACTIVE PROFILE</span>

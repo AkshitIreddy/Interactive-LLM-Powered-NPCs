@@ -11,13 +11,12 @@ $release = Get-Content -LiteralPath $releaseConfigPath -Raw | ConvertFrom-Json
 $tauri = Get-Content -LiteralPath $tauriConfigPath -Raw | ConvertFrom-Json
 
 $hookSetting = [string]$release.bundle.windows.nsis.installerHooks
-if ($hookSetting -ne '../../../packaging/windows/nsis/installer-hooks.nsh') {
-    throw 'Release config must reference the reviewed hook relative to the Tauri src-tauri config directory.'
+if ($hookSetting -ne 'generated-installer-inputs/installer-hooks.generated.nsh') {
+    throw 'Release config must require the generated pinned-offline hook beneath the Tauri source directory.'
 }
-$resolvedHook = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $tauriConfigPath) $hookSetting))
 $expectedHook = [System.IO.Path]::GetFullPath((Join-Path $repoRoot 'packaging/windows/nsis/installer-hooks.nsh'))
-if (-not $resolvedHook.Equals($expectedHook, [System.StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $resolvedHook -PathType Leaf)) {
-    throw 'Configured NSIS hook does not resolve to the reviewed packaging hook.'
+if (-not (Test-Path -LiteralPath $expectedHook -PathType Leaf)) {
+    throw 'Committed NSIS lifecycle hook source is missing.'
 }
 if ($release.bundle.windows.nsis.installMode -ne 'currentUser') {
     throw 'Registry symmetry policy is valid only for the current-user installer mode.'
@@ -26,7 +25,7 @@ if ($tauri.productName -ne 'Interactive NPCs Response Console' -or $tauri.identi
     throw 'Product identity changed; review the exact NSIS registry paths before packaging.'
 }
 
-$hook = Get-Content -LiteralPath $resolvedHook -Raw
+$hook = Get-Content -LiteralPath $expectedHook -Raw
 $productKey = 'Software\github\Interactive NPCs Response Console'
 foreach ($required in @(
     "ReadRegStr `$R8 HKCU `"$productKey`" `"`"",

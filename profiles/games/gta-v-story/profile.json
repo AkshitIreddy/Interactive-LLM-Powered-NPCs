@@ -213,6 +213,8 @@
     }
   },
   "content": {
+    "character_data_readiness": "curated",
+    "character_data_readiness_notes": "Shipped named-character records have stable IDs and authored biography, personality, dialogue-style, prompt, voice-intent, explicit-selection identity, and provenance metadata; live visual identity is not certified.",
     "world_lore": "Los Santos and Blaine County form a satirical contemporary setting where wealth, celebrity, policing, property, and criminal enterprise overlap. The story follows three playable protagonists whose lives converge through robberies, debts, family pressures, federal manipulation, and unstable alliances. The city offers polished financial districts, hillside wealth, sprawling neighborhoods, industrial corridors, beaches, desert towns, and isolated mountain roads, each with different rhythms and risks. Dialogue should distinguish what a character personally witnessed from news, rumor, bravado, or suspicion. The profile is restricted to the authored single-player story; no event, economy, organization, property, player avatar, or update from GTA Online is part of this world state. Player choices, mission success, injuries, relationships, and endings must come from explicit session state rather than assumptions.",
     "spoiler_policy": "Start with the protagonists' early public circumstances. Gate alliance changes, family developments, heist plans, federal secrets, betrayals, and endings behind explicit campaign milestones.",
     "spoiler_tiers": [
@@ -699,7 +701,26 @@
       ]
     }
   },
+  "recommendations": {
+    "integration_mode": "external_only",
+    "provider_strategy": "api_first",
+    "local_activation_policy": "measured_whole_loadout_fit_required",
+    "game_resource_reserve_required": true,
+    "screen_space_lip_sync": "experimental_opt_in_after_exact_target_and_advancing_frame_qualification"
+  },
   "diagnostics": [
+    {
+      "id": "recommended-feature-loadout",
+      "severity": "info",
+      "check": "Keep a game-first resource reserve, prefer explicitly configured API routes for LLM, STT, TTS, and embeddings, and admit optional local models only after measured whole-loadout RAM and VRAM fit checks.",
+      "remediation": "Move optional language or speech roles to an explicitly selected hosted provider, unload nonessential local models, or increase the configured game reserve; keep experimental screen-space lip sync disabled until exact target binding, advancing-frame, and untouched-frame restore checks pass."
+    },
+    {
+      "id": "external-only-safety",
+      "severity": "error",
+      "check": "Confirm the selected target remains an eligible single-player top-level game window and that the session uses external capture, audio, and subtitles only, with no injection, hooks, automated input, or anti-cheat bypass.",
+      "remediation": "Stop on online, protection, process, PID, HWND, executable, or session-mode ambiguity; return to a clearly eligible single-player state and bind the exact game window again, otherwise use no game integration."
+    },
     {
       "id": "story-mode-proof",
       "severity": "error",

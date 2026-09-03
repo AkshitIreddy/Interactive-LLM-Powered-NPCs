@@ -1,0 +1,268 @@
+{
+  "$schema": "./model-pack-manifest.schema.json",
+  "schema": "npc.model-pack/v2",
+  "pack_id": "local.tts.kokoro-v1.0-int8.sherpa-onnx-cpu.windows-x64",
+  "revision": "2026.08.30-r1",
+  "display_name": "Kokoro v1.0 INT8 English stock voices (Windows CPU)",
+  "description": "Optional explicit-download Kokoro-82M v1.0 INT8 speech-synthesis pack using the pinned sherpa-onnx 1.13.6 Windows x64 C runtime. It exposes 28 fixed American and British English stock voices and streams 24 kHz mono PCM. API TTS remains the default. Local activation is blocked until catalog trust, license acceptance, a real Windows self-test attestation, signed current-device measurements, and whole-loadout admission all pass.",
+  "source": {
+    "project_url": "https://huggingface.co/hexgrad/Kokoro-82M",
+    "immutable_revision": "f3ff3571791e39611d31c381e3a41a3af07b4987",
+    "model_card_url": "https://huggingface.co/hexgrad/Kokoro-82M/blob/f3ff3571791e39611d31c381e3a41a3af07b4987/README.md"
+  },
+  "capability": {
+    "kind": "speech_synthesis",
+    "scope": "generic"
+  },
+  "artifacts": [
+    {
+      "id": "sherpa-runtime",
+      "role": "runtime",
+      "kind": "archive",
+      "archive_format": "tar_bz2",
+      "source_urls": [
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.6/sherpa-onnx-v1.13.6-win-x64-shared-MD-Release-lib.tar.bz2"
+      ],
+      "size_bytes": 7215482,
+      "sha256": "dca033829d3a7e74c127fc0d349a12257fb890fe5038a381ab1706e4b35cf0fa",
+      "destination": "runtime",
+      "strip_prefix": "sherpa-onnx-v1.13.6-win-x64-shared-MD-Release-lib",
+      "required_paths": [
+        "lib/sherpa-onnx-c-api.dll",
+        "lib/onnxruntime.dll"
+      ]
+    },
+    {
+      "id": "kokoro-model",
+      "role": "other",
+      "kind": "archive",
+      "archive_format": "tar_bz2",
+      "source_urls": [
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_0.tar.bz2"
+      ],
+      "size_bytes": 131839838,
+      "sha256": "75654a84864be26f345f020f4070c2c019e96dd1b7f9bf6e2ffd59efac6aa5a3",
+      "destination": "model",
+      "strip_prefix": "kokoro-int8-multi-lang-v1_0",
+      "required_paths": [
+        "model.int8.onnx",
+        "voices.bin",
+        "tokens.txt",
+        "lexicon-us-en.txt",
+        "espeak-ng-data/phondata",
+        "LICENSE"
+      ]
+    }
+  ],
+  "runtime": {
+    "runtime": "sherpa-onnx",
+    "immutable_revision": "1.13.6+1cb484af5e69d3c7803c1eb0b3b5ab8041e0e911+onnxruntime.1.27.1",
+    "abi": "npc-local-tts-sherpa-c-api-v1",
+    "entrypoint": "workers/local-tts/worker.py",
+    "supported_platforms": [
+      "windows10",
+      "windows11"
+    ],
+    "supported_architectures": [
+      "x86_64"
+    ],
+    "backends": [
+      "sherpa-onnx-1.13.6-cpu"
+    ],
+    "network_access_after_install": false
+  },
+  "hardware": {
+    "minimum_ram_bytes": 0,
+    "recommended_ram_bytes": 0,
+    "minimum_vram_bytes": 0,
+    "recommended_vram_bytes": 0,
+    "minimum_cpu_threads": 1,
+    "accelerators": [
+      "cpu"
+    ],
+    "required_cpu_features": []
+  },
+  "resources": {
+    "storage_bytes": 139055320,
+    "peak_install_bytes": 1139055320,
+    "planning_resident_ram_bytes": null,
+    "planning_resident_vram_bytes": null,
+    "planning_load_millis": null,
+    "planning_hardware": null,
+    "quality_tier": "experimental",
+    "languages": [
+      "en-US",
+      "en-GB"
+    ],
+    "measurement": {
+      "required_schema": "npc.measured-resource-envelope/v1",
+      "minimum_samples": 20,
+      "current_device_fingerprint_required": true,
+      "signed_evidence_required": true,
+      "p99_reload_required": true,
+      "manifest_values_not_for_admission": true
+    }
+  },
+  "license": {
+    "spdx_expression": "Apache-2.0 AND MIT AND GPL-3.0-or-later AND CC-BY-3.0 AND CC-BY-4.0",
+    "license_name": "Composite Kokoro, sherpa-onnx, ONNX Runtime, piper-phonemize, eSpeak-NG, and training-data attribution terms",
+    "license_url": "https://huggingface.co/hexgrad/Kokoro-82M/blob/f3ff3571791e39611d31c381e3a41a3af07b4987/README.md",
+    "attribution": "Kokoro-82M v1.0 and its fixed stock voice embeddings are attributed to hexgrad and the upstream contributors. The runtime is sherpa-onnx by k2-fsa and contributors, with Microsoft ONNX Runtime, piper-phonemize, and eSpeak-NG. The Kokoro model card names CC-BY-licensed Koniwa tnc and SIWIS training-data portions whose attribution must be retained.",
+    "redistributable": false,
+    "commercial_use": "allowed",
+    "derivative_use": "allowed",
+    "acceptance_required": true,
+    "notices": [
+      "The pack is never bundled or silently downloaded; installation requires explicit user selection and acceptance of every component notice.",
+      "The two archive assets are fetched directly from their upstream GitHub release URLs. Project mirroring is prohibited until legal review approves the complete notice and corresponding-source delivery.",
+      "sherpa-onnx 1.x TTS links eSpeak-NG through piper phonemization. eSpeak-NG is GPL-3.0-or-later and carries notice and corresponding-source obligations.",
+      "Kokoro fixed voice embeddings are stock model data. Reference audio, arbitrary embeddings, performer cloning, and voice cloning are prohibited by this pack.",
+      "Only the 28 audited en-US and en-GB speaker entries are selectable even though the upstream archive contains additional embeddings.",
+      "Null planning RAM, VRAM, and load fields are unknown and non-admissible. CPU-only placement must still prove zero target-process VRAM in a signed current-device measurement."
+    ],
+    "components": [
+      {
+        "id": "kokoro-model-apache-2.0",
+        "component": "Kokoro-82M v1.0 model and fixed stock voice embeddings",
+        "spdx_expression": "Apache-2.0",
+        "license_url": "https://huggingface.co/hexgrad/Kokoro-82M/blob/f3ff3571791e39611d31c381e3a41a3af07b4987/README.md",
+        "immutable_source_revision": "f3ff3571791e39611d31c381e3a41a3af07b4987",
+        "redistributable": true,
+        "notice_required": true
+      },
+      {
+        "id": "kokoro-training-attribution-cc",
+        "component": "Koniwa tnc and SIWIS training-data portions named by the Kokoro model card",
+        "spdx_expression": "CC-BY-3.0 AND CC-BY-4.0",
+        "license_url": "https://huggingface.co/hexgrad/Kokoro-82M/blob/f3ff3571791e39611d31c381e3a41a3af07b4987/README.md#creative-commons-attribution",
+        "immutable_source_revision": "f3ff3571791e39611d31c381e3a41a3af07b4987",
+        "redistributable": true,
+        "notice_required": true
+      },
+      {
+        "id": "sherpa-onnx-apache-2.0",
+        "component": "sherpa-onnx 1.13.6 C API runtime",
+        "spdx_expression": "Apache-2.0",
+        "license_url": "https://github.com/k2-fsa/sherpa-onnx/blob/1cb484af5e69d3c7803c1eb0b3b5ab8041e0e911/LICENSE",
+        "immutable_source_revision": "1cb484af5e69d3c7803c1eb0b3b5ab8041e0e911",
+        "redistributable": true,
+        "notice_required": true
+      },
+      {
+        "id": "onnxruntime-mit",
+        "component": "Microsoft ONNX Runtime 1.27.1",
+        "spdx_expression": "MIT",
+        "license_url": "https://github.com/microsoft/onnxruntime/blob/v1.27.1/LICENSE",
+        "immutable_source_revision": "v1.27.1",
+        "redistributable": true,
+        "notice_required": true
+      },
+      {
+        "id": "espeak-ng-gpl-3.0-or-later",
+        "component": "eSpeak-NG phonemizer code and data linked by sherpa-onnx 1.x TTS",
+        "spdx_expression": "GPL-3.0-or-later",
+        "license_url": "https://github.com/csukuangfj/espeak-ng/blob/ed530aa113046142eb5115cf2fc9157854d0ffe1/COPYING",
+        "immutable_source_revision": "ed530aa113046142eb5115cf2fc9157854d0ffe1",
+        "redistributable": true,
+        "notice_required": true
+      },
+      {
+        "id": "piper-phonemize-mit",
+        "component": "piper-phonemize integration layer",
+        "spdx_expression": "MIT",
+        "license_url": "https://github.com/csukuangfj/piper-phonemize/blob/78a788e0b719013401572d70fef372e77bff8e43/LICENSE.md",
+        "immutable_source_revision": "78a788e0b719013401572d70fef372e77bff8e43",
+        "redistributable": true,
+        "notice_required": true
+      }
+    ]
+  },
+  "self_test": {
+    "kind": "kokoro_structural_tts_v1",
+    "suite_revision": "2026.08.30.v1",
+    "allowed_runtime_backends": [
+      "sherpa-onnx-1.13.6-cpu"
+    ],
+    "input_fixture": "workers/local-tts/fixtures/self-test.txt",
+    "input_fixture_sha256": "cf627dd34ca9f579d1a40af3b5ad95f72f90be432414f8898df036494ea75856",
+    "expected_output_sha256": null,
+    "timeout_millis": 300000
+  },
+  "voices": [
+    {"voice_id": "af_alloy", "display_name": "Alloy", "locale": "en-US", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "af_aoede", "display_name": "Aoede", "locale": "en-US", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "af_bella", "display_name": "Bella", "locale": "en-US", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "af_heart", "display_name": "Heart", "locale": "en-US", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "af_jessica", "display_name": "Jessica", "locale": "en-US", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "af_kore", "display_name": "Kore", "locale": "en-US", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "af_nicole", "display_name": "Nicole", "locale": "en-US", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "af_nova", "display_name": "Nova", "locale": "en-US", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "af_river", "display_name": "River", "locale": "en-US", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "af_sarah", "display_name": "Sarah", "locale": "en-US", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "af_sky", "display_name": "Sky", "locale": "en-US", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "am_adam", "display_name": "Adam", "locale": "en-US", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "am_echo", "display_name": "Echo", "locale": "en-US", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "am_eric", "display_name": "Eric", "locale": "en-US", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "am_fenrir", "display_name": "Fenrir", "locale": "en-US", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "am_liam", "display_name": "Liam", "locale": "en-US", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "am_michael", "display_name": "Michael", "locale": "en-US", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "am_onyx", "display_name": "Onyx", "locale": "en-US", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "am_puck", "display_name": "Puck", "locale": "en-US", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "am_santa", "display_name": "Santa", "locale": "en-US", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "bf_alice", "display_name": "Alice", "locale": "en-GB", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "bf_emma", "display_name": "Emma", "locale": "en-GB", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "bf_isabella", "display_name": "Isabella", "locale": "en-GB", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "bf_lily", "display_name": "Lily", "locale": "en-GB", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "bm_daniel", "display_name": "Daniel", "locale": "en-GB", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "bm_fable", "display_name": "Fable", "locale": "en-GB", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "bm_george", "display_name": "George", "locale": "en-GB", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"},
+    {"voice_id": "bm_lewis", "display_name": "Lewis", "locale": "en-GB", "stock_voice": true, "voice_cloning": false, "license_component_id": "kokoro-model-apache-2.0"}
+  ],
+  "extensions": {
+    "speech_synthesis": {
+      "output_sample_rate_hz": 24000,
+      "channels": 1,
+      "sample_format": "pcm_s16le",
+      "incremental_pcm": true,
+      "voice_cloning": false,
+      "maximum_concurrent_sessions": 1,
+      "maximum_text_utf8_bytes": 262144,
+      "word_timing": false,
+      "phoneme_timing": false,
+      "viseme_timing": false
+    }
+  },
+  "lifecycle": {
+    "explicit_download_required": true,
+    "automatic_download_allowed": false,
+    "install_strategy": "verify_then_atomic_activate",
+    "repair_strategy": "verify_quarantine_reinstall",
+    "remove_requires_unreferenced": true,
+    "activation_gates": [
+      "explicit_user_approval",
+      "catalog_trust",
+      "artifact_integrity",
+      "license_acceptance",
+      "runtime_compatibility",
+      "self_test_attestation",
+      "current_device_measurement",
+      "whole_loadout_admission"
+    ]
+  },
+  "trust": {
+    "release_catalog_required": true,
+    "immutable_revision_required": true,
+    "artifact_sha256_required": true,
+    "self_test_attestation_required": true,
+    "measured_resource_envelope_required": true,
+    "unsigned_activation_allowed": false
+  },
+  "admission": {
+    "state": "blocked_pending_measurement",
+    "reason": "Artifact and license identities are pinned, but this CPU pack remains blocked until the exact manifest is catalog-trusted, a real Windows self-test is attested, at least 20 signed current-device load/reload/synthesis samples prove RAM, CPU, zero target-process VRAM, audio correctness and cancellation, and whole-loadout admission preserves the game reserve.",
+    "allowed_residencies": [
+      "cpu_resident"
+    ],
+    "unknowns_fail_closed": true
+  }
+}

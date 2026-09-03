@@ -1,0 +1,37 @@
+{
+  "schema": "npc.non-qualifying-model-review-summary/v1",
+  "identity": {
+    "pack_id": "npc.stt.moonshine-v2-medium-streaming-en.win-x64",
+    "revision": "0.1.5-moonshine.234f60f"
+  },
+  "manifest_raw_sha256": "2eaef47dc00c7594c1466358f5e063b741a674e5fb0f9f3a6157ca1c32554a97",
+  "upstream_evidence_sha256": "14cd469e3e524a007b49f577cbb0fefbc40edea5dd29266f377065ab20f4b71e",
+  "upstream_evidence_distributed": false,
+  "signed_measurement_envelope": false,
+  "admission_eligible": false,
+  "sample_counts": {
+    "cycles": 21,
+    "reloads": 20
+  },
+  "reported_measurements": {
+    "peak_rss_bytes_p99": "460007833.6",
+    "load_millis_p99": "4857.17",
+    "reload_millis_p99": "4860.86",
+    "inference_millis_p99": "41079.77",
+    "audio_duration_seconds": "9.963",
+    "rtf_p50": "3.376",
+    "rtf_p99": "4.1231",
+    "first_final_millis": "4960",
+    "first_partial_millis_p99": "1683.16",
+    "final_after_end_millis_p99": "0.9287",
+    "cancel_ack_millis_p99": "0.0463",
+    "unload_millis_p99": "111.6175",
+    "model_process_vram_mib_p99": "0",
+    "total_cpu_percent_approximate": "80.7"
+  },
+  "blockers": [
+    "The evidence is not a threshold-signed current-device QualifiedResourceEnvelope.",
+    "Measured latency, real-time factor, and CPU use fail the low-latency local speech-recognition admission target."
+  ],
+  "provenance": "Transcribed without alteration from the local-STT qualification owner handoff; decimal values are strings to preserve the reported precision."
+}

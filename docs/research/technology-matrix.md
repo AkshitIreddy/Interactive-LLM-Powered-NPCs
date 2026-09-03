@@ -37,21 +37,23 @@ Decisions are for a Windows gaming companion, not a general SaaS or research not
 
 | Area | Primary | Alternative/candidate | Rule |
 | --- | --- | --- | --- |
-| LLM | explicitly configured hosted providers | configurable hosted OpenAI-compatible endpoint | API-first; no local LLM pack or silent provider fallback. |
-| STT | explicitly configured hosted providers | provider endpointing plus PTT | API-first; PTT key-up remains authoritative. |
-| TTS | explicitly configured hosted providers | provider stock voices | API-first; no actor imitation or local TTS pack. |
+| LLM | explicitly configured hosted providers | Qwen3-4B-Instruct-2507 Q4_K_M through llama.cpp, CPU-first | API-first default; an explicit local pack activates only after a measured whole-loadout fit. No silent provider fallback. |
+| STT | explicitly configured hosted providers | Moonshine v2 Tiny/Small streaming on CPU | API-first default; PTT key-up remains authoritative and the exact Windows pack must pass latency/accuracy qualification. |
+| TTS | explicitly configured hosted providers | Kokoro-82M INT8 ONNX/sherpa-onnx on CPU | API-first default; stock voices only, with exact voice assets and licenses in the pack ledger. No actor imitation. |
 | Retrieval | SQLite FTS/recent context + optional hosted embeddings/reranking | lexical-only fallback | Hosted semantic text egress requires explicit route authorization. |
-| Screen-space baseline | Audio2Face-3D regression v2.3 coefficient source → project-owned tracked 2D mouth residual | audio-derived viseme/mouth warp | Research architecture only; no native rig, no pack claim, immutable current frame and strict masked fail-open composition. |
-| Direct-video experiment | NVIDIA Maxine AR SDK LipSync | none qualified | Access-controlled NGC feature; synchronized frame/audio contract; exact access, license, Windows, latency, VRAM, quality and game-impact qualification required. |
-| Offline comparator | MuseTalk 1.5 | LatentSync offline-only | MuseTalk's measured batch path took ~102 s for 1.579 s output; neither is a live pack candidate. |
+| Screen-space baseline | TTS-native visemes or causal audio-to-viseme → tracked current-frame mouth warp | optional tiny teeth/lip residual | **Selected engineering direction**; no native rig, immutable current frame, actor/frame/generation addressing, queue depth one, strict masked bypass. |
+| NVIDIA animation experiments | Public MIT Audio2Face-3D SDK + regression Mark v2.3 | Private-access NVIDIA LipSync; deprecated portrait-oriented Audio2Face-2D; self-hosted A2F3D NIM | The SDK is the first NVIDIA local low-latency coefficient/geometry candidate for Windows x64, not a hosted route or pixel compositor. It still requires a prepared animation target plus a project-owned tracked ROI mapper/compositor. NVIDIA's faster-than-60-FPS statement is unverified on the target RTX 4080 beside a game. |
+| Neural residual spike | MuseTalk 1.5, heavily refactored for current ROIs | LatentSync offline-only | MuseTalk may be measured as a bounded residual experiment; its stock avatar pipeline and current 4 GB consumer result are far too slow to claim as a live pack. |
 | Watchlist | EfficientSync; FlashLips | Ditto deferred | Paper results only until code, weights, license, Windows, cancellation and local resource/visual gates pass. |
 | Rejected live paths | Native game-rig integration; Wav2Lip; SadTalker; LivePortrait | — | No per-game integration or full-frame live replacement. |
 
 ## Decision guardrails
+
+NVIDIA provider and animation status in this matrix was last verified against official sources on **2026-08-30**: [trial terms](https://assets.ngc.nvidia.com/products/api-catalog/legal/NVIDIA%20API%20Trial%20Terms%20of%20Service.pdf), [NIM FAQ](https://docs.api.nvidia.com/nim/docs/product), [LipSync model card](https://build.nvidia.com/nvidia/lipsync/modelcard), [Audio2Face-2D](https://build.nvidia.com/nvidia/audio2face-2d/deploy), the [public Audio2Face-3D SDK](https://github.com/NVIDIA/Audio2Face-3D-SDK), the [Audio2Face-3D collection](https://github.com/NVIDIA/Audio2Face-3D), the [Mark v2.3 model](https://huggingface.co/nvidia/Audio2Face-3D-v2.3-Mark), and the [current self-hosted NIM](https://docs.nvidia.com/ace/audio2face-3d-microservice/latest/text/getting-started/overview.html). Hosted NIM is a single-key evaluation option with model-specific entitlements and limits, not unlimited access or a redistributable runtime. The SDK is MIT, its model weights use separate NVIDIA Open Model terms, and its Windows requirements are CUDA `>=12.8,<13.0` (12.9 recommended) plus TensorRT `>=10.13,<11.0`.
 
 - No vendor benchmark becomes a product claim without reproduction.
 - No model/library is packed before exact source revision, all transitive assets and intended redistribution/commercial terms are recorded.
 - A faster optional visual feature that destabilizes the game or delays audio loses to audio/subtitles.
 - Backend diversity is a catalog/pack concern; core contracts do not expose CUDA-specific assumptions.
 - The captured source frame is immutable. Visual output is a bounded, frame/generation-addressed mouth residual applied only to a presentation copy; invalid or stale work reveals the untouched current frame.
-- Current admission permits one optional local visual lease. Any future local conversation-model policy requires measured co-residency, live game reserve, p99 workspace and load/unload accounting; no silent device or cloud substitution.
+- API-first mode permits one explicit generic visual pack. Advanced local conversation packs require the separate measured-local policy: complete loadout co-residency, live game reserve, p99 workspace, RAM/VRAM safety margins and load/unload accounting; no silent device or cloud substitution.

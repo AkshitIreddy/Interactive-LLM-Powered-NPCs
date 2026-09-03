@@ -120,10 +120,10 @@ async fn fixture_round_trip_preserves_wire_contract_and_event_order() {
                     "audio": "AAECAwQ=",
                     "alignment": {
                         "chars": ["H", "i", " ", "M", "a", "r", "a"],
-                        "char_start_times_ms": [0, 10, 20, 30, 40, 50, 60],
-                        "char_durations_ms": [10, 10, 10, 10, 10, 10, 10]
+                        "charStartTimesMs": [0, 10, 20, 30, 40, 50, 60],
+                        "charDurationsMs": [10, 10, 10, 10, 10, 10, 10]
                     },
-                    "is_final": false
+                    "isFinal": null
                 })
                 .to_string()
                 .into(),
@@ -131,7 +131,7 @@ async fn fixture_round_trip_preserves_wire_contract_and_event_order() {
             .await
             .expect("send audio fixture");
         socket
-            .send(Message::Text(r#"{"is_final":true}"#.into()))
+            .send(Message::Text(r#"{"isFinal":true}"#.into()))
             .await
             .expect("send completion fixture");
         let _ignored = socket.close(None).await;

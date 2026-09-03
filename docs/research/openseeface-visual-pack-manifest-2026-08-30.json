@@ -1,0 +1,213 @@
+{
+  "schema_version": 1,
+  "pack_id": "openseeface-mnv3-lm1-mouth-signal",
+  "display_name": "OpenSeeFace MNV3 + landmark model 1 mouth signal",
+  "version": "85aa70fc67582d046e771ea73625182a0d8f7475",
+  "qualification": "conditionally_qualified_optional_experimental_signal_pack",
+  "role": "face_detection_and_mouth_landmark_signal_for_current_frame_residual_warp",
+  "is_complete_lip_sync_model": false,
+  "is_identity_recognition_model": false,
+  "default_enabled": false,
+  "distribution": {
+    "user_selected_download_only": true,
+    "upstream_repository": "https://github.com/emilianavt/OpenSeeFace",
+    "upstream_revision": "85aa70fc67582d046e771ea73625182a0d8f7475",
+    "upstream_describe": "v1.20.4-63-g85aa70f",
+    "upstream_commit_date": "2025-12-28T12:52:30+01:00",
+    "license_spdx": "BSD-2-Clause",
+    "license_applies_to": "OpenSeeFace code and models",
+    "license_file_sha256": "28612834d7ca038a9009550e3869a67e6be3a87c238d997f58c0907e08744146",
+    "license_file_bytes": 1364,
+    "installed_payload_bytes": 5411995,
+    "installed_payload_mib": 5.1613,
+    "runtime_excluded_from_payload": true,
+    "files": [
+      {
+        "path_at_revision": "models/mnv3_detection_opt.onnx",
+        "role": "face_detector",
+        "bytes": 568302,
+        "sha256": "0e8e4806766d85ab067a52c7af0dcb59eb7f9dfe580b44f20a8e6ab712d89809"
+      },
+      {
+        "path_at_revision": "models/lm_model1_opt.onnx",
+        "role": "66_point_face_landmark_estimator",
+        "bytes": 4842329,
+        "sha256": "5bec42b298a24142cdb249a7256d65bc3fc0fbc673fa1752a64f4d7164719c9f"
+      },
+      {
+        "path_at_revision": "LICENSE",
+        "role": "redistribution_license",
+        "bytes": 1364,
+        "sha256": "28612834d7ca038a9009550e3869a67e6be3a87c238d997f58c0907e08744146"
+      }
+    ]
+  },
+  "runtime": {
+    "name": "ONNX Runtime",
+    "tested_version": "1.22.1",
+    "tested_execution_provider": "CPUExecutionProvider",
+    "tested_intra_op_threads": 1,
+    "license_spdx": "MIT",
+    "license_sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c",
+    "accelerator_tested": false,
+    "accelerator_reason": "The isolated runtime contained no DirectML or CUDA provider. The CPU path exceeded the 15 fps replay rate, so the optional pack was not allowed to consume game GPU reserve."
+  },
+  "onnx_admission": {
+    "must_run_before_session_creation": true,
+    "reject_external_tensor_data": true,
+    "reject_sparse_initializers": true,
+    "reject_control_flow": true,
+    "reject_unknown_operators_or_domains": true,
+    "require_full_checker_and_strict_shape_inference": true,
+    "allowed_contrib_operators": [
+      "com.microsoft::FusedConv"
+    ],
+    "detector_input": [
+      "batch",
+      3,
+      224,
+      224
+    ],
+    "detector_outputs": [
+      [
+        "batch",
+        2,
+        56,
+        56
+      ],
+      [
+        "batch",
+        2,
+        56,
+        56
+      ]
+    ],
+    "landmark_input": [
+      "batch",
+      3,
+      224,
+      224
+    ],
+    "landmark_output": [
+      "batch",
+      198,
+      28,
+      28
+    ]
+  },
+  "resource_contract": {
+    "load_ms_measured": 71.22,
+    "ram_loaded_delta_mib_measured": 15.133,
+    "ram_peak_delta_mib_measured": 88.945,
+    "ram_activation_budget_mib": 128,
+    "dedicated_vram_mib_measured": 0,
+    "transient_vram_mib_measured": 0,
+    "cpu_percent_of_one_logical_core_measured": 104.466,
+    "sustained_processed_fps": 23.316,
+    "max_signal_rate_hz": 15,
+    "queue_depth": 1,
+    "late_result_policy": "drop_and_show_untouched_current_frame",
+    "game_gpu_reserve_impact": "none_on_tested_cpu_only_path",
+    "real_game_frame_rate_impact": "not_measured_synthetic_replay_only"
+  },
+  "eclipse_harbor_replay": {
+    "path": "docs/assets/demo/demo.mp4",
+    "sha256": "a27480c3cfeca36b72f3a2b8baff204fbe04e23d7ccd3a762f719d0da350a3a3",
+    "width": 960,
+    "height": 600,
+    "frames": 453,
+    "fps": 15,
+    "seconds": 30.2,
+    "audio": "silent",
+    "detector_invocations": 239,
+    "detector_ms": {
+      "p50": 11.8786,
+      "p95": 37.4057,
+      "p99": 38.7886
+    },
+    "landmark_ms": {
+      "p50": 47.0476,
+      "p95": 52.1589,
+      "p99": 56.5669
+    },
+    "detector_plus_landmark_ms": {
+      "p50": 47.7261,
+      "p95": 84.4455,
+      "p99": 87.7384
+    },
+    "full_frame_processing_ms": {
+      "p50": 48.4978,
+      "p95": 86.2102,
+      "p99": 92.4245
+    },
+    "mouth_roi_center_delta_over_face_diagonal": {
+      "p50": 0.0057,
+      "p95": 0.0145,
+      "p99": 0.0173
+    },
+    "mouth_roi_area_fractional_delta": {
+      "p50": 0.0272,
+      "p95": 0.4045,
+      "p99": 0.5396
+    },
+    "track_ids_created": 3,
+    "track_switches": 2,
+    "target_visible_frames": 243,
+    "unoccluded_target_frames": 214,
+    "eligible_unoccluded_target_frames": 214,
+    "eligible_visible_recall_percent": 88.066,
+    "appearance_rejected_absent_target_detections": 5,
+    "eligible_false_positive_mouth_outputs": 0
+  },
+  "causal_viseme_stage": {
+    "implementation": "project_authored_five_cue_audio_analysis",
+    "bundled_third_party_model": false,
+    "cues": [
+      "closed",
+      "round",
+      "open",
+      "fricative",
+      "wide"
+    ],
+    "window_ms": 20,
+    "hop_ms": 10,
+    "future_lookahead_ms": 0,
+    "minimum_audio_accumulation_ms": 20,
+    "compute_ms_per_hop": {
+      "p50": 0.2737,
+      "p95": 0.3335,
+      "p99": 0.494
+    },
+    "quality_status": "compute_only_unlabeled_audio_no_phoneme_accuracy_claim",
+    "preferred_signal": "provider_timed_viseme_events_when_available"
+  },
+  "mandatory_activation_gates": [
+    "explicit_user_selection_and_download",
+    "exact_content_hash_and_license_verification",
+    "static_onnx_allowlist_validation_before_runtime_load",
+    "cpu_provider_one_thread_and_max_15_hz",
+    "locked_actor_track_frame_and_scene_epoch_from_product_runtime",
+    "queue_depth_one_with_late_stale_and_cancelled_result_drop",
+    "temporal_appearance_and_occlusion_latch",
+    "no_mouth_output_when_appearance_gate_rejects",
+    "dynamic_mouth_mask_contained_by_current_landmarks",
+    "provider_timed_visemes_preferred_over_audio_heuristic",
+    "broader_live_game_camera_head_pose_lighting_and_occlusion_qualification_before_promotion"
+  ],
+  "honest_limits": [
+    "This is a face and landmark signal pack, not a talking-head generator or an end-to-end lip-sync model.",
+    "It cannot recognize character identity; identity locking must come from the product runtime.",
+    "The synthetic replay is one flat stylized avatar and is not representative of arbitrary games, cameras, skin tones, helmets, facial hair, head poses, lighting, or occlusions.",
+    "The guarded landmark p95 fits a 15 fps source frame, but detector reacquisition p95 does not fit 30 fps.",
+    "Mouth ROI area jitter is high and requires smoothing plus a conservative dynamic residual mask.",
+    "The replay is silent, so audiovisual onset, skew, phoneme accuracy, and rendered mouth quality were not measured.",
+    "The CPU path consumes approximately one logical core; real game frame-rate impact remains unmeasured.",
+    "An unguarded tracker confidently placed mouth landmarks on the CLOSE SIMULATION button; the appearance latch is mandatory, not optional."
+  ],
+  "evidence": {
+    "ignored_artifact_directory": "artifacts/visual-pack-qualification",
+    "onnx_validation_report_sha256": "859cecb2ca18fc252b8e9601949d0be73a3700415287abcbf87e94c601f44c91",
+    "comparator_benchmark_report_sha256": "41efeb8f773dc277e0790c995252d3fe41a1a031d6b6dd3cd8bdb3bdfdb0b3ec",
+    "guarded_benchmark_report_sha256": "7bbd78e9c2aae7b760fb6258878437009cf6f31c7bf13df34ae5867f6be8cf97"
+  }
+}

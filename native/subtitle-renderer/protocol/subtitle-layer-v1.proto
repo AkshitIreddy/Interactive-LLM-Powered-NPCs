@@ -1,0 +1,227 @@
+syntax = "proto3";
+
+package npc.subtitle.v1;
+
+// Documentation schema for the authenticated runtime-to-renderer boundary.
+// Implementations must apply the stricter byte/count limits in RenderLimits
+// before allocating. Glyph coverage is one byte per pixel; text, fonts, and
+// shaping instructions do not cross this boundary.
+
+message PresentationAuth {
+  bytes launch_nonce = 1; // exactly 32 bytes, constant-time compared
+  string session_id = 2; // authenticated broker launch session
+  uint32 client_process_id = 3;
+  uint64 client_process_creation_time = 4; // prevents PID reuse
+  string client_executable_name = 5;
+  uint64 request_sequence = 6; // strictly increasing per connection
+  uint64 deadline_qpc = 7;
+}
+
+message RectPx {
+  float x = 1;
+  float y = 2;
+  float width = 3;
+  float height = 4;
+}
+
+message Color {
+  float r = 1;
+  float g = 2;
+  float b = 3;
+  float a = 4;
+}
+
+enum TextRole {
+  TEXT_ROLE_BODY = 0;
+  TEXT_ROLE_SPEAKER = 1;
+}
+
+enum AnchorKind {
+  ANCHOR_HEAD_ABOVE = 0;
+  ANCHOR_HEAD_BELOW = 1;
+  ANCHOR_HEAD_LEFT = 2;
+  ANCHOR_HEAD_RIGHT = 3;
+  ANCHOR_BOTTOM_CENTER = 4;
+}
+
+message GlyphMask {
+  sint32 origin_x_px = 1;
+  sint32 origin_y_px = 2;
+  uint32 width_px = 3;
+  uint32 height_px = 4;
+  uint32 stride_bytes = 5;
+  bytes coverage = 6;
+}
+
+message GlyphRun {
+  TextRole role = 1;
+  RectPx clip_px = 2;
+  repeated GlyphMask glyphs = 3;
+}
+
+message Layout {
+  RectPx bounds_px = 1;
+  optional RectPx speaker_bounds_px = 2;
+  RectPx body_bounds_px = 3;
+  AnchorKind anchor = 4;
+}
+
+message Outline {
+  bool enabled = 1;
+  float width_px = 2;
+  Color color = 3;
+}
+
+message Shadow {
+  bool enabled = 1;
+  float offset_x_px = 2;
+  float offset_y_px = 3;
+  float blur_radius_px = 4;
+  Color color = 5;
+}
+
+message Backplate {
+  bool enabled = 1;
+  float corner_radius_px = 2;
+  float border_width_px = 3;
+  Color fill = 4;
+  Color border = 5;
+}
+
+message Style {
+  Color body = 1;
+  Color speaker = 2;
+  Outline outline = 3;
+  Shadow shadow = 4;
+  Backplate backplate = 5;
+  float global_alpha = 6;
+}
+
+message RenderSubtitleRequest {
+  uint32 protocol_version = 1; // exactly 1
+  uint64 presentation_id = 2;
+  uint64 capture_sequence = 3;
+  uint64 graphics_generation = 4;
+  RectPx viewport_px = 5;
+  RectPx output_clip_px = 6;
+  Layout layout = 7;
+  Style style = 8;
+  repeated GlyphRun glyph_runs = 9;
+  bool allow_bottom_center_fallback = 10;
+  float fallback_safe_margin_px = 11;
+  float fallback_bottom_offset_px = 12;
+}
+
+enum ParagraphDirection {
+  PARAGRAPH_DIRECTION_LTR = 0;
+  PARAGRAPH_DIRECTION_RTL = 1;
+}
+
+enum TargetColorSpace {
+  TARGET_COLOR_SPACE_SDR_SRGB = 0;
+  TARGET_COLOR_SPACE_SDR_SCRGB = 1;
+  TARGET_COLOR_SPACE_HDR10_PQ = 2;
+  TARGET_COLOR_SPACE_HDR_SCRGB = 3;
+  // No trusted native color-space measurement was available. The presenter
+  // must report compositor-managed treatment, never fabricate SDR/HDR proof.
+  TARGET_COLOR_SPACE_UNKNOWN = 4;
+}
+
+enum PresentationProvenance {
+  PRESENTATION_PROVENANCE_TRUSTED_NATIVE_CAPTURE = 0;
+  PRESENTATION_PROVENANCE_CONSOLE_BOTTOM_CENTER_UNAVAILABLE = 1;
+}
+
+message TargetIdentity {
+  uint32 process_id = 1;
+  uint64 window_handle = 2;
+  string executable_name = 3;
+}
+
+message PresentSubtitleRequest {
+  uint32 protocol_version = 1; // exactly 1
+  PresentationAuth auth = 2;
+  string turn_id = 3;
+  uint64 sentence_id = 4;
+  uint64 cancellation_generation = 5;
+  uint64 target_geometry_epoch = 6;
+  uint32 dpi_x = 7;
+  uint32 dpi_y = 8;
+  ParagraphDirection direction = 9;
+  bool bidi_shaping_applied = 10;
+  bool grapheme_clusters_preserved = 11;
+  TargetColorSpace target_color_space = 12;
+  float sdr_white_level_nits = 13;
+  RenderSubtitleRequest render = 14;
+  PresentationProvenance provenance = 15;
+  optional TargetIdentity target = 16; // absent for console-unavailable fallback
+  repeated RectPx hud_exclusions_px = 17; // measured trusted viewport exclusions only
+  optional uint64 source_capture_qpc = 18; // runtime rejects future/expired capture evidence
+  uint64 renderer_authority_revision = 19;
+  string renderer_authority_sha256 = 20; // exact lowercase digest bound at private launch
+}
+
+message RenderedSubtitleLayer {
+  uint32 protocol_version = 1;
+  uint64 presentation_id = 2;
+  uint64 capture_sequence = 3;
+  uint64 graphics_generation = 4;
+  sint32 desktop_x_px = 5;
+  sint32 desktop_y_px = 6;
+  uint32 width_px = 7;
+  uint32 height_px = 8;
+  uint32 stride_bytes = 9;
+  bool used_bottom_center_fallback = 10;
+  bytes bgra8_premultiplied = 11;
+}
+
+enum ColorTreatment {
+  COLOR_TREATMENT_SDR_PREMULTIPLIED_SOURCE_OVER = 0;
+  COLOR_TREATMENT_SCRGB_LINEAR_SOURCE_OVER = 1;
+  COLOR_TREATMENT_HDR10_TONE_MAPPED_SOURCE_OVER = 2;
+  COLOR_TREATMENT_WINDOWS_COMPOSITOR_SDR_WHITE_MAPPING = 3;
+}
+
+// Delivery evidence exists only after the broker-owned surface committed.
+// Enqueueing, shaping, or rendering alone must never fabricate this receipt.
+message SubtitlePresentationReceipt {
+  uint32 protocol_version = 1;
+  string receipt_id = 2;
+  string session_id = 3;
+  string turn_id = 4;
+  uint64 sentence_id = 5;
+  uint64 presentation_id = 6;
+  uint64 request_sequence = 7;
+  uint64 cancellation_generation = 8;
+  uint64 target_geometry_epoch = 9;
+  uint64 capture_sequence = 10;
+  uint64 graphics_generation = 11;
+  fixed64 layer_hash = 12;
+  uint64 presented_qpc = 13;
+  sint32 desktop_x_px = 14;
+  sint32 desktop_y_px = 15;
+  uint32 width_px = 16;
+  uint32 height_px = 17;
+  uint32 dpi_x = 18;
+  uint32 dpi_y = 19;
+  ParagraphDirection direction = 20;
+  bool bidi_shaping_applied = 21;
+  bool grapheme_clusters_preserved = 22;
+  bool used_bottom_center_fallback = 23;
+  ColorTreatment color_treatment = 24;
+  bool committed = 25;
+  PresentationProvenance provenance = 26;
+  uint64 renderer_authority_revision = 27;
+  string renderer_authority_sha256 = 28;
+  bytes renderer_authority_sources_json = 29; // validated canonical source DTO
+  string renderer_style_id = 30;
+  float renderer_safe_area_dp = 31;
+  float renderer_text_scale = 32;
+  bool renderer_backplate_enabled = 33;
+  float renderer_opacity = 34;
+}
+
+message CancelSubtitleRequest {
+  PresentationAuth auth = 1;
+  uint64 new_cancellation_generation = 2;
+}

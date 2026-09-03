@@ -27,6 +27,7 @@ public:
                                RectI desktop_bounds,
                                Failure& failure);
     [[nodiscard]] bool active() const noexcept;
+    [[nodiscard]] bool capture_excluded() const noexcept;
 
 private:
     struct Impl;

@@ -204,6 +204,8 @@
     }
   },
   "content": {
+    "character_data_readiness": "curated",
+    "character_data_readiness_notes": "Shipped named-character records have stable IDs and authored biography, personality, dialogue-style, prompt, voice-intent, explicit-selection identity, and provenance metadata; live visual identity is not certified.",
     "world_lore": "Skyrim is a cold northern province of Tamriel divided by civil war while dragons return from legend. Holds retain distinct customs, economies, and loyalties under jarls whose authority is both political and personal. Nordic reverence for ancestry coexists uneasily with Imperial institutions, elven influence, old ruins, and many living traditions. The player may be recognized as the Dragonborn, but that status, faction membership, and completed deeds must come from enabled quest context rather than assumption. Daily life includes farms, mines, inns, caravans, temples, guilds, and settlements threatened by war, wildlife, banditry, and supernatural forces. Conversations should treat travel distance, local allegiance, reputation, and current danger as practical realities. Magic is known but not universally trusted; the Divines, Daedric powers, and older beliefs invite sharply different opinions. NPCs must distinguish public knowledge from secrets and avoid revealing quest outcomes beyond the selected spoiler tier.",
     "spoiler_policy": "Default to premise-level knowledge. Unlock faction and main-quest facts only from explicit user settings or explicitly selected quest state; never infer an ending from a conversational hint.",
     "spoiler_tiers": [
@@ -608,7 +610,26 @@
       ]
     }
   },
+  "recommendations": {
+    "integration_mode": "external_only",
+    "provider_strategy": "api_first",
+    "local_activation_policy": "measured_whole_loadout_fit_required",
+    "game_resource_reserve_required": true,
+    "screen_space_lip_sync": "experimental_opt_in_after_exact_target_and_advancing_frame_qualification"
+  },
   "diagnostics": [
+    {
+      "id": "recommended-feature-loadout",
+      "severity": "info",
+      "check": "Keep a game-first resource reserve, prefer explicitly configured API routes for LLM, STT, TTS, and embeddings, and admit optional local models only after measured whole-loadout RAM and VRAM fit checks.",
+      "remediation": "Move optional language or speech roles to an explicitly selected hosted provider, unload nonessential local models, or increase the configured game reserve; keep experimental screen-space lip sync disabled until exact target binding, advancing-frame, and untouched-frame restore checks pass."
+    },
+    {
+      "id": "external-only-safety",
+      "severity": "error",
+      "check": "Confirm the selected target remains an eligible single-player top-level game window and that the session uses external capture, audio, and subtitles only, with no injection, hooks, automated input, or anti-cheat bypass.",
+      "remediation": "Stop on online, protection, process, PID, HWND, executable, or session-mode ambiguity; return to a clearly eligible single-player state and bind the exact game window again, otherwise use no game integration."
+    },
     {
       "id": "process-detection",
       "severity": "error",

@@ -12,7 +12,7 @@ const {
   loadScenario,
   computeFixtureLedger,
 } = require("./manifest.ts");
-const { simulate, assertExpected } = require("./simulator.ts");
+const { simulate, evaluateExpected, assertExpected } = require("./simulator.ts");
 const { buildBenchmarkReport } = require("./benchmark.ts");
 
 function usage() {
@@ -92,15 +92,32 @@ function main() {
 
   if (command === "verify") {
     const firstPass = [];
+    let assertionCount = 0;
     for (const { scenario, resourceProfile } of loadScenarios()) {
       const result = simulate(scenario, resourceProfile);
       assertExpected(scenario, result);
       const replay = simulate(scenario, resourceProfile);
       if (result.jsonl !== replay.jsonl) throw new Error(`${scenario.id}: replay is not deterministic`);
-      firstPass.push({ id: scenario.id, traceSha256: result.traceSha256 });
+      const assertions = evaluateExpected(scenario, result);
+      assertionCount += assertions.length;
+      firstPass.push({
+        id: scenario.id,
+        status: result.status,
+        traceSha256: result.traceSha256,
+        metrics: result.metrics,
+        assertions,
+      });
     }
     verifyLedger();
-    process.stdout.write(`${canonicalJson({ status: "ok", scenarios: firstPass })}\n`);
+    process.stdout.write(`${canonicalJson({
+      schemaVersion: "npc.sim.verification.v1",
+      status: "ok",
+      deterministicReplay: true,
+      fixtureIntegrity: "verified",
+      scenarioCount: firstPass.length,
+      assertionCount,
+      scenarios: firstPass,
+    })}\n`);
     return;
   }
 

@@ -1,0 +1,18 @@
+{
+  "schema": "npc.identity-rights-cleared-fixture-corpus/v1",
+  "suite_revision": "identity-yunet-sface-windows-2026-08-30.v1",
+  "local_only": true,
+  "partitions": [
+    "calibration_known",
+    "held_out_known",
+    "held_out_unknown"
+  ],
+  "files": [],
+  "rights_attestation": {
+    "attested_by_local_user": false,
+    "attested_unix_seconds": 1,
+    "no_web_scrape": true,
+    "no_third_party_biometrics": true,
+    "protected_trait_labels_absent": true
+  }
+}

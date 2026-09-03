@@ -1,0 +1,23 @@
+[package]
+name = "npc-subtitle-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Deterministic, renderer-agnostic subtitle layout and style engine"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3.14"
+thiserror = "2"
+
+[dev-dependencies]
+proptest = "1.6"
+pretty_assertions = "1.4"

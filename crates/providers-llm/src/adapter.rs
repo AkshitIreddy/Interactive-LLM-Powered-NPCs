@@ -21,6 +21,9 @@ use crate::{
 
 const MAX_MODEL_LIST_BYTES: usize = 4 * 1_048_576;
 pub const NVIDIA_NIM_HOSTED_BASE_URL: &str = "https://integrate.api.nvidia.com/";
+pub const NVIDIA_NIM_DEFAULT_MODEL_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
+const NVIDIA_NIM_MIN_MODEL_CACHE_TTL: Duration = Duration::from_millis(100);
+const NVIDIA_NIM_MAX_MODEL_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[async_trait]
 pub trait HostedLanguageModel: Send + Sync {
@@ -428,6 +431,14 @@ adapter_type!(CohereChat);
 pub struct NvidiaNimChat {
     inner: AdapterInner,
     verified_model_capabilities: Arc<BTreeMap<String, ModelCapabilities>>,
+    model_cache: Arc<tokio::sync::Mutex<Option<NvidiaModelCache>>>,
+    model_cache_ttl: Duration,
+}
+
+#[derive(Clone, Debug)]
+struct NvidiaModelCache {
+    expires_at: Instant,
+    models: Vec<ModelInfo>,
 }
 
 impl NvidiaNimChat {
@@ -460,11 +471,25 @@ impl NvidiaNimChat {
         config: AdapterConfig,
         verified_model_capabilities: BTreeMap<String, ModelCapabilities>,
     ) -> Result<Self, ProviderError> {
+        Self::with_verified_model_capabilities_and_cache_ttl(
+            config,
+            verified_model_capabilities,
+            NVIDIA_NIM_DEFAULT_MODEL_CACHE_TTL,
+        )
+    }
+
+    pub fn with_verified_model_capabilities_and_cache_ttl(
+        config: AdapterConfig,
+        verified_model_capabilities: BTreeMap<String, ModelCapabilities>,
+        model_cache_ttl: Duration,
+    ) -> Result<Self, ProviderError> {
         if !trusted_nvidia_endpoint(&config)
             || verified_model_capabilities.len() > 4_096
             || verified_model_capabilities
                 .keys()
                 .any(|model_id| !crate::types::valid_model_id(model_id))
+            || !(NVIDIA_NIM_MIN_MODEL_CACHE_TTL..=NVIDIA_NIM_MAX_MODEL_CACHE_TTL)
+                .contains(&model_cache_ttl)
         {
             return Err(ProviderError::new(
                 "nvidia-nim",
@@ -488,6 +513,8 @@ impl NvidiaNimChat {
         Ok(Self {
             inner,
             verified_model_capabilities: Arc::new(verified_model_capabilities),
+            model_cache: Arc::new(tokio::sync::Mutex::new(None)),
+            model_cache_ttl,
         })
     }
 
@@ -541,6 +568,14 @@ impl HostedLanguageModel for NvidiaNimChat {
         &self,
         cancellation: CancellationToken,
     ) -> Result<Vec<ModelInfo>, ProviderError> {
+        let mut cache = tokio::select! {
+            _ = cancellation.cancelled() => return Err(ProviderError::cancelled("nvidia-nim")),
+            cache = self.model_cache.lock() => cache,
+        };
+        let now = Instant::now();
+        if let Some(cached) = cache.as_ref().filter(|cached| cached.expires_at > now) {
+            return Ok(cached.models.clone());
+        }
         let mut models = self.inner.list_models(cancellation).await?;
         for model in &mut models {
             model.capabilities = self
@@ -554,6 +589,10 @@ impl HostedLanguageModel for NvidiaNimChat {
                     reasoning: CapabilitySupport::Unknown,
                 });
         }
+        *cache = Some(NvidiaModelCache {
+            expires_at: now + self.model_cache_ttl,
+            models: models.clone(),
+        });
         Ok(models)
     }
 }
@@ -1077,6 +1116,15 @@ fn nvidia_nim_body(request: &LlmRequest) -> Result<Value, ProviderError> {
     body.insert("model".into(), Value::String(request.model.clone()));
     body.insert("stream".into(), Value::Bool(true));
     body.insert("max_tokens".into(), json!(request.maximum_output_tokens));
+    // Nemotron 3 enables reasoning by default. Interactive NPC turns need the
+    // directly spoken answer, not a long visible chain-of-thought preamble.
+    // NVIDIA's hosted API exposes this model-scoped chat-template control.
+    if request.model.starts_with("nvidia/nemotron-3") {
+        body.insert(
+            "chat_template_kwargs".into(),
+            json!({ "enable_thinking": false }),
+        );
+    }
     body.insert(
         "messages".into(),
         Value::Array(

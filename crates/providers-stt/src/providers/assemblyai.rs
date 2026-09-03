@@ -15,8 +15,8 @@ const LANGUAGES: &[&str] = &["en", "es", "de", "fr", "pt", "it", "multi"];
 static CAPABILITIES: RecognizerCapabilities = RecognizerCapabilities {
     provider_id: PROVIDER_ID,
     display_name: "AssemblyAI Universal Streaming",
-    default_model: "universal-3-pro",
-    capability_revision: "2026-08-28",
+    default_model: "u3-rt-pro",
+    capability_revision: "2026-08-30",
     languages: LANGUAGES,
     accepted_audio: AUDIO,
     partial_revisions: true,
@@ -135,6 +135,9 @@ impl ProviderSessionProtocol for AssemblySession {
             "Begin" => Ok(vec![WireEvent::SessionStarted {
                 provider_session_id: value.get("id").and_then(Value::as_str).map(str::to_owned),
             }]),
+            // Universal-3 Pro emits this optional VAD signal before a Turn. The provider-neutral
+            // contract currently has no speech-start event, so it is intentionally consumed.
+            "SpeechStarted" => Ok(Vec::new()),
             "Turn" => self.parse_turn(value),
             "Termination" => Ok(Vec::new()),
             "Warning" => Ok(vec![safe_warning(

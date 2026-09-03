@@ -15,6 +15,7 @@ fn catalog_binding(manifest: &ModelPackManifestV1) -> CatalogInstallBindingV1 {
             format!("fixture-catalog:{}", manifest.digest().unwrap()).as_bytes(),
         ),
         catalog_version: 1,
+        trust_domain: CatalogTrustDomainV1::ReleaseThreshold,
     }
 }
 
@@ -100,6 +101,8 @@ fn sample_manifest(pack: &str, revision: &str, bytes: &[u8]) -> ModelPackManifes
             size_bytes: bytes.len() as u64,
             sha256: digest(bytes),
             destination: "models/weights.bin".to_owned(),
+            strip_prefix: None,
+            required_paths: vec![],
         }],
         runtime: RuntimeCompatibilityV1 {
             runtime: "onnxruntime".to_owned(),
@@ -147,6 +150,104 @@ fn sample_manifest(pack: &str, revision: &str, bytes: &[u8]) -> ModelPackManifes
             timeout_millis: 10_000,
         },
     }
+}
+
+struct FixtureMeasurementVerifier;
+
+impl CatalogSignatureVerifier for FixtureMeasurementVerifier {
+    fn is_trusted_key(&self, key_id: &str) -> bool {
+        key_id == "fixture-measurement-key"
+    }
+
+    fn verify(&self, _key_id: &str, algorithm: &str, _message: &[u8], signature: &str) -> bool {
+        algorithm == "fixture" && signature == "valid"
+    }
+}
+
+fn measured_admission(manifest: &ModelPackManifestV1) -> LoadoutAdmissionV1 {
+    let device = digest(b"fixture-local-device");
+    let envelope = SignedMeasuredResourceEnvelopeV1 {
+        signed: MeasuredResourceEnvelopePayloadV1 {
+            schema: MEASURED_RESOURCE_ENVELOPE_SCHEMA_V1.to_owned(),
+            report_id: "fixture-loadout-measurement".to_owned(),
+            sequence: 1,
+            measured_unix_seconds: 100,
+            expires_unix_seconds: 1_000,
+            device_fingerprint_sha256: device.clone(),
+            identity: manifest.identity(),
+            manifest_sha256: manifest.digest().unwrap(),
+            capability: manifest.capability.kind.clone(),
+            benchmark_suite_revision: "fixture-suite-v1".to_owned(),
+            runtime: "onnxruntime".to_owned(),
+            runtime_revision: "r1".to_owned(),
+            backend: "cpu".to_owned(),
+            sample_count: 20,
+            placements: std::collections::BTreeMap::from([(
+                ResidencyModeV1::CpuResident,
+                PlacementMeasurementV1 {
+                    resident_ram_bytes: 700_000_000,
+                    p99_total_ram_bytes: 800_000_000,
+                    resident_vram_bytes: 0,
+                    p99_workspace_vram_bytes: 0,
+                    p99_load_millis: 100,
+                    p99_reload_millis: 80,
+                    p99_operation_millis: 20,
+                },
+            )]),
+        },
+        signatures: vec![CatalogSignatureV1 {
+            key_id: "fixture-measurement-key".to_owned(),
+            algorithm: "fixture".to_owned(),
+            signature: "valid".to_owned(),
+        }],
+    };
+    let (verified, _) = verify_measured_resource_envelope(
+        &envelope,
+        &FixtureMeasurementVerifier,
+        &MeasurementTrustPolicyV1 {
+            signature_threshold: 1,
+            minimum_samples: 20,
+            maximum_lifetime_seconds: 2_000,
+            maximum_clock_skew_seconds: 10,
+        },
+        &MeasurementTrustStateV1::default(),
+        200,
+    )
+    .unwrap();
+    let governor = ResourceGovernorV1::new(ResourceGovernorPolicyV1 {
+        schema: RESOURCE_GOVERNOR_POLICY_SCHEMA_V1.to_owned(),
+        vram_soft_ceiling_basis_points: 9_000,
+        ram_soft_ceiling_basis_points: 9_000,
+        minimum_vram_safety_bytes: 1_000_000_000,
+        proportional_vram_safety_basis_points: 1_000,
+        minimum_ram_safety_bytes: 2_000_000_000,
+        maximum_snapshot_age_millis: 100,
+        keep_warm_millis: 30_000,
+        unload_ttl_millis: 120_000,
+    })
+    .unwrap();
+    governor
+        .admit(
+            &LiveResourceSnapshotV1 {
+                captured_monotonic_millis: 1_000,
+                device_fingerprint_sha256: device,
+                physical_vram_bytes: 12_000_000_000,
+                os_vram_budget_bytes: 12_000_000_000,
+                desktop_resident_vram_bytes: 500_000_000,
+                game_resident_vram_bytes: 5_000_000_000,
+                game_reserve_vram_bytes: 7_000_000_000,
+                physical_ram_bytes: 32_000_000_000,
+                available_ram_bytes: 20_000_000_000,
+                game_additional_reserve_ram_bytes: 2_000_000_000,
+            },
+            1_050,
+            &[LoadoutModelRequestV1 {
+                role: manifest.capability.kind.clone(),
+                mode: ResidencyModeV1::CpuResident,
+                envelope: &verified,
+            }],
+        )
+        .unwrap()
 }
 
 fn finish_install(
@@ -334,6 +435,56 @@ fn api_first_policy_allows_only_explicit_generic_lip_sync_selection() {
         policy.authorize(&game_specific, explicit),
         Err(PackSelectionError::GenericLipSyncRequired)
     );
+}
+
+#[test]
+fn measured_local_policy_requires_complete_loadout_wide_fit_before_activation() {
+    let policy = MeasuredLocalPackSelectionPolicyV1;
+    let manifest = sample_manifest("local.language", "r1", b"weights");
+    let request = PackSelectionRequestV1 {
+        selection_id: "selection-local-001".to_owned(),
+        origin: PackSelectionOriginV1::ExplicitUser,
+        action: PackSelectionActionV1::InstallAndActivate,
+        selected_unix_seconds: 10,
+    };
+    for kind in [
+        ModelPackKindV1::LanguageModel,
+        ModelPackKindV1::SpeechRecognition,
+        ModelPackKindV1::SpeechSynthesis,
+        ModelPackKindV1::Embedding,
+        ModelPackKindV1::Vision,
+        ModelPackKindV1::LipSync,
+    ] {
+        let mut selected = manifest.clone();
+        selected.capability.kind = kind;
+        let admission = measured_admission(&selected);
+        let authorization = policy
+            .authorize(&selected, request.clone(), Some(&admission))
+            .expect("measured local pack should be authorized");
+        assert!(authorization.activation_allowed());
+        authorization
+            .validate_for_manifest(&selected)
+            .expect("authorization remains bound to the manifest and fit policy");
+    }
+
+    assert_eq!(
+        policy.authorize(&manifest, request.clone(), None),
+        Err(PackSelectionError::IncompleteLoadoutFitEvidence)
+    );
+
+    let different = sample_manifest("local.different", "r1", b"weights");
+    let unrelated_admission = measured_admission(&different);
+    assert_eq!(
+        policy.authorize(&manifest, request.clone(), Some(&unrelated_admission)),
+        Err(PackSelectionError::LoadoutAdmissionDoesNotCoverManifest)
+    );
+
+    let mut install_only = request;
+    install_only.action = PackSelectionActionV1::InstallOnly;
+    let authorization = policy
+        .authorize(&manifest, install_only, None)
+        .expect("an explicit install may precede device qualification");
+    assert!(!authorization.activation_allowed());
 }
 
 #[test]

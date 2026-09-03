@@ -151,6 +151,8 @@ impl LegacyProfileV1 {
                 biography: v.biography,
                 personality: v.personality,
                 dialogue_style: v.dialogue_style,
+                style_examples: vec![],
+                opening_lines: vec![],
                 background_npc: false,
                 prompt: CharacterPrompt {
                     role: "Remain in character and answer using only established world knowledge."
@@ -212,7 +214,11 @@ impl LegacyProfileV1 {
                 spoiler_policy: "Default to introductory knowledge; the user must explicitly unlock later tiers.".into(),
                 spoiler_tiers: vec![SpoilerTier { id: "introductory".into(), description: "Opening-world knowledge without quest outcomes.".into(), default_enabled: true }],
                 background_npc_rules: vec!["Use explicit selection and create a distinct encounter identity.".into()],
-                provenance: vec![ProvenanceRecord { id: provenance_id, title: "Local v1 profile import".into(), kind: ProvenanceKind::LegacyImport, source_url: None, license: None, notes: Some("Requires human provenance review before distribution.".into()) }],
+                provenance: vec![ProvenanceRecord { id: provenance_id, title: "Local v1 profile import".into(), kind: ProvenanceKind::LegacyImport, source_url: None, license: None, notes: Some("Requires human provenance review before distribution.".into()), source_revision: None, source_path: None, source_sha256: None, review_status: Some(ReviewStatus::Pending), transform_version: Some("game-profile-v1-to-v2".into()) }],
+                knowledge: vec![],
+                retrieval: RetrievalPolicy::default(),
+                character_data_readiness: Some(CharacterDataReadiness::Partial),
+                character_data_readiness_notes: Some("Migrated character records require provenance and content review.".into()),
             },
             characters,
             defaults: ProfileDefaults { character_id: default_character, model: default_model(), voice: default_voice() },
@@ -223,6 +229,13 @@ impl LegacyProfileV1 {
                 safety_rules: vec!["Remain in single-player contexts and never instruct anti-cheat bypass.".into()],
                 background_npc_template: "Create a grounded temporary NPC identity using the current location and selected spoiler tier.".into(),
             },
+            recommendations: Some(RecommendationPolicy {
+                integration_mode: IntegrationMode::ExternalOnly,
+                provider_strategy: ProviderStrategy::ApiFirst,
+                local_activation_policy: LocalActivationPolicy::MeasuredWholeLoadoutFitRequired,
+                game_resource_reserve_required: true,
+                screen_space_lip_sync: ScreenSpaceLipSyncRecommendation::ExperimentalOptInAfterExactTargetAndAdvancingFrameQualification,
+            }),
         }
     }
 }
@@ -240,6 +253,10 @@ fn default_voice() -> VoiceDefaults {
         locale: "en-US".into(),
         style_tags: vec!["natural".into()],
         provider_voice_id: None,
+        adapter_id: None,
+        catalog_version: None,
+        license: None,
+        user_override_allowed: true,
     }
 }
 

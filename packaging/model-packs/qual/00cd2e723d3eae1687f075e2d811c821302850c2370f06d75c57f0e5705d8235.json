@@ -1,0 +1,44 @@
+{
+  "signed": {
+    "schema": "npc.measured-resource-envelope/v1",
+    "report_id": "openseeface-1788075067-final-manifest-review-rebind",
+    "sequence": 1788075068,
+    "measured_unix_seconds": 1788075067,
+    "expires_unix_seconds": 1790667067,
+    "device_fingerprint_sha256": "480a0ebfe9b7f9ce9edc0b5e98d97491c7c3a2c8e5d3e52bcb4d13f9e3a230ce",
+    "identity": {
+      "pack_id": "openseeface-mnv3-lm1-mouth-signal",
+      "revision": "85aa70fc67582d046e771ea73625182a0d8f7475"
+    },
+    "manifest_sha256": "0127b61113b1f838bf70bdc4127bd7d5f7f9a75fde95429c89c5e726751f0552",
+    "capability": "vision",
+    "benchmark_suite_revision": "openseeface-current-frame-windows-cpu-v2-2026-08-30",
+    "runtime": "onnxruntime",
+    "runtime_revision": "1.22.1",
+    "backend": "cpu-execution-provider-one-thread",
+    "sample_count": 20,
+    "placements": {
+      "cpu_resident": {
+        "resident_ram_bytes": 35086336,
+        "p99_total_ram_bytes": 125935616,
+        "resident_vram_bytes": 0,
+        "p99_workspace_vram_bytes": 0,
+        "p99_load_millis": 103,
+        "p99_reload_millis": 148,
+        "p99_operation_millis": 55
+      }
+    }
+  },
+  "signatures": [
+    {
+      "key_id": "automated-local-review-rev4-ephemeral-1",
+      "algorithm": "ed25519",
+      "signature": "sxi0a24sj_bR5Qcb2WyOYi60HqFADWYTSrdBH03lDzfbgO3uB0u5xXHPRUGswxUbTIIPHFktEEN2UTMPPaytDw"
+    },
+    {
+      "key_id": "automated-local-review-rev4-ephemeral-2",
+      "algorithm": "ed25519",
+      "signature": "0KbTsbjL2h-BcXsEPKoN48ODXKHg4LBcl82zoCRrbS2kyuAfATwPyPdnn5DBjhzvV4sspfFF09STYImeJ2zAAA"
+    }
+  ]
+}

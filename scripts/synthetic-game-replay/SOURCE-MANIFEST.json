@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "component_id": "interactive-npcs-synthetic-review-game",
+  "component_version": "1.1.0",
+  "source_path": "scripts/synthetic-game-replay/SyntheticGameReplay.cs",
+  "source_sha256": "7df6fedce8f4b17e080c46dfc84e0fc7aa6876ca3054c932157d76ff30766d84",
+  "source_spdx_identifier": "MIT",
+  "license_path": "LICENSE",
+  "license_sha256": "8703e8c956a5accb5322bf6160ae4b5612683d680d8803a2288ff0a95f834ce8",
+  "license_expression": "MIT",
+  "copyright_notice": "Copyright (c) 2023 Akshit Ireddy",
+  "distribution_class": "project-owned-source-built-review-fixture",
+  "portrait_asset": {
+    "path": "scripts/synthetic-game-replay/assets/mara-venn-portrait-v1.png",
+    "sha256": "0ae10605199bb831c34a3be29c31a06f8a1d5a7e5cd07b8a1456866f2bb7dc2d",
+    "provenance_path": "scripts/synthetic-game-replay/assets/PROVENANCE.md",
+    "provenance_sha256": "d9a4778a039b1292285ed2d54ad34a2c4c0f4ef3980dcc24c5ddedc7040fd3da",
+    "resource_name": "InteractiveNpcs.SyntheticReplay.MaraVennPortraitV1.png",
+    "visual_source": "embedded-original-generated-photorealistic-portrait-v1",
+    "source_mouth_motion": false
+  },
+  "build_toolchain": {
+    "host_path": "%ProgramFiles%/dotnet/dotnet.exe",
+    "host_sha256": "c9fbb23d644f162894635776ad92ff137f0de05b34ace4a3737882609872fa48",
+    "sdk_version": "9.0.302",
+    "compiler_path": "%ProgramFiles%/dotnet/sdk/9.0.302/Roslyn/bincore/csc.dll",
+    "compiler_sha256": "0124776082578cebfe5d7cdf6ca37e7dc87771e224ba3a9c59d04b28260e9569",
+    "framework_reference_root": "%WINDIR%/Microsoft.NET/Framework64/v4.0.30319",
+    "framework_references": [
+      { "path": "mscorlib.dll", "sha256": "a8cae3d326f7d973ca79cba849939d4837ad18d507ef6d5f6ebab802b7fb157a" },
+      { "path": "System.dll", "sha256": "2b3c17c6208a0b4b6beb94e1a066f99ba06cdb2ea919479e99d47e8c6d96dc71" },
+      { "path": "System.Core.dll", "sha256": "06fbe25901c981f00f6dc823be375e1468cf6c05f000606bc93897732172fdd6" },
+      { "path": "System.Drawing.dll", "sha256": "e16f7abead4afde7f03b82e5869c5544043be2eae29647a9de5f565d61a3bd29" },
+      { "path": "System.Windows.Forms.dll", "sha256": "8c0f533e089647aeffb3ce0868f01d696a3fd2893ced5c3570e8438c96613a98" },
+      { "path": "System.Web.Extensions.dll", "sha256": "5e6378edc06f5a61920aaadb2aba839dd3cf302d6192e08aacd4454ba4cff0b3" }
+    ]
+  },
+  "third_party_binaries": [],
+  "inbox_system_dependencies": [
+    "Windows .NET Framework 4.x",
+    "Windows Forms and GDI+",
+    "Windows SoundPlayer/waveOut"
+  ]
+}

@@ -7,6 +7,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
+. (Join-Path $PSScriptRoot '../windows/node-tooling.ps1')
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { $OutputDirectory = Join-Path $repoRoot 'artifacts/sbom' }
 if (-not [System.IO.Path]::IsPathRooted($OutputDirectory)) { $OutputDirectory = Join-Path $repoRoot $OutputDirectory }
@@ -24,14 +25,19 @@ if ($null -eq $python) {
 $pythonPath = if ($python -is [System.IO.FileInfo]) { $python.FullName } else { $python.Source }
 $fallbackOutput = Join-Path $OutputDirectory 'lockfiles.cdx.json'
 $sourceEvidence = Join-Path $OutputDirectory 'source-evidence.json'
-$sourceArguments = '"{0}" --root "{1}" --out "{2}"' -f (Join-Path $PSScriptRoot 'generate_source_evidence.py'), $repoRoot, $sourceEvidence
-$sourceProcess = Start-Process -FilePath $pythonPath -ArgumentList $sourceArguments -NoNewWindow -Wait -PassThru
+$sourceProcess = Invoke-NpcHiddenProcess -FilePath $pythonPath -ArgumentList @(
+    (Join-Path $PSScriptRoot 'generate_source_evidence.py'), '--root', $repoRoot, '--out', $sourceEvidence
+)
 if ($sourceProcess.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $sourceEvidence -PathType Leaf)) {
     Write-Error 'Source identity evidence generation failed.'
     exit 1
 }
-$sbomArguments = '"{0}" --root "{1}" --out "{2}" --source-evidence "{3}"' -f (Join-Path $PSScriptRoot 'generate_lock_sbom.py'), $repoRoot, $fallbackOutput, $sourceEvidence
-$sbomProcess = Start-Process -FilePath $pythonPath -ArgumentList $sbomArguments -NoNewWindow -Wait -PassThru
+$sbomArguments = @(
+    (Join-Path $PSScriptRoot 'generate_lock_sbom.py'), '--root', $repoRoot,
+    '--out', $fallbackOutput, '--source-evidence', $sourceEvidence
+)
+if ($Strict) { $sbomArguments += '--strict' }
+$sbomProcess = Invoke-NpcHiddenProcess -FilePath $pythonPath -ArgumentList $sbomArguments
 if ($sbomProcess.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $fallbackOutput -PathType Leaf)) {
     Write-Error 'The complete lockfile CycloneDX generator failed.'
     exit 1
@@ -46,7 +52,12 @@ if ($Enrich) {
         Write-Error "Optional enrichment was requested, but pinned cargo-cyclonedx $expected is unavailable. Nothing was auto-installed."
         exit 2
     }
-    $versionOutput = (& cargo-cyclonedx --version 2>&1 | Out-String)
+    $versionProcess = Invoke-NpcHiddenProcess -FilePath $generator.Source -ArgumentList @('--version') -NoReplayOutput
+    if ($versionProcess.ExitCode -ne 0) {
+        Write-Error "cargo-cyclonedx version probe failed with exit code $($versionProcess.ExitCode)."
+        exit $versionProcess.ExitCode
+    }
+    $versionOutput = $versionProcess.StandardOutput + $versionProcess.StandardError
     if ($versionOutput -notmatch [regex]::Escape($expected)) {
         Write-Error "cargo-cyclonedx version does not match pinned version $expected."
         exit 2

@@ -1,19 +1,30 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeBuildCommand": ""
+  },
   "bundle": {
     "active": true,
     "targets": [
       "nsis"
     ],
     "createUpdaterArtifacts": false,
+    "externalBin": [
+      "binaries/npc-runtime",
+      "binaries/npc-media-broker",
+      "binaries/npc-mouth-worker",
+      "binaries/npc-subtitle-presenter"
+    ],
+    "resources": {
+      "generated-resources/": "product-audit/"
+    },
     "windows": {
       "webviewInstallMode": {
-        "type": "downloadBootstrapper",
-        "silent": true
+        "type": "skip"
       },
       "nsis": {
         "displayLanguageSelector": false,
-        "installerHooks": "../../../packaging/windows/nsis/installer-hooks.nsh",
+        "installerHooks": "generated-installer-inputs/installer-hooks.generated.nsh",
         "installMode": "currentUser",
         "languages": [
           "English"

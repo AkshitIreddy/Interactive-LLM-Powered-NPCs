@@ -1,0 +1,51 @@
+{
+  "schema": "npc.identity-qualification-run-config/v1",
+  "suite_revision": "identity-yunet-sface-windows-2026-08-30.v1",
+  "paths": {
+    "plan": "qualification-plan.v1.json",
+    "pack_manifest": "../../packaging/model-packs/opencv-yunet-sface-private-evaluation.json",
+    "artifact_root": "C:/ProgramData/InteractiveNPCs/model-packs/opencv-yunet-sface-private-eval/zoo-47534e27-opencv-5.0.0.93",
+    "runtime_python": "C:/ProgramData/InteractiveNPCs/runtimes/identity-cp312/Scripts/python.exe",
+    "runtime_requirements": "runtime-requirements.windows-x86_64-cp312.v1.json",
+    "runtime_inventory": "C:/ProgramData/InteractiveNPCs/runtimes/identity-cp312/installed-runtime-inventory.v1.json",
+    "driver_executable": "C:/Program Files/Interactive NPCs/npc_identity_qualification_driver.exe",
+    "fixture_manifest": "C:/Users/REPLACE_ME/AppData/Local/InteractiveNPCs/private-identity-fixtures/corpus.v1.json",
+    "parent_grant": "C:/Users/REPLACE_ME/AppData/Local/InteractiveNPCs/grants/identity-parent-grant.v1.json",
+    "gpu_lock": "C:/Users/akshi/Desktop/Code Palace/gpu use.txt",
+    "output_directory": "C:/Users/REPLACE_ME/AppData/Local/InteractiveNPCs/qualification/REPLACE_WITH_EMPTY_DIRECTORY"
+  },
+  "pins": {
+    "plan_sha256": "REPLACE_WITH_CURRENT_QUALIFICATION_PLAN_SHA256",
+    "pack_manifest_sha256": "a4af4874af77c4dc517fe41990371e96e68a4469ee6817102876b7b074302e67",
+    "runtime_requirements_sha256": "e63cdbf08823ea44c6ad307f38636d9b2eaff511078d2243c253bc8dbc766e96",
+    "driver_sha256": "REPLACE_WITH_REVIEWED_NATIVE_DRIVER_SHA256",
+    "fixture_manifest_sha256": "REPLACE_WITH_PRIVATE_FIXTURE_MANIFEST_SHA256"
+  },
+  "target": {
+    "process_id": 1,
+    "window_handle": 1,
+    "executable_path": "C:/REPLACE/WITH/OFFLINE_TEST_GAME.exe",
+    "executable_sha256": "REPLACE_WITH_TEST_GAME_SHA256",
+    "online_or_anti_cheat": false,
+    "overlay_capture_excluded": true
+  },
+  "execution": {
+    "cpu_threads": 2,
+    "other_selected_local_models_loaded": true,
+    "single_face_samples": 100,
+    "multi_face_samples": 100,
+    "lifecycle_samples": 20,
+    "driver_protocol": "npc.identity-wgc-qualification-driver/v1",
+    "driver_source": "windows_graphics_capture_command_16_17",
+    "no_download": true,
+    "hidden_children": true,
+    "emit_unsigned_only": true
+  },
+  "telemetry": {
+    "process_ram_cpu": "windows_process_counters",
+    "gpu_memory": "dxgi_per_process_dedicated_and_shared",
+    "game_frame_time": "presentmon_etw_or_equivalent_current_process",
+    "network_egress": "windows_tcp_udp_owner_pid_pre_post_and_during",
+    "driver_cleanup": "job_object_kill_on_close_and_mapping_release_ack"
+  }
+}

@@ -190,6 +190,8 @@
     }
   },
   "content": {
+    "character_data_readiness": "curated",
+    "character_data_readiness_notes": "Shipped named-character records have stable IDs and authored biography, personality, dialogue-style, prompt, voice-intent, explicit-selection identity, and provenance metadata; live visual identity is not certified.",
     "world_lore": "The Lands Between are shaped by a broken order, rival demigods, long wars, and layers of belief that do not resolve into one trustworthy account. Grace guides some Tarnished back from exile, but guidance does not determine what they will value or whom they will serve. The Erdtree dominates the landscape and the Golden Order dominates many institutions, while older peoples, outer powers, sorcerous traditions, underground civilizations, wandering merchants, and those rejected by grace preserve different memories. Ruins and item histories suggest connections, not an omniscient transcript of the past. NPC dialogue should be elliptical without becoming meaningless: characters know their vows, place, relationships, and witnessed events, not every hidden explanation. The player's origin, allegiance, discoveries, Great Runes, deaths, endings, and expansion progress must come from explicit session state.",
     "spoiler_policy": "Start with the opening journey, public Roundtable roles, and locations the user marks discovered. Gate demigod outcomes, NPC quest turns, the nature of the world's powers, endings, and Shadow of the Erdtree material separately.",
     "spoiler_tiers": [
@@ -729,7 +731,26 @@
       ]
     }
   },
+  "recommendations": {
+    "integration_mode": "external_only",
+    "provider_strategy": "api_first",
+    "local_activation_policy": "measured_whole_loadout_fit_required",
+    "game_resource_reserve_required": true,
+    "screen_space_lip_sync": "experimental_opt_in_after_exact_target_and_advancing_frame_qualification"
+  },
   "diagnostics": [
+    {
+      "id": "recommended-feature-loadout",
+      "severity": "info",
+      "check": "Keep a game-first resource reserve, prefer explicitly configured API routes for LLM, STT, TTS, and embeddings, and admit optional local models only after measured whole-loadout RAM and VRAM fit checks.",
+      "remediation": "Move optional language or speech roles to an explicitly selected hosted provider, unload nonessential local models, or increase the configured game reserve; keep experimental screen-space lip sync disabled until exact target binding, advancing-frame, and untouched-frame restore checks pass."
+    },
+    {
+      "id": "external-only-safety",
+      "severity": "error",
+      "check": "Confirm the selected target remains an eligible single-player top-level game window and that the session uses external capture, audio, and subtitles only, with no injection, hooks, automated input, or anti-cheat bypass.",
+      "remediation": "Stop on online, protection, process, PID, HWND, executable, or session-mode ambiguity; return to a clearly eligible single-player state and bind the exact game window again, otherwise use no game integration."
+    },
     {
       "id": "offline-mode-proof",
       "severity": "error",

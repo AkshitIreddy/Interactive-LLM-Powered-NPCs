@@ -7,7 +7,7 @@ const { spawnSync } = require("node:child_process");
 const test = require("node:test");
 const { canonicalJson } = require("../src/canonical.ts");
 const { fixtureRoot, readJson, loadScenarios, loadScenario, computeFixtureLedger } = require("../src/manifest.ts");
-const { SPINE, simulate, assertExpected } = require("../src/simulator.ts");
+const { SPINE, simulate, evaluateExpected, assertExpected } = require("../src/simulator.ts");
 const { nearestRank, buildBenchmarkReport } = require("../src/benchmark.ts");
 
 function run(id) {
@@ -19,7 +19,7 @@ function run(id) {
 
 test("all versioned scenarios replay byte-for-byte and match golden trace hashes", () => {
   const loaded = loadScenarios();
-  assert.equal(loaded.length, 7);
+  assert.equal(loaded.length, 13);
   for (const { scenario, resourceProfile } of loaded) {
     const first = simulate(scenario, resourceProfile);
     const replay = simulate(scenario, resourceProfile);
@@ -63,6 +63,73 @@ test("barge-in advances cancellation generation and rejects all stale queued chu
   assert.ok(stale.length >= 5);
   assert.ok(stale.every((event) => event.payload.reason === "stale_cancellation_generation"));
   assert.equal(result.events.filter((event) => event.kind === "audio.chunk").length, 1);
+  assert.equal(result.metrics.deliveryCommitCount, 0);
+  assert.equal(result.events.some((event) => event.kind === "delivery.committed"), false);
+});
+
+test("typed input completes through audio, current-frame lip-sync, and one delivery commit", () => {
+  const result = run("typed-turn");
+  assert.equal(result.status, "completed");
+  assert.equal(result.metrics.inputReadyToFirstAudioMs, 205);
+  assert.equal(result.metrics.deliveryCommitCount, 1);
+  assert.equal(result.events.filter((event) => event.kind === "animation.patch_applied").length, 1);
+  assert.deepEqual([result.spine.listening, result.spine.transcribing], ["skipped", "skipped"]);
+});
+
+test("provider timeout requires an explicit manual retry on a new generation", () => {
+  const result = run("provider-timeout-manual-retry");
+  const error = result.events.find((event) => event.kind === "turn.error");
+  const retry = result.events.find((event) => event.kind === "turn.retry_started");
+  const commit = result.events.find((event) => event.kind === "delivery.committed");
+  assert.equal(error.payload.code, "provider_timeout");
+  assert.equal(error.payload.retryable, true);
+  assert.equal(retry.cancellationGeneration, 1);
+  assert.equal(commit.cancellationGeneration, 1);
+  assert.ok(commit.sequence > retry.sequence);
+  assert.equal(result.metrics.failureToRecoveryMs, 100);
+});
+
+test("runtime crash and restart cannot falsely commit the pre-crash generation", () => {
+  const result = run("runtime-crash-restart");
+  assert.equal(result.metrics.runtimeRestartCount, 1);
+  assert.equal(result.metrics.deliveryCommitCount, 1);
+  assert.equal(result.metrics.rejectedDeliveryCommitCount, 0);
+  const staleCommit = result.events.find(
+    (event) => event.kind === "late_event.ignored" && event.source === "delivery" && event.payload.kind === "commit",
+  );
+  assert.equal(staleCommit.payload.reason, "stale_cancellation_generation");
+  const committed = result.events.filter((event) => event.kind === "delivery.committed");
+  assert.equal(committed.length, 1);
+  assert.equal(committed[0].payload.sentenceId, "post-restart");
+});
+
+test("identity ambiguity and a missed track never guess before manual resolution", () => {
+  const result = run("actor-ambiguity-miss");
+  const evidence = result.events.filter((event) => event.kind.startsWith("identity."));
+  assert.deepEqual(evidence.map((event) => event.kind), ["identity.ambiguous", "identity.missed", "identity.resolved"]);
+  assert.equal(evidence[0].payload.action, "do_not_guess");
+  assert.equal(evidence[2].payload.strategy, "manual_target");
+});
+
+test("stale lip-sync patches are dropped by frame and actor epoch while current work applies", () => {
+  const result = run("stale-lipsync-drop");
+  const dropped = result.events.filter((event) => event.kind === "animation.patch_dropped");
+  assert.deepEqual(dropped.map((event) => event.payload.reason), ["captured_frame_not_current", "actor_track_epoch_mismatch"]);
+  assert.equal(result.events.filter((event) => event.kind === "animation.patch_applied").length, 1);
+  assert.equal(result.metrics.staleLipSyncDropCount, 2);
+});
+
+test("seed fixture replays byte-identically and a different seed changes the canonical trace", () => {
+  const { scenario, resourceProfile } = loadScenario("seed-reproducibility");
+  const first = simulate(scenario, resourceProfile);
+  const replay = simulate(structuredClone(scenario), resourceProfile);
+  const otherSeed = structuredClone(scenario);
+  otherSeed.seed += 1;
+  const divergent = simulate(otherSeed, resourceProfile);
+  assert.equal(first.jsonl, replay.jsonl);
+  assert.equal(first.traceSha256, replay.traceSha256);
+  assert.notEqual(first.traceSha256, divergent.traceSha256);
+  assert.notEqual(first.events[0].payload.deterministicRunId, divergent.events[0].payload.deterministicRunId);
 });
 
 test("provider failure is retryable and never commits mocked audio", () => {
@@ -114,7 +181,7 @@ test("virtual benchmark report keeps power constraints and refuses canonical sta
   const report = buildBenchmarkReport();
   assert.equal(report.schemaVersion, "npc.sim.benchmark.v1");
   assert.equal(report.canonicalReleaseBenchmark, false);
-  assert.equal(report.observations.length, 7);
+  assert.equal(report.observations.length, 13);
   assert.ok(report.observations.every((observation) => observation.canonicalMeasurement === false));
   const constrained = report.observations.find((observation) => observation.resourceProfileId === "silent-shared-machine");
   assert.deepEqual(
@@ -134,7 +201,13 @@ test("CLI returns canonical JSONL and verifies the complete corpus", () => {
 
   const verifyResult = spawnSync(process.execPath, [cli, "verify"], { encoding: "utf8" });
   assert.equal(verifyResult.status, 0, verifyResult.stderr);
-  assert.equal(JSON.parse(verifyResult.stdout).status, "ok");
+  const verification = JSON.parse(verifyResult.stdout);
+  assert.equal(verification.status, "ok");
+  assert.equal(verification.schemaVersion, "npc.sim.verification.v1");
+  assert.equal(verification.scenarioCount, 13);
+  assert.ok(verification.assertionCount >= 80);
+  assert.ok(verification.scenarios.every((scenario) => scenario.assertions.every((assertion) => assertion.passed)));
+  assert.ok(verification.scenarios.every((scenario) => typeof scenario.metrics.eventCountBeforeSummary === "number"));
 
   const benchmarkResult = spawnSync(process.execPath, [cli, "benchmark"], { encoding: "utf8" });
   assert.equal(benchmarkResult.status, 0, benchmarkResult.stderr);

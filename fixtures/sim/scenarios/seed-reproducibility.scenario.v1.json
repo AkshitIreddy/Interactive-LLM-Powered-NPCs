@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "npc.sim.scenario.v1",
+  "id": "seed-reproducibility",
+  "description": "A compact typed turn proves byte-identical replay for one seed and a distinct deterministic run identifier for another seed.",
+  "seed": 3006,
+  "resourceProfile": "reference-balanced-12gb",
+  "privacy": { "mode": "offline", "networkAllowed": false },
+  "providers": { "llm": "mock-local", "tts": "mock-local" },
+  "turn": {
+    "sessionId": "session-seed-replay",
+    "turnId": "turn-seed-replay-001",
+    "inputMode": "typed",
+    "npc": { "id": "seeded-npc", "name": "Seeded NPC", "visibility": "offscreen" }
+  },
+  "stream": [
+    { "atMs": 0, "source": "input", "kind": "typed_input", "payload": { "text": "Replay this." } },
+    { "atMs": 15, "source": "identity", "kind": "resolved", "payload": { "strategy": "manual_target", "confidence": 1 } },
+    { "atMs": 30, "source": "memory", "kind": "retrieved", "payload": { "episodicCount": 0, "factCount": 0, "latencyMs": 15 } },
+    { "atMs": 60, "source": "llm", "kind": "sentence", "payload": { "text": "Replay confirmed." } },
+    { "atMs": 100, "source": "tts", "kind": "audio_chunk", "payload": { "chunkIndex": 0, "sampleCount": 960, "sampleRateHz": 24000 } },
+    { "atMs": 130, "source": "llm", "kind": "complete", "payload": { "finishReason": "stop", "text": "Replay confirmed." } },
+    { "atMs": 160, "source": "tts", "kind": "complete", "payload": { "chunks": 1, "deliveredText": "Replay confirmed." } },
+    { "atMs": 170, "source": "delivery", "kind": "commit", "payload": { "sentenceId": "sentence-seed-1", "deliveredText": "Replay confirmed." } }
+  ],
+  "faults": [],
+  "expected": {
+    "status": "completed",
+    "traceSha256": "df351549ae84664cf83624555f339762154d48072b7f9f5a64ad3d26ed15393a",
+    "firstAudioAtMs": 100,
+    "networkAttempts": 0,
+    "degradationReasons": [],
+    "metrics": { "inputReadyToFirstAudioMs": 100, "deliveryCommitCount": 1 },
+    "eventCounts": { "delivery.committed": 1 }
+  }
+}

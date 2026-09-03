@@ -3,7 +3,9 @@ use crate::{
     validate_archive_entries, validate_relative_archive_path, ArchiveEntry, ArchiveEntryKind,
     ArchiveFormatV1, ArchivePolicy, ArchiveValidationError, ArtifactKind, ArtifactV1,
 };
+use bzip2::read::BzDecoder;
 use flate2::read::GzDecoder;
+use std::collections::BTreeSet;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -26,20 +28,27 @@ pub fn extract_artifact(
         ArtifactKind::File => install_single_file(artifact, verified_source, staging_root),
         ArtifactKind::Archive => match artifact.archive_format.as_ref() {
             Some(ArchiveFormatV1::Zip) => {
-                extract_zip(verified_source, staging_root, &artifact.destination, policy)
+                extract_zip(artifact, verified_source, staging_root, policy)
             }
             Some(ArchiveFormatV1::Tar) => extract_tar_path(
                 verified_source,
-                false,
+                TarCompression::None,
                 staging_root,
-                &artifact.destination,
+                artifact,
                 policy,
             ),
             Some(ArchiveFormatV1::TarGz) => extract_tar_path(
                 verified_source,
-                true,
+                TarCompression::Gzip,
                 staging_root,
-                &artifact.destination,
+                artifact,
+                policy,
+            ),
+            Some(ArchiveFormatV1::TarBz2) => extract_tar_path(
+                verified_source,
+                TarCompression::Bzip2,
+                staging_root,
+                artifact,
                 policy,
             ),
             None => Err(ExtractionError::MissingArchiveFormat),
@@ -77,12 +86,12 @@ fn install_single_file(
 }
 
 fn extract_zip(
+    artifact: &ArtifactV1,
     source: &Path,
     staging_root: &Path,
-    destination: &str,
     policy: &ArchivePolicy,
 ) -> Result<ExtractedArtifact, ExtractionError> {
-    let prefix = validate_relative_archive_path(destination)?;
+    let destination = validate_relative_archive_path(&artifact.destination)?;
     let file = File::open(source).map_err(ExtractionError::Io)?;
     let mut archive = zip::ZipArchive::new(file).map_err(ExtractionError::Zip)?;
     let mut metadata = Vec::with_capacity(archive.len());
@@ -107,17 +116,21 @@ fn extract_zip(
     let mut archive = zip::ZipArchive::new(file).map_err(ExtractionError::Zip)?;
     let mut files = Vec::new();
     let mut total = 0_u64;
+    let mut found = BTreeSet::new();
     for index in 0..archive.len() {
         let mut member = archive.by_index(index).map_err(ExtractionError::Zip)?;
         let name = std::str::from_utf8(member.name_raw())
             .map_err(|_| ExtractionError::NonUtf8Path)?
             .to_owned();
-        let relative = validate_relative_archive_path(&name)?;
-        let target = staging_root.join(prefix.as_str()).join(relative.as_str());
         if zip_entry_kind(&member) == ArchiveEntryKind::Directory {
-            create_directory(staging_root, &target)?;
             continue;
         }
+        let Some(relative) = selected_archive_member(artifact, &name, &mut found)? else {
+            continue;
+        };
+        let target = staging_root
+            .join(destination.as_str())
+            .join(relative.as_str());
         prepare_parent(staging_root, &target)?;
         let mut output = create_new_file(staging_root, &target)?;
         let expected = member.size();
@@ -133,6 +146,7 @@ fn extract_zip(
             .ok_or(ExtractionError::ExpandedSizeOverflow)?;
         files.push(target);
     }
+    require_archive_members(artifact, &found)?;
     Ok(ExtractedArtifact {
         files,
         total_bytes: total,
@@ -153,17 +167,17 @@ fn zip_entry_kind(member: &zip::read::ZipFile<'_>) -> ArchiveEntryKind {
 
 fn extract_tar_path(
     source: &Path,
-    compressed: bool,
+    compression: TarCompression,
     staging_root: &Path,
-    destination: &str,
+    artifact: &ArtifactV1,
     policy: &ArchivePolicy,
 ) -> Result<ExtractedArtifact, ExtractionError> {
-    let prefix = validate_relative_archive_path(destination)?;
+    let destination = validate_relative_archive_path(&artifact.destination)?;
     let preflight_file = File::open(source).map_err(ExtractionError::Io)?;
-    let preflight_reader: Box<dyn Read> = if compressed {
-        Box::new(GzDecoder::new(preflight_file))
-    } else {
-        Box::new(preflight_file)
+    let preflight_reader: Box<dyn Read> = match compression {
+        TarCompression::None => Box::new(preflight_file),
+        TarCompression::Gzip => Box::new(GzDecoder::new(preflight_file)),
+        TarCompression::Bzip2 => Box::new(BzDecoder::new(preflight_file)),
     };
     let mut preflight = tar::Archive::new(preflight_reader);
     let mut owned_metadata = Vec::new();
@@ -191,24 +205,29 @@ fn extract_tar_path(
     drop(preflight);
 
     let extraction_file = File::open(source).map_err(ExtractionError::Io)?;
-    let extraction_reader: Box<dyn Read> = if compressed {
-        Box::new(GzDecoder::new(extraction_file))
-    } else {
-        Box::new(extraction_file)
+    let extraction_reader: Box<dyn Read> = match compression {
+        TarCompression::None => Box::new(extraction_file),
+        TarCompression::Gzip => Box::new(GzDecoder::new(extraction_file)),
+        TarCompression::Bzip2 => Box::new(BzDecoder::new(extraction_file)),
     };
     let mut archive = tar::Archive::new(extraction_reader);
     let mut files = Vec::new();
     let mut total = 0_u64;
+    let mut found = BTreeSet::new();
     for entry in archive.entries().map_err(ExtractionError::Io)? {
         let mut entry = entry.map_err(ExtractionError::Io)?;
         let path = std::str::from_utf8(entry.path_bytes().as_ref())
             .map_err(|_| ExtractionError::NonUtf8Path)?
             .to_owned();
-        let relative = validate_relative_archive_path(&path)?;
-        let target = staging_root.join(prefix.as_str()).join(relative.as_str());
         match tar_entry_kind(entry.header().entry_type()) {
-            ArchiveEntryKind::Directory => create_directory(staging_root, &target)?,
+            ArchiveEntryKind::Directory => continue,
             ArchiveEntryKind::File => {
+                let Some(relative) = selected_archive_member(artifact, &path, &mut found)? else {
+                    continue;
+                };
+                let target = staging_root
+                    .join(destination.as_str())
+                    .join(relative.as_str());
                 prepare_parent(staging_root, &target)?;
                 let mut output = create_new_file(staging_root, &target)?;
                 let expected = entry.size();
@@ -227,10 +246,63 @@ fn extract_tar_path(
             other => return Err(ExtractionError::UnsupportedTarType(other)),
         }
     }
+    require_archive_members(artifact, &found)?;
     Ok(ExtractedArtifact {
         files,
         total_bytes: total,
     })
+}
+
+fn selected_archive_member(
+    artifact: &ArtifactV1,
+    member: &str,
+    found: &mut BTreeSet<String>,
+) -> Result<Option<crate::ValidatedArchivePath>, ExtractionError> {
+    let member = validate_relative_archive_path(member)?;
+    let relative = if let Some(prefix) = &artifact.strip_prefix {
+        let prefix = validate_relative_archive_path(prefix)?;
+        let expected = format!("{}/", prefix.as_str());
+        let stripped = member
+            .as_str()
+            .strip_prefix(&expected)
+            .ok_or_else(|| ExtractionError::MemberOutsideStripPrefix(member.as_str().to_owned()))?;
+        validate_relative_archive_path(stripped)?
+    } else {
+        member
+    };
+    if !artifact.required_paths.is_empty()
+        && !artifact
+            .required_paths
+            .iter()
+            .any(|required| required.eq_ignore_ascii_case(relative.as_str()))
+    {
+        return Ok(None);
+    }
+    if !found.insert(relative.as_str().to_ascii_lowercase()) {
+        return Err(ExtractionError::DuplicateRequiredMember(
+            relative.as_str().to_owned(),
+        ));
+    }
+    Ok(Some(relative))
+}
+
+fn require_archive_members(
+    artifact: &ArtifactV1,
+    found: &BTreeSet<String>,
+) -> Result<(), ExtractionError> {
+    for required in &artifact.required_paths {
+        if !found.contains(&required.to_ascii_lowercase()) {
+            return Err(ExtractionError::MissingRequiredMember(required.clone()));
+        }
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum TarCompression {
+    None,
+    Gzip,
+    Bzip2,
 }
 
 fn tar_entry_kind(entry_type: tar::EntryType) -> ArchiveEntryKind {
@@ -322,4 +394,10 @@ pub enum ExtractionError {
     ExpandedSizeOverflow,
     #[error("unsupported tar entry type: {0:?}")]
     UnsupportedTarType(ArchiveEntryKind),
+    #[error("archive member is outside the declared strip prefix: {0}")]
+    MemberOutsideStripPrefix(String),
+    #[error("required archive member is absent: {0}")]
+    MissingRequiredMember(String),
+    #[error("required archive member is duplicated: {0}")]
+    DuplicateRequiredMember(String),
 }

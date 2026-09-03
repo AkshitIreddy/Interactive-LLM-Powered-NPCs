@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "generated_asset_policy": "No generated or remotely downloaded font binaries are included.",
+  "assets": [
+    {
+      "path": "assets/subtitles/styles.v1.json",
+      "kind": "original_style_manifest",
+      "copyright": "Copyright (c) 2026 Interactive LLM Powered NPCs contributors",
+      "license_expression": "MIT",
+      "redistribution": "included"
+    },
+    {
+      "path": "assets/subtitles/fonts.v1.json",
+      "kind": "original_font_role_manifest",
+      "copyright": "Copyright (c) 2026 Interactive LLM Powered NPCs contributors",
+      "license_expression": "MIT",
+      "redistribution": "included"
+    },
+    {
+      "path": "assets/subtitles/licenses.v1.json",
+      "kind": "original_license_manifest",
+      "copyright": "Copyright (c) 2026 Interactive LLM Powered NPCs contributors",
+      "license_expression": "MIT",
+      "redistribution": "included"
+    }
+  ],
+  "font_license_references": [
+    {
+      "license_id": "LicenseRef-Microsoft-System-Font",
+      "applies_to": ["Segoe UI", "Segoe UI Semibold", "Segoe UI Emoji", "Nirmala UI", "Leelawadee UI", "Microsoft YaHei UI", "Yu Gothic UI", "Malgun Gothic"],
+      "binary_bundled": false,
+      "redistribution": "prohibited_by_project_policy",
+      "usage_basis": "Resolved only from the user's licensed Windows installation through the platform font API.",
+      "reference": "https://learn.microsoft.com/typography/fonts/font-faq"
+    },
+    {
+      "license_id": "OFL-1.1",
+      "applies_to": ["Noto Sans", "Noto Sans Arabic", "Noto Sans Hebrew", "Noto Sans Devanagari", "Noto Sans Bengali", "Noto Sans Thai", "Noto Sans CJK JP", "Noto Sans CJK KR", "Noto Color Emoji"],
+      "binary_bundled": false,
+      "redistribution": "not_applicable_system_reference_only",
+      "usage_basis": "Optional installed-family lookup; the project does not ship or fetch the font.",
+      "reference": "https://openfontlicense.org"
+    },
+    {
+      "license_id": "LicenseRef-Platform-Generic-Font",
+      "applies_to": ["sans-serif"],
+      "binary_bundled": false,
+      "redistribution": "not_applicable_logical_family",
+      "usage_basis": "Logical platform fallback resolved by the renderer; it does not identify a font binary.",
+      "reference": null
+    }
+  ]
+}

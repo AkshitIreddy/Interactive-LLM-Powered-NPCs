@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://interactive-npcs.invalid/schemas/character-mouth-atlas-v1.schema.json",
+  "title": "Interactive NPCs character mouth atlas v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "artifactType",
+    "status",
+    "characterBinding",
+    "source",
+    "texture",
+    "states",
+    "driver"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "artifactType": {
+      "const": "character-mouth-atlas"
+    },
+    "status": {
+      "enum": ["prototype", "unqualified", "qualified"]
+    },
+    "characterBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profileId", "identityRevision", "portraitSha256"],
+      "properties": {
+        "profileId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "identityRevision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._:-]+$"
+        },
+        "portraitSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["teacherId", "teacherVideoSha256", "audioSha256", "faceBox", "mouthBox"],
+      "properties": {
+        "teacherId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._:-]+$"
+        },
+        "teacherVideoSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "audioSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "faceBox": {
+          "$ref": "#/$defs/pixelBox"
+        },
+        "mouthBox": {
+          "$ref": "#/$defs/pixelBox"
+        }
+      }
+    },
+    "texture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file",
+        "sha256",
+        "bytes",
+        "pixelFormat",
+        "alphaMode",
+        "width",
+        "height",
+        "strideBytes",
+        "stateCount",
+        "stateBytes",
+        "neutralStateIndex"
+      ],
+      "properties": {
+        "file": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+\\.bin$",
+          "maxLength": 128
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 4096,
+          "maximum": 16777216
+        },
+        "pixelFormat": {
+          "const": "bgra8-unorm"
+        },
+        "alphaMode": {
+          "const": "premultiplied"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 512
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 512
+        },
+        "strideBytes": {
+          "type": "integer",
+          "minimum": 64,
+          "maximum": 2048
+        },
+        "stateCount": {
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 16
+        },
+        "stateBytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 1048576
+        },
+        "neutralStateIndex": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 15
+        }
+      }
+    },
+    "states": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["index", "byteOffset", "medoidFrameIndex", "teacherFrameCount"],
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 15
+          },
+          "byteOffset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 16777215
+          },
+          "medoidFrameIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "teacherFrameCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          }
+        }
+      }
+    },
+    "driver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "audioFeatureDimensions", "crossUtteranceQualified"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "unlabeled-prototype",
+            "same-clip-audio-centroids-proof",
+            "provider-viseme-map",
+            "qualified-local-viseme-classifier"
+          ]
+        },
+        "audioFeatureDimensions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4096
+        },
+        "crossUtteranceQualified": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "pixelBox": {
+      "type": "array",
+      "prefixItems": [
+        { "type": "integer", "minimum": 0 },
+        { "type": "integer", "minimum": 0 },
+        { "type": "integer", "minimum": 1 },
+        { "type": "integer", "minimum": 1 }
+      ],
+      "items": false,
+      "minItems": 4,
+      "maxItems": 4
+    }
+  }
+}

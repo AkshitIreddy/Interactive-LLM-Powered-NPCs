@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://interactive-npcs.invalid/schemas/embedding-tensor-v1.json",
+  "title": "Normalized local embedding tensor v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "model",
+    "preprocessing",
+    "element_format",
+    "distance_metric",
+    "items"
+  ],
+  "properties": {
+    "contract_version": { "const": "npc.embedding-tensor/v1" },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model_id", "revision", "pack_revision", "dimensions"],
+      "properties": {
+        "provider": { "const": "onnxruntime-cpu" },
+        "model_id": { "const": "BAAI/bge-small-en-v1.5" },
+        "revision": { "const": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a" },
+        "pack_revision": { "const": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a.1" },
+        "dimensions": { "const": 384 }
+      }
+    },
+    "preprocessing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision", "maximum_tokens", "pooling", "normalization", "query_instruction_applied"],
+      "properties": {
+        "revision": {
+          "enum": [
+            "bge-en-v1.5-cls-l2-tokenizer-5c38ec7-v1:query",
+            "bge-en-v1.5-cls-l2-tokenizer-5c38ec7-v1:passage"
+          ]
+        },
+        "maximum_tokens": { "const": 512 },
+        "pooling": { "const": "cls" },
+        "normalization": { "const": "l2" },
+        "query_instruction_applied": { "type": "boolean" }
+      }
+    },
+    "element_format": { "const": "f32_le" },
+    "distance_metric": { "const": "cosine" },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["input_id", "source_content_sha256", "values", "storage"],
+        "properties": {
+          "input_id": { "type": "string", "minLength": 2, "maxLength": 128 },
+          "source_content_sha256": { "$ref": "#/$defs/sha256" },
+          "values": {
+            "type": "array",
+            "minItems": 384,
+            "maxItems": 384,
+            "items": { "type": "number" }
+          },
+          "storage": {
+            "oneOf": [
+              { "type": "null" },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schema_version",
+                  "item_id",
+                  "generation",
+                  "model_id",
+                  "model_revision",
+                  "preprocessing_revision",
+                  "dimensions",
+                  "element_format",
+                  "distance_metric",
+                  "source_content_sha256",
+                  "tensor_sha256",
+                  "tensor_byte_length"
+                ],
+                "properties": {
+                  "schema_version": { "const": "character-db/1.0.0" },
+                  "item_id": { "type": "string", "minLength": 2, "maxLength": 128 },
+                  "generation": { "type": "integer", "minimum": 0 },
+                  "model_id": { "const": "BAAI/bge-small-en-v1.5" },
+                  "model_revision": { "const": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a" },
+                  "preprocessing_revision": { "type": "string", "minLength": 1 },
+                  "dimensions": { "const": 384 },
+                  "element_format": { "const": "f32_le" },
+                  "distance_metric": { "const": "cosine" },
+                  "source_content_sha256": { "$ref": "#/$defs/sha256" },
+                  "tensor_sha256": { "$ref": "#/$defs/sha256" },
+                  "tensor_byte_length": { "const": 1536 }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}
+

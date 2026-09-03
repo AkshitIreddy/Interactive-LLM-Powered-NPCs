@@ -1,5 +1,5 @@
-#[path = "../src/audio_output/mod.rs"]
-mod audio_output;
+#[cfg(windows)]
+use npc_runtime_host::audio_output;
 
 #[cfg(windows)]
 use std::time::Duration;

@@ -1,58 +1,67 @@
-# Interactive LLM Powered NPCs 2.0 — local-review handoff
+# Interactive LLM Powered NPCs 2.0 — headless visual-core handoff
 
-Updated: 2026-08-29
+Updated: 2026-09-03 IST
 
-## Current state
+## Current decision
 
-- Branch: `feat/2.0-overhaul`.
-- The 1.x notebook/SadTalker prototype has been retired. The active product is
-  a Windows-only, generic external-capture companion: no game injection, mod,
-  hook, native-rig, or executable adapter path is supported.
-- Conversation is API-first. Local model downloads are optional and limited by
-  policy to explicitly chosen generic lip-sync packs.
-- Named provider/model loadouts resolve global → game → character settings,
-  pin every turn's route, and permit only explicit manual recovery choices.
-- The visual model catalog is research/qualification data; no third-party
-  talking-head model weights are installed or bundled.
+Desktop capture, recording, and visual app-driving are intentionally paused.
+Do not reopen the broker Windows smoke tests: they previously produced unsafe
+white/blue flashing and beeps. Continue with hidden, noninteractive commands and
+headless artifacts unless the user explicitly asks to resume desktop testing.
 
-## Local test artifact
+## Authoritative locations
 
-The current unsigned Debug test installer is under:
+- Checkout: `C:\Users\akshi\Desktop\Code Palace\interactive llm\Interactive-LLM-Powered-NPCs`
+- Large build/model/cache root: `E:\temp\InteractiveNPCs`
+- Native source mirror: `E:\temp\IPNbuild`
+- Review app: `E:\temp\InteractiveNPCs\review-app-v8\interactive-npcs-control.exe`
+- Test game: `E:\temp\local-app-data\test-game\interactive-npcs-synthetic-target.exe`
+- Accepted headless video: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\headless-realistic-game-framing-v5\mara-magpie-headless-lipsync.mp4`
+- Accepted report: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\headless-realistic-game-framing-v5\headless-proof.json`
 
-`artifacts/test-app/<UTC timestamp>/`
+The worktree is the ongoing uncommitted 2.0 overhaul. Preserve all existing
+changes. Do not reset, clean, commit, publish, or rewrite history without an
+explicit user request. Do not print, copy into logs, or commit credentials.
 
-It is always an `unchecked-development-package`, local-review-only and not an
-RC. The latest installer smoke result is
-`artifacts/installer-smoke-final.json`; it verifies the installed runtime and
-media broker, private AppData/config DACLs, process supervision, normal
-uninstall, and no residue.
+## Proven result
 
-## Verified locally
+The exact pinned OpenSeeFace MNV3+LM1 models and ONNX Runtime 1.22.1 CPU path
+were exercised headlessly against the realistic Mara portrait. A real NVIDIA
+Magpie API-generated 22,050 Hz mono PCM WAV drove the actual
+`ReferenceMouthWorker` and current-frame compositor at 30 FPS.
 
-- Root Rust workspace tests, formatting, and strict Clippy.
-- Tauri tests, provider-loadout persistence tests, frontend tests/typecheck,
-  production build, and rendered visual evidence.
-- 20 profile/replay validations, 7 deterministic simulation scenarios, worker
-  protocol checks, Windows media-broker CTest, and inert game-load harness.
-- Current-tree secret scan, strict license/provenance policy, deterministic
-  SBOM/source evidence, docs links, and Debug installer smoke.
+- 42/42 residual frames
+- 34 changed adjacent frames; 32 distinct frame digests
+- OpenSeeFace 25.789 ms p50 / 30.210 ms p95
+- compositor 1.657 ms p95
+- 54,706,176 process private bytes
+- 0 GPU VRAM
+- audio -29.149 dBFS RMS / -11.832 dBFS peak
+- 28 frames above the material motion gate; mouth mean absolute delta 0.020 closed / 5.015 maximum
 
-## Remaining release gates
+Closed, opening, sustained, and return-to-closed frames were inspected. An
+initial diagonal-cavity artifact was rejected and corrected. The accepted
+worker binary is `184320` bytes with SHA-256
+`b9aeea95256e433b4297a3682978ca496aa227cf56638b53c24165ff7272a396` and
+uses the Windows GUI subsystem; the same bytes are in the source sidecar slot
+and beside review-app-v8.
 
-- The reachable Git history still contains the historical `apikeys.json`
-  filename. Do not rewrite history without explicit user approval.
-- Production TUF roots/catalog signatures, signing custody, approved model
-  pack runner and qualified pack metadata are not provisioned.
-- No real generic lip-sync pack, live-game certification, clean Windows VM
-  matrix, display/DPI/HDR matrix, live latency/FPS/WER/soak benchmark, or
-  public release has been completed.
+## Verification completed
 
-## Operating constraints
+- Tauri/Rust library: 203 passed
+- Frontend: 124 passed
+- TypeScript typecheck: passed
+- Mouth worker portable suites: worker, product runtime, service protocol,
+  landmark provider, and PE subsystem all passed
+- Media broker non-GUI suites: core, simulated display matrix, input transport,
+  playback transport, and presentation context all passed
+- H.264/AAC output: 960x720, 30 FPS, 1.393 seconds
 
-- Do not push, tag, publish, upload, activate updates, or release without
-  explicit user approval.
-- Keep Windows power settings unchanged. If a future GPU workload is needed,
-  set `C:\Users\akshi\Desktop\Code Palace\gpu use.txt` to `yes` immediately
-  before it and restore `no` afterward. The current value is `no`.
-- Prefer task-owned GUI windows on a secondary display when Windows exposes
-  one; otherwise use the active display without moving unrelated windows.
+## Truth boundary
+
+The headless visual core is accepted as efficient component evidence. It is a
+causal energy-driven talking-mouth renderer, not a phoneme recognizer or full
+SadTalker-style head generator. The desktop app/broker presentation path is not
+accepted: the last live attempt did not play/present lip-sync, and no complete
+native visual presentation receipt exists. Do not claim that the review app's
+in-game lip-sync works until a future safe presentation test proves it.

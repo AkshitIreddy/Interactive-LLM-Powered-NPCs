@@ -1,144 +1,267 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://interactive-npcs.invalid/schemas/model-pack-manifest-v1.json",
-  "title": "ModelPackManifestV1",
+  "$id": "https://interactive-npcs.invalid/schemas/model-pack-manifest-v2.json",
+  "title": "ModelPackManifestV2",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "schema",
-    "pack_id",
-    "revision",
-    "display_name",
-    "description",
-    "source_project",
-    "source_revision",
-    "capability",
-    "artifacts",
-    "runtime",
-    "hardware",
-    "resources",
-    "license",
-    "self_test"
-  ],
+  "required": ["$schema", "schema", "pack_id", "revision", "display_name", "description", "source", "capability", "artifacts", "runtime", "hardware", "resources", "license", "self_test", "voices", "extensions", "lifecycle", "trust", "admission"],
   "properties": {
-    "$schema": { "type": "string" },
-    "schema": { "const": "npc.model-pack/v1" },
-    "pack_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{1,94}[a-z0-9]$" },
-    "revision": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "$schema": { "const": "./model-pack-manifest.schema.json" },
+    "schema": { "const": "npc.model-pack/v2" },
+    "pack_id": { "$ref": "#/$defs/packId" },
+    "revision": { "$ref": "#/$defs/revision" },
     "display_name": { "type": "string", "minLength": 1, "maxLength": 160 },
     "description": { "type": "string", "minLength": 1, "maxLength": 4096 },
-    "source_project": { "type": "string", "minLength": 1, "maxLength": 512 },
-    "source_revision": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "source": { "$ref": "#/$defs/source" },
+    "capability": { "$ref": "#/$defs/capability" },
+    "artifacts": { "type": "array", "minItems": 1, "maxItems": 256, "items": { "$ref": "#/$defs/artifact" } },
+    "runtime": { "$ref": "#/$defs/runtime" },
+    "hardware": { "$ref": "#/$defs/hardware" },
+    "resources": { "$ref": "#/$defs/resources" },
+    "license": { "$ref": "#/$defs/license" },
+    "self_test": { "$ref": "#/$defs/selfTest" },
+    "voices": { "type": "array", "maxItems": 4096, "items": { "$ref": "#/$defs/voice" } },
+    "extensions": { "$ref": "#/$defs/extensions" },
+    "lifecycle": { "$ref": "#/$defs/lifecycle" },
+    "trust": { "$ref": "#/$defs/trust" },
+    "admission": { "$ref": "#/$defs/admission" }
+  },
+  "allOf": [
+    { "if": { "$ref": "#/$defs/isLlm" }, "then": { "properties": { "extensions": { "required": ["language_model"], "maxProperties": 1 } } } },
+    { "if": { "$ref": "#/$defs/isStt" }, "then": { "properties": { "extensions": { "required": ["speech_recognition"], "maxProperties": 1 } } } },
+    { "if": { "$ref": "#/$defs/isTts" }, "then": { "properties": { "extensions": { "required": ["speech_synthesis"], "maxProperties": 1 } } } },
+    { "if": { "$ref": "#/$defs/isEmbedding" }, "then": { "properties": { "extensions": { "required": ["embedding"], "maxProperties": 1 } } } },
+    { "if": { "$ref": "#/$defs/isVision" }, "then": { "properties": { "extensions": { "required": ["vision"], "maxProperties": 1 } } } },
+    { "if": { "$ref": "#/$defs/isLipSync" }, "then": { "properties": { "extensions": { "required": ["lip_sync"], "maxProperties": 1 } } } },
+    { "if": { "$ref": "#/$defs/isNoExtension" }, "then": { "properties": { "extensions": { "maxProperties": 0 } } } },
+    { "if": { "not": { "$ref": "#/$defs/isTts" } }, "then": { "properties": { "voices": { "maxItems": 0 } } } }
+  ],
+  "$defs": {
+    "packId": { "type": "string", "minLength": 3, "maxLength": 96, "pattern": "^[a-z0-9](?:[a-z0-9]|[.-](?=[a-z0-9]))*[a-z0-9]$" },
+    "revision": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._+-]+$", "not": { "enum": ["main", "master", "head", "latest", "MAIN", "MASTER", "HEAD", "LATEST"] } },
+    "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
+    "httpsUri": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "token": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._+@-]+$" },
+    "stringSet": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "nullableBoolean": { "type": ["boolean", "null"] },
+    "nullablePositiveInteger": { "type": ["integer", "null"], "minimum": 1 },
+    "nullableStringSet": { "oneOf": [{ "$ref": "#/$defs/stringSet" }, { "type": "null" }] },
+    "kindIs": { "type": "object", "properties": { "capability": { "type": "object", "required": ["kind"] } }, "required": ["capability"] },
+    "isLlm": { "allOf": [{ "$ref": "#/$defs/kindIs" }, { "properties": { "capability": { "properties": { "kind": { "const": "language_model" } } } } }] },
+    "isStt": { "allOf": [{ "$ref": "#/$defs/kindIs" }, { "properties": { "capability": { "properties": { "kind": { "const": "speech_recognition" } } } } }] },
+    "isTts": { "allOf": [{ "$ref": "#/$defs/kindIs" }, { "properties": { "capability": { "properties": { "kind": { "const": "speech_synthesis" } } } } }] },
+    "isEmbedding": { "allOf": [{ "$ref": "#/$defs/kindIs" }, { "properties": { "capability": { "properties": { "kind": { "const": "embedding" } } } } }] },
+    "isVision": { "allOf": [{ "$ref": "#/$defs/kindIs" }, { "properties": { "capability": { "properties": { "kind": { "const": "vision" } } } } }] },
+    "isLipSync": { "allOf": [{ "$ref": "#/$defs/kindIs" }, { "properties": { "capability": { "properties": { "kind": { "const": "lip_sync" } } } } }] },
+    "isNoExtension": { "allOf": [{ "$ref": "#/$defs/kindIs" }, { "properties": { "capability": { "properties": { "kind": { "enum": ["animation", "other"] } } } } }] },
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["project_url", "immutable_revision", "model_card_url"],
+      "properties": {
+        "project_url": { "$ref": "#/$defs/httpsUri" },
+        "immutable_revision": { "$ref": "#/$defs/revision" },
+        "model_card_url": { "oneOf": [{ "$ref": "#/$defs/httpsUri" }, { "type": "null" }] }
+      }
+    },
     "capability": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["kind", "scope"],
+      "type": "object", "additionalProperties": false, "required": ["kind", "scope"],
       "properties": {
         "kind": { "enum": ["language_model", "speech_recognition", "speech_synthesis", "embedding", "vision", "lip_sync", "animation", "other"] },
         "scope": { "enum": ["generic", "game_specific"] }
       }
     },
-    "artifacts": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 256,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["id", "kind", "source_urls", "size_bytes", "sha256", "destination"],
-        "properties": {
-          "id": { "type": "string", "minLength": 1, "maxLength": 128 },
-          "kind": { "enum": ["archive", "file"] },
-          "source_urls": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 8,
-            "items": { "type": "string", "format": "uri", "pattern": "^https://" }
-          },
-          "size_bytes": { "type": "integer", "minimum": 1 },
-          "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
-          "destination": { "type": "string", "minLength": 1 }
-        }
-      }
+    "artifact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "role", "kind", "archive_format", "source_urls", "size_bytes", "sha256", "destination", "strip_prefix", "required_paths"],
+      "properties": {
+        "id": { "$ref": "#/$defs/token" },
+        "role": { "enum": ["model_weights", "runtime", "tokenizer", "voice_data", "language_data", "native_bridge", "license", "notice", "fixture", "other"] },
+        "kind": { "enum": ["archive", "file"] },
+        "archive_format": { "type": ["string", "null"], "enum": ["zip", "tar", "tar_gz", "tar_bz2", null] },
+        "source_urls": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "$ref": "#/$defs/httpsUri" } },
+        "size_bytes": { "type": "integer", "minimum": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "destination": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "strip_prefix": { "type": ["string", "null"], "minLength": 1, "maxLength": 1024 },
+        "required_paths": { "type": "array", "maxItems": 4096, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 1024 } }
+      },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "archive" } }, "required": ["kind"] }, "then": { "properties": { "archive_format": { "enum": ["zip", "tar", "tar_gz", "tar_bz2"] } } } },
+        { "if": { "properties": { "kind": { "const": "file" } }, "required": ["kind"] }, "then": { "properties": { "archive_format": { "type": "null" }, "strip_prefix": { "type": "null" }, "required_paths": { "maxItems": 0 } } } }
+      ]
     },
     "runtime": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["runtime", "abi", "minimum_runtime_revision", "supported_platforms", "supported_architectures"],
+      "type": "object", "additionalProperties": false,
+      "required": ["runtime", "immutable_revision", "abi", "entrypoint", "supported_platforms", "supported_architectures", "backends", "network_access_after_install"],
       "properties": {
-        "runtime": { "type": "string", "minLength": 1 },
-        "abi": { "type": "string", "minLength": 1 },
-        "minimum_runtime_revision": { "type": ["string", "null"] },
+        "runtime": { "$ref": "#/$defs/token" },
+        "immutable_revision": { "oneOf": [{ "$ref": "#/$defs/revision" }, { "type": "null" }] },
+        "abi": { "$ref": "#/$defs/token" },
+        "entrypoint": { "type": ["string", "null"], "minLength": 1, "maxLength": 1024 },
         "supported_platforms": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["windows10", "windows11"] } },
-        "supported_architectures": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "const": "x86_64" } }
+        "supported_architectures": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "const": "x86_64" } },
+        "backends": { "type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": { "$ref": "#/$defs/token" } },
+        "network_access_after_install": { "type": ["boolean", "null"] }
       }
     },
     "hardware": {
-      "type": "object",
-      "additionalProperties": false,
+      "type": "object", "additionalProperties": false,
       "required": ["minimum_ram_bytes", "recommended_ram_bytes", "minimum_vram_bytes", "recommended_vram_bytes", "minimum_cpu_threads", "accelerators", "required_cpu_features"],
       "properties": {
         "minimum_ram_bytes": { "type": "integer", "minimum": 0 },
         "recommended_ram_bytes": { "type": "integer", "minimum": 0 },
         "minimum_vram_bytes": { "type": ["integer", "null"], "minimum": 0 },
         "recommended_vram_bytes": { "type": ["integer", "null"], "minimum": 0 },
-        "minimum_cpu_threads": { "type": "integer", "minimum": 1 },
+        "minimum_cpu_threads": { "type": "integer", "minimum": 1, "maximum": 65535 },
         "accelerators": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["cpu", "cuda", "direct_ml", "vulkan"] } },
-        "required_cpu_features": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }
+        "required_cpu_features": { "$ref": "#/$defs/stringSet" }
       }
     },
     "resources": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["storage_bytes", "peak_install_bytes", "measured_ram_bytes", "measured_vram_bytes", "measured_load_millis", "benchmark_hardware", "quality_tier", "languages"],
+      "type": "object", "additionalProperties": false,
+      "required": ["storage_bytes", "peak_install_bytes", "planning_resident_ram_bytes", "planning_resident_vram_bytes", "planning_load_millis", "planning_hardware", "quality_tier", "languages", "measurement"],
       "properties": {
         "storage_bytes": { "type": "integer", "minimum": 1 },
         "peak_install_bytes": { "type": "integer", "minimum": 1 },
-        "measured_ram_bytes": { "type": ["integer", "null"], "minimum": 0 },
-        "measured_vram_bytes": { "type": ["integer", "null"], "minimum": 0 },
-        "measured_load_millis": { "type": ["integer", "null"], "minimum": 0 },
-        "benchmark_hardware": { "type": ["string", "null"] },
+        "planning_resident_ram_bytes": { "type": ["integer", "null"], "minimum": 0 },
+        "planning_resident_vram_bytes": { "type": ["integer", "null"], "minimum": 0 },
+        "planning_load_millis": { "type": ["integer", "null"], "minimum": 0 },
+        "planning_hardware": { "type": ["string", "null"], "minLength": 1 },
         "quality_tier": { "enum": ["fast", "balanced", "quality", "experimental"] },
-        "languages": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } }
+        "languages": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 64 } },
+        "measurement": {
+          "type": "object", "additionalProperties": false,
+          "required": ["required_schema", "minimum_samples", "current_device_fingerprint_required", "signed_evidence_required", "p99_reload_required", "manifest_values_not_for_admission"],
+          "properties": {
+            "required_schema": { "const": "npc.measured-resource-envelope/v1" },
+            "minimum_samples": { "type": "integer", "minimum": 20 },
+            "current_device_fingerprint_required": { "const": true },
+            "signed_evidence_required": { "const": true },
+            "p99_reload_required": { "const": true },
+            "manifest_values_not_for_admission": { "const": true }
+          }
+        }
+      }
+    },
+    "licensePermission": { "enum": ["allowed", "prohibited", "restricted", "unknown"] },
+    "licenseComponent": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "component", "spdx_expression", "license_url", "immutable_source_revision", "redistributable", "notice_required"],
+      "properties": {
+        "id": { "$ref": "#/$defs/token" },
+        "component": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "spdx_expression": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
+        "license_url": { "$ref": "#/$defs/httpsUri" },
+        "immutable_source_revision": { "$ref": "#/$defs/revision" },
+        "redistributable": { "type": ["boolean", "null"] },
+        "notice_required": { "type": "boolean" }
       }
     },
     "license": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["spdx_expression", "license_name", "license_url", "attribution", "redistributable", "commercial_use", "derivative_use", "acceptance_required", "notices"],
+      "type": "object", "additionalProperties": false,
+      "required": ["spdx_expression", "license_name", "license_url", "attribution", "redistributable", "commercial_use", "derivative_use", "acceptance_required", "notices", "components"],
       "properties": {
-        "spdx_expression": { "type": ["string", "null"] },
-        "license_name": { "type": "string", "minLength": 1 },
-        "license_url": { "type": "string", "format": "uri", "pattern": "^https://" },
-        "attribution": { "type": "string", "minLength": 1 },
+        "spdx_expression": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
+        "license_name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "license_url": { "$ref": "#/$defs/httpsUri" },
+        "attribution": { "type": "string", "minLength": 1, "maxLength": 4096 },
         "redistributable": { "type": "boolean" },
         "commercial_use": { "$ref": "#/$defs/licensePermission" },
         "derivative_use": { "$ref": "#/$defs/licensePermission" },
         "acceptance_required": { "type": "boolean" },
-        "notices": { "type": "array", "items": { "type": "string" } }
+        "notices": { "type": "array", "maxItems": 1024, "items": { "type": "string", "minLength": 1 } },
+        "components": { "type": "array", "maxItems": 1024, "items": { "$ref": "#/$defs/licenseComponent" } }
       }
     },
-    "self_test": {
-      "type": "object",
-      "additionalProperties": false,
+    "selfTest": {
+      "type": "object", "additionalProperties": false,
       "required": ["kind", "suite_revision", "allowed_runtime_backends", "input_fixture", "expected_output_sha256", "timeout_millis"],
       "properties": {
-        "kind": { "type": "string", "minLength": 1, "maxLength": 64 },
-        "suite_revision": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "allowed_runtime_backends": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 16,
-          "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
-        },
-        "input_fixture": { "type": "string", "minLength": 1 },
-        "expected_output_sha256": { "type": ["string", "null"], "pattern": "^[a-fA-F0-9]{64}$" },
+        "kind": { "$ref": "#/$defs/token" },
+        "suite_revision": { "$ref": "#/$defs/revision" },
+        "allowed_runtime_backends": { "type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": { "$ref": "#/$defs/token" } },
+        "input_fixture": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "input_fixture_sha256": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "expected_output_sha256": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
         "timeout_millis": { "type": "integer", "minimum": 100, "maximum": 300000 }
       }
+    },
+    "voice": {
+      "type": "object", "additionalProperties": false,
+      "required": ["voice_id", "display_name", "locale", "stock_voice", "voice_cloning", "license_component_id"],
+      "properties": {
+        "voice_id": { "$ref": "#/$defs/token" },
+        "display_name": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "locale": { "type": "string", "minLength": 2, "maxLength": 32 },
+        "stock_voice": { "type": "boolean" },
+        "voice_cloning": { "type": "boolean" },
+        "license_component_id": { "$ref": "#/$defs/token" }
+      }
+    },
+    "languageModelExtension": {
+      "type": "object", "additionalProperties": false,
+      "required": ["context_tokens", "structured_output", "tool_calling", "thinking_mode"],
+      "properties": { "context_tokens": { "$ref": "#/$defs/nullablePositiveInteger" }, "structured_output": { "$ref": "#/$defs/nullableBoolean" }, "tool_calling": { "$ref": "#/$defs/nullableBoolean" }, "thinking_mode": { "$ref": "#/$defs/nullableBoolean" } }
+    },
+    "speechRecognitionExtension": {
+      "type": "object", "additionalProperties": false,
+      "required": ["streaming", "input_sample_formats", "accepted_sample_rates_hz", "working_sample_rate_hz", "channels", "partial_transcripts", "word_timestamps", "diarization", "maximum_concurrent_sessions", "maximum_buffered_audio_millis"],
+      "properties": {
+        "streaming": { "$ref": "#/$defs/nullableBoolean" }, "input_sample_formats": { "$ref": "#/$defs/nullableStringSet" },
+        "accepted_sample_rates_hz": { "oneOf": [{ "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer", "minimum": 1 } }, { "type": "null" }] },
+        "working_sample_rate_hz": { "$ref": "#/$defs/nullablePositiveInteger" }, "channels": { "$ref": "#/$defs/nullablePositiveInteger" },
+        "partial_transcripts": { "$ref": "#/$defs/nullableBoolean" }, "word_timestamps": { "$ref": "#/$defs/nullableBoolean" }, "diarization": { "$ref": "#/$defs/nullableBoolean" },
+        "maximum_concurrent_sessions": { "$ref": "#/$defs/nullablePositiveInteger" }, "maximum_buffered_audio_millis": { "$ref": "#/$defs/nullablePositiveInteger" }
+      }
+    },
+    "speechSynthesisExtension": {
+      "type": "object", "additionalProperties": false,
+      "required": ["output_sample_rate_hz", "channels", "sample_format", "incremental_pcm", "voice_cloning", "maximum_concurrent_sessions", "maximum_text_utf8_bytes", "word_timing", "phoneme_timing", "viseme_timing"],
+      "properties": {
+        "output_sample_rate_hz": { "$ref": "#/$defs/nullablePositiveInteger" }, "channels": { "$ref": "#/$defs/nullablePositiveInteger" }, "sample_format": { "type": ["string", "null"], "minLength": 1 },
+        "incremental_pcm": { "$ref": "#/$defs/nullableBoolean" }, "voice_cloning": { "$ref": "#/$defs/nullableBoolean" }, "maximum_concurrent_sessions": { "$ref": "#/$defs/nullablePositiveInteger" },
+        "maximum_text_utf8_bytes": { "$ref": "#/$defs/nullablePositiveInteger" }, "word_timing": { "$ref": "#/$defs/nullableBoolean" }, "phoneme_timing": { "$ref": "#/$defs/nullableBoolean" }, "viseme_timing": { "$ref": "#/$defs/nullableBoolean" }
+      }
+    },
+    "embeddingExtension": {
+      "type": "object", "additionalProperties": false, "required": ["dimensions", "maximum_tokens", "pooling", "normalized"],
+      "properties": { "dimensions": { "$ref": "#/$defs/nullablePositiveInteger" }, "maximum_tokens": { "$ref": "#/$defs/nullablePositiveInteger" }, "pooling": { "type": ["string", "null"], "minLength": 1 }, "normalized": { "$ref": "#/$defs/nullableBoolean" } }
+    },
+    "visionExtension": {
+      "type": "object", "additionalProperties": false, "required": ["input_pixel_formats", "output_signals", "maximum_signal_rate_hz", "identity_recognition"],
+      "properties": { "input_pixel_formats": { "$ref": "#/$defs/nullableStringSet" }, "output_signals": { "$ref": "#/$defs/nullableStringSet" }, "maximum_signal_rate_hz": { "$ref": "#/$defs/nullablePositiveInteger" }, "identity_recognition": { "$ref": "#/$defs/nullableBoolean" } }
+    },
+    "lipSyncExtension": {
+      "type": "object", "additionalProperties": false, "required": ["audio_sample_formats", "output_signals", "causal", "maximum_queue_depth", "stale_generation_drop_required", "stale_frame_drop_required"],
+      "properties": { "audio_sample_formats": { "$ref": "#/$defs/nullableStringSet" }, "output_signals": { "$ref": "#/$defs/nullableStringSet" }, "causal": { "$ref": "#/$defs/nullableBoolean" }, "maximum_queue_depth": { "$ref": "#/$defs/nullablePositiveInteger" }, "stale_generation_drop_required": { "$ref": "#/$defs/nullableBoolean" }, "stale_frame_drop_required": { "$ref": "#/$defs/nullableBoolean" } }
+    },
+    "extensions": {
+      "type": "object", "additionalProperties": false,
+      "properties": { "language_model": { "$ref": "#/$defs/languageModelExtension" }, "speech_recognition": { "$ref": "#/$defs/speechRecognitionExtension" }, "speech_synthesis": { "$ref": "#/$defs/speechSynthesisExtension" }, "embedding": { "$ref": "#/$defs/embeddingExtension" }, "vision": { "$ref": "#/$defs/visionExtension" }, "lip_sync": { "$ref": "#/$defs/lipSyncExtension" } }
+    },
+    "lifecycle": {
+      "type": "object", "additionalProperties": false,
+      "required": ["explicit_download_required", "automatic_download_allowed", "install_strategy", "repair_strategy", "remove_requires_unreferenced", "activation_gates"],
+      "properties": {
+        "explicit_download_required": { "type": "boolean" }, "automatic_download_allowed": { "type": "boolean" },
+        "install_strategy": { "const": "verify_then_atomic_activate" }, "repair_strategy": { "const": "verify_quarantine_reinstall" }, "remove_requires_unreferenced": { "type": "boolean" },
+        "activation_gates": { "type": "array", "minItems": 8, "maxItems": 8, "uniqueItems": true, "items": { "enum": ["explicit_user_approval", "catalog_trust", "artifact_integrity", "license_acceptance", "runtime_compatibility", "self_test_attestation", "current_device_measurement", "whole_loadout_admission"] } }
+      }
+    },
+    "trust": {
+      "type": "object", "additionalProperties": false,
+      "required": ["release_catalog_required", "immutable_revision_required", "artifact_sha256_required", "self_test_attestation_required", "measured_resource_envelope_required", "unsigned_activation_allowed"],
+      "properties": { "release_catalog_required": { "const": true }, "immutable_revision_required": { "const": true }, "artifact_sha256_required": { "const": true }, "self_test_attestation_required": { "const": true }, "measured_resource_envelope_required": { "const": true }, "unsigned_activation_allowed": { "const": false } }
+    },
+    "admission": {
+      "type": "object", "additionalProperties": false,
+      "required": ["state", "reason", "allowed_residencies", "unknowns_fail_closed"],
+      "properties": {
+        "state": { "enum": ["candidate_unqualified", "blocked_pending_measurement", "eligible_after_external_admission"] },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "allowed_residencies": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["cpu_resident", "gpu_resident", "cpu_resident_gpu_cold"] } },
+        "unknowns_fail_closed": { "const": true }
+      }
     }
-  },
-  "$defs": {
-    "licensePermission": { "enum": ["allowed", "prohibited", "restricted", "unknown"] }
   }
 }

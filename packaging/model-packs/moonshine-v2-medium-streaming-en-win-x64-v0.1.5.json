@@ -1,0 +1,178 @@
+{
+  "$schema": "./model-pack-manifest.schema.json",
+  "schema": "npc.model-pack/v2",
+  "pack_id": "npc.stt.moonshine-v2-medium-streaming-en.win-x64",
+  "revision": "0.1.5-moonshine.234f60f",
+  "display_name": "Moonshine v2 Medium Streaming English (Windows CPU)",
+  "description": "Optional explicit-download streaming English speech recognition pack. The pinned upstream archive combines the Moonshine v0.1.5 Windows runtime, ONNX Runtime, headers and static libraries, the Medium Streaming English model, and the original Beckett speech fixture. API STT remains the default; activation is blocked until trusted self-test and signed current-device whole-loadout measurements pass.",
+  "source": {
+    "project_url": "https://github.com/moonshine-ai/moonshine",
+    "immutable_revision": "234f60faa0eb388b01cdf7e60aca232af37aefda",
+    "model_card_url": null
+  },
+  "capability": {
+    "kind": "speech_recognition",
+    "scope": "generic"
+  },
+  "artifacts": [
+    {
+      "id": "moonshine-v0.1.5-windows-cli-medium-streaming-en",
+      "role": "other",
+      "kind": "archive",
+      "archive_format": "tar_gz",
+      "source_urls": [
+        "https://github.com/moonshine-ai/moonshine/releases/download/v0.1.5/windows-cli-transcriber.tar.gz"
+      ],
+      "size_bytes": 402991031,
+      "sha256": "a56bcd27765fefa4ab9a9b219cbb26e6de7d48b6536c88b92b6d24ffa7eb4c25",
+      "destination": "moonshine",
+      "strip_prefix": "cli-transcriber",
+      "required_paths": [
+        "beckett.wav",
+        "moonshine-voice-windows-x86_64/include/moonshine-c-api.h",
+        "moonshine-voice-windows-x86_64/lib/moonshine.lib",
+        "moonshine-voice-windows-x86_64/lib/bin-tokenizer.lib",
+        "moonshine-voice-windows-x86_64/lib/ort-utils.lib",
+        "moonshine-voice-windows-x86_64/lib/moonshine-utils.lib",
+        "moonshine-voice-windows-x86_64/lib/onnxruntime.lib",
+        "moonshine-voice-windows-x86_64/lib/onnxruntime.dll",
+        "models/medium-streaming-en/adapter.ort",
+        "models/medium-streaming-en/cross_kv.ort",
+        "models/medium-streaming-en/decoder_kv.ort",
+        "models/medium-streaming-en/decoder_kv_with_attention.ort",
+        "models/medium-streaming-en/encoder.ort",
+        "models/medium-streaming-en/frontend.model.ort",
+        "models/medium-streaming-en/frontend.weights.ort",
+        "models/medium-streaming-en/streaming_config.json",
+        "models/medium-streaming-en/tokenizer.bin"
+      ]
+    }
+  ],
+  "runtime": {
+    "runtime": "moonshine-voice",
+    "immutable_revision": "0.1.5+234f60f",
+    "abi": "npc.local-stt.v1+bridge1",
+    "entrypoint": "workers/local-stt/worker.py",
+    "supported_platforms": ["windows10", "windows11"],
+    "supported_architectures": ["x86_64"],
+    "backends": ["moonshine-v0.1.5-native-cpu"],
+    "network_access_after_install": false
+  },
+  "hardware": {
+    "minimum_ram_bytes": 0,
+    "recommended_ram_bytes": 0,
+    "minimum_vram_bytes": 0,
+    "recommended_vram_bytes": 0,
+    "minimum_cpu_threads": 1,
+    "accelerators": ["cpu"],
+    "required_cpu_features": []
+  },
+  "resources": {
+    "storage_bytes": 402991031,
+    "peak_install_bytes": 1302991031,
+    "planning_resident_ram_bytes": null,
+    "planning_resident_vram_bytes": null,
+    "planning_load_millis": null,
+    "planning_hardware": null,
+    "quality_tier": "experimental",
+    "languages": ["en"],
+    "measurement": {
+      "required_schema": "npc.measured-resource-envelope/v1",
+      "minimum_samples": 20,
+      "current_device_fingerprint_required": true,
+      "signed_evidence_required": true,
+      "p99_reload_required": true,
+      "manifest_values_not_for_admission": true
+    }
+  },
+  "license": {
+    "spdx_expression": "MIT",
+    "license_name": "MIT License",
+    "license_url": "https://github.com/moonshine-ai/moonshine/blob/234f60faa0eb388b01cdf7e60aca232af37aefda/LICENSE",
+    "attribution": "Moonshine Voice and all streaming speech-to-text models, including Medium Streaming English, Copyright (c) 2025 Useful Sensors, Inc. (dba Moonshine AI). The combined archive also contains Microsoft ONNX Runtime under MIT terms.",
+    "redistributable": true,
+    "commercial_use": "allowed",
+    "derivative_use": "allowed",
+    "acceptance_required": true,
+    "notices": [
+      "The model is never bundled or silently downloaded; installation requires an explicit user action.",
+      "All Moonshine streaming speech-to-text models and all English models are MIT. Legacy non-streaming models in named non-English languages are excluded from this pack.",
+      "The exact upstream Moonshine license is vendored at workers/local-stt/THIRD_PARTY_LICENSES/MOONSHINE-v0.1.5-LICENSE.txt with SHA-256 fa7d1174dd8af6a7cd280be20b80d10095ed4c19b5b20b61a7715c3ad790dc5f.",
+      "The retained archive is a combined upstream release asset; artifact role other does not imply ownership or a new redistribution grant."
+    ],
+    "components": [
+      {
+        "id": "moonshine-mit",
+        "component": "Moonshine Voice runtime and Medium Streaming English speech-to-text model",
+        "spdx_expression": "MIT",
+        "license_url": "https://github.com/moonshine-ai/moonshine/blob/234f60faa0eb388b01cdf7e60aca232af37aefda/LICENSE",
+        "immutable_source_revision": "234f60faa0eb388b01cdf7e60aca232af37aefda",
+        "redistributable": true,
+        "notice_required": true
+      },
+      {
+        "id": "onnxruntime-mit",
+        "component": "ONNX Runtime binaries vendored by the pinned Moonshine release",
+        "spdx_expression": "MIT",
+        "license_url": "https://github.com/moonshine-ai/moonshine/blob/234f60faa0eb388b01cdf7e60aca232af37aefda/core/third-party/onnxruntime/LICENSE.txt",
+        "immutable_source_revision": "234f60faa0eb388b01cdf7e60aca232af37aefda",
+        "redistributable": true,
+        "notice_required": true
+      }
+    ]
+  },
+  "self_test": {
+    "kind": "moonshine_streaming_stt_v1",
+    "suite_revision": "2026.08.30.v1",
+    "allowed_runtime_backends": ["moonshine-v0.1.5-native-cpu"],
+    "input_fixture": "moonshine/beckett.wav",
+    "expected_output_sha256": null,
+    "timeout_millis": 300000
+  },
+  "voices": [],
+  "extensions": {
+    "speech_recognition": {
+      "streaming": true,
+      "input_sample_formats": ["pcm_s16le"],
+      "accepted_sample_rates_hz": [8000, 16000, 22050, 24000, 44100, 48000],
+      "working_sample_rate_hz": 16000,
+      "channels": 1,
+      "partial_transcripts": true,
+      "word_timestamps": true,
+      "diarization": false,
+      "maximum_concurrent_sessions": 1,
+      "maximum_buffered_audio_millis": 30000
+    }
+  },
+  "lifecycle": {
+    "explicit_download_required": true,
+    "automatic_download_allowed": false,
+    "install_strategy": "verify_then_atomic_activate",
+    "repair_strategy": "verify_quarantine_reinstall",
+    "remove_requires_unreferenced": true,
+    "activation_gates": [
+      "explicit_user_approval",
+      "catalog_trust",
+      "artifact_integrity",
+      "license_acceptance",
+      "runtime_compatibility",
+      "self_test_attestation",
+      "current_device_measurement",
+      "whole_loadout_admission"
+    ]
+  },
+  "trust": {
+    "release_catalog_required": true,
+    "immutable_revision_required": true,
+    "artifact_sha256_required": true,
+    "self_test_attestation_required": true,
+    "measured_resource_envelope_required": true,
+    "unsigned_activation_allowed": false
+  },
+  "admission": {
+    "state": "blocked_pending_measurement",
+    "reason": "Artifact and license identities are pinned, but activation remains blocked until a trusted real-model self-test attestation, signed current-device measurements, and whole-loadout admission are present.",
+    "allowed_residencies": ["cpu_resident"],
+    "unknowns_fail_closed": true
+  }
+}

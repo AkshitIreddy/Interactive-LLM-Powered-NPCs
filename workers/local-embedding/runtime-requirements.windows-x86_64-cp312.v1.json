@@ -1,0 +1,54 @@
+{
+  "schema": "npc.python-worker-runtime-requirements/v1",
+  "python_abi": "cp312-win_amd64",
+  "reviewed_unix_date": "2026-08-30",
+  "direct_runtime_requirements": [
+    {
+      "name": "onnxruntime",
+      "version": "1.29.0",
+      "filename": "onnxruntime-1.29.0-cp312-cp312-win_amd64.whl",
+      "size_bytes": 14001407,
+      "sha256": "4acf2b4948b7ede87221ca6332344b8facdc8059d6ac751a7d367d04532b02dd",
+      "source_url": "https://files.pythonhosted.org/packages/b4/80/5b28f1f1111210fc4a336ddbc6950f468ebf9a6a265420568f4f43fa33ce/onnxruntime-1.29.0-cp312-cp312-win_amd64.whl",
+      "license": "MIT",
+      "license_url": "https://github.com/microsoft/onnxruntime/blob/v1.29.0/LICENSE"
+    },
+    {
+      "name": "numpy",
+      "version": "2.5.2",
+      "filename": "numpy-2.5.2-cp312-cp312-win_amd64.whl",
+      "size_bytes": 12464674,
+      "sha256": "28ac63476ec7651484215ee7fa15a1f78b57c14621f01e392afe17b9a1390ce4",
+      "source_url": "https://files.pythonhosted.org/packages/7f/b9/87fea2769fe1c47c1b5b01d8310772c9d1a85d485de7cf386ef7a3332b02/numpy-2.5.2-cp312-cp312-win_amd64.whl",
+      "license": "BSD-3-Clause",
+      "license_url": "https://github.com/numpy/numpy/blob/v2.5.2/LICENSE.txt"
+    },
+    {
+      "name": "tokenizers",
+      "version": "0.23.1",
+      "filename": "tokenizers-0.23.1-cp310-abi3-win_amd64.whl",
+      "size_bytes": 2798223,
+      "sha256": "e7bfaf995c1bdbbd21d13539decb6650967013759318627d85daeb7881af16b7",
+      "source_url": "https://files.pythonhosted.org/packages/97/c9/2553f72aaf65a2797d4229e37fa7fbe38ffbf3e32912d31bdd78b3323e59/tokenizers-0.23.1-cp310-abi3-win_amd64.whl",
+      "license": "Apache-2.0",
+      "license_url": "https://github.com/huggingface/tokenizers/blob/v0.23.1/LICENSE"
+    }
+  ],
+  "resolved_qualification_inventory": {
+    "path": "out/evidence/local-embedding-python-runtime-inventory-2026-08-30.json",
+    "sha256": "c6ae5e84502a19d4304598c05f59875f0d678f330823ab1b2d4d6a558539d6af",
+    "wheel_count": 21,
+    "package_count": 21,
+    "pip_check_passed": true,
+    "direct_network_install_used": false,
+    "wheelhouse_downloaded_from_pypi": true,
+    "installed_from_hash-inventoried_local_wheelhouse": true
+  },
+  "packaging_gate": {
+    "complete_transitive_lock_required": true,
+    "license_inventory_required": true,
+    "wheel_hash_verification_required": true,
+    "worker_binary_build_reproducibility_required": true,
+    "status": "qualification_inventory_complete_distribution_bundle_not_built"
+  }
+}

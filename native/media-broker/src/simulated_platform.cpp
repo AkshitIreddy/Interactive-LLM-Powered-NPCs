@@ -73,6 +73,10 @@ void SimulatedMediaPlatform::stop_overlay() noexcept {
     impl_->residual_visible = false;
 }
 
+bool SimulatedMediaPlatform::overlay_capture_excluded() const noexcept {
+    return impl_->overlay_active;
+}
+
 bool SimulatedMediaPlatform::initialize_audio(Failure&) {
     impl_->audio_initialized = true;
     return true;

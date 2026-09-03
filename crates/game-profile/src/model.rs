@@ -18,6 +18,10 @@ pub struct GameProfileV2 {
     pub diagnostics: Vec<DiagnosticContract>,
     pub troubleshooting: Vec<TroubleshootingEntry>,
     pub prompts: GlobalPrompts,
+    /// Provider-agnostic product recommendations. Provider/model IDs remain in
+    /// independently swappable loadout catalogs, never in game profiles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recommendations: Option<RecommendationPolicy>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -232,6 +236,25 @@ pub struct ContentBundle {
     pub spoiler_tiers: Vec<SpoilerTier>,
     pub background_npc_rules: Vec<String>,
     pub provenance: Vec<ProvenanceRecord>,
+    /// Canonical, authored knowledge records. Runtime observations and summaries
+    /// remain in `npc-memory`; they must never be written back into a profile.
+    #[serde(default)]
+    pub knowledge: Vec<KnowledgeRecord>,
+    /// Controls how independently authorized context lanes are budgeted.
+    #[serde(default)]
+    pub retrieval: RetrievalPolicy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub character_data_readiness: Option<CharacterDataReadiness>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub character_data_readiness_notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CharacterDataReadiness {
+    Curated,
+    Partial,
+    Unavailable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -254,6 +277,16 @@ pub struct ProvenanceRecord {
     pub license: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_revision: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_status: Option<ReviewStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transform_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -263,6 +296,83 @@ pub enum ProvenanceKind {
     Official,
     Licensed,
     LegacyImport,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewStatus {
+    Pending,
+    Approved,
+    Rejected,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KnowledgeAuthority {
+    CoreCanon,
+    GamePublic,
+    CharacterAuthored,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KnowledgeRecord {
+    pub id: String,
+    pub authority: KnowledgeAuthority,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_character_id: Option<String>,
+    pub text: String,
+    #[serde(default)]
+    pub topic_tags: Vec<String>,
+    pub spoiler_tier: String,
+    pub provenance_id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PromptAuthority {
+    CoreCanon,
+    CharacterProfile,
+    GamePublic,
+    CharacterAuthored,
+    /// Provenance-bearing, spoiler-filtered derived memories retrieved from
+    /// the exact active authority scope. These records are never canon merely
+    /// because they were remembered.
+    RetrievedMemory,
+    SessionSummary,
+    RecentDeliveredTurns,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetrievalPolicy {
+    pub query_window_delivered_turns: u16,
+    pub max_core_records: u16,
+    pub max_public_records: u16,
+    pub max_character_records: u16,
+    pub max_memory_records: u16,
+    pub authority_order: Vec<PromptAuthority>,
+}
+
+impl Default for RetrievalPolicy {
+    fn default() -> Self {
+        Self {
+            query_window_delivered_turns: 5,
+            max_core_records: 16,
+            max_public_records: 4,
+            max_character_records: 4,
+            max_memory_records: 8,
+            authority_order: vec![
+                PromptAuthority::CoreCanon,
+                PromptAuthority::CharacterProfile,
+                PromptAuthority::CharacterAuthored,
+                PromptAuthority::GamePublic,
+                PromptAuthority::SessionSummary,
+                PromptAuthority::RetrievedMemory,
+                PromptAuthority::RecentDeliveredTurns,
+            ],
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -275,12 +385,34 @@ pub struct CharacterProfile {
     pub biography: String,
     pub personality: String,
     pub dialogue_style: String,
+    /// Curated examples are data, never executable profile hooks. Stable IDs and
+    /// integer weights make deterministic selection and replay straightforward.
+    #[serde(default)]
+    pub style_examples: Vec<StyleExample>,
+    /// Profile-authored greetings are not durable conversation history.
+    #[serde(default)]
+    pub opening_lines: Vec<String>,
     #[serde(default)]
     pub background_npc: bool,
     pub prompt: CharacterPrompt,
     pub voice: VoiceDefaults,
     pub identity: IdentityContract,
     pub model: ModelDefaults,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StyleExample {
+    pub id: String,
+    pub speaker: String,
+    pub text: String,
+    #[serde(default)]
+    pub situation_tags: Vec<String>,
+    #[serde(default)]
+    pub tone_tags: Vec<String>,
+    /// Relative weight in the inclusive 0..=1000 range.
+    pub weight_millis: u16,
+    pub provenance_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -302,6 +434,14 @@ pub struct VoiceDefaults {
     pub style_tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_voice_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapter_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
+    #[serde(default)]
+    pub user_override_allowed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -385,4 +525,38 @@ pub struct GlobalPrompts {
     pub system_preamble: String,
     pub safety_rules: Vec<String>,
     pub background_npc_template: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecommendationPolicy {
+    pub integration_mode: IntegrationMode,
+    pub provider_strategy: ProviderStrategy,
+    pub local_activation_policy: LocalActivationPolicy,
+    pub game_resource_reserve_required: bool,
+    pub screen_space_lip_sync: ScreenSpaceLipSyncRecommendation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IntegrationMode {
+    ExternalOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderStrategy {
+    ApiFirst,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalActivationPolicy {
+    MeasuredWholeLoadoutFitRequired,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScreenSpaceLipSyncRecommendation {
+    ExperimentalOptInAfterExactTargetAndAdvancingFrameQualification,
 }

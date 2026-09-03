@@ -156,6 +156,9 @@ def model_discovery(key: str) -> tuple[dict, list[str]]:
 
 def chat_smoke(key: str, discovered: list[str]) -> dict:
     preferred = [
+        "nvidia/nemotron-3.5-lightning-30b-a3b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "nvidia/nemotron-nano-3-30b-a3b",
         "nvidia/nemotron-3-nano-30b-a3b",
         "meta/llama-3.1-8b-instruct",
         "nvidia/nvidia-nemotron-nano-9b-v2",
@@ -166,7 +169,9 @@ def chat_smoke(key: str, discovered: list[str]) -> dict:
             (
                 candidate
                 for candidate in discovered
-                if candidate.startswith(("nvidia/", "meta/"))
+                if candidate.startswith(("nvidia/", "meta/", "mistralai/"))
+                and any(token in candidate for token in ("instruct", "lightning", "super", "nano"))
+                and not any(token in candidate for token in ("embed", "rerank", "guard", "safety", "parse", "vision"))
             ),
             None,
         )

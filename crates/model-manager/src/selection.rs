@@ -1,11 +1,13 @@
 use crate::{
-    ArtifactV1, ModelPackKindV1, ModelPackManifestV1, ModelPackScopeV1, PackRevision, Sha256Digest,
+    ArtifactV1, LoadoutAdmissionV1, ModelPackKindV1, ModelPackManifestV1, ModelPackScopeV1,
+    PackRevision, Sha256Digest,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use thiserror::Error;
 
 pub const API_FIRST_SELECTION_POLICY_V1: &str = "npc.model-selection/api-first-v1";
+pub const MEASURED_LOCAL_SELECTION_POLICY_V1: &str = "npc.model-selection/measured-local-v1";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -44,6 +46,7 @@ pub struct PackSelectionAuthorizationV1 {
     selection_id: String,
     selected_unix_seconds: u64,
     activation_allowed: bool,
+    fit_evidence_sha256: Option<Sha256Digest>,
     artifacts: BTreeMap<String, (u64, Sha256Digest)>,
 }
 
@@ -68,8 +71,7 @@ impl PackSelectionAuthorizationV1 {
         &self,
         manifest: &ModelPackManifestV1,
     ) -> Result<(), PackSelectionError> {
-        if self.policy != API_FIRST_SELECTION_POLICY_V1
-            || self.identity != manifest.identity()
+        if self.identity != manifest.identity()
             || self.manifest_sha256
                 != manifest
                     .digest()
@@ -79,10 +81,13 @@ impl PackSelectionAuthorizationV1 {
         {
             return Err(PackSelectionError::AuthorizationMismatch);
         }
-        if self.kind != ModelPackKindV1::LipSync || self.scope != ModelPackScopeV1::Generic {
-            return Err(PackSelectionError::AuthorizationOutsideApiFirstPolicy);
-        }
+        validate_policy_scope_and_kind(&self.policy, &self.kind, &self.scope)?;
         validate_selection_id(&self.selection_id)?;
+        if self.policy == MEASURED_LOCAL_SELECTION_POLICY_V1 && self.activation_allowed {
+            self.fit_evidence_sha256
+                .as_ref()
+                .ok_or(PackSelectionError::IncompleteLoadoutFitEvidence)?;
+        }
         Ok(())
     }
 
@@ -91,13 +96,10 @@ impl PackSelectionAuthorizationV1 {
         identity: &PackRevision,
         artifact: &ArtifactV1,
     ) -> Result<(), PackSelectionError> {
-        if self.policy != API_FIRST_SELECTION_POLICY_V1
-            || &self.identity != identity
-            || self.kind != ModelPackKindV1::LipSync
-            || self.scope != ModelPackScopeV1::Generic
-        {
+        if &self.identity != identity {
             return Err(PackSelectionError::AuthorizationMismatch);
         }
+        validate_policy_scope_and_kind(&self.policy, &self.kind, &self.scope)?;
         if self.artifacts.get(&artifact.id) != Some(&(artifact.size_bytes, artifact.sha256.clone()))
         {
             return Err(PackSelectionError::ArtifactAuthorizationMismatch);
@@ -143,6 +145,7 @@ impl ApiFirstPackSelectionPolicyV1 {
             selection_id: request.selection_id,
             selected_unix_seconds: request.selected_unix_seconds,
             activation_allowed: request.action == PackSelectionActionV1::InstallAndActivate,
+            fit_evidence_sha256: None,
             artifacts: manifest
                 .artifacts
                 .iter()
@@ -154,6 +157,111 @@ impl ApiFirstPackSelectionPolicyV1 {
                 })
                 .collect(),
         })
+    }
+}
+
+/// Opt-in policy for users who explicitly choose local LLM, STT, TTS,
+/// retrieval, vision, or lip-sync packs. Activation is authorized only when a
+/// measured loadout-wide fit includes the game reserve and p99 workspace.
+#[derive(Clone, Debug, Default)]
+pub struct MeasuredLocalPackSelectionPolicyV1;
+
+impl MeasuredLocalPackSelectionPolicyV1 {
+    pub fn authorize(
+        &self,
+        manifest: &ModelPackManifestV1,
+        request: PackSelectionRequestV1,
+        fit: Option<&LoadoutAdmissionV1>,
+    ) -> Result<PackSelectionAuthorizationV1, PackSelectionError> {
+        manifest
+            .validate()
+            .map_err(|error| PackSelectionError::Manifest(error.to_string()))?;
+        validate_selection_id(&request.selection_id)?;
+        if request.origin != PackSelectionOriginV1::ExplicitUser {
+            return Err(PackSelectionError::ExplicitUserSelectionRequired(
+                request.origin,
+            ));
+        }
+        validate_policy_scope_and_kind(
+            MEASURED_LOCAL_SELECTION_POLICY_V1,
+            &manifest.capability.kind,
+            &manifest.capability.scope,
+        )?;
+        let fit_evidence_sha256 = if request.action == PackSelectionActionV1::InstallAndActivate {
+            let admission = fit.ok_or(PackSelectionError::IncompleteLoadoutFitEvidence)?;
+            let manifest_sha256 = manifest
+                .digest()
+                .map_err(|error| PackSelectionError::Manifest(error.to_string()))?;
+            if !admission.validates_manifest(&manifest.identity(), &manifest_sha256) {
+                return Err(PackSelectionError::LoadoutAdmissionDoesNotCoverManifest);
+            }
+            Some(
+                admission
+                    .digest()
+                    .map_err(|_| PackSelectionError::IncompleteLoadoutFitEvidence)?,
+            )
+        } else {
+            None
+        };
+        Ok(PackSelectionAuthorizationV1 {
+            policy: MEASURED_LOCAL_SELECTION_POLICY_V1.to_owned(),
+            identity: manifest.identity(),
+            manifest_sha256: manifest
+                .digest()
+                .map_err(|error| PackSelectionError::Manifest(error.to_string()))?,
+            kind: manifest.capability.kind.clone(),
+            scope: manifest.capability.scope.clone(),
+            selection_id: request.selection_id,
+            selected_unix_seconds: request.selected_unix_seconds,
+            activation_allowed: request.action == PackSelectionActionV1::InstallAndActivate,
+            fit_evidence_sha256,
+            artifacts: manifest
+                .artifacts
+                .iter()
+                .map(|artifact| {
+                    (
+                        artifact.id.clone(),
+                        (artifact.size_bytes, artifact.sha256.clone()),
+                    )
+                })
+                .collect(),
+        })
+    }
+}
+
+fn validate_policy_scope_and_kind(
+    policy: &str,
+    kind: &ModelPackKindV1,
+    scope: &ModelPackScopeV1,
+) -> Result<(), PackSelectionError> {
+    match policy {
+        API_FIRST_SELECTION_POLICY_V1 if scope != &ModelPackScopeV1::Generic => {
+            Err(PackSelectionError::GenericLipSyncRequired)
+        }
+        API_FIRST_SELECTION_POLICY_V1 if kind == &ModelPackKindV1::LipSync => Ok(()),
+        API_FIRST_SELECTION_POLICY_V1 => {
+            Err(PackSelectionError::AuthorizationOutsideApiFirstPolicy)
+        }
+        MEASURED_LOCAL_SELECTION_POLICY_V1 if scope != &ModelPackScopeV1::Generic => {
+            Err(PackSelectionError::GenericPackRequired)
+        }
+        MEASURED_LOCAL_SELECTION_POLICY_V1
+            if matches!(
+                kind,
+                ModelPackKindV1::LanguageModel
+                    | ModelPackKindV1::SpeechRecognition
+                    | ModelPackKindV1::SpeechSynthesis
+                    | ModelPackKindV1::Embedding
+                    | ModelPackKindV1::Vision
+                    | ModelPackKindV1::LipSync
+            ) =>
+        {
+            Ok(())
+        }
+        MEASURED_LOCAL_SELECTION_POLICY_V1 => {
+            Err(PackSelectionError::LocalInferenceKindBlocked(kind.clone()))
+        }
+        _ => Err(PackSelectionError::AuthorizationMismatch),
     }
 }
 
@@ -178,6 +286,12 @@ pub enum PackSelectionError {
     LocalInferenceKindBlocked(ModelPackKindV1),
     #[error("API-first mode permits only a generic lip-sync pack")]
     GenericLipSyncRequired,
+    #[error("local model packs must be generic rather than game-specific")]
+    GenericPackRequired,
+    #[error("loadout fit evidence is incomplete or contains unknown measurements")]
+    IncompleteLoadoutFitEvidence,
+    #[error("verified loadout admission does not include this exact manifest")]
+    LoadoutAdmissionDoesNotCoverManifest,
     #[error("selection ID is invalid")]
     InvalidSelectionId,
     #[error("selection authorization does not match this manifest or pack")]

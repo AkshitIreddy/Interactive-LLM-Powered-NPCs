@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { canonicalJson, canonicalJsonLines, sha256 } = require("../src/canonical.ts");
 const { VirtualClock, SeededRandom } = require("../src/virtual-clock.ts");
+const { loadScenario, validateScenario } = require("../src/manifest.ts");
 
 test("canonical JSON recursively sorts keys and omits undefined object fields", () => {
   const actual = canonicalJson({ z: 1, a: { d: undefined, c: 3, b: 2 }, list: [{ y: 2, x: 1 }] });
@@ -35,4 +36,15 @@ test("seeded random streams replay exactly and diverge with a different seed", (
   const first = sample(left);
   assert.deepEqual(first, sample(replay));
   assert.notDeepEqual(first, sample(other));
+});
+
+test("scenario validation rejects source-kind mismatches and invalid generations", () => {
+  const { scenario } = loadScenario("typed-turn");
+  const mismatched = structuredClone(scenario);
+  mismatched.stream[0].source = "tts";
+  assert.throws(() => validateScenario(mismatched), /kind is invalid for source/);
+
+  const invalidGeneration = structuredClone(scenario);
+  invalidGeneration.stream[0].generation = -1;
+  assert.throws(() => validateScenario(invalidGeneration), /invalid generation/);
 });

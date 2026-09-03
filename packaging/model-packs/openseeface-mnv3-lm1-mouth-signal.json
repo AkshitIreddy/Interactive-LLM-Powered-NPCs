@@ -1,0 +1,123 @@
+{
+  "$schema": "./model-pack-manifest.schema.json",
+  "schema": "npc.model-pack/v2",
+  "pack_id": "openseeface-mnv3-lm1-mouth-signal",
+  "revision": "85aa70fc67582d046e771ea73625182a0d8f7475",
+  "display_name": "OpenSeeFace MNV3 + LM1 mouth signal",
+  "description": "Optional CPU-only face detector and 66-point landmark signal pack. It is not an identity model, talking-head generator, or complete lip-sync model and is disabled until its separate ONNX Runtime and current-device resource envelope are admitted.",
+  "source": {
+    "project_url": "https://github.com/emilianavt/OpenSeeFace",
+    "immutable_revision": "85aa70fc67582d046e771ea73625182a0d8f7475",
+    "model_card_url": "https://github.com/emilianavt/OpenSeeFace/tree/85aa70fc67582d046e771ea73625182a0d8f7475"
+  },
+  "capability": { "kind": "vision", "scope": "generic" },
+  "artifacts": [
+    {
+      "id": "mnv3-detection-opt", "role": "model_weights", "kind": "file", "archive_format": null,
+      "source_urls": ["https://raw.githubusercontent.com/emilianavt/OpenSeeFace/85aa70fc67582d046e771ea73625182a0d8f7475/models/mnv3_detection_opt.onnx"],
+      "size_bytes": 568302, "sha256": "0e8e4806766d85ab067a52c7af0dcb59eb7f9dfe580b44f20a8e6ab712d89809",
+      "destination": "models/mnv3_detection_opt.onnx", "strip_prefix": null, "required_paths": []
+    },
+    {
+      "id": "lm-model1-opt", "role": "model_weights", "kind": "file", "archive_format": null,
+      "source_urls": ["https://raw.githubusercontent.com/emilianavt/OpenSeeFace/85aa70fc67582d046e771ea73625182a0d8f7475/models/lm_model1_opt.onnx"],
+      "size_bytes": 4842329, "sha256": "5bec42b298a24142cdb249a7256d65bc3fc0fbc673fa1752a64f4d7164719c9f",
+      "destination": "models/lm_model1_opt.onnx", "strip_prefix": null, "required_paths": []
+    },
+    {
+      "id": "openseeface-license", "role": "license", "kind": "file", "archive_format": null,
+      "source_urls": ["https://raw.githubusercontent.com/emilianavt/OpenSeeFace/85aa70fc67582d046e771ea73625182a0d8f7475/LICENSE"],
+      "size_bytes": 1364, "sha256": "28612834d7ca038a9009550e3869a67e6be3a87c238d997f58c0907e08744146",
+      "destination": "LICENSE", "strip_prefix": null, "required_paths": []
+    },
+    {
+      "id": "onnxruntime-1.22.1-cpu-windows-x64", "role": "runtime", "kind": "archive", "archive_format": "zip",
+      "source_urls": ["https://github.com/microsoft/onnxruntime/releases/download/v1.22.1/onnxruntime-win-x64-1.22.1.zip"],
+      "size_bytes": 73731806, "sha256": "855276cd4be3cda14fe636c69eb038d75bf5bcd552bda1193a5d79c51f436dfe",
+      "destination": "runtime/onnxruntime-1.22.1-cpu", "strip_prefix": "onnxruntime-win-x64-1.22.1",
+      "required_paths": ["GIT_COMMIT_ID", "LICENSE", "ThirdPartyNotices.txt", "VERSION_NUMBER", "lib/onnxruntime.dll", "lib/onnxruntime_providers_shared.dll"]
+    }
+  ],
+  "runtime": {
+    "runtime": "onnxruntime", "immutable_revision": "1.22.1", "abi": "onnxruntime-cpu-v1", "entrypoint": null,
+    "supported_platforms": ["windows10", "windows11"], "supported_architectures": ["x86_64"],
+    "backends": ["onnxruntime-1.22.1-cpu"], "network_access_after_install": false
+  },
+  "hardware": {
+    "minimum_ram_bytes": 268435456, "recommended_ram_bytes": 536870912,
+    "minimum_vram_bytes": 0, "recommended_vram_bytes": 0, "minimum_cpu_threads": 1,
+    "accelerators": ["cpu"], "required_cpu_features": []
+  },
+  "resources": {
+    "storage_bytes": 79143801, "peak_install_bytes": 91916048,
+    "planning_resident_ram_bytes": 93265592, "planning_resident_vram_bytes": 0,
+    "planning_load_millis": 72,
+    "planning_hardware": "Synthetic Eclipse Harbor replay; CPUExecutionProvider, one intra-op thread; see docs/research/openseeface-visual-pack-qualification-2026-08-30.md",
+    "quality_tier": "experimental", "languages": ["language-independent-visual-signal"],
+    "measurement": {
+      "required_schema": "npc.measured-resource-envelope/v1", "minimum_samples": 20,
+      "current_device_fingerprint_required": true, "signed_evidence_required": true,
+      "p99_reload_required": true, "manifest_values_not_for_admission": true
+    }
+  },
+  "license": {
+    "spdx_expression": "BSD-2-Clause AND MIT", "license_name": "BSD 2-Clause and MIT",
+    "license_url": "https://github.com/emilianavt/OpenSeeFace/blob/85aa70fc67582d046e771ea73625182a0d8f7475/LICENSE",
+    "attribution": "OpenSeeFace by Emiliana Torrano; source and models pinned to revision 85aa70fc67582d046e771ea73625182a0d8f7475.",
+    "redistributable": true, "commercial_use": "allowed", "derivative_use": "allowed", "acceptance_required": false,
+    "notices": [
+      "The application does not bundle this pack; it is fetched only after explicit user selection.",
+      "The BSD license file is itself a pinned, verified artifact.",
+      "ONNX Runtime project code is MIT-licensed; the pinned release archive also carries ThirdPartyNotices.txt and its bundled third-party terms.",
+      "ONNX Runtime is not included in the base installer and is acquired as a separately governed optional runtime only after explicit user approval.",
+      "Optional archive redistribution and activation require installation of the pinned LICENSE and ThirdPartyNotices.txt, closed-world SBOM reconciliation, and human legal review."
+    ],
+    "components": [
+      {
+        "id": "openseeface-models", "component": "OpenSeeFace MNV3 detector and LM1 landmark models",
+        "spdx_expression": "BSD-2-Clause",
+        "license_url": "https://github.com/emilianavt/OpenSeeFace/blob/85aa70fc67582d046e771ea73625182a0d8f7475/LICENSE",
+        "immutable_source_revision": "85aa70fc67582d046e771ea73625182a0d8f7475",
+        "redistributable": true, "notice_required": true
+      },
+      {
+        "id": "onnxruntime-1.22.1-cpu", "component": "Microsoft ONNX Runtime 1.22.1 Windows x64 CPU runtime",
+        "spdx_expression": "MIT",
+        "license_url": "https://github.com/microsoft/onnxruntime/blob/v1.22.1/LICENSE",
+        "immutable_source_revision": "v1.22.1",
+        "redistributable": true, "notice_required": true
+      }
+    ]
+  },
+  "self_test": {
+    "kind": "openseeface-mouth-signal-v1", "suite_revision": "2026-08-30",
+    "allowed_runtime_backends": ["onnxruntime-1.22.1-cpu"],
+    "input_fixture": "docs/assets/demo/demo.mp4",
+    "input_fixture_sha256": "a27480c3cfeca36b72f3a2b8baff204fbe04e23d7ccd3a762f719d0da350a3a3",
+    "expected_output_sha256": null, "timeout_millis": 300000
+  },
+  "voices": [],
+  "extensions": {
+    "vision": {
+      "input_pixel_formats": ["rgb_f32_nchw_224x224"],
+      "output_signals": ["face_detection", "face_landmarks_66", "mouth_landmarks"],
+      "maximum_signal_rate_hz": 15, "identity_recognition": false
+    }
+  },
+  "lifecycle": {
+    "explicit_download_required": true, "automatic_download_allowed": false,
+    "install_strategy": "verify_then_atomic_activate", "repair_strategy": "verify_quarantine_reinstall",
+    "remove_requires_unreferenced": true,
+    "activation_gates": ["explicit_user_approval", "catalog_trust", "artifact_integrity", "license_acceptance", "runtime_compatibility", "self_test_attestation", "current_device_measurement", "whole_loadout_admission"]
+  },
+  "trust": {
+    "release_catalog_required": true, "immutable_revision_required": true, "artifact_sha256_required": true,
+    "self_test_attestation_required": true, "measured_resource_envelope_required": true,
+    "unsigned_activation_allowed": false
+  },
+  "admission": {
+    "state": "blocked_pending_measurement",
+    "reason": "The model and exact ONNX Runtime archive are pinned and a current-device candidate measurement passed, but its ephemeral signature is not release-trusted. Activation remains blocked until extracted runtime allowlist verification, ThirdPartyNotices and optional-runtime legal reconciliation, release-catalog trust, attested self-test, a trusted signed current-device envelope, and whole-loadout admission all pass.",
+    "allowed_residencies": ["cpu_resident"], "unknowns_fail_closed": true
+  }
+}

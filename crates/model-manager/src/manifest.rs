@@ -123,6 +123,7 @@ pub enum ArchiveFormatV1 {
     Zip,
     Tar,
     TarGz,
+    TarBz2,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -137,6 +138,13 @@ pub struct ArtifactV1 {
     pub sha256: Sha256Digest,
     /// Relative destination. Archive members are additionally validated while extracting.
     pub destination: String,
+    /// Optional immutable archive root removed before destination mapping.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strip_prefix: Option<String>,
+    /// When non-empty, only these exact post-strip files are installed and all
+    /// entries must be present. This keeps optional runtime trees closed-world.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_paths: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -336,6 +344,36 @@ impl ModelPackManifestV1 {
                     source,
                 }
             })?;
+            if let Some(strip_prefix) = &artifact.strip_prefix {
+                if artifact.kind != ArtifactKind::Archive {
+                    return Err(ManifestError::UnexpectedArchiveFormat(artifact.id.clone()));
+                }
+                crate::validate_relative_archive_path(strip_prefix).map_err(|source| {
+                    ManifestError::UnsafeDestination {
+                        artifact: artifact.id.clone(),
+                        source,
+                    }
+                })?;
+            }
+            if !artifact.required_paths.is_empty() {
+                if artifact.kind != ArtifactKind::Archive || artifact.required_paths.len() > 1_024 {
+                    return Err(ManifestError::UnexpectedArchiveFormat(artifact.id.clone()));
+                }
+                let mut required = BTreeSet::new();
+                for path in &artifact.required_paths {
+                    let path = crate::validate_relative_archive_path(path).map_err(|source| {
+                        ManifestError::UnsafeDestination {
+                            artifact: artifact.id.clone(),
+                            source,
+                        }
+                    })?;
+                    if !required.insert(path.as_str().to_ascii_lowercase()) {
+                        return Err(ManifestError::DuplicateDestination(
+                            path.as_str().to_owned(),
+                        ));
+                    }
+                }
+            }
             if !destinations.insert(artifact.destination.to_ascii_lowercase().replace('\\', "/")) {
                 return Err(ManifestError::DuplicateDestination(
                     artifact.destination.clone(),

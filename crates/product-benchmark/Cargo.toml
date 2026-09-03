@@ -1,0 +1,25 @@
+[package]
+name = "npc-product-benchmark"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Bounded, privacy-preserving This-PC benchmark orchestration and reports"
+publish = false
+
+[dependencies]
+async-trait = "0.1.89"
+npc-system-telemetry = { path = "../system-telemetry" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+time = { version = "0.3", features = ["formatting", "parsing"] }
+tokio = { version = "1", features = ["rt", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true

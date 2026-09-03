@@ -358,6 +358,9 @@ pub enum DeliveryMode {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DeliveredSentence {
     pub sentence_id: u64,
+    /// Exact UTF-8 range in `TurnOutcome::full_response`.
+    pub text_start_bytes: usize,
+    pub text_end_bytes: usize,
     pub text: String,
     pub delivery: DeliveryMode,
     pub audible_frames: u64,
@@ -388,6 +391,9 @@ pub struct TurnOutcome {
     pub identity: TurnIdentity,
     pub lifecycle: TurnLifecycle,
     pub full_response: String,
+    /// Present only when the selected route returned a strictly validated
+    /// `npc_response.v1` envelope. Legacy providers remain source compatible.
+    pub structured_response: Option<crate::structured_response::NpcResponseEnvelopeV1>,
     pub effects: NpcEffectsV1,
     pub delivered: Vec<DeliveredSentence>,
     pub degradations: Vec<Degradation>,
@@ -430,6 +436,8 @@ pub enum TurnEvent {
     SentenceReady {
         identity: TurnIdentity,
         sentence_id: u64,
+        text_start_bytes: usize,
+        text_end_bytes: usize,
         text: String,
     },
     SpeechStarted {
@@ -460,7 +468,7 @@ pub enum TurnEvent {
         span: crate::timing::TimingSpan,
     },
     Terminal {
-        outcome: TurnOutcome,
+        outcome: Box<TurnOutcome>,
     },
 }
 

@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://interactive-npcs.invalid/schemas/benchmark-evidence-v1.schema.json",
+  "title": "Interactive NPCs benchmark evidence report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "report_id",
+    "generated_at_utc",
+    "classification",
+    "source",
+    "bounds",
+    "machine",
+    "percentile_method",
+    "metrics"
+  ],
+  "properties": {
+    "schema_version": { "const": "interactive-npcs-benchmark-report/v1" },
+    "report_id": { "$ref": "#/$defs/safe_id" },
+    "generated_at_utc": { "$ref": "#/$defs/utc_timestamp" },
+    "classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["execution_mode", "measurement_kind", "acceptance_eligible", "reason"],
+      "properties": {
+        "execution_mode": { "$ref": "#/$defs/execution_mode" },
+        "measurement_kind": { "$ref": "#/$defs/measurement_kind" },
+        "acceptance_eligible": { "type": "boolean" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 240 }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "sha256", "bytes", "records", "path_recorded", "payloads_recorded"],
+      "properties": {
+        "format": { "const": "jsonl" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "bytes": { "type": "integer", "minimum": 1, "maximum": 268435456 },
+        "records": { "type": "integer", "minimum": 12, "maximum": 1000000 },
+        "path_recorded": { "const": false },
+        "payloads_recorded": { "const": false }
+      }
+    },
+    "bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timeout_seconds", "max_records", "records_processed", "elapsed_ms", "completed_within_bounds"],
+      "properties": {
+        "timeout_seconds": { "type": "number", "minimum": 0.1, "maximum": 900 },
+        "max_records": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "records_processed": { "type": "integer", "minimum": 12, "maximum": 1000000 },
+        "elapsed_ms": { "type": "number", "minimum": 0 },
+        "completed_within_bounds": { "const": true }
+      }
+    },
+    "machine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operating_system", "architecture", "python_version", "logical_processor_count", "hostname_recorded", "environment_variables_recorded"],
+      "properties": {
+        "operating_system": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "architecture": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "python_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+" },
+        "logical_processor_count": { "type": "integer", "minimum": 1 },
+        "hostname_recorded": { "const": false },
+        "environment_variables_recorded": { "const": false }
+      }
+    },
+    "percentile_method": { "const": "R-7 linear interpolation; position=(n-1)*q" },
+    "metrics": {
+      "type": "array",
+      "minItems": 12,
+      "maxItems": 12,
+      "items": { "$ref": "#/$defs/metric_result" }
+    }
+  },
+  "$defs": {
+    "safe_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$"
+    },
+    "utc_timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+    },
+    "execution_mode": {
+      "enum": ["simulated", "mocked", "live"]
+    },
+    "measurement_kind": {
+      "enum": ["measured", "planning_estimate"]
+    },
+    "finite_nonnegative": {
+      "type": "number",
+      "minimum": 0
+    },
+    "metric_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "unit",
+        "description",
+        "sample_count",
+        "min",
+        "max",
+        "mean",
+        "p50",
+        "p95",
+        "p99",
+        "execution_mode",
+        "measurement_kind"
+      ],
+      "properties": {
+        "name": {
+          "enum": [
+            "capture.latency_ms",
+            "identity.latency_ms",
+            "llm.ttft_ms",
+            "llm.output_tokens",
+            "llm.tokens_per_second",
+            "tts.ttfa_ms",
+            "tts.audio_completion_ms",
+            "audio.submission_ms",
+            "compositor.latency_ms",
+            "compositor.fps",
+            "compositor.stale_drops",
+            "end_to_end.turn_ms"
+          ]
+        },
+        "unit": { "enum": ["ms", "tokens", "tokens_per_second", "frames_per_second", "count"] },
+        "description": { "type": "string", "minLength": 1, "maxLength": 180 },
+        "sample_count": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "min": { "$ref": "#/$defs/finite_nonnegative" },
+        "max": { "$ref": "#/$defs/finite_nonnegative" },
+        "mean": { "$ref": "#/$defs/finite_nonnegative" },
+        "p50": { "$ref": "#/$defs/finite_nonnegative" },
+        "p95": { "$ref": "#/$defs/finite_nonnegative" },
+        "p99": { "$ref": "#/$defs/finite_nonnegative" },
+        "execution_mode": { "$ref": "#/$defs/execution_mode" },
+        "measurement_kind": { "$ref": "#/$defs/measurement_kind" }
+      }
+    }
+  }
+}

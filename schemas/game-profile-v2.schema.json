@@ -19,7 +19,8 @@
     "defaults": { "$ref": "#/$defs/defaults" },
     "diagnostics": { "type": "array", "minItems": 1, "maxItems": 128, "items": { "$ref": "#/$defs/diagnostic" } },
     "troubleshooting": { "type": "array", "minItems": 1, "maxItems": 128, "items": { "$ref": "#/$defs/troubleshooting" } },
-    "prompts": { "$ref": "#/$defs/globalPrompts" }
+    "prompts": { "$ref": "#/$defs/globalPrompts" },
+    "recommendations": { "$ref": "#/$defs/recommendationPolicy" }
   },
   "$defs": {
     "slug": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "minLength": 1, "maxLength": 80 },
@@ -184,8 +185,21 @@
         "spoiler_policy": { "$ref": "#/$defs/shortText" },
         "spoiler_tiers": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "$ref": "#/$defs/spoilerTier" } },
         "background_npc_rules": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/shortText" } },
-        "provenance": { "type": "array", "minItems": 1, "maxItems": 256, "items": { "$ref": "#/$defs/provenance" } }
-      }
+        "provenance": { "type": "array", "minItems": 1, "maxItems": 256, "items": { "$ref": "#/$defs/provenance" } },
+        "knowledge": { "type": "array", "maxItems": 8192, "default": [], "items": { "$ref": "#/$defs/knowledge" } },
+        "retrieval": { "$ref": "#/$defs/retrievalPolicy" },
+        "character_data_readiness": { "enum": ["curated", "partial", "unavailable"] },
+        "character_data_readiness_notes": { "$ref": "#/$defs/shortText" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "character_data_readiness": { "enum": ["partial", "unavailable"] } },
+            "required": ["character_data_readiness"]
+          },
+          "then": { "required": ["character_data_readiness_notes"] }
+        }
+      ]
     },
     "spoilerTier": {
       "type": "object", "additionalProperties": false,
@@ -199,12 +213,45 @@
         "id": { "$ref": "#/$defs/slug" }, "title": { "$ref": "#/$defs/name" },
         "kind": { "enum": ["original", "official", "licensed", "legacy_import"] },
         "source_url": { "type": "string", "format": "uri", "pattern": "^https://", "maxLength": 2048 },
-        "license": { "$ref": "#/$defs/name" }, "notes": { "$ref": "#/$defs/shortText" }
+        "license": { "$ref": "#/$defs/name" }, "notes": { "$ref": "#/$defs/shortText" },
+        "source_revision": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "source_path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "source_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "review_status": { "enum": ["pending", "approved", "rejected"] },
+        "transform_version": { "type": "string", "minLength": 1, "maxLength": 160 }
       },
       "allOf": [
         { "if": { "properties": { "kind": { "enum": ["official", "licensed"] } }, "required": ["kind"] }, "then": { "required": ["source_url"] } },
         { "if": { "properties": { "kind": { "const": "licensed" } }, "required": ["kind"] }, "then": { "required": ["license"] } }
       ]
+    },
+    "knowledge": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "authority", "text", "topic_tags", "spoiler_tier", "provenance_id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/slug" },
+        "authority": { "enum": ["core_canon", "game_public", "character_authored"] },
+        "owner_character_id": { "$ref": "#/$defs/slug" },
+        "text": { "$ref": "#/$defs/longText" },
+        "topic_tags": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "$ref": "#/$defs/name" } },
+        "spoiler_tier": { "$ref": "#/$defs/slug" },
+        "provenance_id": { "$ref": "#/$defs/slug" }
+      }
+    },
+    "retrievalPolicy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["query_window_delivered_turns", "max_core_records", "max_public_records", "max_character_records", "max_memory_records", "authority_order"],
+      "properties": {
+        "query_window_delivered_turns": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "max_core_records": { "type": "integer", "minimum": 1, "maximum": 256 },
+        "max_public_records": { "type": "integer", "minimum": 0, "maximum": 256 },
+        "max_character_records": { "type": "integer", "minimum": 0, "maximum": 256 },
+        "max_memory_records": { "type": "integer", "minimum": 0, "maximum": 256 },
+        "authority_order": {
+          "type": "array", "minItems": 1, "maxItems": 7, "uniqueItems": true,
+          "items": { "enum": ["core_canon", "character_profile", "game_public", "character_authored", "retrieved_memory", "session_summary", "recent_delivered_turns"] }
+        }
+      }
     },
     "character": {
       "type": "object", "additionalProperties": false,
@@ -214,8 +261,23 @@
         "aliases": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "$ref": "#/$defs/name" } },
         "biography": { "$ref": "#/$defs/longText" }, "personality": { "$ref": "#/$defs/longText" },
         "dialogue_style": { "$ref": "#/$defs/longText" }, "background_npc": { "type": "boolean" },
+        "style_examples": { "type": "array", "maxItems": 512, "default": [], "items": { "$ref": "#/$defs/styleExample" } },
+        "opening_lines": { "type": "array", "maxItems": 32, "default": [], "items": { "$ref": "#/$defs/shortText" } },
         "prompt": { "$ref": "#/$defs/characterPrompt" }, "voice": { "$ref": "#/$defs/voice" },
         "identity": { "$ref": "#/$defs/identity" }, "model": { "$ref": "#/$defs/model" }
+      }
+    },
+    "styleExample": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "speaker", "text", "situation_tags", "tone_tags", "weight_millis", "provenance_id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/slug" },
+        "speaker": { "$ref": "#/$defs/name" },
+        "text": { "$ref": "#/$defs/longText" },
+        "situation_tags": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "$ref": "#/$defs/name" } },
+        "tone_tags": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "$ref": "#/$defs/name" } },
+        "weight_millis": { "type": "integer", "minimum": 0, "maximum": 1000 },
+        "provenance_id": { "$ref": "#/$defs/slug" }
       }
     },
     "characterPrompt": {
@@ -234,7 +296,11 @@
       "properties": {
         "description": { "$ref": "#/$defs/shortText" }, "locale": { "$ref": "#/$defs/locale" },
         "style_tags": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "$ref": "#/$defs/name" } },
-        "provider_voice_id": { "type": "string", "pattern": "^[A-Za-z0-9._:-]+$", "minLength": 1, "maxLength": 160 }
+        "provider_voice_id": { "type": "string", "pattern": "^[A-Za-z0-9._:-]+$", "minLength": 1, "maxLength": 160 },
+        "adapter_id": { "type": "string", "pattern": "^[A-Za-z0-9._:-]+$", "minLength": 1, "maxLength": 160 },
+        "catalog_version": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "license": { "$ref": "#/$defs/name" },
+        "user_override_allowed": { "type": "boolean", "default": false }
       }
     },
     "identity": {
@@ -273,6 +339,17 @@
         "system_preamble": { "$ref": "#/$defs/longText" },
         "safety_rules": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/shortText" } },
         "background_npc_template": { "$ref": "#/$defs/longText" }
+      }
+    },
+    "recommendationPolicy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["integration_mode", "provider_strategy", "local_activation_policy", "game_resource_reserve_required", "screen_space_lip_sync"],
+      "properties": {
+        "integration_mode": { "const": "external_only" },
+        "provider_strategy": { "const": "api_first" },
+        "local_activation_policy": { "const": "measured_whole_loadout_fit_required" },
+        "game_resource_reserve_required": { "const": true },
+        "screen_space_lip_sync": { "const": "experimental_opt_in_after_exact_target_and_advancing_frame_qualification" }
       }
     }
   }

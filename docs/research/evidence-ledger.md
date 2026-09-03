@@ -2,6 +2,8 @@
 
 Snapshot date: 2026-08-29. This ledger records decision evidence, not a permanent claim that provider catalogs, model IDs, pricing or licenses remain unchanged. Volatile facts must be refreshed into signed catalogs before a release candidate.
 
+Focused qualification: [generic captured-game lip-sync](generic-captured-game-lipsync-qualification-2026-08-30.md).
+
 ## Evidence quality rules
 
 - Prefer official platform/provider documentation, upstream repositories, model cards and license texts.

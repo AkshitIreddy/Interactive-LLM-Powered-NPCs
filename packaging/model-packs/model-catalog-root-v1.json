@@ -1,0 +1,19 @@
+{
+  "schema": "npc.model-catalog-root/v1",
+  "trustScope": "automated_local_review_bootstrap",
+  "productionTrust": false,
+  "rotationRequiredBeforeRelease": true,
+  "promotionSupported": false,
+  "publicationSupported": false,
+  "signatureThreshold": 2,
+  "keys": [
+    {
+      "keyId": "automated-local-review-rev4-ephemeral-1",
+      "publicKeyHex": "4c5bdd1066cd2a5bcc5cd2730d5d398935655a7419544d71a6505093cd97d78c"
+    },
+    {
+      "keyId": "automated-local-review-rev4-ephemeral-2",
+      "publicKeyHex": "117f78605cf050872052487064a7ab1229960e2aa87239772b750381cec308bb"
+    }
+  ]
+}

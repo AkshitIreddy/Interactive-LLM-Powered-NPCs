@@ -12,6 +12,7 @@ mod manual;
 mod path_security;
 mod scanner;
 mod steam;
+mod target;
 mod vdf;
 
 #[cfg(windows)]
@@ -22,12 +23,19 @@ pub use evidence::{
     Confidence, DetectionSource, EditionEvidence, InstallationCandidate, InstallationEvidence,
     StoreKind,
 };
-pub use filesystem::{EpicFilesystemScanner, GogFilesystemScanner, SteamFilesystemScanner};
+pub use filesystem::{
+    CommonDirectoryRule, CommonDirectoryScanner, EpicFilesystemScanner, GogFilesystemScanner,
+    SteamFilesystemScanner,
+};
 pub use gog::{parse_gog_info, GogInstall};
-pub use manual::{validate_manual_executable, ManualSelectionError};
+pub use manual::{manual_installation_candidate, validate_manual_executable, ManualSelectionError};
 pub use path_security::StoreRelativePathError;
 pub use scanner::{DiscoveryError, DiscoveryService, StoreScanner};
 pub use steam::{parse_app_manifest, parse_library_folders, SteamApp, SteamLibrary};
+pub use target::{
+    BoundGameTarget, CaptureFreshnessError, ProcessWindowRule, RunningGameWindow, TargetPolicy,
+    TargetPolicyError, TargetRevalidationError, TargetSelectionError,
+};
 
 #[cfg(windows)]
 pub use windows::WindowsStoreLocator;

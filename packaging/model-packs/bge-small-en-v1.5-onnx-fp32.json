@@ -1,0 +1,187 @@
+{
+  "$schema": "./model-pack-manifest.schema.json",
+  "admission": {
+    "allowed_residencies": [
+      "cpu_resident"
+    ],
+    "reason": "CPU embedding pack remains blocked until this exact manifest is catalog-trusted, the hidden self-test is attested, and at least 20 signed current-device load/reload/operation samples admit the whole game loadout.",
+    "state": "blocked_pending_measurement",
+    "unknowns_fail_closed": true
+  },
+  "artifacts": [
+    {
+      "archive_format": null,
+      "destination": "model/model.onnx",
+      "id": "bge-small-en-v1.5-onnx-fp32",
+      "kind": "file",
+      "required_paths": [],
+      "role": "model_weights",
+      "sha256": "828e1496d7fabb79cfa4dcd84fa38625c0d3d21da474a00f08db0f559940cf35",
+      "size_bytes": 133093490,
+      "source_urls": [
+        "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/onnx/model.onnx"
+      ],
+      "strip_prefix": null
+    },
+    {
+      "archive_format": null,
+      "destination": "model/tokenizer.json",
+      "id": "bge-small-en-v1.5-tokenizer-json",
+      "kind": "file",
+      "required_paths": [],
+      "role": "tokenizer",
+      "sha256": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66",
+      "size_bytes": 711396,
+      "source_urls": [
+        "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/tokenizer.json"
+      ],
+      "strip_prefix": null
+    },
+    {
+      "archive_format": null,
+      "destination": "licenses/BGE-MODEL-CARD.md",
+      "id": "bge-small-en-v1.5-model-card-license",
+      "kind": "file",
+      "required_paths": [],
+      "role": "license",
+      "sha256": "ddb964361a55c6e5dfca6361615854b260c9c960205d04c7520151aaa1d75837",
+      "size_bytes": 94783,
+      "source_urls": [
+        "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/README.md"
+      ],
+      "strip_prefix": null
+    }
+  ],
+  "capability": {
+    "kind": "embedding",
+    "scope": "generic"
+  },
+  "description": "Optional English memory and character-knowledge embeddings using the immutable official FP32 ONNX export. Activation requires a matching signed machine qualification envelope.",
+  "display_name": "BGE Small English v1.5 (local CPU embeddings)",
+  "extensions": {
+    "embedding": {
+      "dimensions": 384,
+      "maximum_tokens": 512,
+      "normalized": true,
+      "pooling": "cls"
+    }
+  },
+  "hardware": {
+    "accelerators": [
+      "cpu"
+    ],
+    "minimum_cpu_threads": 1,
+    "minimum_ram_bytes": 1073741824,
+    "minimum_vram_bytes": 0,
+    "recommended_ram_bytes": 2147483648,
+    "recommended_vram_bytes": 0,
+    "required_cpu_features": []
+  },
+  "license": {
+    "acceptance_required": false,
+    "attribution": "BAAI, BGE Small English v1.5",
+    "commercial_use": "allowed",
+    "components": [
+      {
+        "component": "BAAI BGE Small English v1.5 model and tokenizer",
+        "id": "bge-small-en-v1.5",
+        "immutable_source_revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
+        "license_url": "https://huggingface.co/BAAI/bge-small-en-v1.5/blob/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/README.md",
+        "notice_required": true,
+        "redistributable": true,
+        "spdx_expression": "MIT"
+      }
+    ],
+    "derivative_use": "allowed",
+    "license_name": "MIT License",
+    "license_url": "https://huggingface.co/BAAI/bge-small-en-v1.5/blob/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/README.md",
+    "notices": [
+      "Model license is declared MIT by the immutable upstream model card.",
+      "ONNX Runtime, NumPy, tokenizers, and transitive runtime notices ship separately."
+    ],
+    "redistributable": true,
+    "spdx_expression": "MIT"
+  },
+  "lifecycle": {
+    "activation_gates": [
+      "explicit_user_approval",
+      "catalog_trust",
+      "artifact_integrity",
+      "license_acceptance",
+      "runtime_compatibility",
+      "self_test_attestation",
+      "current_device_measurement",
+      "whole_loadout_admission"
+    ],
+    "automatic_download_allowed": false,
+    "explicit_download_required": true,
+    "install_strategy": "verify_then_atomic_activate",
+    "remove_requires_unreferenced": true,
+    "repair_strategy": "verify_quarantine_reinstall"
+  },
+  "pack_id": "bge-small-en-v1.5-onnx-fp32",
+  "resources": {
+    "languages": [
+      "en"
+    ],
+    "measurement": {
+      "current_device_fingerprint_required": true,
+      "manifest_values_not_for_admission": true,
+      "minimum_samples": 20,
+      "p99_reload_required": true,
+      "required_schema": "npc.measured-resource-envelope/v1",
+      "signed_evidence_required": true
+    },
+    "peak_install_bytes": 267799338,
+    "planning_hardware": null,
+    "planning_load_millis": null,
+    "planning_resident_ram_bytes": null,
+    "planning_resident_vram_bytes": 0,
+    "quality_tier": "fast",
+    "storage_bytes": 133899669
+  },
+  "revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a.1",
+  "runtime": {
+    "abi": "bge-bert-cls-f32-v1",
+    "backends": [
+      "onnxruntime-cpu"
+    ],
+    "entrypoint": "workers/local-embedding/worker.py",
+    "immutable_revision": "1.29.0",
+    "network_access_after_install": false,
+    "runtime": "onnxruntime",
+    "supported_architectures": [
+      "x86_64"
+    ],
+    "supported_platforms": [
+      "windows10",
+      "windows11"
+    ]
+  },
+  "schema": "npc.model-pack/v2",
+  "self_test": {
+    "allowed_runtime_backends": [
+      "onnxruntime-cpu"
+    ],
+    "expected_output_sha256": null,
+    "input_fixture": "workers/local-embedding/fixtures/self-test.request.json",
+    "input_fixture_sha256": "3abdba8b0018a4f553a96cbd55662e1d803cc38bb5e24040337309e695e45f03",
+    "kind": "embedding_semantic_ordering",
+    "suite_revision": "bge-small-en-v1.5-hidden-v1",
+    "timeout_millis": 30000
+  },
+  "source": {
+    "immutable_revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
+    "model_card_url": "https://huggingface.co/BAAI/bge-small-en-v1.5/blob/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a/README.md",
+    "project_url": "https://huggingface.co/BAAI/bge-small-en-v1.5"
+  },
+  "trust": {
+    "artifact_sha256_required": true,
+    "immutable_revision_required": true,
+    "measured_resource_envelope_required": true,
+    "release_catalog_required": true,
+    "self_test_attestation_required": true,
+    "unsigned_activation_allowed": false
+  },
+  "voices": []
+}

@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "npc.sim.scenario.v1",
+  "id": "stale-lipsync-drop",
+  "description": "Lip-sync patches from an old frame or actor epoch are dropped while the current tracked frame is applied and delivered.",
+  "seed": 3005,
+  "resourceProfile": "reference-balanced-12gb",
+  "privacy": { "mode": "hybrid", "networkAllowed": true },
+  "providers": { "llm": "mock-nvidia-nim", "tts": "mock-local" },
+  "turn": {
+    "sessionId": "session-stale-lipsync",
+    "turnId": "turn-stale-lipsync-001",
+    "inputMode": "typed",
+    "npc": { "id": "eclipse-harbor-mara", "name": "Mara Venn", "visibility": "visible" }
+  },
+  "stream": [
+    { "atMs": 0, "source": "input", "kind": "typed_input", "payload": { "text": "Say that again." } },
+    { "atMs": 20, "source": "identity", "kind": "resolved", "payload": { "strategy": "tracked_actor", "confidence": 0.99, "actorTrackId": "track-mara", "trackEpoch": 9 } },
+    { "atMs": 45, "source": "memory", "kind": "retrieved", "payload": { "episodicCount": 2, "factCount": 3, "latencyMs": 25 } },
+    { "atMs": 100, "source": "llm", "kind": "sentence", "payload": { "text": "The fog is lifting." } },
+    { "atMs": 170, "source": "tts", "kind": "audio_chunk", "payload": { "chunkIndex": 0, "sampleCount": 1440, "sampleRateHz": 24000 } },
+    { "atMs": 190, "source": "animation", "kind": "frame_patch", "payload": { "actorTrackId": "track-mara", "trackEpoch": 9, "frameId": 100, "currentFrameId": 102 } },
+    { "atMs": 210, "source": "animation", "kind": "frame_patch", "payload": { "actorTrackId": "track-mara", "trackEpoch": 8, "frameId": 103, "currentFrameId": 103 } },
+    { "atMs": 230, "source": "animation", "kind": "frame_patch", "payload": { "actorTrackId": "track-mara", "trackEpoch": 9, "frameId": 104, "currentFrameId": 104 } },
+    { "atMs": 270, "source": "llm", "kind": "complete", "payload": { "finishReason": "stop", "text": "The fog is lifting." } },
+    { "atMs": 310, "source": "tts", "kind": "complete", "payload": { "chunks": 1, "deliveredText": "The fog is lifting." } },
+    { "atMs": 320, "source": "animation", "kind": "complete", "payload": { "patchCount": 1, "droppedPatchCount": 2 } },
+    { "atMs": 330, "source": "delivery", "kind": "commit", "payload": { "sentenceId": "sentence-lipsync-1", "deliveredText": "The fog is lifting." } }
+  ],
+  "faults": [],
+  "expected": {
+    "status": "completed",
+    "traceSha256": "d64ec45ab68638c259bb57f788c6a561cfe3e7d65870d1c0e5ab7a25f0b2f896",
+    "firstAudioAtMs": 170,
+    "networkAttempts": 0,
+    "degradationReasons": [],
+    "metrics": { "staleLipSyncDropCount": 2, "deliveryCommitCount": 1 },
+    "eventCounts": { "animation.patch_dropped": 2, "animation.patch_applied": 1, "delivery.committed": 1 },
+    "spine": { "animating": "completed" }
+  }
+}

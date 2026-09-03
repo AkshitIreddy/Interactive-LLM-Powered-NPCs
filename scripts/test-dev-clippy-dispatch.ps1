@@ -3,6 +3,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
+. (Join-Path $PSScriptRoot 'windows/node-tooling.ps1')
 
 if ($env:OS -ne 'Windows_NT') {
     Write-Host 'SKIP: Clippy dispatch regression requires Windows rustup command semantics.'
@@ -41,6 +42,7 @@ function New-ClippyDispatchFixture {
             $binRoot,
             $outsideRoot,
             (Join-Path $repoRoot 'scripts'),
+            (Join-Path $repoRoot 'scripts/windows'),
             (Join-Path $repoRoot 'apps/control/src-tauri'),
             (Join-Path $repoRoot 'apps/control/src-tauri/binaries')
         )) {
@@ -49,10 +51,13 @@ function New-ClippyDispatchFixture {
 
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'dev.ps1') -Destination (Join-Path $repoRoot 'scripts/dev.ps1')
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'short-cmake-build-path.ps1') -Destination (Join-Path $repoRoot 'scripts/short-cmake-build-path.ps1')
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'windows/node-tooling.ps1') -Destination (Join-Path $repoRoot 'scripts/windows/node-tooling.ps1')
     Write-Utf8NoBom -Path (Join-Path $repoRoot 'package.json') -Content @'
 {
+  "packageManager": "pnpm@10.28.2",
   "engines": {
-    "node": "20.20.2"
+    "node": "20.20.2",
+    "pnpm": "10.28.2"
   },
   "scripts": {
     "typecheck": "fixture",
@@ -72,6 +77,8 @@ Add-Content -LiteralPath $env:NPC_CLIPPY_TEST_LOG -Value "prepare|$PWD|$Configur
 $sidecarRoot = Join-Path $PSScriptRoot '../apps/control/src-tauri/binaries'
 Set-Content -LiteralPath (Join-Path $sidecarRoot 'npc-runtime-x86_64-pc-windows-msvc.exe') -Value 'fixture'
 Set-Content -LiteralPath (Join-Path $sidecarRoot 'npc-media-broker-x86_64-pc-windows-msvc.exe') -Value 'fixture'
+Set-Content -LiteralPath (Join-Path $sidecarRoot 'npc-mouth-worker-x86_64-pc-windows-msvc.exe') -Value 'fixture'
+Set-Content -LiteralPath (Join-Path $sidecarRoot 'npc-subtitle-presenter-x86_64-pc-windows-msvc.exe') -Value 'fixture'
 '@
 
     $cargoShim = @'
@@ -103,7 +110,7 @@ exit /b 0
 @echo off
 setlocal
 >>"%NPC_CLIPPY_TEST_LOG%" echo rustc^|%CD%^|%*
-if /I "%1"=="+stable" (
+if /I "%~1"=="+stable" (
   echo release: 1.96.1
   echo commit-hash: $stableCommit
   exit /b 0
@@ -114,9 +121,10 @@ exit /b 0
 "@
     Write-Utf8NoBom -Path (Join-Path $binRoot 'rustc.cmd') -Content $rustcShim
 
-    foreach ($commandName in @('corepack', 'git', 'node', 'pnpm')) {
+    foreach ($commandName in @('corepack', 'git', 'node')) {
         Write-Utf8NoBom -Path (Join-Path $binRoot "$commandName.cmd") -Content "@echo off`r`nexit /b 0`r`n"
     }
+    Write-Utf8NoBom -Path (Join-Path $binRoot 'pnpm.cmd') -Content "@echo off`r`necho 10.28.2`r`nexit /b 0`r`n"
 
     return [pscustomobject]@{
         RepoRoot = $repoRoot
@@ -153,14 +161,17 @@ function Invoke-ClippyDispatchCase {
         $env:NPC_CLIPPY_TEST_LOG = $fixture.LogPath
         $env:NPC_CLIPPY_TEST_REPO = $fixture.RepoRoot
 
-        Push-Location -LiteralPath $fixture.OutsideRoot
-        try {
-            $output = @(& $powershellPath -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $fixture.RepoRoot 'scripts/dev.ps1') lint 2>&1)
-            $exitCode = $LASTEXITCODE
-        }
-        finally {
-            Pop-Location
-        }
+        $process = Invoke-NpcHiddenProcess -FilePath $powershellPath -ArgumentList @(
+            '-NoLogo',
+            '-NoProfile',
+            '-NonInteractive',
+            '-WindowStyle', 'Hidden',
+            '-ExecutionPolicy', 'Bypass',
+            '-File', (Join-Path $fixture.RepoRoot 'scripts/dev.ps1'),
+            'lint'
+        ) -WorkingDirectory $fixture.OutsideRoot -NoReplayOutput
+        $output = @($process.StandardOutput, $process.StandardError)
+        $exitCode = $process.ExitCode
 
         $text = ($output | ForEach-Object { [string]$_ }) -join "`n"
         $calls = if (Test-Path -LiteralPath $fixture.LogPath -PathType Leaf) {
@@ -170,22 +181,24 @@ function Invoke-ClippyDispatchCase {
         }
         $repoPrefix = "cargo|$($fixture.RepoRoot)|"
         $prepareCall = "prepare|$($fixture.RepoRoot)|Debug"
+        $plainClippyProbe = "${repoPrefix}`"clippy`" `"--version`""
+        $outsideClippyProbe = "cargo|$($fixture.OutsideRoot)|`"clippy`" `"--version`""
 
-        Assert-True -Condition ($calls -contains "${repoPrefix}clippy --version") -Message "$Name did not probe plain Clippy from the sanitized repository root. Calls: $($calls -join '; '). Output: $text"
-        Assert-True -Condition (-not ($calls -contains "cargo|$($fixture.OutsideRoot)|clippy --version")) -Message "$Name incorrectly probed Clippy from the caller's directory."
+        Assert-True -Condition ($calls -contains $plainClippyProbe) -Message "$Name did not probe plain Clippy from the sanitized repository root. Calls: $($calls -join '; '). Output: $text"
+        Assert-True -Condition (-not ($calls -contains $outsideClippyProbe)) -Message "$Name incorrectly probed Clippy from the caller's directory."
 
         if ($MismatchStableIdentity) {
             Assert-True -Condition ($exitCode -ne 0) -Message 'Identity mismatch unexpectedly passed lint.'
             Assert-True -Condition ($text -match 'not proven identical') -Message "Identity mismatch did not report the safe refusal. Output: $text"
-            Assert-True -Condition (-not ($calls | Where-Object { $_ -like "${repoPrefix}+stable clippy --workspace*" })) -Message 'Identity mismatch executed the unverified stable Clippy fallback.'
+            Assert-True -Condition (-not ($calls | Where-Object { $_ -like "${repoPrefix}`"+stable`" `"clippy`" `"--workspace`"*" })) -Message 'Identity mismatch executed the unverified stable Clippy fallback.'
         } else {
             Assert-True -Condition ($exitCode -eq 0) -Message "Matching identity fixture failed lint with exit $exitCode. Output: $text"
             Assert-True -Condition ($text -match 'verified \+stable is identical') -Message "Matching identity fixture did not report the verified fallback. Calls: $($calls -join '; '). Output: $text"
-            Assert-True -Condition (@($calls | Where-Object { $_ -like "${repoPrefix}+stable clippy*" }).Count -eq 2) -Message "Matching identity fixture did not run both Clippy gates through +stable. Calls: $($calls -join '; ')"
-            Assert-True -Condition (-not ($calls | Where-Object { $_ -like "${repoPrefix}clippy --workspace*" })) -Message 'Matching identity fixture bypassed the selected +stable invocation.'
+            Assert-True -Condition (@($calls | Where-Object { $_ -like "${repoPrefix}`"+stable`" `"clippy`"*" }).Count -eq 2) -Message "Matching identity fixture did not run both Clippy gates through +stable. Calls: $($calls -join '; ')"
+            Assert-True -Condition (-not ($calls | Where-Object { $_ -like "${repoPrefix}`"clippy`" `"--workspace`"*" })) -Message 'Matching identity fixture bypassed the selected +stable invocation.'
             Assert-True -Condition ($calls -contains $prepareCall) -Message "Matching identity fixture did not prepare clean-checkout sidecars. Calls: $($calls -join '; ')"
             $prepareIndex = [array]::IndexOf($calls, $prepareCall)
-            $tauriClippyCall = @($calls | Where-Object { $_ -like "${repoPrefix}+stable clippy --manifest-path*" }) | Select-Object -First 1
+            $tauriClippyCall = @($calls | Where-Object { $_ -like "${repoPrefix}`"+stable`" `"clippy`" `"--manifest-path`"*" }) | Select-Object -First 1
             $tauriClippyIndex = [array]::IndexOf($calls, $tauriClippyCall)
             Assert-True -Condition ($prepareIndex -ge 0 -and $tauriClippyIndex -gt $prepareIndex) -Message "Matching identity fixture did not prepare sidecars before nested Tauri Clippy. Calls: $($calls -join '; ')"
         }

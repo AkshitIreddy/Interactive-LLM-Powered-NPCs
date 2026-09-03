@@ -12,6 +12,7 @@ mod elevenlabs_websocket;
 mod error;
 mod fallback;
 mod nvidia_nim;
+mod nvidia_riva;
 mod transport;
 mod types;
 
@@ -21,5 +22,6 @@ pub use elevenlabs_websocket::*;
 pub use error::*;
 pub use fallback::*;
 pub use nvidia_nim::*;
+pub use nvidia_riva::*;
 pub use transport::*;
 pub use types::*;

@@ -194,6 +194,8 @@
     }
   },
   "content": {
+    "character_data_readiness": "curated",
+    "character_data_readiness_notes": "Shipped named-character records have stable IDs and authored biography, personality, dialogue-style, prompt, voice-intent, explicit-selection identity, and provenance metadata; live visual identity is not certified.",
     "world_lore": "Thedas is divided by history, faith, nation, species, class, and competing interpretations of magic. In southern Thedas, a civil conflict between mages and templars leaves communities exposed just as a supernatural Breach tears open the sky and lesser rifts appear across the land. The Inquisition forms as an independent force to close rifts, gather allies, investigate the crisis, and restore enough order for ordinary people to survive. Its authority is never absolute: Ferelden remembers occupation, Orlais turns politics into performance, the Chantry is fractured, and elves, dwarves, Qunari, mages, and non-mages do not share one experience. Dialogue must respect the player's chosen Inquisitor identity and current decisions without inventing race, class, faith, romances, judgments, recruitment, or quest outcomes. Companions can disagree strongly while remaining shaped by what they have actually witnessed together.",
     "spoiler_policy": "Default to knowledge available after the Inquisition establishes an early foothold. Reveal recruitment outcomes, personal quests, the main antagonist's plan, and post-campaign revelations only through explicitly enabled tiers.",
     "spoiler_tiers": [
@@ -687,7 +689,26 @@
       ]
     }
   },
+  "recommendations": {
+    "integration_mode": "external_only",
+    "provider_strategy": "api_first",
+    "local_activation_policy": "measured_whole_loadout_fit_required",
+    "game_resource_reserve_required": true,
+    "screen_space_lip_sync": "experimental_opt_in_after_exact_target_and_advancing_frame_qualification"
+  },
   "diagnostics": [
+    {
+      "id": "recommended-feature-loadout",
+      "severity": "info",
+      "check": "Keep a game-first resource reserve, prefer explicitly configured API routes for LLM, STT, TTS, and embeddings, and admit optional local models only after measured whole-loadout RAM and VRAM fit checks.",
+      "remediation": "Move optional language or speech roles to an explicitly selected hosted provider, unload nonessential local models, or increase the configured game reserve; keep experimental screen-space lip sync disabled until exact target binding, advancing-frame, and untouched-frame restore checks pass."
+    },
+    {
+      "id": "external-only-safety",
+      "severity": "error",
+      "check": "Confirm the selected target remains an eligible single-player top-level game window and that the session uses external capture, audio, and subtitles only, with no injection, hooks, automated input, or anti-cheat bypass.",
+      "remediation": "Stop on online, protection, process, PID, HWND, executable, or session-mode ambiguity; return to a clearly eligible single-player state and bind the exact game window again, otherwise use no game integration."
+    },
     {
       "id": "campaign-mode",
       "severity": "error",

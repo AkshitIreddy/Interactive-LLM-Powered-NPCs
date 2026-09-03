@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://interactive-npcs.local/schemas/subtitle-style-v1.json",
+  "title": "Interactive NPC subtitle style manifest v1",
+  "type": "object",
+  "required": ["schema_version", "default_style_id", "styles"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "default_style_id": { "type": "string", "minLength": 1 },
+    "styles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "typography",
+          "geometry",
+          "effects",
+          "animation",
+          "colors",
+          "behavior"
+        ],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "typography": { "type": "object" },
+          "geometry": { "type": "object" },
+          "effects": { "type": "object" },
+          "animation": { "type": "object" },
+          "behavior": { "type": "object" },
+          "colors": {
+            "type": "object",
+            "required": ["body", "speaker", "encoding", "hdr"],
+            "properties": {
+              "body": { "type": "object" },
+              "speaker": { "type": "object" },
+              "encoding": { "enum": ["srgb", "linear_srgb"] },
+              "hdr": { "$ref": "#/$defs/hdr" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "hdr": {
+      "type": "object",
+      "required": [
+        "target_spaces",
+        "source_surface",
+        "sdr_white_mapping",
+        "tone_map",
+        "custom_pq_or_scrgb_shader"
+      ],
+      "properties": {
+        "target_spaces": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["srgb", "scrgb", "rec2020_pq"] }
+        },
+        "source_surface": { "const": "bgra8_srgb_premultiplied" },
+        "sdr_white_mapping": { "const": "windows_compositor_managed" },
+        "tone_map": {
+          "const": "none_in_renderer",
+          "description": "Canonical v1 behavior: the subtitle engine and BGRA8 presenter perform no custom HDR tone mapping."
+        },
+        "custom_pq_or_scrgb_shader": { "const": false }
+      },
+      "additionalProperties": false
+    }
+  }
+}

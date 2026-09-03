@@ -8,7 +8,7 @@ use thiserror::Error;
 use crate::{
     profile_replays::ProfileReplayCorpus,
     profiles::{GenericGameSelection, GENERIC_GAME_ID},
-    simulation::SimulationSafetyContext,
+    simulation::{SimulationProfilePolicy, SimulationSafetyContext, SimulationSafetyEvidenceState},
     HostConfig, HostState, ServeOptions, SimulationRequest,
 };
 
@@ -123,6 +123,8 @@ pub async fn run(cli: Cli) -> Result<(), CliError> {
                     turn_id,
                     game_id: game.clone(),
                     character_id: character,
+                    native_identity_decision: None,
+                    enabled_spoiler_tiers: Vec::new(),
                     generic_selection: match (
                         generic_game_name,
                         generic_executable,
@@ -144,14 +146,28 @@ pub async fn run(cli: Cli) -> Result<(), CliError> {
                         SimulationSafetyContext::default()
                     } else {
                         SimulationSafetyContext {
+                            evidence_state: if protected_online_detected || anti_cheat_detected {
+                                SimulationSafetyEvidenceState::Blocked
+                            } else {
+                                SimulationSafetyEvidenceState::Unknown
+                            },
+                            profile_policy: SimulationProfilePolicy::Unknown,
+                            visuals_allowed: false,
                             protected_online_detected,
                             anti_cheat_detected,
                         }
                     },
+                    application_namespace: None,
                     transcript,
                     locale,
                     execution_mode: None,
                     dev_live_tts: None,
+                    route_snapshot: None,
+                    input: Default::default(),
+                    delivery: Default::default(),
+                    audio_playback_leases: Vec::new(),
+                    private_evaluation_acknowledgements: Vec::new(),
+                    subtitle_presentation_context: None,
                 })
                 .await?;
             write_json(&result)?;

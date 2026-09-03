@@ -30,7 +30,6 @@ export function Onboarding({
     Math.max(0, Math.min(ONBOARDING_STEPS.length - 1, initialStep)),
   );
   const [selectedGame, setSelectedGame] = useState("skyrim");
-  const [rehearsed, setRehearsed] = useState(false);
   const [simulation, setSimulation] = useState<"idle" | "running" | "done">(
     "idle",
   );
@@ -60,11 +59,7 @@ export function Onboarding({
   }, [step]);
 
   const next = () => {
-    if (step === 8 && simulation !== "done") {
-      setSimulation("running");
-      window.setTimeout(() => setSimulation("done"), 1350);
-      return;
-    }
+    if (step === 8 && simulation !== "done") return;
     if (step === ONBOARDING_STEPS.length - 1) onClose();
     else setStep((value) => value + 1);
   };
@@ -154,18 +149,11 @@ export function Onboarding({
           {step === 4 && <ProviderChoice />}
           {step === 5 && (
             <MicrophoneRehearsal
-              rehearsed={rehearsed}
-              onChange={setRehearsed}
               ptt={preferences.ptt}
               setPtt={(ptt) => updatePreferences({ ptt })}
             />
           )}
-          {step === 6 && (
-            <PresenceChoice
-              preferences={preferences}
-              update={updatePreferences}
-            />
-          )}
+          {step === 6 && <PresenceChoice />}
           {step === 7 && (
             <PerformanceChoice
               value={preferences.performance}
@@ -205,6 +193,7 @@ export function Onboarding({
           </div>
           <ActionButton
             onPress={next}
+            isDisabled={step === 8 && simulation !== "done"}
             icon={
               step === 9
                 ? "check"
@@ -264,22 +253,26 @@ function Welcome() {
           <li>
             <Icon name="mic" size={17} />
             <span>
-              <strong>Talk naturally</strong> with push-to-talk or optional
-              voice activity
+              <strong>Push-to-talk is conditional:</strong> it becomes available
+              only after a native input, selected AssemblyAI route, credential,
+              and physical press/release proof are ready. Voice activity
+              detection is unavailable.
             </span>
           </li>
           <li>
             <Icon name="shield" size={17} />
             <span>
-              <strong>Choose your boundary:</strong> cloud, hybrid, or fully
-              local
+              <strong>API-first by default.</strong> Hybrid and fully local
+              intent remain experimental or unavailable until signed current
+              packs and native whole-loadout admission prove a fit.
             </span>
           </li>
           <li>
             <Icon name="performance" size={17} />
             <span>
-              <strong>Protect frame rate</strong> with measured performance
-              limits
+              <strong>No frame-rate promise is inferred.</strong> Performance
+              limits become measured evidence only after a completed This-PC
+              benchmark and current telemetry receipts.
             </span>
           </li>
         </ul>
@@ -296,59 +289,60 @@ function HardwareScan() {
   return (
     <div className="setup-sheet">
       <div className="setup-intro">
-        <span className="step-kicker">PRIVATE SYSTEM READ</span>
-        <h1 id="onboarding-title">This PC is ready for hybrid play.</h1>
+        <span className="step-kicker">SYSTEM EVIDENCE UNAVAILABLE</span>
+        <h1 id="onboarding-title">No hardware fit has been measured.</h1>
         <p>
-          The scan stays on this device. It helps us recommend models that fit
-          without crowding your game.
+          This legacy setup view is not connected to native telemetry. Use the
+          installed app’s Voice &amp; models page for current-device resource
+          observations and measured admission.
         </p>
       </div>
       <div className="hardware-layout">
         <div className="hardware-radar">
           <div className="hardware-radar__rings" />
           <div className="hardware-radar__core">
-            <span>12</span>
-            <small>GB VRAM</small>
+            <span>—</span>
+            <small>UNMEASURED</small>
           </div>
-          <span className="radar-label radar-label--gpu">RTX 4080 Laptop</span>
-          <span className="radar-label radar-label--cpu">i9-13980HX</span>
-          <span className="radar-label radar-label--ram">16 GB RAM</span>
+          <span className="radar-label radar-label--gpu">GPU unavailable</span>
+          <span className="radar-label radar-label--cpu">CPU unavailable</span>
+          <span className="radar-label radar-label--ram">RAM unavailable</span>
         </div>
         <div className="scan-results">
           <div className="scan-row">
-            <Icon name="check" />
+            <Icon name="warning" />
             <div>
               <strong>Local voice pipeline</strong>
               <span>
-                Speech recognition and voice synthesis can stay on CPU.
+                No native device or pack admission result is attached.
               </span>
             </div>
-            <StatusPill tone="ok">Great fit</StatusPill>
+            <StatusPill tone="neutral">Unmeasured</StatusPill>
           </div>
           <div className="scan-row">
-            <Icon name="check" />
+            <Icon name="warning" />
             <div>
               <strong>Compact local intelligence</strong>
-              <span>A 3–4B model fits beside most games on this GPU.</span>
+              <span>No whole-loadout fit or game reserve was measured.</span>
             </div>
-            <StatusPill tone="ok">Fits</StatusPill>
+            <StatusPill tone="neutral">Unmeasured</StatusPill>
           </div>
           <div className="scan-row">
             <Icon name="warning" />
             <div>
               <strong>Visual mouth motion</strong>
               <span>
-                Available as an experiment; it may yield under heavy GPU load.
+                No signed complete pack has passed measured admission.
               </span>
             </div>
-            <StatusPill tone="warn">Optional</StatusPill>
+            <StatusPill tone="warn">Unavailable</StatusPill>
           </div>
         </div>
       </div>
-      <Disclosure title="What was checked">
-        Windows version, processor, memory, graphics adapter, available VRAM,
-        audio devices, and local storage. No serial numbers or file contents
-        were read.
+      <Disclosure title="Why no recommendation is shown">
+        No native telemetry command was called by this view, so it cannot name
+        this PC’s hardware, recommend a local runtime, or claim fit. API-first
+        remains the safe default.
       </Disclosure>
     </div>
   );
@@ -634,13 +628,9 @@ function PipelineRow({
 }
 
 function MicrophoneRehearsal({
-  rehearsed,
-  onChange,
   ptt,
   setPtt,
 }: {
-  rehearsed: boolean;
-  onChange: (value: boolean) => void;
   ptt: boolean;
   setPtt: (value: boolean) => void;
 }) {
@@ -655,56 +645,40 @@ function MicrophoneRehearsal({
         </p>
       </div>
       <div className="rehearsal">
-        <div className={`rehearsal__orb ${rehearsed ? "is-done" : ""}`}>
+        <div className="rehearsal__orb">
           <div className="orb-rings" />
-          <Icon name={rehearsed ? "check" : "mic"} size={34} />
+          <Icon name="mic" size={34} />
         </div>
         <div>
-          <span className="rehearsal__label">
-            {rehearsed ? "HEARD CLEARLY" : "HOLD TO REHEARSE"}
-          </span>
+          <span className="rehearsal__label">REHEARSAL UNAVAILABLE</span>
           <h2>
-            {rehearsed ? (
-              "“Can you hear me?”"
-            ) : (
-              <>
-                <KeyboardKey>V</KeyboardKey> then say “Can you hear me?”
-              </>
-            )}
+            <KeyboardKey>V</KeyboardKey> push-to-talk preference
           </h2>
           <p>
-            {rehearsed
-              ? "Microphone level, noise floor, and endpoint timing look good."
-              : "The rehearsal is processed locally and is not saved."}
+            This view has no native audio-device or captured-sample evidence. It
+            cannot report microphone level, noise floor, endpoint timing, or
+            successful speech recognition.
           </p>
           <ActionButton
-            icon={rehearsed ? "refresh" : "mic"}
-            variant={rehearsed ? "outline" : "primary"}
-            onPress={() => onChange(!rehearsed)}
+            icon="mic"
+            variant="outline"
+            isDisabled
+            onPress={() => undefined}
           >
-            {rehearsed ? "Try again" : "Simulate key hold"}
+            Native microphone rehearsal unavailable
           </ActionButton>
         </div>
       </div>
       <div className="device-strip">
         <div>
           <span>Input</span>
-          <strong>Microphone Array (Realtek Audio)</strong>
+          <strong>No native device evidence</strong>
         </div>
         <div>
           <span>Level</span>
-          <div className="level-meter">
-            <i />
-            <i />
-            <i />
-            <i />
-            <i />
-            <i />
-            <i />
-            <i />
-          </div>
+          <strong>Unmeasured</strong>
         </div>
-        <button>Change</button>
+        <button disabled>Device selection unavailable</button>
       </div>
       <div className="rehearsal-toggle">
         <Toggle
@@ -719,13 +693,7 @@ function MicrophoneRehearsal({
   );
 }
 
-function PresenceChoice({
-  preferences,
-  update,
-}: {
-  preferences: AppPreferences;
-  update: (patch: Partial<AppPreferences>) => void;
-}) {
+function PresenceChoice() {
   return (
     <div className="setup-sheet">
       <div className="setup-intro">
@@ -739,18 +707,19 @@ function PresenceChoice({
       <div className="presence-options">
         <Toggle
           label="See the game window"
-          description="Reads selected frames to identify the speaker and on-screen context. Frames are discarded after analysis."
-          isSelected={preferences.screenPresence}
-          onChange={(screenPresence) => update({ screenPresence })}
-          privacy="Local by default · never captures other windows"
+          description="Unavailable: ordinary game capture is fail-closed until the native safety boundary provides trusted target evidence."
+          isSelected={false}
+          onChange={() => undefined}
+          privacy="Synthetic review capture does not authorize commercial games"
+          disabled
         />
         <Toggle
           label="Animate visible speech"
-          description="Adds experimental mouth motion when a face is confidently tracked. Falls back instantly when uncertain."
-          isSelected={preferences.screenPresence}
-          onChange={(screenPresence) => update({ screenPresence })}
-          privacy="Experimental · may use up to 5.2 GB VRAM"
-          disabled={!preferences.screenPresence}
+          description="Unavailable: no signed complete lip-sync pack has passed measured current-device admission."
+          isSelected={false}
+          onChange={() => undefined}
+          privacy="No VRAM estimate is shown without signed pack evidence"
+          disabled
         />
         <Toggle
           label="Use my camera for presence"
@@ -758,8 +727,14 @@ function PresenceChoice({
           isSelected={false}
           onChange={() => undefined}
           privacy="Off by default · local only"
+          disabled
         />
       </div>
+      <p className="inline-status" role="note">
+        Capture and visual animation are separate capabilities. Neither is
+        enabled by the saved screen-presence preference while its native proof
+        is unavailable.
+      </p>
       <Disclosure title="Audio-only is a complete experience">
         If a character is obscured or offscreen, select their name and continue
         with voice and subtitles. Facial animation never blocks a conversation.
@@ -785,44 +760,44 @@ function PerformanceChoice({
     {
       id: "competitive",
       title: "Competitive",
-      fps: "≤ 2% avg",
-      latency: "Fastest",
-      visual: "Audio only",
+      fps: "Unmeasured",
+      latency: "Intent only",
+      visual: "Not activated",
     },
     {
       id: "fast",
       title: "Fast",
-      fps: "≤ 3% avg",
-      latency: "Very fast",
-      visual: "Light context",
+      fps: "Unmeasured",
+      latency: "Intent only",
+      visual: "Not activated",
     },
     {
       id: "balanced",
       title: "Balanced",
-      fps: "≤ 5% avg",
-      latency: "Fast",
-      visual: "Adaptive",
+      fps: "Unmeasured",
+      latency: "Intent only",
+      visual: "Not activated",
     },
     {
       id: "immersive",
       title: "Immersive",
-      fps: "≤ 10% avg",
-      latency: "Moderate",
-      visual: "Full presence",
+      fps: "Unmeasured",
+      latency: "Intent only",
+      visual: "Not activated",
     },
     {
       id: "maximum",
       title: "Maximum quality",
-      fps: "≤ 15% avg",
-      latency: "Quality first",
-      visual: "All features",
+      fps: "Unmeasured",
+      latency: "Intent only",
+      visual: "Not activated",
     },
     {
       id: "custom",
       title: "Custom",
-      fps: "You decide",
-      latency: "You decide",
-      visual: "Per feature",
+      fps: "Unmeasured",
+      latency: "Intent only",
+      visual: "Not activated",
     },
   ];
   return (
@@ -848,6 +823,7 @@ function PerformanceChoice({
             key={mode.id}
             className={`performance-choice ${value === mode.id ? "is-selected" : ""}`}
             onPress={() => onChange(mode.id)}
+            isDisabled
           >
             <span className="performance-choice__radio" />
             <strong>{mode.title}</strong>
@@ -859,20 +835,14 @@ function PerformanceChoice({
       </div>
       <div className="budget-preview">
         <div>
-          <span>Recommended VRAM ceiling</span>
-          <strong>
-            {value === "competitive"
-              ? "3.5"
-              : value === "maximum"
-                ? "9.5"
-                : "7.5"}{" "}
-            <small>/ 12 GB</small>
-          </strong>
+          <span>Measured resource ceiling</span>
+          <strong>Unavailable</strong>
         </div>
-        <MiniBar
-          value={value === "competitive" ? 29 : value === "maximum" ? 79 : 63}
-        />
-        <p>Optional visual work pauses before the conversation or game does.</p>
+        <MiniBar value={0} />
+        <p>
+          Performance presets require native telemetry and a persisted preset
+          snapshot. No FPS or VRAM target is inferred in this view.
+        </p>
       </div>
     </div>
   );
@@ -882,11 +852,11 @@ function Simulation({ state }: { state: "idle" | "running" | "done" }) {
   return (
     <div className="setup-sheet">
       <div className="setup-intro">
-        <span className="step-kicker">PRIVATE TEST RUN</span>
-        <h1 id="onboarding-title">A conversation, without launching a game.</h1>
+        <span className="step-kicker">NATIVE TEST REQUIRED</span>
+        <h1 id="onboarding-title">No conversation test ran in this view.</h1>
         <p>
-          Eclipse Harbor is a synthetic scene. It checks timing, memory, speech,
-          and fallback behavior without any copyrighted game content.
+          Use the Session deck in the installed app. Only native lifecycle,
+          route, subtitle, and audio receipts can prove a delivered turn.
         </p>
       </div>
       <div className={`simulation-card simulation-card--${state}`}>
@@ -901,57 +871,36 @@ function Simulation({ state }: { state: "idle" | "running" | "done" }) {
             <span>MV</span>
           </div>
           <div className="simulation-caption">
-            {state === "idle"
-              ? "Ready when you are"
-              : state === "running"
-                ? "Mara is forming a reply…"
-                : "“The eastern lock is clear. I’ll keep the lantern on for you.”"}
+            Native runtime evidence unavailable
           </div>
         </div>
         <div className="simulation-card__telemetry">
           <div>
             <span>Listening</span>
-            <i className={state !== "idle" ? "is-lit" : ""} />
+            <i />
           </div>
           <div>
             <span>Transcript</span>
-            <i
-              className={
-                state === "running" || state === "done" ? "is-lit" : ""
-              }
-            />
+            <i />
           </div>
           <div>
             <span>Memory</span>
-            <i
-              className={
-                state === "running" || state === "done" ? "is-lit" : ""
-              }
-            />
+            <i />
           </div>
           <div>
             <span>Response</span>
-            <i className={state === "done" ? "is-lit" : ""} />
+            <i />
           </div>
           <div>
             <span>Voice</span>
-            <i className={state === "done" ? "is-lit" : ""} />
+            <i />
           </div>
         </div>
       </div>
-      {state === "done" && (
-        <div className="simulation-result">
-          <Icon name="check" />
-          <div>
-            <strong>Round trip complete in 1.31 seconds</strong>
-            <span>
-              Voice started before the full reply finished. No cloud route or
-              visual feature was needed.
-            </span>
-          </div>
-          <StatusPill tone="ok">All checks passed</StatusPill>
-        </div>
-      )}
+      <p className="inline-status" role="note">
+        Continue is disabled because a timer or animated fixture would not be
+        setup validation.
+      </p>
     </div>
   );
 }

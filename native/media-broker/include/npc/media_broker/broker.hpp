@@ -21,6 +21,7 @@ enum class CompositingDecision {
     pristine_wrong_epoch,
     pristine_wrong_frame,
     pristine_wrong_source_time,
+    pristine_wrong_track,
     pristine_unsafe_bounds,
     pristine_missing_texture,
     patch,
@@ -58,6 +59,8 @@ private:
     void handle_frame(FrameDescriptor frame);
     void handle_failure(Failure failure);
     void handle_target_state(TargetState state, std::optional<TargetGeometry> geometry);
+    void invalidate_geometry_epoch(TargetGeometry& geometry);
+    void reset_frame_evidence() noexcept;
     void attempt_recovery(MonotonicTime now);
     [[nodiscard]] bool activate_capture(CaptureBackend backend);
     [[nodiscard]] CompositingDecision decide_compositing(const FrameDescriptor& frame,

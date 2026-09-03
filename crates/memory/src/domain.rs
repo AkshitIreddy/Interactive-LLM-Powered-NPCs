@@ -437,6 +437,51 @@ pub struct BackupReport {
     pub pages_copied: i32,
 }
 
+/// Native-owned, deliberately narrow physical-erasure request. Optional
+/// encounter/session/save values further narrow the mandatory user/profile/
+/// game/character boundary; missing optional values never widen character_id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CharacterMemoryErasureRequest {
+    pub scope: AuthorityScope,
+    pub erased_at_ms: i64,
+}
+
+impl CharacterMemoryErasureRequest {
+    pub fn validate(&self) -> Result<(), MemoryError> {
+        self.scope.validate()?;
+        if self.scope.character_id.is_none() {
+            return Err(MemoryError::InvalidData(
+                "character memory erasure requires an exact character ID".to_owned(),
+            ));
+        }
+        if self.erased_at_ms < 0 {
+            return Err(MemoryError::InvalidData(
+                "memory erasure timestamp cannot be negative".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CharacterMemoryErasureReport {
+    pub erasure_id: String,
+    pub scope_sha256: String,
+    pub delivered_turns_deleted: usize,
+    pub structured_memories_deleted: usize,
+    pub legacy_items_deleted: usize,
+    pub outbox_jobs_deleted: usize,
+    pub erased_at_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CharacterMemoryStatusReport {
+    pub delivered_turns: usize,
+    pub structured_memories: usize,
+    pub legacy_items: usize,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum MemoryError {
     #[error("database error: {0}")]
@@ -461,4 +506,542 @@ pub enum MemoryError {
     BackgroundTask(String),
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+}
+
+/// Stable high-level storage failure categories suitable for UI recovery
+/// guidance. Callers must not parse SQLite's platform-dependent error text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StorageFailureKind {
+    DiskFull,
+    Corrupt,
+    Busy,
+    ReadOnly,
+    Io,
+    Unknown,
+}
+
+impl MemoryError {
+    pub fn storage_failure_kind(&self) -> Option<StorageFailureKind> {
+        let code = match self {
+            Self::Database(rusqlite::Error::SqliteFailure(error, _)) => error.extended_code & 0xff,
+            Self::Io(_) => return Some(StorageFailureKind::Io),
+            _ => return None,
+        };
+        Some(match code {
+            rusqlite::ffi::SQLITE_FULL => StorageFailureKind::DiskFull,
+            rusqlite::ffi::SQLITE_CORRUPT | rusqlite::ffi::SQLITE_NOTADB => {
+                StorageFailureKind::Corrupt
+            }
+            rusqlite::ffi::SQLITE_BUSY | rusqlite::ffi::SQLITE_LOCKED => StorageFailureKind::Busy,
+            rusqlite::ffi::SQLITE_READONLY => StorageFailureKind::ReadOnly,
+            rusqlite::ffi::SQLITE_IOERR | rusqlite::ffi::SQLITE_CANTOPEN => StorageFailureKind::Io,
+            _ => StorageFailureKind::Unknown,
+        })
+    }
+}
+
+/// Complete authority boundary used by the 2.0 memory APIs. Unlike the legacy
+/// optional `MemoryScope`, user/profile/game identity is mandatory. Queries
+/// against these APIs never widen a missing identifier into another user's or
+/// another game's data.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthorityScope {
+    pub user_id: String,
+    pub profile_id: String,
+    pub game_id: String,
+    pub character_id: Option<String>,
+    pub encounter_id: Option<String>,
+    pub session_id: Option<String>,
+    pub save_id: Option<String>,
+}
+
+impl AuthorityScope {
+    pub fn validate(&self) -> Result<(), MemoryError> {
+        for (name, value) in [
+            ("user_id", Some(self.user_id.as_str())),
+            ("profile_id", Some(self.profile_id.as_str())),
+            ("game_id", Some(self.game_id.as_str())),
+            ("character_id", self.character_id.as_deref()),
+            ("encounter_id", self.encounter_id.as_deref()),
+            ("session_id", self.session_id.as_deref()),
+            ("save_id", self.save_id.as_deref()),
+        ] {
+            if let Some(value) = value {
+                if value.trim().is_empty() || value.len() > 512 {
+                    return Err(MemoryError::InvalidData(format!(
+                        "{name} must be non-blank and at most 512 bytes"
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnSpeaker {
+    Player,
+    Npc,
+}
+
+impl TurnSpeaker {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Player => "player",
+            Self::Npc => "npc",
+        }
+    }
+}
+
+impl FromStr for TurnSpeaker {
+    type Err = MemoryError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "player" => Ok(Self::Player),
+            "npc" => Ok(Self::Npc),
+            other => Err(MemoryError::InvalidData(format!(
+                "unknown turn speaker: {other}"
+            ))),
+        }
+    }
+}
+
+/// A producer may submit its final lifecycle state directly. Only `Delivered`
+/// and the validated prefix of `PartiallyDelivered` are eligible for storage.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum DeliveryDisposition {
+    Queued,
+    Delivered {
+        delivered_at_ms: i64,
+    },
+    PartiallyDelivered {
+        delivered_bytes: usize,
+        delivered_at_ms: i64,
+    },
+    Cancelled,
+    Failed,
+}
+
+impl DeliveryDisposition {
+    pub(crate) fn eligible_text<'a>(
+        &self,
+        text: &'a str,
+    ) -> Result<Option<(&'a str, i64)>, MemoryError> {
+        match self {
+            Self::Delivered { delivered_at_ms } => Ok(Some((text, *delivered_at_ms))),
+            Self::PartiallyDelivered {
+                delivered_bytes,
+                delivered_at_ms,
+            } => {
+                if *delivered_bytes == 0
+                    || *delivered_bytes >= text.len()
+                    || !text.is_char_boundary(*delivered_bytes)
+                {
+                    return Err(MemoryError::InvalidData(
+                        "partial delivery must be a non-empty, proper UTF-8 byte prefix".to_owned(),
+                    ));
+                }
+                Ok(Some((&text[..*delivered_bytes], *delivered_at_ms)))
+            }
+            Self::Queued | Self::Cancelled | Self::Failed => Ok(None),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TurnCommitInput {
+    pub turn_id: String,
+    pub scope: AuthorityScope,
+    pub speaker: TurnSpeaker,
+    pub text: String,
+    pub delivery: DeliveryDisposition,
+    pub created_at_ms: i64,
+    pub sequence: u64,
+    pub cancellation_generation: u64,
+    pub provider_id: Option<String>,
+    pub delivery_receipt_id: Option<String>,
+    #[serde(default)]
+    pub provenance: Provenance,
+}
+
+impl TurnCommitInput {
+    pub fn validate(&self) -> Result<(), MemoryError> {
+        self.scope.validate()?;
+        validate_bounded("turn_id", &self.turn_id, 512)?;
+        if self.text.trim().is_empty() || self.text.len() > 1_048_576 {
+            return Err(MemoryError::InvalidData(
+                "turn text must be non-blank and at most 1 MiB".to_owned(),
+            ));
+        }
+        if let Some(value) = self.provider_id.as_deref() {
+            validate_bounded("provider_id", value, 512)?;
+        }
+        if let Some(value) = self.delivery_receipt_id.as_deref() {
+            validate_bounded("delivery_receipt_id", value, 512)?;
+        }
+        if let Some((text, delivered_at_ms)) = self.delivery.eligible_text(&self.text)? {
+            if text.trim().is_empty() || delivered_at_ms < self.created_at_ms {
+                return Err(MemoryError::InvalidData(
+                    "delivered text cannot be blank or predate turn creation".to_owned(),
+                ));
+            }
+            if self.speaker == TurnSpeaker::Npc && self.delivery_receipt_id.is_none() {
+                return Err(MemoryError::InvalidData(
+                    "delivered NPC text requires an audio or subtitle delivery receipt".to_owned(),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DeliveredTurnRecord {
+    pub turn_id: String,
+    pub scope: AuthorityScope,
+    pub speaker: TurnSpeaker,
+    pub delivered_text: String,
+    pub content_sha256: String,
+    pub created_at_ms: i64,
+    pub delivered_at_ms: i64,
+    pub sequence: u64,
+    pub cancellation_generation: u64,
+    pub provider_id: Option<String>,
+    pub delivery_receipt_id: Option<String>,
+    pub provenance: Provenance,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KnowledgeClass {
+    WorldLore,
+    Biography,
+    CharacterKnowledge,
+    UncertainPublicInfo,
+    LongTermSummary,
+}
+
+impl KnowledgeClass {
+    pub const ALL: [Self; 5] = [
+        Self::WorldLore,
+        Self::Biography,
+        Self::CharacterKnowledge,
+        Self::UncertainPublicInfo,
+        Self::LongTermSummary,
+    ];
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::WorldLore => "world_lore",
+            Self::Biography => "biography",
+            Self::CharacterKnowledge => "character_knowledge",
+            Self::UncertainPublicInfo => "uncertain_public_info",
+            Self::LongTermSummary => "long_term_summary",
+        }
+    }
+}
+
+impl FromStr for KnowledgeClass {
+    type Err = MemoryError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "world_lore" => Ok(Self::WorldLore),
+            "biography" => Ok(Self::Biography),
+            "character_knowledge" => Ok(Self::CharacterKnowledge),
+            "uncertain_public_info" => Ok(Self::UncertainPublicInfo),
+            "long_term_summary" => Ok(Self::LongTermSummary),
+            other => Err(MemoryError::InvalidData(format!(
+                "unknown knowledge class: {other}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpoilerScope {
+    None,
+    Game,
+    Save,
+    CharacterPrivate,
+    UserPrivate,
+}
+
+impl SpoilerScope {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Game => "game",
+            Self::Save => "save",
+            Self::CharacterPrivate => "character_private",
+            Self::UserPrivate => "user_private",
+        }
+    }
+}
+
+impl FromStr for SpoilerScope {
+    type Err = MemoryError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "none" => Ok(Self::None),
+            "game" => Ok(Self::Game),
+            "save" => Ok(Self::Save),
+            "character_private" => Ok(Self::CharacterPrivate),
+            "user_private" => Ok(Self::UserPrivate),
+            other => Err(MemoryError::InvalidData(format!(
+                "unknown spoiler scope: {other}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GeneratorProvenance {
+    pub provider_id: String,
+    pub model_id: String,
+    pub model_revision: String,
+    pub prompt_version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DerivedMemoryInput {
+    pub id: Option<String>,
+    pub scope: AuthorityScope,
+    pub class: KnowledgeClass,
+    pub spoiler_scope: SpoilerScope,
+    pub content: String,
+    #[serde(default)]
+    pub provenance: Provenance,
+    pub confidence: f64,
+    pub importance: f64,
+    pub observed_at_ms: i64,
+    pub expires_at_ms: Option<i64>,
+    #[serde(default)]
+    pub source_turn_ids: Vec<String>,
+    pub generator: Option<GeneratorProvenance>,
+}
+
+impl DerivedMemoryInput {
+    pub fn validate(&self) -> Result<(), MemoryError> {
+        self.scope.validate()?;
+        if let Some(id) = self.id.as_deref() {
+            validate_bounded("derived memory id", id, 512)?;
+        }
+        if self.content.trim().is_empty() || self.content.len() > 1_048_576 {
+            return Err(MemoryError::InvalidData(
+                "derived memory must be non-blank and at most 1 MiB".to_owned(),
+            ));
+        }
+        for (name, value) in [
+            ("confidence", self.confidence),
+            ("importance", self.importance),
+        ] {
+            if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                return Err(MemoryError::InvalidData(format!(
+                    "{name} must be finite and between 0 and 1"
+                )));
+            }
+        }
+        if self
+            .expires_at_ms
+            .is_some_and(|expiry| expiry <= self.observed_at_ms)
+        {
+            return Err(MemoryError::InvalidData(
+                "derived memory expiry must follow observation".to_owned(),
+            ));
+        }
+        if self.source_turn_ids.len() > 10_000 {
+            return Err(MemoryError::InvalidData(
+                "derived memory references too many source turns".to_owned(),
+            ));
+        }
+        let mut unique = std::collections::BTreeSet::new();
+        for id in &self.source_turn_ids {
+            validate_bounded("source turn id", id, 512)?;
+            if !unique.insert(id) {
+                return Err(MemoryError::InvalidData(
+                    "derived memory source turn IDs must be unique".to_owned(),
+                ));
+            }
+        }
+        if self.class == KnowledgeClass::LongTermSummary
+            && (self.source_turn_ids.is_empty() || self.generator.is_none())
+        {
+            return Err(MemoryError::InvalidData(
+                "long-term summaries require source turns and generator provenance".to_owned(),
+            ));
+        }
+        if let Some(generator) = &self.generator {
+            for (name, value) in [
+                ("generator provider", generator.provider_id.as_str()),
+                ("generator model", generator.model_id.as_str()),
+                ("generator revision", generator.model_revision.as_str()),
+                ("prompt version", generator.prompt_version.as_str()),
+            ] {
+                validate_bounded(name, value, 512)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DerivedMemoryRecord {
+    pub id: String,
+    pub scope: AuthorityScope,
+    pub class: KnowledgeClass,
+    pub spoiler_scope: SpoilerScope,
+    pub content: String,
+    pub content_sha256: String,
+    pub provenance: Provenance,
+    pub confidence: f64,
+    pub importance: f64,
+    pub observed_at_ms: i64,
+    pub created_at_ms: i64,
+    pub expires_at_ms: Option<i64>,
+    pub source_turn_ids: Vec<String>,
+    pub generator: Option<GeneratorProvenance>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryCommitBatch {
+    #[serde(default)]
+    pub turns: Vec<TurnCommitInput>,
+    #[serde(default)]
+    pub derived: Vec<DerivedMemoryInput>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkippedTurnReason {
+    Queued,
+    Cancelled,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SkippedTurn {
+    pub turn_id: String,
+    pub reason: SkippedTurnReason,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct MemoryCommitReport {
+    pub stored_turns: Vec<DeliveredTurnRecord>,
+    pub skipped_turns: Vec<SkippedTurn>,
+    pub derived_memories: Vec<DerivedMemoryRecord>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpoilerPolicy {
+    pub allow_game: bool,
+    pub allow_save: bool,
+    pub allow_character_private: bool,
+    pub allow_user_private: bool,
+}
+
+impl Default for SpoilerPolicy {
+    fn default() -> Self {
+        Self {
+            allow_game: true,
+            allow_save: true,
+            allow_character_private: true,
+            allow_user_private: true,
+        }
+    }
+}
+
+impl SpoilerPolicy {
+    pub fn allows(self, scope: SpoilerScope) -> bool {
+        match scope {
+            SpoilerScope::None => true,
+            SpoilerScope::Game => self.allow_game,
+            SpoilerScope::Save => self.allow_save,
+            SpoilerScope::CharacterPrivate => self.allow_character_private,
+            SpoilerScope::UserPrivate => self.allow_user_private,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContextQuery {
+    pub scope: AuthorityScope,
+    pub text: Option<String>,
+    #[serde(default)]
+    pub spoiler_policy: SpoilerPolicy,
+    pub recent_turn_limit: usize,
+    pub per_class_limit: usize,
+    pub now_ms: i64,
+}
+
+impl ContextQuery {
+    pub fn validate(&self) -> Result<(), MemoryError> {
+        self.scope.validate()?;
+        if self.recent_turn_limit > 1_000 || self.per_class_limit > 1_000 {
+            return Err(MemoryError::InvalidData(
+                "context limits must be at most 1000".to_owned(),
+            ));
+        }
+        if self.text.as_ref().is_some_and(|text| text.len() > 65_536) {
+            return Err(MemoryError::InvalidData(
+                "context query text is too large".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct MemoryContextBundle {
+    pub world_lore: Vec<DerivedMemoryRecord>,
+    pub biography: Vec<DerivedMemoryRecord>,
+    pub character_knowledge: Vec<DerivedMemoryRecord>,
+    pub uncertain_public_info: Vec<DerivedMemoryRecord>,
+    pub recent_dialogue: Vec<DeliveredTurnRecord>,
+    pub long_term_summaries: Vec<DerivedMemoryRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IntegrityReport {
+    pub ok: bool,
+    pub messages: Vec<String>,
+    pub schema_version: i64,
+    pub delivered_turns: u64,
+    pub derived_memories: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DurabilityReport {
+    pub wal_frames: i64,
+    pub checkpointed_frames: i64,
+    pub busy: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecoveryReport {
+    pub destination: PathBuf,
+    pub quarantined_database: Option<PathBuf>,
+    pub integrity: IntegrityReport,
+}
+
+fn validate_bounded(name: &str, value: &str, maximum: usize) -> Result<(), MemoryError> {
+    if value.trim().is_empty() || value.len() > maximum {
+        return Err(MemoryError::InvalidData(format!(
+            "{name} must be non-blank and at most {maximum} bytes"
+        )));
+    }
+    Ok(())
 }

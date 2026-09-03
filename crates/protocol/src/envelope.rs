@@ -67,6 +67,8 @@ pub enum ControlOperationV1 {
     SimulateTurn = 4,
     Cancel = 5,
     Shutdown = 6,
+    DiscoverTtsVoices = 7,
+    TranscribeSelectedStt = 8,
 }
 
 #[derive(Clone, PartialEq, Message, Serialize, Deserialize)]
@@ -122,7 +124,10 @@ impl ControlRequestV1 {
 
     #[must_use]
     pub fn is_turn_bound(&self) -> bool {
-        self.operation() == ControlOperationV1::SimulateTurn
+        matches!(
+            self.operation(),
+            ControlOperationV1::SimulateTurn | ControlOperationV1::TranscribeSelectedStt
+        )
     }
 }
 
@@ -155,7 +160,10 @@ impl ControlResponseV1 {
 
     #[must_use]
     pub fn is_turn_bound(&self) -> bool {
-        self.operation() == ControlOperationV1::SimulateTurn
+        matches!(
+            self.operation(),
+            ControlOperationV1::SimulateTurn | ControlOperationV1::TranscribeSelectedStt
+        )
     }
 }
 
@@ -799,6 +807,16 @@ mod tests {
         ));
         value.turn_id = Some(TurnId::from_bytes([3; 16]).unwrap());
         assert_eq!(value.validate(&context()), Ok(()));
+
+        if let Some(Body::ControlResponse(response)) = value.body.as_mut() {
+            response.operation = ControlOperationV1::TranscribeSelectedStt as i32;
+        }
+        value.turn_id = None;
+        value.synchronize_declared_size().unwrap();
+        assert!(matches!(
+            value.validate(&context()),
+            Err(EnvelopeValidationError::MissingTurn)
+        ));
     }
 
     proptest! {

@@ -6,6 +6,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
+. (Join-Path $PSScriptRoot '../windows/node-tooling.ps1')
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $python = Get-Command python -ErrorAction SilentlyContinue
 if ($null -eq $python) { $python = Get-Command python3 -ErrorAction SilentlyContinue }
@@ -18,8 +19,9 @@ if ($null -eq $python) {
 }
 
 $pythonPath = if ($python -is [System.IO.FileInfo]) { $python.FullName } else { $python.Source }
-$pythonArguments = '"{0}" --root "{1}"' -f (Join-Path $PSScriptRoot 'check_lock_licenses.py'), $repoRoot
-$pythonProcess = Start-Process -FilePath $pythonPath -ArgumentList $pythonArguments -NoNewWindow -Wait -PassThru
+$pythonProcess = Invoke-NpcHiddenProcess -FilePath $pythonPath -ArgumentList @(
+    (Join-Path $PSScriptRoot 'check_lock_licenses.py'), '--root', $repoRoot
+)
 if ($pythonProcess.ExitCode -ne 0) { exit $pythonProcess.ExitCode }
 
 if ($Enrich) {
@@ -30,16 +32,19 @@ if ($Enrich) {
         Write-Error "Optional enrichment was requested, but pinned cargo-deny $expected is unavailable. Nothing was auto-installed."
         exit 2
     }
-    $versionOutput = (& cargo-deny --version 2>&1 | Out-String)
+    $versionProcess = Invoke-NpcHiddenProcess -FilePath $cargoDeny.Source -ArgumentList @('--version') -NoReplayOutput
+    if ($versionProcess.ExitCode -ne 0) {
+        Write-Error "cargo-deny version probe failed with exit code $($versionProcess.ExitCode)."
+        exit $versionProcess.ExitCode
+    }
+    $versionOutput = $versionProcess.StandardOutput + $versionProcess.StandardError
     if ($versionOutput -notmatch [regex]::Escape($expected)) {
         Write-Error "cargo-deny version does not match pinned version $expected."
         exit 2
     }
-    Push-Location $repoRoot
-    try {
-        & cargo deny check bans licenses sources
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    } finally { Pop-Location }
+    $denyProcess = Invoke-NpcHiddenProcess -FilePath $cargoDeny.Source `
+        -ArgumentList @('check', 'bans', 'licenses', 'sources') -WorkingDirectory $repoRoot
+    if ($denyProcess.ExitCode -ne 0) { exit $denyProcess.ExitCode }
 }
 
 Write-Host 'Offline lock/license and model provenance policy passed.' -ForegroundColor Green

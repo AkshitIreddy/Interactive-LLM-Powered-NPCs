@@ -1,0 +1,21 @@
+[package]
+name = "npc-identity-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Generic screen-space actor tracking and conservative identity decisions"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+thiserror = "2"
+
+[dev-dependencies]
+proptest = "1.6"
+serde_json = "1"
+

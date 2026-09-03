@@ -11,7 +11,8 @@ export type SimulationEvidencePhase =
   | "running"
   | "sentenceReady"
   | "delivered"
-  | "cancelled";
+  | "cancelled"
+  | "failed";
 
 export interface SimulationEvidence {
   source: SimulationEvidenceSource;
@@ -23,6 +24,7 @@ export interface SimulationEvidence {
     | "deterministicFixture"
     | "trustedRuntimeFixture"
     | "controlledBenchmark"
+    | "pendingProviderEvidence"
     | null;
   sentenceReadyText: string | null;
   deliveredText: string | null;
@@ -111,6 +113,12 @@ export function applyNativeSimulationEvent(
         phase: "cancelled",
         cancellationReason: event.reason,
       };
+    case "failed":
+      return {
+        ...ordered,
+        phase: "failed",
+        cancellationReason: event.reason,
+      };
     case "stageStarted":
     case "stageCompleted":
       return ordered;
@@ -134,7 +142,13 @@ export function simulationEvidenceLabel(evidence: SimulationEvidence): string {
     if (evidence.phase === "delivered") return "NATIVE RUNTIME · DELIVERED";
     if (evidence.phase === "sentenceReady")
       return "NATIVE RUNTIME · SENTENCE READY";
-    return "NATIVE RUNTIME · DETERMINISTIC FIXTURE";
+    if (evidence.phase === "failed") return "NATIVE RUNTIME · FAILED";
+    if (evidence.phase === "cancelled") return "NATIVE RUNTIME · CANCELLED";
+    if (evidence.measurementBasis === "pendingProviderEvidence")
+      return "NATIVE RUNTIME · PROVIDER EVIDENCE PENDING";
+    if (evidence.measurementBasis === "controlledBenchmark")
+      return "NATIVE RUNTIME · CONTROLLED BENCHMARK";
+    return "NATIVE RUNTIME · RUNTIME FIXTURE";
   }
   if (evidence.source === "awaitingNative") return "AWAITING NATIVE RUNTIME";
   if (evidence.source === "browserFixture") return "BROWSER FIXTURE PREVIEW";

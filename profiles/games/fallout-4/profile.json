@@ -198,6 +198,8 @@
     }
   },
   "content": {
+    "character_data_readiness": "curated",
+    "character_data_readiness_notes": "Shipped named-character records have stable IDs and authored biography, personality, dialogue-style, prompt, voice-intent, explicit-selection identity, and provenance metadata; live visual identity is not certified.",
     "world_lore": "The Commonwealth is the ruined and rebuilt region around pre-war Boston, where settlements, traders, farms, scavengers, raiders, mutants, robots, and organized factions compete for safety and resources. Old technology is valuable but poorly understood, and pre-war institutions survive more often as myth, hazard, or repurposed infrastructure than reliable authority. Synths create political and personal conflict around identity, autonomy, fear, and infiltration; NPCs must not presume who is a synth or reveal hidden identities without trusted quest state. The Sole Survivor's name, appearance, choices, faction ties, settlements, companions, family revelations, and reputation are variable. Public setting knowledge is separate from confidential faction operations and late main-quest outcomes. Radiation, injury, scarcity, and violence are serious realities but conversation should also make space for humor, work, craft, community, grief, and ordinary ambitions. A spoken agreement cannot modify settlements, inventories, affinity, quests, or faction standing.",
     "spoiler_policy": "Begin with the Commonwealth's public premise and first-meeting character context. Enable faction secrets, companion histories, family revelations, and endings only from trusted quest and affinity state.",
     "spoiler_tiers": [
@@ -620,7 +622,26 @@
       ]
     }
   },
+  "recommendations": {
+    "integration_mode": "external_only",
+    "provider_strategy": "api_first",
+    "local_activation_policy": "measured_whole_loadout_fit_required",
+    "game_resource_reserve_required": true,
+    "screen_space_lip_sync": "experimental_opt_in_after_exact_target_and_advancing_frame_qualification"
+  },
   "diagnostics": [
+    {
+      "id": "recommended-feature-loadout",
+      "severity": "info",
+      "check": "Keep a game-first resource reserve, prefer explicitly configured API routes for LLM, STT, TTS, and embeddings, and admit optional local models only after measured whole-loadout RAM and VRAM fit checks.",
+      "remediation": "Move optional language or speech roles to an explicitly selected hosted provider, unload nonessential local models, or increase the configured game reserve; keep experimental screen-space lip sync disabled until exact target binding, advancing-frame, and untouched-frame restore checks pass."
+    },
+    {
+      "id": "external-only-safety",
+      "severity": "error",
+      "check": "Confirm the selected target remains an eligible single-player top-level game window and that the session uses external capture, audio, and subtitles only, with no injection, hooks, automated input, or anti-cheat bypass.",
+      "remediation": "Stop on online, protection, process, PID, HWND, executable, or session-mode ambiguity; return to a clearly eligible single-player state and bind the exact game window again, otherwise use no game integration."
+    },
     {
       "id": "process-detection",
       "severity": "error",

@@ -1,13 +1,16 @@
 use crate::domain::*;
 use crate::retrieval::{cosine_similarity, rank_candidates, rank_map, CandidateRanks};
 use crate::schema;
+use rusqlite::functions::FunctionFlags;
 use rusqlite::types::Type;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Row, Transaction};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc as std_mpsc;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::oneshot;
 use uuid::Uuid;
@@ -43,6 +46,10 @@ struct Inner {
 }
 
 enum WriterCommand {
+    CommitBatch {
+        batch: MemoryCommitBatch,
+        response: oneshot::Sender<Result<MemoryCommitReport, MemoryError>>,
+    },
     Upsert {
         input: Box<MemoryInput>,
         response: oneshot::Sender<Result<MemoryRecord, MemoryError>>,
@@ -51,6 +58,10 @@ enum WriterCommand {
         id: String,
         deleted_at_ms: i64,
         response: oneshot::Sender<Result<bool, MemoryError>>,
+    },
+    EraseCharacter {
+        request: CharacterMemoryErasureRequest,
+        response: oneshot::Sender<Result<CharacterMemoryErasureReport, MemoryError>>,
     },
     PutEmbedding {
         embedding: EmbeddingInput,
@@ -99,6 +110,12 @@ enum WriterCommand {
     PurgeExpired {
         now_ms: i64,
         response: oneshot::Sender<Result<usize, MemoryError>>,
+    },
+    Flush {
+        response: oneshot::Sender<Result<DurabilityReport, MemoryError>>,
+    },
+    Close {
+        response: oneshot::Sender<Result<(), MemoryError>>,
     },
 }
 
@@ -159,6 +176,80 @@ impl MemoryStore {
         receive(receiver).await
     }
 
+    /// Atomically persists the delivered portion of raw turns, followed by any
+    /// derived records that reference them. Queued, cancelled, and failed turns
+    /// are reported as skipped and never reach an authoritative table.
+    ///
+    /// Completion of this future means the SQLite transaction committed under
+    /// `synchronous=FULL`; queue admission alone is never reported as success.
+    pub async fn commit_batch(
+        &self,
+        batch: MemoryCommitBatch,
+    ) -> Result<MemoryCommitReport, MemoryError> {
+        if batch.turns.len() > 10_000 || batch.derived.len() > 10_000 {
+            return Err(MemoryError::InvalidData(
+                "a memory commit batch may contain at most 10000 turns and 10000 derived records"
+                    .to_owned(),
+            ));
+        }
+        for turn in &batch.turns {
+            turn.validate()?;
+            checked_sql_integer("turn sequence", turn.sequence)?;
+            checked_sql_integer("cancellation generation", turn.cancellation_generation)?;
+        }
+        for memory in &batch.derived {
+            memory.validate()?;
+        }
+        let (response, receiver) = oneshot::channel();
+        self.send(WriterCommand::CommitBatch { batch, response })?;
+        receive(receiver).await
+    }
+
+    pub async fn commit_turn(
+        &self,
+        turn: TurnCommitInput,
+    ) -> Result<MemoryCommitReport, MemoryError> {
+        self.commit_batch(MemoryCommitBatch {
+            turns: vec![turn],
+            derived: Vec::new(),
+        })
+        .await
+    }
+
+    pub async fn get_delivered_turn(
+        &self,
+        turn_id: impl Into<String>,
+    ) -> Result<Option<DeliveredTurnRecord>, MemoryError> {
+        let turn_id = turn_id.into();
+        self.read(move |connection| load_delivered_turn(connection, &turn_id))
+            .await
+    }
+
+    pub async fn derive_memory(
+        &self,
+        memory: DerivedMemoryInput,
+    ) -> Result<DerivedMemoryRecord, MemoryError> {
+        let mut report = self
+            .commit_batch(MemoryCommitBatch {
+                turns: Vec::new(),
+                derived: vec![memory],
+            })
+            .await?;
+        report
+            .derived_memories
+            .pop()
+            .ok_or_else(|| MemoryError::BackgroundTask("derived write returned no record".into()))
+    }
+
+    pub async fn get_derived_memory(
+        &self,
+        id: impl Into<String>,
+    ) -> Result<Option<DerivedMemoryRecord>, MemoryError> {
+        let id = id.into();
+        self.read(move |connection| load_derived_memory(connection, &id))
+            .await
+    }
+
     pub async fn soft_delete(
         &self,
         id: impl Into<String>,
@@ -171,6 +262,37 @@ impl MemoryStore {
             response,
         })?;
         receive(receiver).await
+    }
+
+    /// Physically removes one exact character authority scope, including
+    /// dependent derived records. This is the explicit user-erasure exception
+    /// to append-only runtime history; the operation is atomic and leaves only
+    /// a content-free hashed audit receipt.
+    pub async fn erase_character_memory(
+        &self,
+        request: CharacterMemoryErasureRequest,
+    ) -> Result<CharacterMemoryErasureReport, MemoryError> {
+        request.validate()?;
+        let (response, receiver) = oneshot::channel();
+        self.send(WriterCommand::EraseCharacter { request, response })?;
+        receive(receiver).await
+    }
+
+    /// Counts records under one exact native authority scope without returning
+    /// their content. Optional encounter/session/save values narrow the result;
+    /// they never widen the mandatory character boundary.
+    pub async fn character_memory_status(
+        &self,
+        scope: AuthorityScope,
+    ) -> Result<CharacterMemoryStatusReport, MemoryError> {
+        scope.validate()?;
+        if scope.character_id.is_none() {
+            return Err(MemoryError::InvalidData(
+                "character memory status requires an exact character ID".to_owned(),
+            ));
+        }
+        self.read(move |connection| character_memory_status(connection, &scope))
+            .await
     }
 
     pub async fn put_embedding(&self, embedding: EmbeddingInput) -> Result<(), MemoryError> {
@@ -193,6 +315,22 @@ impl MemoryStore {
         query.validate()?;
         self.read(move |connection| retrieve_on(connection, query))
             .await
+    }
+
+    /// Builds typed prompt context without collapsing source categories into an
+    /// indistinguishable string. Every query is exact-user/profile/game scoped,
+    /// bounded, and deterministically ordered.
+    pub async fn retrieve_context(
+        &self,
+        query: ContextQuery,
+    ) -> Result<MemoryContextBundle, MemoryError> {
+        query.validate()?;
+        self.read(move |connection| retrieve_context_on(connection, &query))
+            .await
+    }
+
+    pub async fn integrity_check(&self) -> Result<IntegrityReport, MemoryError> {
+        self.read(integrity_report).await
     }
 
     pub async fn enqueue_job(&self, job: OutboxJobInput) -> Result<i64, MemoryError> {
@@ -340,6 +478,39 @@ impl MemoryStore {
         receive(receiver).await
     }
 
+    /// Forces the WAL through a FULL checkpoint. This is useful before a user
+    /// initiated shutdown/export; normal mutation futures already wait for a
+    /// synchronous FULL transaction commit.
+    pub async fn flush(&self) -> Result<DurabilityReport, MemoryError> {
+        let (response, receiver) = oneshot::channel();
+        self.send(WriterCommand::Flush { response })?;
+        receive(receiver).await
+    }
+
+    /// Terminates this store's writer connection after a WAL checkpoint. This
+    /// is a terminal operation for every clone of the handle and is required
+    /// before native maintenance replaces or removes the SQLite files.
+    pub async fn close(&self) -> Result<(), MemoryError> {
+        let (response, receiver) = oneshot::channel();
+        self.send(WriterCommand::Close { response })?;
+        receive(receiver).await
+    }
+
+    /// Restores a validated SQLite backup into a destination that is not open.
+    /// Existing data is never silently overwritten: replacement must be
+    /// explicit and the previous file is atomically quarantined beside it.
+    pub async fn recover_from_backup(
+        backup: impl AsRef<Path>,
+        destination: impl AsRef<Path>,
+        replace_existing: bool,
+    ) -> Result<RecoveryReport, MemoryError> {
+        let backup = backup.as_ref().to_path_buf();
+        let destination = destination.as_ref().to_path_buf();
+        tokio::task::spawn_blocking(move || recover_database(backup, destination, replace_existing))
+            .await
+            .map_err(|error| MemoryError::BackgroundTask(error.to_string()))?
+    }
+
     pub async fn vector_backend(&self) -> Result<VectorSearchBackend, MemoryError> {
         self.read(|connection| {
             #[cfg(feature = "sqlite-vec")]
@@ -400,12 +571,20 @@ fn writer_main(
     receiver: std_mpsc::Receiver<WriterCommand>,
     ready: std_mpsc::SyncSender<Result<(), MemoryError>>,
 ) {
+    let erasure_authorized = Arc::new(AtomicBool::new(false));
+    let erasure_authorized_for_sql = Arc::clone(&erasure_authorized);
     let connection = Connection::open(&path).and_then(|mut connection| {
         connection.busy_timeout(busy_timeout)?;
         schema::migrate(&mut connection).map_err(|error| match error {
             MemoryError::Database(error) => error,
             other => rusqlite::Error::ToSqlConversionFailure(Box::new(other)),
         })?;
+        connection.create_scalar_function(
+            "memory_erasure_authorized",
+            0,
+            FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_INNOCUOUS,
+            move |_| Ok(erasure_authorized_for_sql.load(Ordering::Acquire)),
+        )?;
         Ok(connection)
     });
 
@@ -420,8 +599,12 @@ fn writer_main(
         }
     };
 
+    let mut close_response = None;
     while let Ok(command) = receiver.recv() {
         match command {
+            WriterCommand::CommitBatch { batch, response } => {
+                let _ = response.send(commit_authoritative_batch(&mut connection, batch));
+            }
             WriterCommand::Upsert { input, response } => {
                 let _ = response.send(upsert_record(&mut connection, *input, unix_time_ms()));
             }
@@ -438,6 +621,13 @@ fn writer_main(
                     .map(|changed| changed > 0)
                     .map_err(MemoryError::from);
                 let _ = response.send(result);
+            }
+            WriterCommand::EraseCharacter { request, response } => {
+                let _ = response.send(erase_character_memory(
+                    &mut connection,
+                    &erasure_authorized,
+                    request,
+                ));
             }
             WriterCommand::PutEmbedding {
                 embedding,
@@ -519,8 +709,454 @@ fn writer_main(
                     .map_err(MemoryError::from);
                 let _ = response.send(result);
             }
+            WriterCommand::Flush { response } => {
+                let result = connection
+                    .query_row("PRAGMA wal_checkpoint(FULL)", [], |row| {
+                        Ok(DurabilityReport {
+                            busy: row.get::<_, i64>(0)? != 0,
+                            wal_frames: row.get(1)?,
+                            checkpointed_frames: row.get(2)?,
+                        })
+                    })
+                    .map_err(MemoryError::from);
+                let _ = response.send(result);
+            }
+            WriterCommand::Close { response } => {
+                let result = connection
+                    .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+                    .map_err(MemoryError::from);
+                close_response = Some((response, result));
+                break;
+            }
         }
     }
+    drop(connection);
+    if let Some((response, result)) = close_response {
+        let _ = response.send(result);
+    }
+}
+
+fn checked_sql_integer(name: &str, value: u64) -> Result<i64, MemoryError> {
+    i64::try_from(value).map_err(|_| {
+        MemoryError::InvalidData(format!("{name} exceeds SQLite's signed integer range"))
+    })
+}
+
+fn character_memory_status(
+    connection: &Connection,
+    scope: &AuthorityScope,
+) -> Result<CharacterMemoryStatusReport, MemoryError> {
+    let character_id = scope
+        .character_id
+        .as_deref()
+        .ok_or_else(|| MemoryError::InvalidData("character ID is required".to_owned()))?;
+    let delivered_turns = connection.query_row(
+        "SELECT count(*) FROM delivered_turns
+         WHERE user_id=?1 AND profile_id=?2 AND game_id=?3 AND character_id IS ?4
+           AND (?5 IS NULL OR encounter_id IS ?5)
+           AND (?6 IS NULL OR session_id IS ?6)
+           AND (?7 IS NULL OR save_id IS ?7)",
+        params![
+            &scope.user_id,
+            &scope.profile_id,
+            &scope.game_id,
+            character_id,
+            scope.encounter_id.as_deref(),
+            scope.session_id.as_deref(),
+            scope.save_id.as_deref(),
+        ],
+        |row| row.get(0),
+    )?;
+    let structured_memories = connection.query_row(
+        "SELECT count(*) FROM structured_memories
+         WHERE user_id=?1 AND profile_id=?2 AND game_id=?3 AND character_id IS ?4
+           AND (?5 IS NULL OR encounter_id IS ?5)
+           AND (?6 IS NULL OR session_id IS ?6)
+           AND (?7 IS NULL OR save_id IS ?7)",
+        params![
+            &scope.user_id,
+            &scope.profile_id,
+            &scope.game_id,
+            character_id,
+            scope.encounter_id.as_deref(),
+            scope.session_id.as_deref(),
+            scope.save_id.as_deref(),
+        ],
+        |row| row.get(0),
+    )?;
+    // Legacy rows predate the mandatory user/encounter principals. The exact
+    // profile/game/character scope is still enforced, with optional session and
+    // save refinements when supplied.
+    let legacy_items = connection.query_row(
+        "SELECT count(*) FROM memory_items
+         WHERE profile_id IS ?1 AND game_id IS ?2 AND character_id IS ?3
+           AND (?4 IS NULL OR session_id IS ?4)
+           AND (?5 IS NULL OR save_id IS ?5)",
+        params![
+            &scope.profile_id,
+            &scope.game_id,
+            character_id,
+            scope.session_id.as_deref(),
+            scope.save_id.as_deref(),
+        ],
+        |row| row.get(0),
+    )?;
+    Ok(CharacterMemoryStatusReport {
+        delivered_turns,
+        structured_memories,
+        legacy_items,
+    })
+}
+
+fn erase_character_memory(
+    connection: &mut Connection,
+    erasure_authorized: &AtomicBool,
+    request: CharacterMemoryErasureRequest,
+) -> Result<CharacterMemoryErasureReport, MemoryError> {
+    request.validate()?;
+    let character_id = request
+        .scope
+        .character_id
+        .as_deref()
+        .ok_or_else(|| MemoryError::InvalidData("character ID is required".to_owned()))?;
+    let scope_bytes = serde_json::to_vec(&request.scope)?;
+    let scope_sha256 = Sha256::digest(&scope_bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let erasure_id = Uuid::new_v4().to_string();
+    let _authorization = ErasureAuthorizationGuard::new(erasure_authorized);
+    let tx = connection.transaction()?;
+    tx.execute_batch(
+        "CREATE TEMP TABLE IF NOT EXISTS erase_turn_ids(id TEXT PRIMARY KEY) WITHOUT ROWID;
+         CREATE TEMP TABLE IF NOT EXISTS erase_memory_ids(id TEXT PRIMARY KEY) WITHOUT ROWID;
+         CREATE TEMP TABLE IF NOT EXISTS erase_legacy_ids(id TEXT PRIMARY KEY) WITHOUT ROWID;
+         DELETE FROM erase_turn_ids;
+         DELETE FROM erase_memory_ids;
+         DELETE FROM erase_legacy_ids;",
+    )?;
+    tx.execute(
+        "INSERT INTO erase_turn_ids(id)
+         SELECT turn_id FROM delivered_turns
+         WHERE user_id=?1 AND profile_id=?2 AND game_id=?3 AND character_id IS ?4
+           AND (?5 IS NULL OR encounter_id IS ?5)
+           AND (?6 IS NULL OR session_id IS ?6)
+           AND (?7 IS NULL OR save_id IS ?7)",
+        params![
+            &request.scope.user_id,
+            &request.scope.profile_id,
+            &request.scope.game_id,
+            character_id,
+            request.scope.encounter_id.as_deref(),
+            request.scope.session_id.as_deref(),
+            request.scope.save_id.as_deref(),
+        ],
+    )?;
+    tx.execute(
+        "INSERT OR IGNORE INTO erase_memory_ids(id)
+         SELECT id FROM structured_memories
+         WHERE user_id=?1 AND profile_id=?2 AND game_id=?3 AND character_id IS ?4
+           AND (?5 IS NULL OR encounter_id IS ?5)
+           AND (?6 IS NULL OR session_id IS ?6)
+           AND (?7 IS NULL OR save_id IS ?7)",
+        params![
+            &request.scope.user_id,
+            &request.scope.profile_id,
+            &request.scope.game_id,
+            character_id,
+            request.scope.encounter_id.as_deref(),
+            request.scope.session_id.as_deref(),
+            request.scope.save_id.as_deref(),
+        ],
+    )?;
+    tx.execute_batch(
+        "INSERT OR IGNORE INTO erase_memory_ids(id)
+         SELECT DISTINCT memory_id FROM structured_memory_sources
+         WHERE turn_id IN (SELECT id FROM erase_turn_ids);",
+    )?;
+    // Legacy rows predate mandatory user and encounter principals. They are
+    // erased only under the same exact profile/game/character and any supplied
+    // session/save refinements.
+    tx.execute(
+        "INSERT OR IGNORE INTO erase_legacy_ids(id)
+         SELECT id FROM memory_items
+         WHERE profile_id IS ?1 AND game_id IS ?2 AND character_id IS ?3
+           AND (?4 IS NULL OR session_id IS ?4)
+           AND (?5 IS NULL OR save_id IS ?5)",
+        params![
+            &request.scope.profile_id,
+            &request.scope.game_id,
+            character_id,
+            request.scope.session_id.as_deref(),
+            request.scope.save_id.as_deref(),
+        ],
+    )?;
+    let delivered_turns_deleted: usize =
+        tx.query_row("SELECT count(*) FROM erase_turn_ids", [], |row| row.get(0))?;
+    let structured_memories_deleted: usize =
+        tx.query_row("SELECT count(*) FROM erase_memory_ids", [], |row| {
+            row.get(0)
+        })?;
+    let legacy_items_deleted: usize =
+        tx.query_row("SELECT count(*) FROM erase_legacy_ids", [], |row| {
+            row.get(0)
+        })?;
+    let outbox_jobs_deleted = tx.execute(
+        "DELETE FROM memory_outbox
+         WHERE aggregate_id IN (SELECT id FROM erase_turn_ids)
+            OR aggregate_id IN (SELECT id FROM erase_memory_ids)
+            OR aggregate_id IN (SELECT id FROM erase_legacy_ids)",
+        [],
+    )?;
+    tx.execute(
+        "DELETE FROM structured_memory_sources
+         WHERE memory_id IN (SELECT id FROM erase_memory_ids)",
+        [],
+    )?;
+    tx.execute(
+        "DELETE FROM structured_memories WHERE id IN (SELECT id FROM erase_memory_ids)",
+        [],
+    )?;
+    tx.execute(
+        "DELETE FROM delivered_turns WHERE turn_id IN (SELECT id FROM erase_turn_ids)",
+        [],
+    )?;
+    tx.execute(
+        "DELETE FROM memory_items WHERE id IN (SELECT id FROM erase_legacy_ids)",
+        [],
+    )?;
+    tx.execute(
+        "INSERT INTO memory_erasure_audit(
+             erasure_id,scope_sha256,delivered_turns_deleted,
+             structured_memories_deleted,legacy_items_deleted,
+             outbox_jobs_deleted,erased_at_ms
+         ) VALUES(?1,?2,?3,?4,?5,?6,?7)",
+        params![
+            erasure_id,
+            scope_sha256,
+            delivered_turns_deleted,
+            structured_memories_deleted,
+            legacy_items_deleted,
+            outbox_jobs_deleted,
+            request.erased_at_ms,
+        ],
+    )?;
+    tx.commit()?;
+    Ok(CharacterMemoryErasureReport {
+        erasure_id,
+        scope_sha256,
+        delivered_turns_deleted,
+        structured_memories_deleted,
+        legacy_items_deleted,
+        outbox_jobs_deleted,
+        erased_at_ms: request.erased_at_ms,
+    })
+}
+
+struct ErasureAuthorizationGuard<'a> {
+    authorized: &'a AtomicBool,
+}
+
+impl<'a> ErasureAuthorizationGuard<'a> {
+    fn new(authorized: &'a AtomicBool) -> Self {
+        authorized.store(true, Ordering::Release);
+        Self { authorized }
+    }
+}
+
+impl Drop for ErasureAuthorizationGuard<'_> {
+    fn drop(&mut self) {
+        self.authorized.store(false, Ordering::Release);
+    }
+}
+
+fn commit_authoritative_batch(
+    connection: &mut Connection,
+    batch: MemoryCommitBatch,
+) -> Result<MemoryCommitReport, MemoryError> {
+    let tx = connection.transaction()?;
+    let mut report = MemoryCommitReport::default();
+
+    // Source authority is inserted first. A derived record in this same batch
+    // can therefore reference a just-delivered turn through a real FK.
+    for turn in batch.turns {
+        let eligible = turn.delivery.eligible_text(&turn.text)?;
+        let Some((delivered_text, delivered_at_ms)) = eligible else {
+            let reason = match turn.delivery {
+                DeliveryDisposition::Queued => SkippedTurnReason::Queued,
+                DeliveryDisposition::Cancelled => SkippedTurnReason::Cancelled,
+                DeliveryDisposition::Failed => SkippedTurnReason::Failed,
+                DeliveryDisposition::Delivered { .. }
+                | DeliveryDisposition::PartiallyDelivered { .. } => unreachable!(),
+            };
+            report.skipped_turns.push(SkippedTurn {
+                turn_id: turn.turn_id,
+                reason,
+            });
+            continue;
+        };
+        let content = delivered_text.to_owned();
+        let content_sha256 = sha256(&content);
+        let expected = DeliveredTurnRecord {
+            turn_id: turn.turn_id.clone(),
+            scope: turn.scope.clone(),
+            speaker: turn.speaker,
+            delivered_text: content.clone(),
+            content_sha256: content_sha256.clone(),
+            created_at_ms: turn.created_at_ms,
+            delivered_at_ms,
+            sequence: turn.sequence,
+            cancellation_generation: turn.cancellation_generation,
+            provider_id: turn.provider_id.clone(),
+            delivery_receipt_id: turn.delivery_receipt_id.clone(),
+            provenance: turn.provenance.clone(),
+        };
+        if let Some(existing) = load_delivered_turn(&tx, &turn.turn_id)? {
+            if existing != expected {
+                return Err(MemoryError::InvalidData(format!(
+                    "delivered turn {} is immutable and conflicts with the existing source row",
+                    turn.turn_id
+                )));
+            }
+            report.stored_turns.push(existing);
+            continue;
+        }
+        tx.execute(
+            r#"INSERT INTO delivered_turns(
+                turn_id,user_id,profile_id,game_id,character_id,encounter_id,
+                session_id,save_id,speaker,delivered_text,content_sha256,
+                created_at_ms,delivered_at_ms,sequence_no,cancellation_generation,
+                provider_id,delivery_receipt_id,provenance_json
+            ) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)"#,
+            params![
+                turn.turn_id,
+                turn.scope.user_id,
+                turn.scope.profile_id,
+                turn.scope.game_id,
+                turn.scope.character_id,
+                turn.scope.encounter_id,
+                turn.scope.session_id,
+                turn.scope.save_id,
+                turn.speaker.as_str(),
+                content,
+                content_sha256,
+                turn.created_at_ms,
+                delivered_at_ms,
+                checked_sql_integer("turn sequence", turn.sequence)?,
+                checked_sql_integer("cancellation generation", turn.cancellation_generation)?,
+                turn.provider_id,
+                turn.delivery_receipt_id,
+                serde_json::to_string(&turn.provenance)?,
+            ],
+        )?;
+        report.stored_turns.push(expected);
+    }
+
+    for memory in batch.derived {
+        report
+            .derived_memories
+            .push(insert_derived_memory(&tx, memory)?);
+    }
+    tx.commit()?;
+    Ok(report)
+}
+
+fn insert_derived_memory(
+    tx: &Transaction<'_>,
+    memory: DerivedMemoryInput,
+) -> Result<DerivedMemoryRecord, MemoryError> {
+    let id = memory
+        .id
+        .clone()
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    let content = memory.content.trim().to_owned();
+    let content_sha256 = sha256(&content);
+    let created_at_ms = unix_time_ms();
+    let generator_json = memory
+        .generator
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()?;
+
+    for source_id in &memory.source_turn_ids {
+        let source = load_delivered_turn(tx, source_id)?
+            .ok_or_else(|| MemoryError::NotFound(format!("source turn {source_id}")))?;
+        if !source_scope_compatible(&memory.scope, &source.scope) {
+            return Err(MemoryError::InvalidData(format!(
+                "source turn {source_id} crosses a user, game, character, encounter, or save boundary"
+            )));
+        }
+    }
+
+    if let Some(existing) = load_derived_memory(tx, &id)? {
+        let same = existing.scope == memory.scope
+            && existing.class == memory.class
+            && existing.spoiler_scope == memory.spoiler_scope
+            && existing.content == content
+            && existing.provenance == memory.provenance
+            && existing.confidence == memory.confidence
+            && existing.importance == memory.importance
+            && existing.observed_at_ms == memory.observed_at_ms
+            && existing.expires_at_ms == memory.expires_at_ms
+            && existing.source_turn_ids == memory.source_turn_ids
+            && existing.generator == memory.generator;
+        if !same {
+            return Err(MemoryError::InvalidData(format!(
+                "structured memory {id} is immutable and conflicts with the existing record"
+            )));
+        }
+        return Ok(existing);
+    }
+
+    tx.execute(
+        r#"INSERT INTO structured_memories(
+            id,user_id,profile_id,game_id,character_id,encounter_id,session_id,
+            save_id,knowledge_class,spoiler_scope,content,content_sha256,
+            provenance_json,confidence,importance,observed_at_ms,created_at_ms,
+            expires_at_ms,generator_json
+        ) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)"#,
+        params![
+            id,
+            memory.scope.user_id,
+            memory.scope.profile_id,
+            memory.scope.game_id,
+            memory.scope.character_id,
+            memory.scope.encounter_id,
+            memory.scope.session_id,
+            memory.scope.save_id,
+            memory.class.as_str(),
+            memory.spoiler_scope.as_str(),
+            content,
+            content_sha256,
+            serde_json::to_string(&memory.provenance)?,
+            memory.confidence,
+            memory.importance,
+            memory.observed_at_ms,
+            created_at_ms,
+            memory.expires_at_ms,
+            generator_json,
+        ],
+    )?;
+    for (ordinal, source_id) in memory.source_turn_ids.iter().enumerate() {
+        tx.execute(
+            "INSERT INTO structured_memory_sources(memory_id,turn_id,source_ordinal) VALUES(?1,?2,?3)",
+            params![id, source_id, ordinal as i64],
+        )?;
+    }
+    load_derived_memory(tx, &id)?.ok_or_else(|| MemoryError::NotFound(id))
+}
+
+fn source_scope_compatible(memory: &AuthorityScope, source: &AuthorityScope) -> bool {
+    memory.user_id == source.user_id
+        && memory.profile_id == source.profile_id
+        && memory.game_id == source.game_id
+        && memory.character_id == source.character_id
+        && memory.encounter_id == source.encounter_id
+        && memory.save_id == source.save_id
+}
+
+fn sha256(content: &str) -> String {
+    format!("{:x}", Sha256::digest(content.as_bytes()))
 }
 
 fn upsert_record(
@@ -894,16 +1530,466 @@ fn backup_database(
     if let Some(parent) = destination.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let mut target = Connection::open(&destination)?;
-    let backup = rusqlite::backup::Backup::new(connection, &mut target)?;
-    backup.run_to_completion(128, Duration::from_millis(5), None)?;
-    let pages_copied = backup.progress().pagecount;
-    drop(backup);
-    target.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
-    Ok(BackupReport {
-        destination,
-        pages_copied,
+    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("memory-backup.sqlite");
+    let temporary = parent.join(format!(".{file_name}.backup-{}.tmp", Uuid::new_v4()));
+    let result = (|| {
+        let mut target = Connection::open(&temporary)?;
+        let backup = rusqlite::backup::Backup::new(connection, &mut target)?;
+        backup.run_to_completion(128, Duration::from_millis(5), None)?;
+        let pages_copied = backup.progress().pagecount;
+        drop(backup);
+        let integrity = integrity_report(&target)?;
+        drop(target);
+        if !integrity.ok {
+            return Err(MemoryError::InvalidData(format!(
+                "new backup failed integrity validation: {}",
+                integrity.messages.join("; ")
+            )));
+        }
+        std::fs::rename(&temporary, &destination)?;
+        Ok(BackupReport {
+            destination: destination.clone(),
+            pages_copied,
+        })
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn load_delivered_turn(
+    connection: &Connection,
+    turn_id: &str,
+) -> Result<Option<DeliveredTurnRecord>, MemoryError> {
+    connection
+        .query_row(
+            r#"SELECT turn_id,user_id,profile_id,game_id,character_id,encounter_id,
+                session_id,save_id,speaker,delivered_text,content_sha256,
+                created_at_ms,delivered_at_ms,sequence_no,cancellation_generation,
+                provider_id,delivery_receipt_id,provenance_json
+               FROM delivered_turns WHERE turn_id=?1"#,
+            [turn_id],
+            delivered_turn_from_row,
+        )
+        .optional()
+        .map_err(MemoryError::from)
+}
+
+fn delivered_turn_from_row(row: &Row<'_>) -> rusqlite::Result<DeliveredTurnRecord> {
+    let speaker: String = row.get(8)?;
+    let sequence: i64 = row.get(13)?;
+    let cancellation_generation: i64 = row.get(14)?;
+    let provenance: String = row.get(17)?;
+    Ok(DeliveredTurnRecord {
+        turn_id: row.get(0)?,
+        scope: AuthorityScope {
+            user_id: row.get(1)?,
+            profile_id: row.get(2)?,
+            game_id: row.get(3)?,
+            character_id: row.get(4)?,
+            encounter_id: row.get(5)?,
+            session_id: row.get(6)?,
+            save_id: row.get(7)?,
+        },
+        speaker: speaker.parse().map_err(sql_conversion_error)?,
+        delivered_text: row.get(9)?,
+        content_sha256: row.get(10)?,
+        created_at_ms: row.get(11)?,
+        delivered_at_ms: row.get(12)?,
+        sequence: u64::try_from(sequence).map_err(sql_conversion_error)?,
+        cancellation_generation: u64::try_from(cancellation_generation)
+            .map_err(sql_conversion_error)?,
+        provider_id: row.get(15)?,
+        delivery_receipt_id: row.get(16)?,
+        provenance: serde_json::from_str(&provenance).map_err(sql_conversion_error)?,
     })
+}
+
+fn load_derived_memory(
+    connection: &Connection,
+    id: &str,
+) -> Result<Option<DerivedMemoryRecord>, MemoryError> {
+    let core = connection
+        .query_row(
+            r#"SELECT id,user_id,profile_id,game_id,character_id,encounter_id,
+                session_id,save_id,knowledge_class,spoiler_scope,content,
+                content_sha256,provenance_json,confidence,importance,
+                observed_at_ms,created_at_ms,expires_at_ms,generator_json
+               FROM structured_memories WHERE id=?1"#,
+            [id],
+            derived_memory_from_row,
+        )
+        .optional()?;
+    let Some(mut record) = core else {
+        return Ok(None);
+    };
+    let mut statement = connection.prepare(
+        "SELECT turn_id FROM structured_memory_sources WHERE memory_id=?1 ORDER BY source_ordinal",
+    )?;
+    record.source_turn_ids = statement
+        .query_map([id], |row| row.get(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(record))
+}
+
+fn derived_memory_from_row(row: &Row<'_>) -> rusqlite::Result<DerivedMemoryRecord> {
+    let class: String = row.get(8)?;
+    let spoiler_scope: String = row.get(9)?;
+    let provenance: String = row.get(12)?;
+    let generator: Option<String> = row.get(18)?;
+    Ok(DerivedMemoryRecord {
+        id: row.get(0)?,
+        scope: AuthorityScope {
+            user_id: row.get(1)?,
+            profile_id: row.get(2)?,
+            game_id: row.get(3)?,
+            character_id: row.get(4)?,
+            encounter_id: row.get(5)?,
+            session_id: row.get(6)?,
+            save_id: row.get(7)?,
+        },
+        class: class.parse().map_err(sql_conversion_error)?,
+        spoiler_scope: spoiler_scope.parse().map_err(sql_conversion_error)?,
+        content: row.get(10)?,
+        content_sha256: row.get(11)?,
+        provenance: serde_json::from_str(&provenance).map_err(sql_conversion_error)?,
+        confidence: row.get(13)?,
+        importance: row.get(14)?,
+        observed_at_ms: row.get(15)?,
+        created_at_ms: row.get(16)?,
+        expires_at_ms: row.get(17)?,
+        source_turn_ids: Vec::new(),
+        generator: generator
+            .map(|value| serde_json::from_str(&value))
+            .transpose()
+            .map_err(sql_conversion_error)?,
+    })
+}
+
+fn retrieve_context_on(
+    connection: &Connection,
+    query: &ContextQuery,
+) -> Result<MemoryContextBundle, MemoryError> {
+    let mut context = MemoryContextBundle::default();
+    if query.recent_turn_limit > 0 {
+        let mut statement = connection.prepare(
+            r#"SELECT turn_id,user_id,profile_id,game_id,character_id,encounter_id,
+                      session_id,save_id,speaker,delivered_text,content_sha256,
+                      created_at_ms,delivered_at_ms,sequence_no,cancellation_generation,
+                      provider_id,delivery_receipt_id,provenance_json
+               FROM (
+                   SELECT * FROM delivered_turns
+                   WHERE user_id=?1 AND profile_id=?2 AND game_id=?3
+                     AND character_id IS ?4
+                     AND encounter_id IS ?5
+                     AND session_id IS ?6
+                     AND save_id IS ?7
+                   ORDER BY delivered_at_ms DESC,sequence_no DESC,turn_id DESC
+                   LIMIT ?8
+               )
+               ORDER BY delivered_at_ms,sequence_no,turn_id"#,
+        )?;
+        context.recent_dialogue = statement
+            .query_map(
+                params![
+                    query.scope.user_id,
+                    query.scope.profile_id,
+                    query.scope.game_id,
+                    query.scope.character_id,
+                    query.scope.encounter_id,
+                    query.scope.session_id,
+                    query.scope.save_id,
+                    query.recent_turn_limit as i64,
+                ],
+                delivered_turn_from_row,
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+    }
+
+    for class in KnowledgeClass::ALL {
+        let records = retrieve_class(connection, query, class)?;
+        match class {
+            KnowledgeClass::WorldLore => context.world_lore = records,
+            KnowledgeClass::Biography => context.biography = records,
+            KnowledgeClass::CharacterKnowledge => context.character_knowledge = records,
+            KnowledgeClass::UncertainPublicInfo => context.uncertain_public_info = records,
+            KnowledgeClass::LongTermSummary => context.long_term_summaries = records,
+        }
+    }
+    Ok(context)
+}
+
+fn retrieve_class(
+    connection: &Connection,
+    query: &ContextQuery,
+    class: KnowledgeClass,
+) -> Result<Vec<DerivedMemoryRecord>, MemoryError> {
+    if query.per_class_limit == 0 {
+        return Ok(Vec::new());
+    }
+    let candidate_limit = query.per_class_limit.saturating_mul(8).min(8_000) as i64;
+    let normalized_text = query
+        .text
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_lowercase);
+    let mut statement = connection.prepare(
+        r#"SELECT id,user_id,profile_id,game_id,character_id,encounter_id,
+                  session_id,save_id,knowledge_class,spoiler_scope,content,
+                  content_sha256,provenance_json,confidence,importance,
+                  observed_at_ms,created_at_ms,expires_at_ms,generator_json
+           FROM structured_memories
+           WHERE user_id=?1 AND profile_id=?2 AND game_id=?3
+             AND knowledge_class=?4
+             AND (character_id IS NULL OR character_id IS ?5)
+             AND (encounter_id IS NULL OR encounter_id IS ?6)
+             AND (session_id IS NULL OR session_id IS ?7)
+             AND (save_id IS NULL OR save_id IS ?8)
+             AND (expires_at_ms IS NULL OR expires_at_ms>?9)
+           ORDER BY CASE WHEN ?10 IS NOT NULL AND instr(lower(content),?10)>0 THEN 0 ELSE 1 END,
+                    importance DESC,confidence DESC,observed_at_ms DESC,id
+           LIMIT ?11"#,
+    )?;
+    let candidates = statement
+        .query_map(
+            params![
+                query.scope.user_id,
+                query.scope.profile_id,
+                query.scope.game_id,
+                class.as_str(),
+                query.scope.character_id,
+                query.scope.encounter_id,
+                query.scope.session_id,
+                query.scope.save_id,
+                query.now_ms,
+                normalized_text,
+                candidate_limit,
+            ],
+            derived_memory_from_row,
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut visible = Vec::with_capacity(query.per_class_limit);
+    for mut record in candidates {
+        if !query.spoiler_policy.allows(record.spoiler_scope)
+            || !spoiler_scope_matches(&record, query)
+        {
+            continue;
+        }
+        let mut sources = connection.prepare(
+            "SELECT turn_id FROM structured_memory_sources WHERE memory_id=?1 ORDER BY source_ordinal",
+        )?;
+        record.source_turn_ids = sources
+            .query_map([&record.id], |row| row.get(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        visible.push(record);
+        if visible.len() == query.per_class_limit {
+            break;
+        }
+    }
+    Ok(visible)
+}
+
+fn spoiler_scope_matches(record: &DerivedMemoryRecord, query: &ContextQuery) -> bool {
+    match record.spoiler_scope {
+        SpoilerScope::None | SpoilerScope::Game | SpoilerScope::UserPrivate => true,
+        SpoilerScope::Save => {
+            query.scope.save_id.is_some() && record.scope.save_id == query.scope.save_id
+        }
+        SpoilerScope::CharacterPrivate => {
+            query.scope.character_id.is_some()
+                && record.scope.character_id == query.scope.character_id
+        }
+    }
+}
+
+fn integrity_report(connection: &Connection) -> Result<IntegrityReport, MemoryError> {
+    let schema_version = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    let mut messages = Vec::new();
+    let mut quick_check = connection.prepare("PRAGMA quick_check")?;
+    for message in quick_check
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?
+    {
+        if message != "ok" {
+            messages.push(message);
+        }
+    }
+    let mut foreign_keys = connection.prepare("PRAGMA foreign_key_check")?;
+    let violations = foreign_keys
+        .query_map([], |row| {
+            let table: String = row.get(0)?;
+            let parent: String = row.get(2)?;
+            Ok(format!(
+                "foreign key violation in {table} referencing {parent}"
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    messages.extend(violations);
+    if schema_version != schema::SCHEMA_VERSION {
+        messages.push(format!(
+            "schema version {schema_version} does not match supported version {}",
+            schema::SCHEMA_VERSION
+        ));
+    }
+    for (version, expected_checksum) in schema::MIGRATION_CHECKSUMS {
+        let actual = connection
+            .query_row(
+                "SELECT checksum FROM memory_schema_migrations WHERE version=?1",
+                [version],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        match actual {
+            None => messages.push(format!("migration ledger is missing version {version}")),
+            Some(actual) if actual != expected_checksum => messages.push(format!(
+                "migration {version} checksum differs from the application-owned ledger"
+            )),
+            Some(_) => {}
+        }
+    }
+    let unexpected_migrations = connection.query_row(
+        "SELECT count(*) FROM memory_schema_migrations WHERE version>?1",
+        [schema::SCHEMA_VERSION],
+        |row| row.get::<_, i64>(0),
+    )?;
+    if unexpected_migrations > 0 {
+        messages.push("migration ledger contains unsupported future versions".to_owned());
+    }
+    let delivered_turns =
+        connection.query_row("SELECT count(*) FROM delivered_turns", [], |row| {
+            row.get::<_, u64>(0)
+        })?;
+    let derived_memories =
+        connection.query_row("SELECT count(*) FROM structured_memories", [], |row| {
+            row.get::<_, u64>(0)
+        })?;
+    Ok(IntegrityReport {
+        ok: messages.is_empty(),
+        messages,
+        schema_version,
+        delivered_turns,
+        derived_memories,
+    })
+}
+
+fn recover_database(
+    backup: PathBuf,
+    destination: PathBuf,
+    replace_existing: bool,
+) -> Result<RecoveryReport, MemoryError> {
+    if backup == destination {
+        return Err(MemoryError::InvalidData(
+            "recovery source and destination must differ".to_owned(),
+        ));
+    }
+    let source = Connection::open_with_flags(
+        &backup,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    source.execute_batch("PRAGMA foreign_keys=ON; PRAGMA query_only=ON;")?;
+    let source_integrity = integrity_report(&source)?;
+    if !source_integrity.ok {
+        return Err(MemoryError::InvalidData(format!(
+            "backup failed integrity validation: {}",
+            source_integrity.messages.join("; ")
+        )));
+    }
+    drop(source);
+
+    let sidecars = sqlite_sidecar_paths(&destination);
+    let destination_artifacts_exist =
+        destination.exists() || sidecars.iter().any(|path| path.exists());
+    if destination_artifacts_exist && !replace_existing {
+        return Err(MemoryError::InvalidData(format!(
+            "recovery destination or its SQLite sidecars already exist: {}",
+            destination.display()
+        )));
+    }
+    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let file_name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("memory.sqlite");
+    let temporary = parent.join(format!(".{file_name}.restore-{}.tmp", Uuid::new_v4()));
+    std::fs::copy(&backup, &temporary)?;
+    let copied = Connection::open_with_flags(
+        &temporary,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    copied.execute_batch("PRAGMA foreign_keys=ON; PRAGMA query_only=ON;")?;
+    let copied_integrity = integrity_report(&copied)?;
+    drop(copied);
+    if !copied_integrity.ok {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(MemoryError::InvalidData(
+            "copied backup failed integrity validation".to_owned(),
+        ));
+    }
+
+    let quarantine = if destination_artifacts_exist {
+        let directory = parent.join(format!("{file_name}.quarantine-{}", Uuid::new_v4()));
+        std::fs::create_dir(&directory)?;
+        let quarantined_database = directory.join(file_name);
+        let main_existed = destination.exists();
+        if main_existed {
+            std::fs::rename(&destination, &quarantined_database)?;
+        }
+        for sidecar in &sidecars {
+            if sidecar.exists() {
+                let name = sidecar.file_name().ok_or_else(|| {
+                    MemoryError::InvalidData("SQLite sidecar has no file name".to_owned())
+                })?;
+                std::fs::rename(sidecar, directory.join(name))?;
+            }
+        }
+        let report_path = if main_existed {
+            quarantined_database.clone()
+        } else {
+            directory.clone()
+        };
+        Some((report_path, directory, quarantined_database, main_existed))
+    } else {
+        None
+    };
+    if let Err(error) = std::fs::rename(&temporary, &destination) {
+        if let Some((_report_path, directory, quarantined_database, main_existed)) = &quarantine {
+            if *main_existed && quarantined_database.exists() {
+                let _ = std::fs::rename(quarantined_database, &destination);
+            }
+            for sidecar in &sidecars {
+                if let Some(name) = sidecar.file_name() {
+                    let quarantined_sidecar = directory.join(name);
+                    if quarantined_sidecar.exists() {
+                        let _ = std::fs::rename(quarantined_sidecar, sidecar);
+                    }
+                }
+            }
+            let _ = std::fs::remove_dir(directory);
+        }
+        let _ = std::fs::remove_file(&temporary);
+        return Err(MemoryError::Io(error));
+    }
+    Ok(RecoveryReport {
+        destination,
+        quarantined_database: quarantine.map(|value| value.0),
+        integrity: copied_integrity,
+    })
+}
+
+fn sqlite_sidecar_paths(database: &Path) -> [PathBuf; 2] {
+    let mut wal = database.as_os_str().to_os_string();
+    wal.push("-wal");
+    let mut shared_memory = database.as_os_str().to_os_string();
+    shared_memory.push("-shm");
+    [PathBuf::from(wal), PathBuf::from(shared_memory)]
 }
 
 fn retrieve_on(

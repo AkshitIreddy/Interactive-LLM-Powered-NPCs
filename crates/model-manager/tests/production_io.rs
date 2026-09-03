@@ -22,6 +22,7 @@ fn catalog_binding(manifest: &ModelPackManifestV1) -> CatalogInstallBindingV1 {
             format!("filesystem-catalog:{}", manifest.digest().unwrap()).as_bytes(),
         ),
         catalog_version: 1,
+        trust_domain: CatalogTrustDomainV1::ReleaseThreshold,
     }
 }
 
@@ -157,6 +158,8 @@ fn artifact(bytes: &[u8], source: String) -> ArtifactV1 {
         size_bytes: bytes.len() as u64,
         sha256: digest(bytes),
         destination: "models/weights.bin".to_owned(),
+        strip_prefix: None,
+        required_paths: vec![],
     }
 }
 
@@ -587,7 +590,6 @@ fn attested_activation_rejects_post_test_staging_tamper() {
     let challenge = manager
         .issue_self_test_challenge(&identity, "mock-runtime", 100, 60)
         .unwrap();
-    let transaction_id = challenge.staged.transaction_id.clone();
     manager
         .record_self_test_attestation(
             &identity,
@@ -599,8 +601,10 @@ fn attested_activation_rejects_post_test_staging_tamper() {
     std::fs::write(
         temporary
             .path()
-            .join(".staging")
-            .join(transaction_id)
+            .join("packs")
+            .join(identity.pack_id.as_str())
+            .join("versions")
+            .join(identity.revision.as_str())
             .join("models/weights.bin"),
         b"tampered-after-test",
     )
@@ -677,7 +681,7 @@ fn zip_and_tar_link_attacks_fail_before_writing_members() {
 }
 
 #[test]
-fn zip_and_tar_archives_extract_only_inside_declared_destination() {
+fn zip_tar_and_tar_bz2_archives_extract_only_inside_declared_destination() {
     let temporary = TempDir::new().unwrap();
     let zip_path = temporary.path().join("safe.zip");
     {
@@ -739,6 +743,143 @@ fn zip_and_tar_archives_extract_only_inside_declared_destination() {
         std::fs::read(tar_staging.join("models/tar/nested/model.bin")).unwrap(),
         b"tar-model"
     );
+
+    let tar_bz2_path = temporary.path().join("safe.tar.bz2");
+    {
+        let file = std::fs::File::create(&tar_bz2_path).unwrap();
+        let encoder = bzip2::write::BzEncoder::new(file, bzip2::Compression::best());
+        let mut builder = tar::Builder::new(encoder);
+        let bytes = b"tar-bz2-model";
+        let mut header = tar::Header::new_gnu();
+        header.set_size(bytes.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, "nested/model.bin", bytes.as_slice())
+            .unwrap();
+        let encoder = builder.into_inner().unwrap();
+        encoder.finish().unwrap();
+    }
+    let tar_bz2_bytes = std::fs::read(&tar_bz2_path).unwrap();
+    let mut tar_bz2_artifact = artifact(
+        &tar_bz2_bytes,
+        "https://example.test/safe.tar.bz2".to_owned(),
+    );
+    tar_bz2_artifact.kind = ArtifactKind::Archive;
+    tar_bz2_artifact.archive_format = Some(ArchiveFormatV1::TarBz2);
+    tar_bz2_artifact.destination = "models/tar-bz2".to_owned();
+    let tar_bz2_staging = temporary.path().join("tar-bz2-staging");
+    std::fs::create_dir(&tar_bz2_staging).unwrap();
+    extract_artifact(
+        &tar_bz2_artifact,
+        &tar_bz2_path,
+        &tar_bz2_staging,
+        &ArchivePolicy::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::read(tar_bz2_staging.join("models/tar-bz2/nested/model.bin")).unwrap(),
+        b"tar-bz2-model"
+    );
+}
+
+#[test]
+fn zip_archive_strip_prefix_and_required_paths_form_a_closed_world_install() {
+    let temporary = TempDir::new().unwrap();
+    let archive_path = temporary.path().join("runtime.zip");
+    {
+        let file = std::fs::File::create(&archive_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        for (path, bytes) in [
+            ("runtime-root/GIT_COMMIT_ID", b"commit".as_slice()),
+            ("runtime-root/LICENSE", b"license".as_slice()),
+            (
+                "runtime-root/ThirdPartyNotices.txt",
+                b"third-party notices".as_slice(),
+            ),
+            ("runtime-root/VERSION_NUMBER", b"1.0".as_slice()),
+            ("runtime-root/lib/runtime.dll", b"runtime".as_slice()),
+            ("runtime-root/lib/shared.dll", b"shared".as_slice()),
+            (
+                "runtime-root/include/ignored.h",
+                b"not installed".as_slice(),
+            ),
+        ] {
+            zip.start_file(path, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+    let bytes = std::fs::read(&archive_path).unwrap();
+    let mut archive = artifact(&bytes, "https://example.test/runtime.zip".to_owned());
+    archive.kind = ArtifactKind::Archive;
+    archive.archive_format = Some(ArchiveFormatV1::Zip);
+    archive.destination = "runtime/1.0".to_owned();
+    archive.strip_prefix = Some("runtime-root".to_owned());
+    archive.required_paths = vec![
+        "GIT_COMMIT_ID".to_owned(),
+        "LICENSE".to_owned(),
+        "ThirdPartyNotices.txt".to_owned(),
+        "VERSION_NUMBER".to_owned(),
+        "lib/runtime.dll".to_owned(),
+        "lib/shared.dll".to_owned(),
+    ];
+
+    let staging = temporary.path().join("staging");
+    std::fs::create_dir(&staging).unwrap();
+    let extracted =
+        extract_artifact(&archive, &archive_path, &staging, &ArchivePolicy::default()).unwrap();
+
+    assert_eq!(extracted.files.len(), 6);
+    assert_eq!(
+        std::fs::read(staging.join("runtime/1.0/ThirdPartyNotices.txt")).unwrap(),
+        b"third-party notices"
+    );
+    assert_eq!(
+        std::fs::read(staging.join("runtime/1.0/lib/runtime.dll")).unwrap(),
+        b"runtime"
+    );
+    assert!(!staging.join("runtime/1.0/include/ignored.h").exists());
+}
+
+#[test]
+fn zip_archive_missing_a_required_member_is_rejected() {
+    let temporary = TempDir::new().unwrap();
+    let archive_path = temporary.path().join("incomplete-runtime.zip");
+    {
+        let file = std::fs::File::create(&archive_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        zip.start_file(
+            "runtime-root/lib/runtime.dll",
+            zip::write::SimpleFileOptions::default(),
+        )
+        .unwrap();
+        zip.write_all(b"runtime").unwrap();
+        zip.finish().unwrap();
+    }
+    let bytes = std::fs::read(&archive_path).unwrap();
+    let mut archive = artifact(
+        &bytes,
+        "https://example.test/incomplete-runtime.zip".to_owned(),
+    );
+    archive.kind = ArtifactKind::Archive;
+    archive.archive_format = Some(ArchiveFormatV1::Zip);
+    archive.destination = "runtime/1.0".to_owned();
+    archive.strip_prefix = Some("runtime-root".to_owned());
+    archive.required_paths = vec![
+        "lib/runtime.dll".to_owned(),
+        "ThirdPartyNotices.txt".to_owned(),
+    ];
+
+    let staging = temporary.path().join("staging");
+    std::fs::create_dir(&staging).unwrap();
+    let error =
+        extract_artifact(&archive, &archive_path, &staging, &ArchivePolicy::default()).unwrap_err();
+    assert!(matches!(
+        error,
+        ExtractionError::MissingRequiredMember(path) if path == "ThirdPartyNotices.txt"
+    ));
 }
 
 #[test]

@@ -328,6 +328,9 @@ async fn groq_chat_completions_handles_done_and_usage_chunk() {
 async fn cohere_v2_chat_normalizes_split_text_tool_usage_and_finish() {
     let sse = concat!(
         "event: message-start\ndata: {\"type\":\"message-start\",\"id\":\"cohere-1\",\"delta\":{\"message\":{\"role\":\"assistant\"}}}\n\n",
+        "event: content-start\ndata: {\"type\":\"content-start\",\"index\":0,\"delta\":{\"message\":{\"content\":{\"type\":\"thinking\",\"thinking\":\"\"}}}}\n\n",
+        "event: content-delta\ndata: {\"type\":\"content-delta\",\"index\":0,\"delta\":{\"message\":{\"content\":{\"thinking\":\"private provider reasoning must not become dialogue\"}}}}\n\n",
+        "event: content-end\ndata: {\"type\":\"content-end\",\"index\":0}\n\n",
         "event: content-delta\ndata: {\"type\":\"content-delta\",\"index\":0,\"delta\":{\"message\":{\"content\":{\"text\":\"Checking.\"}}}}\n\n",
         "event: tool-call-start\ndata: {\"type\":\"tool-call-start\",\"index\":1,\"delta\":{\"message\":{\"tool_calls\":{\"id\":\"lookup-1\",\"type\":\"function\",\"function\":{\"name\":\"lookup\",\"arguments\":\"\"}}}}}\n\n",
         "event: tool-call-delta\ndata: {\"type\":\"tool-call-delta\",\"index\":1,\"delta\":{\"message\":{\"tool_calls\":{\"function\":{\"arguments\":\"{\\\"id\\\":7}\"}}}}}\n\n",
@@ -360,6 +363,10 @@ async fn cohere_v2_chat_normalizes_split_text_tool_usage_and_finish() {
     assert!(events
         .iter()
         .any(|event| matches!(event, LlmEvent::TextDelta { text, .. } if text == "Checking.")));
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        LlmEvent::TextDelta { text, .. } if text.contains("private provider reasoning")
+    )));
     assert!(events.iter().any(|event| matches!(event, LlmEvent::ToolCallCompleted { name, arguments, .. } if name == "lookup" && arguments == &json!({"id":7}))));
     assert!(events
         .iter()
@@ -532,6 +539,37 @@ async fn nvidia_nim_normalizes_200_sse_and_preserves_exact_model_id() {
 }
 
 #[tokio::test]
+async fn nvidia_nemotron_three_disables_reasoning_for_low_latency_dialogue() {
+    let sse = concat!(
+        "data: {\"id\":\"nim-fast\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Ready.\"},\"finish_reason\":\"stop\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let fixture = chunked_server(
+        "200 OK",
+        "text/event-stream",
+        vec![sse.as_bytes().to_vec()],
+        Duration::ZERO,
+    )
+    .await;
+    let adapter = NvidiaNimChat::new(config(fixture.base, "/")).expect("adapter");
+    let _events = adapter
+        .stream(
+            nvidia_request("nvidia/nemotron-3.5-lightning-30b-a3b"),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("stream")
+        .collect::<Vec<_>>()
+        .await;
+    let received = String::from_utf8(fixture.request.await.expect("request")).expect("UTF-8");
+    let body: serde_json::Value = serde_json::from_str(
+        received.split("\r\n\r\n").nth(1).expect("body"),
+    )
+    .expect("JSON request body");
+    assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
+}
+
+#[tokio::test]
 async fn nvidia_nim_returns_typed_polling_state_for_202() {
     let fixture = chunked_server(
         "202 Accepted",
@@ -688,6 +726,64 @@ async fn nvidia_nim_discovery_preserves_ids_and_defaults_features_conservatively
     assert_eq!(unknown.capabilities.reasoning, CapabilitySupport::Unknown);
     let received = String::from_utf8(fixture.request.await.expect("request")).expect("UTF-8");
     assert!(received.starts_with("GET /v1/models HTTP/1.1"));
+}
+
+#[tokio::test]
+async fn nvidia_nim_model_discovery_reuses_the_bounded_cache() {
+    let fixture = chunked_server(
+        "200 OK",
+        "application/json",
+        vec![
+            br#"{"object":"list","data":[{"id":"nvidia/nemotron-fixture","owned_by":"nvidia"}]}"#
+                .to_vec(),
+        ],
+        Duration::ZERO,
+    )
+    .await;
+    let adapter = NvidiaNimChat::with_verified_model_capabilities_and_cache_ttl(
+        config(fixture.base, "/"),
+        BTreeMap::new(),
+        Duration::from_secs(5),
+    )
+    .expect("adapter");
+
+    let first = adapter
+        .list_models(CancellationToken::new())
+        .await
+        .expect("first discovery");
+    let second = tokio::time::timeout(
+        Duration::from_millis(100),
+        adapter.list_models(CancellationToken::new()),
+    )
+    .await
+    .expect("cache lookup is immediate")
+    .expect("cached models");
+
+    assert_eq!(first, second);
+    assert_eq!(second[0].id, "nvidia/nemotron-fixture");
+    let received = String::from_utf8(fixture.request.await.expect("request")).expect("UTF-8");
+    assert!(received.starts_with("GET /v1/models HTTP/1.1"));
+}
+
+#[test]
+fn nvidia_nim_rejects_unbounded_model_cache_ttls() {
+    let listener_free_base = Url::parse("http://127.0.0.1:9/").expect("fixture URL");
+    assert!(
+        NvidiaNimChat::with_verified_model_capabilities_and_cache_ttl(
+            config(listener_free_base.clone(), "/"),
+            BTreeMap::new(),
+            Duration::ZERO,
+        )
+        .is_err()
+    );
+    assert!(
+        NvidiaNimChat::with_verified_model_capabilities_and_cache_ttl(
+            config(listener_free_base, "/"),
+            BTreeMap::new(),
+            Duration::from_secs(24 * 60 * 60 + 1),
+        )
+        .is_err()
+    );
 }
 
 #[test]

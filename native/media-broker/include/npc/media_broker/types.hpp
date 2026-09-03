@@ -6,11 +6,20 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace npc::media {
 
 using MonotonicTime = std::chrono::steady_clock::time_point;
 using Duration = std::chrono::steady_clock::duration;
+
+// Event-driven WGC delivery, CPU landmark inference, and authenticated D3D
+// presentation are separately bounded. The review producer gives inference a
+// 220 ms budget after binding; these broker bounds include at most 120 ms of
+// source-frame age plus a short result handoff window.
+inline constexpr std::uint64_t visual_capture_freshness_ms = 120U;
+inline constexpr std::uint64_t visual_worker_result_deadline_ms = 340U;
+inline constexpr std::uint64_t visual_presentation_deadline_ms = 440U;
 
 enum class BrokerState {
     stopped,
@@ -26,9 +35,34 @@ enum class BrokerState {
 };
 
 enum class CaptureBackend { none, windows_graphics_capture, desktop_duplication };
+
+// Authenticated capture evidence names both where pixels came from and what
+// they cover.  A display-wide source must never be promoted to exact-window
+// evidence merely because its pixels happen to resemble the selected game.
+enum class CapturePixelSource : std::uint32_t {
+    unavailable = 0,
+    windows_graphics_capture_texture = 1,
+    desktop_duplication_texture = 2,
+};
+
+enum class CapturePixelScope : std::uint32_t {
+    unavailable = 0,
+    exact_selected_window = 1,
+    full_display_output = 2,
+};
 enum class OverlayBackend { none, d3d11_direct_composition };
 enum class AudioState { stopped, initializing, ready, capturing, playing, recovering, failed };
-enum class TargetState { none, selected, unavailable, minimized, occluded, protected_content, closed };
+enum class TargetState {
+    none,
+    selected,
+    unavailable,
+    minimized,
+    occluded,
+    protected_content,
+    closed,
+    exclusive_fullscreen,
+    unsupported,
+};
 enum class InputMode { push_to_talk, voice_activity, typed_only };
 enum class PttState { released, pressed };
 enum class ColorSpace { sdr_srgb, sdr_sc_rgb, hdr10_pq, hdr_sc_rgb, unknown };
@@ -72,6 +106,8 @@ enum class FailureCode {
     anti_cheat_detected,
     online_mode_detected,
     internal_error,
+    exclusive_fullscreen,
+    unsupported_path,
 };
 
 enum class RecoveryAction {
@@ -152,6 +188,9 @@ struct TargetGeometry {
     SizeI captured_content_px;
     MonitorInfo monitor;
     bool minimized{};
+    // Monotonically advances whenever capture-to-desktop mapping changes. It
+    // invalidates frames and asynchronous residual work from the old mapping.
+    std::uint64_t geometry_epoch{};
 };
 
 struct FrameDescriptor {
@@ -165,6 +204,11 @@ struct FrameDescriptor {
     std::uintptr_t native_texture{};
     bool content_occluded{};
     bool protected_content{};
+    std::uint64_t geometry_epoch{};
+    // Acquisition-time QPC and a bounded fingerprint of captured pixels are
+    // independent evidence that the capture stream is genuinely advancing.
+    std::uint64_t captured_qpc{};
+    std::uint64_t content_hash{};
 };
 
 struct OcclusionEvidence {
@@ -176,6 +220,13 @@ struct OcclusionEvidence {
     // Bind tracking evidence to one captured frame in one graphics epoch.
     std::uint64_t source_frame_sequence{};
     std::uint64_t source_device_generation{};
+    std::uint64_t source_geometry_epoch{};
+    std::uint64_t source_frame_qpc{};
+    // Actor identity and temporal track identity are independent typed values.
+    // Reacquisition must increment the epoch even if a tracker reuses its ID.
+    std::uint64_t actor_id{};
+    std::uint64_t selected_track_id{};
+    std::uint64_t track_epoch{};
 };
 
 struct MouthPatch {
@@ -189,6 +240,279 @@ struct MouthPatch {
     // and original capture time prevent stale output from matching by accident.
     std::uint64_t source_device_generation{};
     MonotonicTime source_frame_captured_at{};
+    std::uint64_t source_geometry_epoch{};
+    std::uint64_t source_frame_qpc{};
+    std::uint64_t actor_id{};
+    std::uint64_t selected_track_id{};
+    std::uint64_t track_epoch{};
+};
+
+// Validated control-plane metadata for one externally produced residual. The
+// Windows adapter is the only component permitted to turn source_handle_value
+// into a local D3D resource, using DuplicateHandle from worker_process_id.
+struct SharedResidualLease {
+    std::uint32_t schema_version{1};
+    std::uint32_t worker_process_id{};
+    std::uint64_t worker_process_creation_time{};
+    std::string worker_executable_name;
+    std::uint64_t source_handle_value{};
+    std::uint64_t lease_nonce_high{};
+    std::uint64_t lease_nonce_low{};
+    std::uint64_t adapter_luid{};
+    std::uint64_t keyed_mutex_acquire_key{};
+    std::uint64_t keyed_mutex_release_key{};
+    std::uint32_t width{};
+    std::uint32_t height{};
+    std::uint32_t stride_bytes{};
+    std::uint32_t dxgi_format{};
+    std::uint32_t alpha_mode{};
+    std::uint64_t expires_qpc{};
+    std::uint64_t cancellation_generation{};
+    std::uint64_t source_device_generation{};
+    std::uint64_t source_geometry_epoch{};
+    std::uint64_t source_frame_sequence{};
+    std::uint64_t source_frame_qpc{};
+    std::uint64_t produced_qpc{};
+    std::uint64_t actor_id{};
+    std::uint64_t track_id{};
+    std::uint64_t track_epoch{};
+    RectF normalized_bounds;
+};
+
+// Broker-issued, single-frame GPU source lease. The broker creates a distinct
+// immutable shared copy of the latest WGC texture and duplicates its NT handle
+// only into the attested worker. It never exports Desktop Duplication frames.
+struct VisualSourceLeaseRequest {
+    std::uint64_t cancellation_generation{};
+    std::uint32_t worker_process_id{};
+    std::uint64_t worker_process_creation_time{};
+    std::string worker_executable_name;
+    std::uint64_t actor_id{};
+    std::uint64_t track_id{};
+    std::uint64_t track_epoch{};
+};
+
+struct VisualSourceLease {
+    std::uint32_t schema_version{1};
+    std::uint32_t broker_process_id{};
+    std::uint64_t broker_process_creation_time{};
+    std::string broker_executable_name;
+    std::uint32_t worker_process_id{};
+    std::uint64_t worker_process_creation_time{};
+    std::string worker_executable_name;
+    std::uint64_t worker_handle_value{};
+    std::uint64_t lease_nonce_high{};
+    std::uint64_t lease_nonce_low{};
+    std::uint64_t adapter_luid{};
+    std::uint64_t keyed_mutex_acquire_key{};
+    std::uint64_t keyed_mutex_release_key{};
+    std::uint32_t width{};
+    std::uint32_t height{};
+    std::uint32_t stride_bytes{};
+    std::uint32_t dxgi_format{};
+    std::uint32_t alpha_mode{};
+    std::uint64_t expires_qpc{};
+    std::uint64_t qpc_frequency{};
+    std::uint64_t cancellation_generation{};
+    std::uint64_t source_device_generation{};
+    std::uint64_t source_geometry_epoch{};
+    std::uint64_t source_frame_sequence{};
+    std::uint64_t source_frame_qpc{};
+    std::uint64_t actor_id{};
+    std::uint64_t track_id{};
+    std::uint64_t track_epoch{};
+};
+
+// Broker-owned, one-frame CPU crop for the local identity observation worker.
+// Unlike VisualSourceLease this is a named read-only byte mapping, not a GPU
+// handle. Exactly one may be live, and every invalidation destroys the mapping.
+struct IdentityFrameLeaseRequest {
+    std::string capture_session_id;
+    std::uint64_t cancellation_generation{};
+    std::uint32_t worker_process_id{};
+    std::uint64_t worker_process_creation_time{};
+    std::string worker_executable_name;
+    RectI crop_px;
+};
+
+struct IdentityFrameLease {
+    std::uint32_t schema_version{1};
+    std::uint32_t worker_process_id{};
+    std::uint64_t worker_process_creation_time{};
+    std::string worker_executable_name;
+    std::string lease_id;
+    std::string shared_memory_name;
+    std::string lease_nonce;
+    std::uint64_t byte_length{};
+    std::uint32_t width{};
+    std::uint32_t height{};
+    std::uint32_t stride_bytes{};
+    std::string pixel_format;
+    std::string content_sha256;
+    std::uint64_t expires_qpc{};
+    std::uint64_t qpc_frequency{};
+    std::uint64_t cancellation_generation{};
+    std::string capture_session_id;
+    std::uint32_t selected_process_id{};
+    std::uint64_t selected_window_handle{};
+    std::string selected_executable_name;
+    std::uint64_t source_device_generation{};
+    std::uint64_t source_geometry_epoch{};
+    std::uint64_t source_frame_sequence{};
+    std::uint64_t source_frame_qpc{};
+    std::uint64_t captured_at_unix_ms{};
+    bool advancing_frame_verified{};
+    bool overlay_capture_excluded{};
+    bool protected_online_detected{};
+    bool anti_cheat_detected{};
+    RectI crop_px;
+    SizeI source_size_px;
+};
+
+enum class IdentityReferenceSourceClass : std::uint32_t {
+    user_private = 1,
+    original_synthetic = 2,
+};
+
+struct IdentityReferenceImportRequest {
+    std::string capture_session_id;
+    std::uint64_t cancellation_generation{};
+    std::uint32_t worker_process_id{};
+    std::uint64_t worker_process_creation_time{};
+    std::string worker_executable_name;
+    std::string picker_consent_token;
+    std::string game_profile_id;
+    std::string character_id;
+    std::string subject_id;
+    std::string reference_id;
+    std::string subject_display_name;
+    IdentityReferenceSourceClass source_class{IdentityReferenceSourceClass::user_private};
+    std::string owner_user_id;
+    std::string original_work_license;
+    bool explicit_user_consent{};
+    bool local_only{};
+    std::uint64_t imported_at_unix_ms{};
+};
+
+struct IdentityReferenceImportLease {
+    std::uint32_t schema_version{1};
+    std::uint32_t worker_process_id{};
+    std::uint64_t worker_process_creation_time{};
+    std::string worker_executable_name;
+    std::string lease_id;
+    std::string shared_memory_name;
+    std::string lease_nonce;
+    std::uint64_t byte_length{};
+    std::uint32_t width{};
+    std::uint32_t height{};
+    std::uint32_t stride_bytes{};
+    std::string pixel_format;
+    std::string content_sha256;
+    std::string source_asset_sha256;
+    std::string source_media_type;
+    std::uint64_t expires_qpc{};
+    std::uint64_t qpc_frequency{};
+    std::uint64_t cancellation_generation{};
+    std::string capture_session_id;
+    std::uint32_t selected_process_id{};
+    std::uint64_t selected_window_handle{};
+    std::string selected_executable_name;
+    std::uint64_t source_device_generation{};
+    std::uint64_t source_geometry_epoch{};
+    std::string picker_consent_token;
+    std::string game_profile_id;
+    std::string character_id;
+    std::string subject_id;
+    std::string reference_id;
+    std::string subject_display_name;
+    IdentityReferenceSourceClass source_class{IdentityReferenceSourceClass::user_private};
+    std::string owner_user_id;
+    std::string original_work_license;
+    bool explicit_user_consent{};
+    bool local_only{};
+    std::uint64_t imported_at_unix_ms{};
+};
+
+// Manual actor selection is deliberately a native transaction. The WebView is
+// never given captured pixels, candidate rectangles, or the pointer location.
+// A qualified native visual authority supplies frame-bound detected ROIs and
+// consumes the typed terminal receipt.
+enum class ManualActorPickerStatus : std::uint32_t {
+    pending = 1,
+    selected = 2,
+    cancelled = 3,
+    timed_out = 4,
+    target_lost = 5,
+    target_resized = 6,
+    dpi_changed = 7,
+    device_changed = 8,
+    capture_changed = 9,
+    click_outside_detected_roi = 10,
+    ambiguous_detected_roi = 11,
+    untrusted_pointer_input = 12,
+    overlay_unavailable = 13,
+    internal_error = 14,
+};
+
+enum class ManualActorPointerKind : std::uint32_t {
+    none = 0,
+    mouse = 1,
+    touch = 2,
+    pen = 3,
+};
+
+struct ManualActorCandidate {
+    std::uint64_t actor_id{};
+    std::uint64_t track_id{};
+    std::uint64_t track_epoch{};
+    RectF normalized_bounds;
+};
+
+struct ManualActorPickerRequest {
+    std::string request_id;
+    std::string capture_session_id;
+    std::uint64_t cancellation_generation{};
+    std::uint32_t selected_process_id{};
+    std::uint64_t selected_window_handle{};
+    std::uint64_t source_device_generation{};
+    std::uint64_t source_geometry_epoch{};
+    std::uint64_t source_frame_sequence{};
+    std::uint64_t source_frame_qpc{};
+    std::uint32_t timeout_ms{};
+    std::vector<ManualActorCandidate> candidates;
+};
+
+struct ManualActorPickerReceipt {
+    std::uint32_t schema_version{1};
+    std::string request_id;
+    ManualActorPickerStatus status{ManualActorPickerStatus::pending};
+    std::uint64_t receipt_nonce_high{};
+    std::uint64_t receipt_nonce_low{};
+    std::string capture_session_id;
+    std::uint64_t cancellation_generation{};
+    std::uint32_t selected_process_id{};
+    std::uint64_t selected_window_handle{};
+    std::string selected_executable_name;
+    std::uint64_t source_device_generation{};
+    std::uint64_t source_geometry_epoch{};
+    std::uint64_t source_frame_sequence{};
+    std::uint64_t source_frame_qpc{};
+    std::uint64_t selected_actor_id{};
+    std::uint64_t selected_track_id{};
+    std::uint64_t selected_track_epoch{};
+    std::uint32_t candidate_count{};
+    std::string candidate_set_sha256;
+    std::uint64_t began_qpc{};
+    std::uint64_t clicked_qpc{};
+    std::uint64_t attested_at_qpc{};
+    std::uint64_t qpc_frequency{};
+    ManualActorPointerKind pointer_kind{ManualActorPointerKind::none};
+    bool frozen_wgc_frame_verified{};
+    bool overlay_capture_excluded{};
+    bool overlay_nonactivating{};
+    bool single_hardware_pointer_click{};
+    bool pixels_withheld_from_webview{true};
+    bool coordinates_withheld_from_webview{true};
 };
 
 struct Failure {
@@ -251,6 +575,20 @@ struct Diagnostics {
     std::uint64_t patches_rejected{};
     std::uint32_t consecutive_failures{};
     std::optional<Failure> last_failure;
+    std::uint64_t geometry_epoch{};
+    std::uint64_t geometry_changes{};
+    std::uint64_t latest_frame_sequence{};
+    std::uint64_t latest_frame_qpc{};
+    std::uint64_t initial_content_hash{};
+    std::uint64_t latest_content_hash{};
+    std::uint64_t content_hash_changes{};
+    std::uint64_t nonadvancing_frames{};
+    std::uint32_t selected_process_id{};
+    std::uintptr_t selected_window{};
+    std::string selected_executable_name;
+    SizeI latest_content_size_px;
+    bool overlay_capture_excluded{};
+    bool overlay_visuals_allowed{};
 };
 
 [[nodiscard]] std::string_view to_string(BrokerState state) noexcept;

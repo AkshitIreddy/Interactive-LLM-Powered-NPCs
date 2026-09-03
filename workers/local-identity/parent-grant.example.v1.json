@@ -1,0 +1,17 @@
+{
+  "schema": "npc.identity-parent-model-run-grant/v1",
+  "grant_id": "replace-with-one-time-random-grant-id",
+  "suite_revision": "identity-yunet-sface-windows-2026-08-30.v1",
+  "pack_id": "opencv-yunet-sface-private-eval",
+  "pack_revision": "zoo-47534e27-opencv-5.0.0.93",
+  "manifest_file_sha256": "a4af4874af77c4dc517fe41990371e96e68a4469ee6817102876b7b074302e67",
+  "backend": "opencv-dnn-cpu",
+  "allow_identity_model_execution": false,
+  "cpu_still_requires_gpu_lane": true,
+  "single_use": true,
+  "issued_unix_seconds": 1,
+  "expires_unix_seconds": 2,
+  "maximum_run_seconds": 60,
+  "token_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "authorized_by": "root_orchestrator"
+}

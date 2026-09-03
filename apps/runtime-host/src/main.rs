@@ -1,3 +1,5 @@
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 use std::process::ExitCode;
 
 use npc_runtime_host::cli::{run, Cli};

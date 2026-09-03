@@ -25,7 +25,7 @@
   ],
   "expected": {
     "status": "failed",
-    "traceSha256": "861bfce1fbe643c5dc2b54c0911fa40a6c3a7f98094243cf1fbfa42a28f86eba",
+    "traceSha256": "06da31d6578417b4bc32461399a585919ce265b5d6c28a6de41f7f48ff8cb98d",
     "firstAudioAtMs": null,
     "speechEndToFirstAudioMs": null,
     "networkAttempts": 2,

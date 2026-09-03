@@ -10,7 +10,89 @@ pub enum DataClass {
     WebcamFrame,
     GameContext,
     ConversationMemory,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalDiagnosticDataClass {
     DiagnosticFacts,
+    DiagnosticEvents,
+    CrashRecoveryMetadata,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TelemetryPolicy {
+    Prohibited,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportInitiation {
+    UserInitiatedOnly,
+}
+
+/// Machine-readable privacy promise embedded in every diagnostics export.
+/// There is intentionally no remote destination field or enabled variant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrivacyEgressDeclaration {
+    pub schema_version: String,
+    pub remote_telemetry: TelemetryPolicy,
+    pub automatic_upload: TelemetryPolicy,
+    pub export_initiation: ExportInitiation,
+    pub locally_recorded: BTreeSet<LocalDiagnosticDataClass>,
+    pub excluded_by_design: BTreeSet<DataClass>,
+}
+
+impl PrivacyEgressDeclaration {
+    pub fn local_diagnostics_v1() -> Self {
+        Self {
+            schema_version: "1.0.0".into(),
+            remote_telemetry: TelemetryPolicy::Prohibited,
+            automatic_upload: TelemetryPolicy::Prohibited,
+            export_initiation: ExportInitiation::UserInitiatedOnly,
+            locally_recorded: BTreeSet::from([
+                LocalDiagnosticDataClass::DiagnosticFacts,
+                LocalDiagnosticDataClass::DiagnosticEvents,
+                LocalDiagnosticDataClass::CrashRecoveryMetadata,
+            ]),
+            excluded_by_design: BTreeSet::from([
+                DataClass::MicrophoneAudio,
+                DataClass::Transcript,
+                DataClass::SelectedGameFrame,
+                DataClass::WebcamFrame,
+                DataClass::GameContext,
+                DataClass::ConversationMemory,
+            ]),
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.schema_version != "1.0.0" {
+            return Err("unsupported privacy declaration schema");
+        }
+        let permitted = BTreeSet::from([
+            LocalDiagnosticDataClass::DiagnosticFacts,
+            LocalDiagnosticDataClass::DiagnosticEvents,
+            LocalDiagnosticDataClass::CrashRecoveryMetadata,
+        ]);
+        if self.locally_recorded != permitted {
+            return Err("privacy declaration omits required local diagnostic classes");
+        }
+        let required_exclusions = BTreeSet::from([
+            DataClass::MicrophoneAudio,
+            DataClass::Transcript,
+            DataClass::SelectedGameFrame,
+            DataClass::WebcamFrame,
+            DataClass::GameContext,
+            DataClass::ConversationMemory,
+        ]);
+        if !required_exclusions.is_subset(&self.excluded_by_design) {
+            return Err("privacy declaration omits a content-bearing exclusion");
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -108,6 +190,41 @@ mod tests {
         assert_eq!(
             policy.evaluate(&manifest()),
             EgressDecision::BlockedDataClass(DataClass::GameContext)
+        );
+    }
+
+    #[test]
+    fn local_diagnostics_declaration_has_no_remote_telemetry_escape_hatch() {
+        let declaration = PrivacyEgressDeclaration::local_diagnostics_v1();
+        assert_eq!(declaration.validate(), Ok(()));
+        assert_eq!(declaration.remote_telemetry, TelemetryPolicy::Prohibited);
+        assert_eq!(declaration.automatic_upload, TelemetryPolicy::Prohibited);
+        assert!(declaration
+            .excluded_by_design
+            .contains(&DataClass::MicrophoneAudio));
+        assert!(declaration
+            .excluded_by_design
+            .contains(&DataClass::SelectedGameFrame));
+    }
+
+    #[test]
+    fn privacy_declaration_rejects_missing_local_class_or_content_exclusion() {
+        let mut declaration = PrivacyEgressDeclaration::local_diagnostics_v1();
+        declaration
+            .locally_recorded
+            .remove(&LocalDiagnosticDataClass::DiagnosticEvents);
+        assert_eq!(
+            declaration.validate(),
+            Err("privacy declaration omits required local diagnostic classes")
+        );
+
+        let mut declaration = PrivacyEgressDeclaration::local_diagnostics_v1();
+        declaration
+            .excluded_by_design
+            .remove(&DataClass::Transcript);
+        assert_eq!(
+            declaration.validate(),
+            Err("privacy declaration omits a content-bearing exclusion")
         );
     }
 }

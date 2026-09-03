@@ -19,6 +19,9 @@ EVIDENCE_PATHS = (
     "demo/readme/package-lock.json",
     "schemas/game-profile-v2.schema.json",
     "catalog/v1/catalog.json",
+    "docs/product-rework/original-brief-gap-map.json",
+    "docs/product-rework/original-brief-acceptance.md",
+    "docs/requirements/local-review-evidence-report.md",
 )
 WINDOWS_DEVICE = re.compile(r"(?i)^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?$")
 
@@ -74,15 +77,18 @@ def main() -> int:
         if not item.replace("\\", "/").startswith(EXCLUDED_PREFIXES)
         and "/.secrets/" not in item.replace("\\", "/")
     ]
+    unaddressable = [item for item in safe_candidates if windows_unaddressable(item)]
+    if unaddressable:
+        raise RuntimeError(
+            "source candidate contains Windows-reserved device path(s): "
+            + ", ".join(unaddressable)
+        )
     source_digest = hashlib.sha256()
     source_files = 0
     deleted_files = 0
     for relative in safe_candidates:
         path = root / relative
-        if windows_unaddressable(relative):
-            marker = "windows-unaddressable"
-            deleted_files += 1
-        elif path.is_file():
+        if path.is_file():
             marker = sha256(path)
             source_files += 1
         elif path.is_symlink():

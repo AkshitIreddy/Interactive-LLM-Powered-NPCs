@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "interactive-npcs/privacy-proof-v1",
+  "title": "Interactive NPCs packaged privacy proof",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "captureEvidenceSha256", "remoteTelemetryAbsence", "denyAllEgress"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "captureEvidenceSha256": { "$ref": "#/$defs/sha256" },
+    "remoteTelemetryAbsence": { "$ref": "#/$defs/telemetryProof" },
+    "denyAllEgress": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "$ref": "#/$defs/denyAllProof" }
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["applicationVersion", "releaseCandidateId", "packageManifestSha256", "packageSha256", "installedDistributionManifestSha256", "executableSha256"],
+      "properties": {
+        "applicationVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "releaseCandidateId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "packageManifestSha256": { "$ref": "#/$defs/sha256" },
+        "packageSha256": { "$ref": "#/$defs/sha256" },
+        "installedDistributionManifestSha256": { "$ref": "#/$defs/sha256" },
+        "executableSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "sha256": { "type": "string", "pattern": "^[0-9A-Fa-f]{64}$" },
+    "telemetryProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "artifact", "provenance", "evidenceSource", "evidenceRunId", "observedAtUtc", "dependencyInventoryScanned", "endpointInventoryScanned", "automaticUploadEntryPoints", "remoteTelemetryDestinations", "outcome"],
+      "properties": {
+        "schemaVersion": { "const": "1.0.0" },
+        "artifact": { "$ref": "#/$defs/artifact" },
+        "provenance": { "const": "measured" },
+        "evidenceSource": { "const": "packaged_executable_observation" },
+        "evidenceRunId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "observedAtUtc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$" },
+        "dependencyInventoryScanned": { "const": true },
+        "endpointInventoryScanned": { "const": true },
+        "automaticUploadEntryPoints": { "const": 0 },
+        "remoteTelemetryDestinations": { "const": 0 },
+        "outcome": { "const": "passed" }
+      }
+    },
+    "denyAllProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "artifact", "scenario", "provenance", "evidenceSource", "evidenceRunId", "observedAtUtc", "enforcement", "monitoredProcessCount", "observedConnectionAttempts", "observedProviderRequests", "externalDestinationCount", "outcome"],
+      "properties": {
+        "schemaVersion": { "const": "1.0.0" },
+        "artifact": { "$ref": "#/$defs/artifact" },
+        "scenario": { "enum": ["offline_mode", "local_lip_sync"] },
+        "provenance": { "const": "measured" },
+        "evidenceSource": { "const": "packaged_executable_observation" },
+        "evidenceRunId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "observedAtUtc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$" },
+        "enforcement": { "const": "os_deny_all" },
+        "monitoredProcessCount": { "type": "integer", "minimum": 1 },
+        "observedConnectionAttempts": { "const": 0 },
+        "observedProviderRequests": { "const": 0 },
+        "externalDestinationCount": { "const": 0 },
+        "outcome": { "const": "passed" }
+      }
+    }
+  }
+}

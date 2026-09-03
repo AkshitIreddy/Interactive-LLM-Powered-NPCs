@@ -1,0 +1,44 @@
+{
+  "signed": {
+    "schema": "npc.measured-resource-envelope/v1",
+    "report_id": "bge-small-cpu-1788072826-3ab078433df7",
+    "sequence": 1,
+    "measured_unix_seconds": 1788072826,
+    "expires_unix_seconds": 1790664826,
+    "device_fingerprint_sha256": "480a0ebfe9b7f9ce9edc0b5e98d97491c7c3a2c8e5d3e52bcb4d13f9e3a230ce",
+    "identity": {
+      "pack_id": "bge-small-en-v1.5-onnx-fp32",
+      "revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a.1"
+    },
+    "manifest_sha256": "f2be1c37d1fff448ca83574c83e6e26871aabeb06f69265f1ba3bde93b75394d",
+    "capability": "embedding",
+    "benchmark_suite_revision": "bge-small-en-v1.5-windows-cpu-v1",
+    "runtime": "onnxruntime",
+    "runtime_revision": "1.29.0",
+    "backend": "cpu",
+    "sample_count": 24,
+    "placements": {
+      "cpu_resident": {
+        "resident_ram_bytes": 233320448,
+        "p99_total_ram_bytes": 233402368,
+        "resident_vram_bytes": 0,
+        "p99_workspace_vram_bytes": 0,
+        "p99_load_millis": 1669,
+        "p99_reload_millis": 1462,
+        "p99_operation_millis": 32
+      }
+    }
+  },
+  "signatures": [
+    {
+      "key_id": "automated-local-review-rev4-ephemeral-1",
+      "algorithm": "ed25519",
+      "signature": "zAijN04tQ75lKd11ZQv1cH_2hHyfXdkl2Zr2e3wZbyPz6oV2yo_GlGhQuhzW13CV9J36vH51HisD-wFfOihYAg"
+    },
+    {
+      "key_id": "automated-local-review-rev4-ephemeral-2",
+      "algorithm": "ed25519",
+      "signature": "Atu1LRntLh_ajM8BzdPVwthgdLfrisG1LVHcN1jYo4vQ3Ca8eq50EbFrgwwL7Ik4LCqrbjvR0l-GvG3fakmDCg"
+    }
+  ]
+}

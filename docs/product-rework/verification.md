@@ -23,11 +23,21 @@ Status: development vertical slice; not an installer/release approval
 - A live turn is sent only after a separate one-turn authorization checkbox.
   Normal turns remain deterministic fixtures. Completion events carry
   `runtimeFixtureOnly`, so fixture text cannot be labeled as audible delivery.
-- The Windows Debug runtime route now connects the existing ElevenLabs stream
+- The Windows Debug sidecar preparation explicitly enables
+  `dev-wasapi-audio`; the runtime route connects the existing ElevenLabs stream
   bridge to the developer WASAPI sink. Success requires nonzero source and
   device submission, source completion, endpoint drain, and one matching receipt
   per delivered sentence. The result remains explicit that OS callback
   submission is not physical-audibility proof and that lip sync is unavailable.
+- On 2026-08-30 the ignored live qualification passed while the task-owned
+  Eclipse Harbor synthetic game was running: credential presence probe, direct
+  ElevenLabs PCM stream, the real ElevenLabs WebSocket adapter, authenticated
+  runtime sidecar, and receipt-backed WASAPI submission all completed. The
+  temporary qualification credential was deleted in `finally`. This found and
+  fixed three live-only defects: BCP-47 `en-US` was incorrectly sent where the
+  provider accepts ISO 639-1 `en`; ordinary provider frames use
+  `isFinal: null`; and a normally joined WASAPI output thread incorrectly marked
+  its completed receipt as cancelled during `Drop`.
 - Conversation content is a session-local delivered-only ledger. No quest,
   relationship, save-state, or historical dialogue fixture remains in normal
   navigation.
@@ -43,15 +53,26 @@ Status: development vertical slice; not an installer/release approval
 | Check | Result |
 | --- | --- |
 | Control TypeScript typecheck | passed |
-| Control frontend suite | 43 passed |
+| Control frontend suite | 44 passed |
 | Focused new product contract | 14 passed |
 | Tauri control library | 64 passed |
 | Runtime-host library, default features | 48 passed, 2 intentionally ignored |
 | Runtime-host library, dev WASAPI feature | 52 passed, 2 intentionally ignored |
 | Runtime-host integration | 8 passed |
+| Direct live ElevenLabs WebSocket stock voice | passed (explicit ignored qualification) |
+| Authenticated sidecar → hosted TTS → WASAPI submission | passed (explicit ignored qualification) |
+| Direct live NVIDIA Magpie fixed-origin Riva gRPC stock voice | passed (explicit ignored qualification) |
+| Native media broker CTest | 3 passed: core, Windows smoke, service protocol |
+| Model manager | 30 passed, including measured whole-loadout admission |
 | Runtime-host release feature check | passed |
 | PE subsystem assertion | Debug control binary verified `Windows Gui` |
 | Diff whitespace check | passed |
+| Present-tree secret scan | passed: 531 tracked plus non-ignored untracked files |
+
+The separate full-history scan still flags the legacy v1 commit
+`adc12a72690abebee3b65e5a051ac71db021466a` for its tracked `apikeys.json`
+filename. That file is absent from the current index/worktree; history has not
+been rewritten.
 
 ## Provider qualification
 
@@ -64,7 +85,16 @@ The temporary media was deleted. SHA-256 evidence:
 - MP3: `5a3e702c74c8f95ff265608601a0800c0ae9289bcfe2fa2c55f20399e0ec8b45`
 - WAV: `df2392903c94b0cabf4d0f3ffdeb300f4f2c704dd250a17143fbe919a3253822`
 
-This proves the provider route, not installed-app speaker audibility.
+The 2026-08-30 follow-up also proved nonzero direct PCM, the live WebSocket
+adapter, and the app's authenticated sidecar-to-WASAPI callback-submission path.
+It still does not prove that sound left a physical speaker or that lip sync ran.
+
+An independently authorized NVIDIA Magpie qualification proved the concrete
+fixed-origin Riva gRPC transport with stock `EN-US.Aria`: TLS connection 105 ms,
+HTTP discovery 261 ms for 86 voices, first audio 816 ms, 948 ms total, and
+59,392 non-silent unclipped PCM bytes. This is provider-transport evidence, not
+proof that a normal app turn selected Magpie, reached a physical speaker, met a
+reliability/game-load target, or carries production entitlement.
 
 ## Rendered review
 
@@ -77,14 +107,16 @@ found during visual inspection.
 
 ## Remaining release blockers
 
-No installer was produced. The following are still required before one can be
-a user-review candidate:
+A local Debug NSIS bundle was produced as a review artifact only. It is not a
+release approval or a production installer. The following remain release
+blockers:
 
 1. Run the exact native four-step onboarding against a clean app-data root,
    including an already-running packaged synthetic target and advancing frame
    deltas.
-2. Enter the provider key through the native prompt and capture one complete
-   app-owned live-TTS turn with cancellation coverage.
+2. Repeat the now-passing app-owned live-TTS path with the key entered through
+   the native prompt (rather than a bounded temporary vault fixture), then add
+   live cancellation/barge-in coverage.
 3. Add and verify microphone/device selection and PTT capture evidence; the
    current PTT control is a bounded rehearsal prompt, not live STT.
 4. Implement broker-owned production PCM transport and a rigorous process-

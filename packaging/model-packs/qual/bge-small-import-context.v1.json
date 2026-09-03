@@ -1,0 +1,21 @@
+{
+  "backend": "cpu",
+  "captured_monotonic_millis": 1,
+  "captured_unix_millis": 1788074199083,
+  "device_fingerprint_sha256": "480a0ebfe9b7f9ce9edc0b5e98d97491c7c3a2c8e5d3e52bcb4d13f9e3a230ce",
+  "identity": {
+    "pack_id": "bge-small-en-v1.5-onnx-fp32",
+    "revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a.1"
+  },
+  "manifest_canonical_sha256": "7266b0c735e7273826bab9e4ba58e3c8f5563dd871590263b3562176df6fc57c",
+  "manifest_normalized_core_sha256": "f2be1c37d1fff448ca83574c83e6e26871aabeb06f69265f1ba3bde93b75394d",
+  "manifest_raw_sha256": "6ce53ad1ec837c7bfcaf541f07973a344a38540a3cc3e6832bbdebfa4d0e0ebc",
+  "qualification_report_sha256": "a2852d74ed08e93c5b02676cafeec21331ef5cfadfdfbf6a3301e2a3c5878463",
+  "raw_hardware_identifiers_stored": false,
+  "runtime": "onnxruntime",
+  "runtime_inventory_sha256": "c6ae5e84502a19d4304598c05f59875f0d678f330823ab1b2d4d6a558539d6af",
+  "runtime_revision": "1.29.0",
+  "sample_count": 24,
+  "schema": "npc.review-envelope-import-context/v1",
+  "whole_loadout_fit_deferred_to_activation": true
+}

@@ -1,0 +1,61 @@
+{
+  "schema": "npc.local-llm.cuda-benchmark-bundle/v1",
+  "purpose": "benchmark_only_not_production_activation",
+  "runtime": "llama.cpp",
+  "release_tag": "b10689",
+  "source_commit": "57291f2644af8c9df0dd8d44395881c5bdcf0ecd",
+  "release_id": 379175691,
+  "release_url": "https://github.com/ggml-org/llama.cpp/releases/tag/b10689",
+  "backend": "cuda",
+  "cuda_runtime": "12.4",
+  "platform": "windows-x86_64",
+  "entrypoint": "llama-server.exe",
+  "assets": [
+    {
+      "id": "llama-b10689-win-cuda-12.4-x64",
+      "github_asset_id": 536120459,
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b10689/llama-b10689-bin-win-cuda-12.4-x64.zip",
+      "size_bytes": 250542232,
+      "sha256": "1c98e0c4eb7f8cbaec0349a57cf7ab2f3f8bfd41743e56bdd1d27e21b5738cf0",
+      "expected_member_count": 52,
+      "expected_expanded_bytes": 584449309,
+      "extraction_ceiling_bytes": 671088640,
+      "required_files": [
+        "ggml-cuda.dll",
+        "ggml-base.dll",
+        "llama.dll",
+        "llama-common.dll",
+        "llama-server-impl.dll",
+        "llama-server.exe"
+      ]
+    },
+    {
+      "id": "llama-b10689-cudart-12.4-x64",
+      "github_asset_id": 536119339,
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b10689/cudart-llama-bin-win-cuda-12.4-x64.zip",
+      "size_bytes": 391443627,
+      "sha256": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
+      "expected_member_count": 3,
+      "expected_expanded_bytes": 574138880,
+      "extraction_ceiling_bytes": 671088640,
+      "required_files": [
+        "cublas64_12.dll",
+        "cublasLt64_12.dll",
+        "cudart64_12.dll"
+      ]
+    }
+  ],
+  "merged_payload": {
+    "strategy": "same_volume_hardlinks_no_overwrite",
+    "expected_member_count": 55,
+    "expected_expanded_bytes": 1158588189
+  },
+  "license": {
+    "llama_cpp_spdx": "MIT",
+    "llama_cpp_license_url": "https://github.com/ggml-org/llama.cpp/blob/57291f2644af8c9df0dd8d44395881c5bdcf0ecd/LICENSE",
+    "llama_cpp_license_sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d",
+    "cuda_runtime_license": "NVIDIA-CUDA-Toolkit-EULA-12.4",
+    "cuda_runtime_license_url": "https://docs.nvidia.com/cuda/archive/12.4.1/eula/index.html",
+    "distribution_status": "local_upstream_download_for_qualification_only_not_bundled_or_redistributed"
+  }
+}

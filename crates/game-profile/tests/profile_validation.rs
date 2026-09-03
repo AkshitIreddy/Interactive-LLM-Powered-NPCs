@@ -8,6 +8,10 @@ use pretty_assertions::assert_eq;
 use serde_json::{json, Value};
 use std::{collections::BTreeSet, fs, path::PathBuf};
 
+const EXPECTED_AUTHORED_GAME_PROFILE_COUNT: usize = 20;
+const EXPECTED_SYNTHETIC_REVIEW_PROFILE_COUNT: usize = 1;
+const SYNTHETIC_REVIEW_PROFILE_ID: &str = "eclipse-harbor";
+
 fn valid_profile() -> Value {
     json!({
         "schema_version": "2.0.0",
@@ -354,17 +358,25 @@ fn v1_migration_is_deterministic_and_conservative() {
 }
 
 #[test]
-fn authored_corpus_has_twenty_strict_profiles_with_replay_verified_core_routes() {
+fn corpus_distinguishes_twenty_authored_games_from_the_synthetic_review_profile() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../profiles/games");
     let mut ids = BTreeSet::new();
-    let mut count = 0;
+    let mut authored_game_count = 0;
+    let mut synthetic_review_count = 0;
     for entry in fs::read_dir(root).unwrap() {
         let path = entry.unwrap().path().join("profile.json");
         if !path.is_file() {
             continue;
         }
+        let directory_id = path
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .and_then(|name| name.to_str())
+            .unwrap()
+            .to_owned();
         let bytes = fs::read(path).unwrap();
         let profile = load_profile(&bytes).unwrap();
+        assert_eq!(profile.id, directory_id);
         assert!(ids.insert(profile.id.clone()));
         for (_, claim) in profile.capabilities.iter() {
             assert!(!claim.evidence.is_empty());
@@ -405,8 +417,360 @@ fn authored_corpus_has_twenty_strict_profiles_with_replay_verified_core_routes()
                 && character.identity.evidence
                     == [npc_game_profile::IdentityEvidence::ExplicitSelection]
         }));
-        count += 1;
+        if profile.id == SYNTHETIC_REVIEW_PROFILE_ID {
+            synthetic_review_count += 1;
+            assert!(profile.display_name.contains("Synthetic Review Game"));
+            assert_eq!(profile.game.publisher, "Interactive NPCs Test Studio");
+            assert!(profile.content.provenance.iter().any(|record| {
+                record.kind == npc_game_profile::ProvenanceKind::Original
+                    && record.license.as_deref() == Some("MIT")
+                    && record.review_status == Some(npc_game_profile::ReviewStatus::Approved)
+            }));
+        } else {
+            authored_game_count += 1;
+        }
     }
-    assert_eq!(count, 20);
-    assert_eq!(ids.len(), 20);
+    assert_eq!(authored_game_count, EXPECTED_AUTHORED_GAME_PROFILE_COUNT);
+    assert_eq!(
+        synthetic_review_count,
+        EXPECTED_SYNTHETIC_REVIEW_PROFILE_COUNT
+    );
+    assert_eq!(
+        ids.len(),
+        EXPECTED_AUTHORED_GAME_PROFILE_COUNT + EXPECTED_SYNTHETIC_REVIEW_PROFILE_COUNT
+    );
+    assert_eq!(ids, expected_profile_ids());
+}
+
+#[test]
+fn authored_corpus_has_stable_detection_safety_data_and_loadout_contracts() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../profiles/games");
+    for entry in fs::read_dir(root).unwrap() {
+        let path = entry.unwrap().path().join("profile.json");
+        if !path.is_file() {
+            continue;
+        }
+        let profile = load_profile(&fs::read(path).unwrap()).unwrap();
+
+        let expected_processes: BTreeSet<_> = expected_primary_processes(&profile.id)
+            .iter()
+            .copied()
+            .collect();
+        let actual_processes: BTreeSet<_> = profile
+            .detection
+            .processes
+            .iter()
+            .filter(|process| process.required)
+            .map(|process| process.executable.as_str())
+            .collect();
+        assert_eq!(
+            actual_processes, expected_processes,
+            "{} primary executable contract drifted",
+            profile.id
+        );
+        assert!(profile.detection.processes.iter().all(|process| {
+            !process.executable.contains(['/', '\\', ':'])
+                && process.executable.to_ascii_lowercase().ends_with(".exe")
+        }));
+        assert!(profile
+            .detection
+            .processes
+            .iter()
+            .filter(|process| process.required)
+            .all(
+                |process| process.window_title_regex.as_ref().is_some_and(|pattern| {
+                    !pattern.trim().is_empty() && regex::Regex::new(pattern).is_ok()
+                })
+            ));
+
+        if let Some(expected_steam_ids) = expected_steam_ids(&profile.id) {
+            let actual_steam_ids: BTreeSet<_> = profile
+                .detection
+                .stores
+                .iter()
+                .filter(|store| store.store == npc_game_profile::StoreKind::Steam)
+                .filter_map(|store| store.app_id.as_deref())
+                .collect();
+            assert_eq!(
+                actual_steam_ids,
+                expected_steam_ids.iter().copied().collect(),
+                "{} Steam identity drifted",
+                profile.id
+            );
+        }
+        assert!(profile.detection.stores.iter().all(|store| {
+            store
+                .app_id
+                .as_ref()
+                .is_some_and(|id| !id.trim().is_empty())
+                || !store.install_directory_hints.is_empty()
+        }));
+
+        let capture = &profile.detection.capture;
+        assert!(!capture.allow_exclusive_fullscreen);
+        assert!(capture
+            .preferred_methods
+            .contains(&npc_game_profile::CaptureMethod::WindowsGraphicsCapture));
+        assert!(capture
+            .preferred_methods
+            .contains(&npc_game_profile::CaptureMethod::AudioSubtitles));
+        assert_eq!(
+            capture.fallback,
+            npc_game_profile::CaptureFallback::AudioSubtitles
+        );
+        assert!(capture.excluded_window_title_regexes.len() >= 2);
+        assert!(capture
+            .excluded_window_title_regexes
+            .iter()
+            .all(|pattern| regex::Regex::new(pattern).is_ok()));
+        assert!(
+            capture.excluded_window_title_regexes.iter().any(|pattern| {
+                let normalized = pattern.to_ascii_lowercase();
+                normalized.contains("launcher")
+                    || normalized.contains("overlay")
+                    || normalized.contains("crash")
+                    || normalized.contains("updater")
+                    || normalized.contains("editor")
+                    || normalized.contains("manager")
+                    || normalized.contains("server")
+                    || normalized.contains("anti-cheat")
+                    || normalized.contains("online")
+                    || normalized.contains("error")
+                    || normalized.contains("console")
+            }),
+            "{} must substantively exclude non-game UI windows",
+            profile.id
+        );
+
+        assert!(profile.safety.single_player_only);
+        assert!(profile.safety.declarative_only);
+        assert_eq!(
+            profile.safety.online_policy,
+            npc_game_profile::OnlinePolicy::Blocked
+        );
+        assert_eq!(
+            profile.safety.anti_cheat_policy,
+            npc_game_profile::AntiCheatPolicy::BlockWhenDetected
+        );
+        assert!(!profile.safety.risk_notes.is_empty());
+
+        assert!(profile.characters.len() >= 6);
+        assert!(profile.characters.iter().all(|character| {
+            !character.id.trim().is_empty()
+                && !character.display_name.trim().is_empty()
+                && character.biography.trim().len() >= 40
+                && character.personality.trim().len() >= 30
+                && character.dialogue_style.trim().len() >= 30
+                && !character.prompt.role.trim().is_empty()
+                && !character.prompt.objectives.is_empty()
+                && !character.prompt.constraints.is_empty()
+                && !character.voice.description.trim().is_empty()
+                && !character.voice.locale.trim().is_empty()
+                && character.identity.strategy
+                    == npc_game_profile::IdentityStrategy::ExplicitSelection
+        }));
+        assert_eq!(
+            profile.content.character_data_readiness,
+            Some(npc_game_profile::CharacterDataReadiness::Curated),
+            "{} must explicitly declare its shipped character records curated",
+            profile.id
+        );
+        let readiness_notes = profile
+            .content
+            .character_data_readiness_notes
+            .as_deref()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        assert!(readiness_notes.contains("stable ids"));
+        assert!(readiness_notes.contains("not certified"));
+
+        let recommendations = profile
+            .recommendations
+            .as_ref()
+            .unwrap_or_else(|| panic!("{} has no typed recommendations", profile.id));
+        assert_eq!(
+            recommendations.integration_mode,
+            npc_game_profile::IntegrationMode::ExternalOnly
+        );
+        assert_eq!(
+            recommendations.provider_strategy,
+            npc_game_profile::ProviderStrategy::ApiFirst
+        );
+        assert_eq!(
+            recommendations.local_activation_policy,
+            npc_game_profile::LocalActivationPolicy::MeasuredWholeLoadoutFitRequired
+        );
+        assert!(recommendations.game_resource_reserve_required);
+        assert_eq!(
+            recommendations.screen_space_lip_sync,
+            npc_game_profile::ScreenSpaceLipSyncRecommendation::ExperimentalOptInAfterExactTargetAndAdvancingFrameQualification
+        );
+
+        let original = profile.content.provenance.iter().any(|record| {
+            record.kind == npc_game_profile::ProvenanceKind::Original
+                && record.license.as_deref() == Some("MIT")
+        });
+        let official = profile.content.provenance.iter().any(|record| {
+            record.kind == npc_game_profile::ProvenanceKind::Official
+                && record
+                    .source_url
+                    .as_deref()
+                    .is_some_and(|url| url.starts_with("https://"))
+        });
+        assert!(
+            original,
+            "{} lacks licensed original provenance",
+            profile.id
+        );
+        assert!(
+            official,
+            "{} lacks an official HTTPS provenance record",
+            profile.id
+        );
+
+        let diagnostics: BTreeSet<_> = profile
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.id.as_str())
+            .collect();
+        assert!(diagnostics.contains("recommended-feature-loadout"));
+        assert!(diagnostics.contains("external-only-safety"));
+        let loadout = profile
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.id == "recommended-feature-loadout")
+            .unwrap();
+        let loadout_text =
+            format!("{} {}", loadout.check, loadout.remediation).to_ascii_lowercase();
+        for required in ["api", "llm", "stt", "tts", "ram", "vram", "game reserve"] {
+            assert!(
+                loadout_text.contains(required),
+                "{} loadout policy is missing {required}",
+                profile.id
+            );
+        }
+        let external = profile
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.id == "external-only-safety")
+            .unwrap();
+        let external_text =
+            format!("{} {}", external.check, external.remediation).to_ascii_lowercase();
+        for required in ["single-player", "external", "no injection", "pid", "hwnd"] {
+            assert!(
+                external_text.contains(required),
+                "{} external-only policy is missing {required}",
+                profile.id
+            );
+        }
+
+        assert!(profile.troubleshooting.len() >= 4);
+        assert!(profile.troubleshooting.iter().all(|entry| {
+            !entry.symptom.trim().is_empty()
+                && !entry.cause.trim().is_empty()
+                && entry.steps.len() >= 2
+                && entry.steps.iter().all(|step| !step.trim().is_empty())
+        }));
+        assert!(profile.prompts.system_preamble.trim().len() >= 120);
+        assert!(profile.prompts.safety_rules.len() >= 3);
+        assert!(profile.prompts.background_npc_template.trim().len() >= 80);
+        let fallback_text = profile
+            .capabilities
+            .iter()
+            .map(|(_, claim)| claim.fallback.as_str())
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_ascii_lowercase();
+        assert!(fallback_text.contains("audio"));
+        assert!(fallback_text.contains("subtitle"));
+        assert!(fallback_text.contains("explicit"));
+    }
+}
+
+fn expected_profile_ids() -> BTreeSet<String> {
+    [
+        "baldurs-gate-3",
+        "cyberpunk-2077",
+        "divinity-original-sin-2",
+        "dragon-age-inquisition",
+        "eclipse-harbor",
+        "elden-ring-offline",
+        "fallout-4",
+        "fallout-new-vegas",
+        "gta-v-story",
+        "kenshi",
+        "kingdom-come-deliverance-2",
+        "mass-effect-legendary-edition",
+        "minecraft-java",
+        "mount-and-blade-2-bannerlord",
+        "oblivion-remastered",
+        "red-dead-redemption-2-story",
+        "skyrim-special-edition",
+        "stardew-valley",
+        "starfield",
+        "the-sims-4",
+        "the-witcher-3",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect()
+}
+
+fn expected_primary_processes(profile_id: &str) -> &'static [&'static str] {
+    match profile_id {
+        "baldurs-gate-3" => &["bg3.exe", "bg3_dx11.exe"],
+        "cyberpunk-2077" => &["Cyberpunk2077.exe"],
+        "divinity-original-sin-2" => &["EoCApp.exe"],
+        "dragon-age-inquisition" => &["DragonAgeInquisition.exe"],
+        "eclipse-harbor" => &["EclipseHarbor.exe"],
+        "elden-ring-offline" => &["eldenring.exe"],
+        "fallout-4" => &["Fallout4.exe"],
+        "fallout-new-vegas" => &["FalloutNV.exe"],
+        "gta-v-story" => &["GTA5.exe", "GTA5_Enhanced.exe"],
+        "kenshi" => &["kenshi_x64.exe", "kenshi_x86.exe"],
+        "kingdom-come-deliverance-2" => &["KingdomCome.exe"],
+        "mass-effect-legendary-edition" => {
+            &["MassEffect1.exe", "MassEffect2.exe", "MassEffect3.exe"]
+        }
+        "minecraft-java" => &["javaw.exe"],
+        "mount-and-blade-2-bannerlord" => &["Bannerlord.Native.exe"],
+        "oblivion-remastered" => &[
+            "OblivionRemastered-Win64-Shipping.exe",
+            "OblivionRemastered-WinGDK-Shipping.exe",
+        ],
+        "red-dead-redemption-2-story" => &["RDR2.exe"],
+        "skyrim-special-edition" => &["SkyrimSE.exe"],
+        "stardew-valley" => &["Stardew Valley.exe"],
+        "starfield" => &["Starfield.exe"],
+        "the-sims-4" => &["TS4_x64.exe"],
+        "the-witcher-3" => &["witcher3.exe", "witcher3_dx12.exe"],
+        other => panic!("unexpected profile {other}"),
+    }
+}
+
+fn expected_steam_ids(profile_id: &str) -> Option<&'static [&'static str]> {
+    match profile_id {
+        "baldurs-gate-3" => Some(&["1086940"]),
+        "cyberpunk-2077" => Some(&["1091500"]),
+        "divinity-original-sin-2" => Some(&["435150"]),
+        "dragon-age-inquisition" => Some(&["1222690"]),
+        "eclipse-harbor" => None,
+        "elden-ring-offline" => Some(&["1245620"]),
+        "fallout-4" => Some(&["377160"]),
+        "fallout-new-vegas" => Some(&["22380"]),
+        "gta-v-story" => Some(&["271590", "3240220"]),
+        "kenshi" => Some(&["233860"]),
+        "kingdom-come-deliverance-2" => Some(&["1771300"]),
+        "mass-effect-legendary-edition" => Some(&["1328670"]),
+        "minecraft-java" => None,
+        "mount-and-blade-2-bannerlord" => Some(&["261550"]),
+        "oblivion-remastered" => Some(&["2623190"]),
+        "red-dead-redemption-2-story" => Some(&["1174180"]),
+        "skyrim-special-edition" => Some(&["489830"]),
+        "stardew-valley" => Some(&["413150"]),
+        "starfield" => Some(&["1716740"]),
+        "the-sims-4" => Some(&["1222670"]),
+        "the-witcher-3" => Some(&["292030"]),
+        other => panic!("unexpected profile {other}"),
+    }
 }

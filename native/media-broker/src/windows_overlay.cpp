@@ -64,6 +64,7 @@ struct ResidualOverlay::Impl {
     ComPtr<IDCompositionDevice> composition_device;
     ComPtr<IDCompositionTarget> composition_target;
     ComPtr<IDCompositionVisual> root_visual;
+    bool capture_excluded{};
 };
 
 ResidualOverlay::ResidualOverlay() : impl_(std::make_unique<Impl>()) {}
@@ -101,6 +102,17 @@ bool ResidualOverlay::start(ID3D11Device* device,
                    "Create transparent overlay window failed"};
         return false;
     }
+    constexpr DWORD exclude_from_capture = 0x00000011;
+    DWORD applied_affinity{};
+    if (!SetWindowDisplayAffinity(impl_->window, exclude_from_capture) ||
+        !GetWindowDisplayAffinity(impl_->window, &applied_affinity) ||
+        applied_affinity != exclude_from_capture) {
+        failure = {FailureDomain::overlay, FailureCode::unsupported_path, false,
+                   "Windows could not exclude the residual overlay from capture"};
+        stop();
+        return false;
+    }
+    impl_->capture_excluded = true;
     const MARGINS margins{-1, -1, -1, -1};
     DwmExtendFrameIntoClientArea(impl_->window, &margins);
 
@@ -167,6 +179,7 @@ void ResidualOverlay::stop() noexcept {
     impl_->swap_chain.Reset();
     impl_->context.Reset();
     impl_->device.Reset();
+    impl_->capture_excluded = false;
     if (impl_->window) {
         DestroyWindow(impl_->window);
         impl_->window = nullptr;
@@ -192,9 +205,14 @@ bool ResidualOverlay::present(ID3D11Texture2D* residual,
     D3D11_TEXTURE2D_DESC source_description{};
     residual->GetDesc(&source_description);
     const auto clipped = intersect(desktop_bounds, impl_->geometry.clipped_desktop_bounds_px);
-    if (!clipped.valid() || source_description.Format != DXGI_FORMAT_B8G8R8A8_UNORM) {
+    if (!clipped.valid() || clipped != desktop_bounds ||
+        source_description.Format != DXGI_FORMAT_B8G8R8A8_UNORM ||
+        source_description.Width != static_cast<UINT>(desktop_bounds.width()) ||
+        source_description.Height != static_cast<UINT>(desktop_bounds.height()) ||
+        source_description.MipLevels != 1U || source_description.ArraySize != 1U ||
+        source_description.SampleDesc.Count != 1U) {
         failure = {FailureDomain::overlay, FailureCode::invalid_geometry, true,
-                   "Residual must be a clipped BGRA8 premultiplied-alpha texture"};
+                   "Residual must exactly cover its bounds as one BGRA8 premultiplied texture"};
         hide();
         return false;
     }
@@ -222,20 +240,7 @@ bool ResidualOverlay::present(ID3D11Texture2D* residual,
 
     constexpr float transparent[]{0.0F, 0.0F, 0.0F, 0.0F};
     impl_->context->ClearRenderTargetView(target_view.Get(), transparent);
-    const auto source_left = static_cast<UINT>(std::max(0, clipped.left - desktop_bounds.left));
-    const auto source_top = static_cast<UINT>(std::max(0, clipped.top - desktop_bounds.top));
-    const auto copy_width = static_cast<UINT>(std::min<std::int32_t>(
-        clipped.width(), static_cast<std::int32_t>(source_description.Width) - static_cast<std::int32_t>(source_left)));
-    const auto copy_height = static_cast<UINT>(std::min<std::int32_t>(
-        clipped.height(), static_cast<std::int32_t>(source_description.Height) - static_cast<std::int32_t>(source_top)));
-    if (copy_width == 0 || copy_height == 0) {
-        failure = {FailureDomain::overlay, FailureCode::invalid_geometry, true,
-                   "Residual texture does not cover its declared patch bounds"};
-        hide();
-        return false;
-    }
-    const D3D11_BOX source_box{source_left, source_top, 0,
-                               source_left + copy_width, source_top + copy_height, 1};
+    const D3D11_BOX source_box{0, 0, 0, source_description.Width, source_description.Height, 1};
     impl_->context->CopySubresourceRegion(
         back_buffer.Get(),
         0,
@@ -268,6 +273,10 @@ bool ResidualOverlay::present(ID3D11Texture2D* residual,
 
 bool ResidualOverlay::active() const noexcept {
     return impl_ && impl_->window && impl_->swap_chain;
+}
+
+bool ResidualOverlay::capture_excluded() const noexcept {
+    return active() && impl_->capture_excluded;
 }
 
 } // namespace npc::media::windows

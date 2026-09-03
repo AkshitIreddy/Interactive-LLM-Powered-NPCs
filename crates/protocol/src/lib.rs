@@ -15,6 +15,7 @@ pub mod ids;
 pub mod model;
 pub mod profile;
 pub mod provider;
+pub mod safety;
 pub mod version;
 
 pub use effects::*;
@@ -25,6 +26,7 @@ pub use ids::*;
 pub use model::*;
 pub use profile::*;
 pub use provider::*;
+pub use safety::*;
 pub use version::*;
 
 /// Maximum accepted protobuf frame, including the length prefix and envelope.
