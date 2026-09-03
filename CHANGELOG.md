@@ -24,12 +24,16 @@ Notable 2.0 changes are recorded here. No 2.0 version has been published; versio
 - Added the local debug NSIS packaging path with all 20 profiles, provider catalog, project-owned runtime/media sidecars, disabled updater metadata, SHA-256 manifest, and no publication step.
 - Added the bounded D3D12/CPU/RAM game-load harness with DXGI budget awareness, thermal/device aborts, PresentMon-observable output, explicit power-profile metadata, and a dry-run default that never changes Windows or G-Helper power settings.
 - Added a CPU-only exact-frame mouth compositor with causal PCM smoothing,
-  lower-jaw-biased motion, shallow-cavity softening, and restrained
-  exposure-matched teeth/tongue detail. Its headless proof supports acquired
-  face ROI carry and adaptive 10/15 Hz tracking while compositing at 30 FPS.
+  lower-jaw-biased source-pixel motion, a lip-local feathered mask, and a
+  source-derived cavity shadow. The PCM fallback no longer paints procedural
+  teeth or tongue. Its headless proof supports acquired face ROI carry and
+  adaptive 10/15 Hz tracking while compositing at 30 FPS.
+- Added explicit NVIDIA Magpie stock-voice selection to the provider smoke
+  runner. It rejects ZeroShot/cloning identifiers and defaults deterministically
+  to Jason, Leo, then Ray instead of preferring Aria/Sofia.
 - Completed local-only credential and synthetic provider smoke tests for Cohere, ElevenLabs, AssemblyAI, and the qualified NVIDIA NIM routes. Only redacted ignored evidence was retained; keys were never placed in tracked source or logs.
 - Passed a local Debug NSIS install/launch/forced-parent-termination/uninstall smoke with authenticated runtime/media-broker health, direct child topology, protected AppData ACLs, and no orphan process, file, shortcut, or registry residue. Runtime doctor was degraded only by the intentionally unsigned development catalog. The package is permanently classified `unchecked-development-package`, remains local and unsigned, and does not replace the clean Windows 10/11 VM matrix or count as RC evidence.
-- Regenerated a source-clean local Debug package at `cb43a7f` with the refined 185,856-byte CPU mouth worker, silently installed it without launching the app, and passed closed-world reconciliation for 756 installed files, 755 manifested payload files, exact four-sidecar hashes, legal resources, and unclassified-file rejection. Unsafe Windows broker GUI smoke tests remained excluded, so desktop lip-sync presentation is still unaccepted.
+- Regenerated a source-clean local Debug package at `cb43a7f` with the then-current 185,856-byte CPU mouth worker, silently installed it without launching the app, and passed closed-world reconciliation for 756 installed files, 755 manifested payload files, exact four-sidecar hashes, legal resources, and unclassified-file rejection. Later visual review rejected that mouth sidecar, so the v9 package is no longer valid lip-sync quality evidence. A v10 local directory overlays the replacement audited sidecar but is not newly reconciled installer evidence. Unsafe Windows broker GUI smoke tests remained excluded, so desktop lip-sync presentation is still unaccepted.
 
 ### Verified locally
 
@@ -37,12 +41,13 @@ Notable 2.0 changes are recorded here. No 2.0 version has been published; versio
 - Passed 124 Response Console tests, TypeScript typecheck, and the production Vite build.
 - Passed 30 worker tests, 21 deterministic benchmark-harness tests, all 20 authored profile validations plus the synthetic review profile, and 22 deterministic simulation tests with 127 assertions across 13 scenarios.
 - Passed the five native media-broker non-GUI CTests plus the headless synthetic renderer/review-game contract. Unsafe Windows broker GUI smoke tests were not run; no live-game or performance result is claimed.
-- Validated 774 local documentation links across 149 files and passed current-tree secret scanning, strict license/provenance checks, and deterministic complete CycloneDX SBOM generation.
-- Passed the isolated mouth core on two license-safe moving real-person clips
-  with a real NVIDIA Magpie WAV. The primary 960x720 proof measured 28.825 ms
-  p95 tracking at 10 Hz, 2.027 ms p95 compositing at 30 FPS, and 0 GPU VRAM;
-  unsupported close-up, low-landmark-confidence, and stylized inputs failed
-  closed without weakening production gates.
+- Validated 777 local documentation links across 150 files and passed current-tree secret scanning, strict license/provenance checks, and deterministic complete CycloneDX SBOM generation.
+- Rejected the first isolated mouth proof after close-up review found a detached
+  dark slit, flat synthetic teeth, and a female Aria fixture on a male subject;
+  its timing figures are retained only as failure evidence. The replacement
+  960x720 proof uses stock male Jason audio, source-preserving lip motion, and no
+  generated anatomy. It measured 29.251 ms p95 tracking at 10 Hz, 1.337 ms p95
+  compositing at 30 FPS, 0 GPU VRAM, and passed its headless motion gate.
 
 ### Remaining integration gates
 

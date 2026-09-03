@@ -14,10 +14,12 @@ headless artifacts unless the user explicitly asks to resume desktop testing.
 - Checkout: `C:\Users\akshi\Desktop\Code Palace\interactive llm\Interactive-LLM-Powered-NPCs`
 - Large build/model/cache root: `E:\temp\InteractiveNPCs`
 - Native source mirror: `E:\temp\IPNbuild`
-- Review app: `E:\temp\InteractiveNPCs\review-app-v9-refined\interactive-npcs-control.exe`
+- Review app: `E:\temp\InteractiveNPCs\review-app-v10-source-preserving\interactive-npcs-control.exe`
 - Test game: `E:\temp\local-app-data\test-game\interactive-npcs-synthetic-target.exe`
-- Accepted headless video: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\moving-pexels-man-v8-final\pexels-man-magpie-moving-lipsync.mp4`
-- Accepted report: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\moving-pexels-man-v8-final\headless-proof.json`
+- Accepted headless video: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\moving-pexels-man-v16-jason-source-preserving\pexels-man-jason-source-preserving-lipsync.mp4`
+- Accepted report: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\moving-pexels-man-v16-jason-source-preserving\headless-proof.json`
+- Male voice report: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\male-jason-v1\nvidia-nim.json`
+- Rejected v8 evidence: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\moving-pexels-man-v8-final`
 - Local package manifest: `E:\temp\InteractiveNPCs\package-v9-refined\20260903T084130Z-d0670c5a63ea4dff9ff67d3ca1c917f0\package-manifest.json`
 - Installed reconciliation: `E:\temp\InteractiveNPCs\package-v9-refined\20260903T084130Z-d0670c5a63ea4dff9ff67d3ca1c917f0\installed-review-v9-manifest.json`
 
@@ -26,30 +28,35 @@ verify status before editing, and do not reset, clean, publish, or rewrite
 history without an explicit user request. Do not print, copy into logs, or
 commit credentials.
 
-## Proven result
+## Proven result and withdrawn evidence
 
 The exact pinned OpenSeeFace MNV3+LM1 models and ONNX Runtime 1.22.1 CPU path
-were exercised headlessly against two license-safe real-person motion clips. A real NVIDIA
-Magpie API-generated 22,050 Hz mono PCM WAV drove the actual
+were exercised headlessly against license-safe real-person motion. A real NVIDIA
+Magpie API-generated 22,050 Hz mono PCM WAV using the explicitly discovered
+stock male voice `Magpie-Multilingual.EN-US.Jason` drove the actual
 `ReferenceMouthWorker` and current-frame compositor at 30 FPS.
 
-- 42/42 residual frames
-- 41 changed adjacent output frames; 42 distinct frame digests
-- 34 changed adjacent source frames in the unobstructed primary proof
-- moving OpenSeeFace 26.989 ms p50 / 28.825 ms p95 at adaptive 10 Hz
-- compositor 2.027 ms p95 at 30 FPS
-- 168,960,000 process private bytes with all 42 source frames held by the proof harness
+- 40/40 residual frames
+- 39 changed adjacent output frames; 40 distinct frame digests
+- 32 changed adjacent source frames
+- moving OpenSeeFace 27.066 ms p50 / 29.251 ms p95 at adaptive 10 Hz
+- compositor 1.337 ms p95 at 30 FPS
+- 168,902,656 process private bytes with all source frames held by the proof harness
 - 0 GPU VRAM
-- audio -29.149 dBFS RMS / -11.832 dBFS peak
-- 31 frames above the material motion gate; mouth mean absolute delta 0.018 closed / 6.757 maximum
+- audio RMS 0.045705 / peak 0.373505; zero clipped samples
+- 27 frames above the material motion gate; mouth mean absolute delta 0.012 closed / 2.654 maximum
 
 Closed, opening, sustained, and return-to-closed frames were inspected. The
-refined compositor preserves the upper lip, moves the lower jaw more strongly,
-softens shallow cavity transitions, exposes a narrow exposure-matched teeth
-line, and smooths PCM attack and release. Review-app-v9 contains the exact
-refined four-sidecar set and passed closed-world installed-file reconciliation,
-but its desktop presentation path remains unaccepted; do not infer app delivery
-from the headless artifact.
+replacement compositor preserves source lip/beard texture, narrows the blend to
+the measured lip seam, uses a source-derived cavity shadow, and does not paint
+procedural teeth or tongue. The earlier v8 render is **rejected** despite passing
+its numeric gate: visual review found a detached dark slit and flat white anatomy,
+and its fixture used the female Aria voice on a male subject.
+
+Review-app-v10 is a local copy of the reconciled v9 review tree with the new
+warning-as-error-built and PE-audited mouth sidecar plus its matching manifest.
+It has not been launched and is not a newly reconciled installer. The older v9
+package remains useful package evidence but contains the rejected compositor.
 
 ## Verification completed
 
@@ -60,7 +67,7 @@ from the headless artifact.
   landmark provider, and PE subsystem all passed
 - Media broker non-GUI suites: core, simulated display matrix, input transport,
   playback transport, and presentation context all passed
-- H.264/AAC output: 960x720, 30 FPS, 1.393 seconds
+- H.264/AAC output: 960x720, 30 FPS, 1.300 seconds, male Jason audio
 - Refined local Debug package: source-clean at `cb43a7f`, unsigned,
   `unchecked-development-package`, no publication/update-feed action
 - Silent install reconciliation: 756 installed files, 755 manifested payload
@@ -69,7 +76,7 @@ from the headless artifact.
 
 ## Truth boundary
 
-The headless visual core is accepted as efficient component evidence. It is a
+The v16 headless visual core is accepted as efficient component evidence. It is a
 causal energy-driven talking-mouth renderer, not a phoneme recognizer or full
 SadTalker-style head generator. The desktop app/broker presentation path is not
 accepted: the last live attempt did not play/present lip-sync, and no complete
