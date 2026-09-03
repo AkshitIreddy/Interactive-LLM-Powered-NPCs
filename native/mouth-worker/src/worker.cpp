@@ -23,6 +23,15 @@ constexpr double hard_maximum_mouth_width_fraction = 0.45;
 constexpr double hard_maximum_mouth_height_fraction = 0.35;
 constexpr double hard_maximum_mouth_area_fraction = 0.12;
 constexpr double hard_maximum_mask_feather_face_fraction = 0.08;
+constexpr Nanoseconds smoothing_continuity_limit_ns = 180'000'000;
+
+[[nodiscard]] double blend_toward(const double current,
+                                  const double target,
+                                  const double rising_alpha,
+                                  const double falling_alpha) noexcept {
+    const double alpha = target >= current ? rising_alpha : falling_alpha;
+    return current + (target - current) * alpha;
+}
 
 [[nodiscard]] bool finite_rect(const NormalizedRect& rect) noexcept {
     return std::isfinite(rect.x) && std::isfinite(rect.y) &&
@@ -155,6 +164,7 @@ bool ReferenceMouthWorker::cancel_to(const std::uint64_t new_generation) noexcep
         pending_.reset();
         ++stats_.cancelled;
     }
+    reset_pcm_smoothing();
     return true;
 }
 
@@ -184,6 +194,7 @@ ProcessResult ReferenceMouthWorker::process_latest(const FrameIdentity& current_
         coefficients = coefficients_from_pcm(item.drive.interleaved_pcm,
                                              item.drive.clock.sample_rate,
                                              item.drive.clock.channels);
+        coefficients = smooth_pcm_coefficients(coefficients, item);
         break;
     }
 
@@ -194,6 +205,46 @@ ProcessResult ReferenceMouthWorker::process_latest(const FrameIdentity& current_
     }
     ++stats_.residuals;
     return {Disposition::residual_ready, std::move(residual)};
+}
+
+MouthCoefficients ReferenceMouthWorker::smooth_pcm_coefficients(
+    const MouthCoefficients& target,
+    const WorkItem& item) noexcept {
+    const bool continuous = smoothed_pcm_coefficients_.has_value() &&
+                            smoothed_pcm_track_.has_value() &&
+                            *smoothed_pcm_track_ == item.track &&
+                            smoothed_pcm_segment_id_ == item.drive.clock.segment_id &&
+                            item.source.identity.captured_at_ns > smoothed_pcm_at_ns_ &&
+                            item.source.identity.captured_at_ns - smoothed_pcm_at_ns_ <=
+                                smoothing_continuity_limit_ns;
+    if (!continuous) {
+        smoothed_pcm_coefficients_ = target;
+    } else {
+        auto& value = *smoothed_pcm_coefficients_;
+        value.jaw_open = blend_toward(value.jaw_open, target.jaw_open, 0.74, 0.48);
+        // Closing should remain decisive enough for bilabials and silence;
+        // opening the lip seal may be quicker without producing chatter.
+        value.lip_close = blend_toward(value.lip_close, target.lip_close, 0.66, 0.78);
+        value.funnel = blend_toward(value.funnel, target.funnel, 0.68, 0.44);
+        value.pucker = blend_toward(value.pucker, target.pucker, 0.68, 0.44);
+        value.smile_left = blend_toward(value.smile_left, target.smile_left, 0.62, 0.42);
+        value.smile_right = blend_toward(value.smile_right, target.smile_right, 0.62, 0.42);
+        value.upper_lip_raise = blend_toward(
+            value.upper_lip_raise, target.upper_lip_raise, 0.68, 0.46);
+        value.lower_lip_depress = blend_toward(
+            value.lower_lip_depress, target.lower_lip_depress, 0.72, 0.48);
+    }
+    smoothed_pcm_track_ = item.track;
+    smoothed_pcm_segment_id_ = item.drive.clock.segment_id;
+    smoothed_pcm_at_ns_ = item.source.identity.captured_at_ns;
+    return *smoothed_pcm_coefficients_;
+}
+
+void ReferenceMouthWorker::reset_pcm_smoothing() noexcept {
+    smoothed_pcm_coefficients_.reset();
+    smoothed_pcm_track_.reset();
+    smoothed_pcm_segment_id_ = 0U;
+    smoothed_pcm_at_ns_ = 0;
 }
 
 std::uint64_t ReferenceMouthWorker::active_generation() const noexcept {

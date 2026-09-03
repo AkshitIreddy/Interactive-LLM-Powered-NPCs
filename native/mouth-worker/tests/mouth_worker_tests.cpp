@@ -501,6 +501,60 @@ void test_pcm_path_and_determinism() {
            "reference output is byte-for-byte deterministic");
 }
 
+void test_pcm_smoothing_preserves_attack_and_release() {
+    auto loud = make_item(201U, 2'000'000'000);
+    loud.drive.kind = DriveKind::pcm_window;
+    loud.drive.clock.segment_id = 31U;
+    loud.drive.clock.first_sample_index = 0U;
+    loud.drive.clock.playback_at_ns = loud.source.identity.captured_at_ns;
+    loud.drive.interleaved_pcm.resize(1'600U);
+    for (std::size_t index = 0; index < loud.drive.interleaved_pcm.size(); ++index) {
+        loud.drive.interleaved_pcm[index] = static_cast<float>(
+            0.18 * std::sin(static_cast<double>(index) * 0.081));
+    }
+
+    ReferenceMouthWorker worker(loud.track.cancellation_generation);
+    expect(worker.submit(loud), "loud smoothing frame accepted");
+    const auto loud_result = worker.process_latest(
+        loud.source.identity, loud.source.identity.captured_at_ns + 2'000'000);
+    expect(loud_result.has_residual() && loud_result.residual.coefficients.jaw_open > 0.5,
+           "speech attack opens the jaw promptly");
+
+    auto quiet = loud;
+    quiet.source = make_frame(202U, loud.source.identity.captured_at_ns + 33'000'000);
+    quiet.track = loud.track;
+    quiet.tracking = loud.tracking;
+    quiet.tracking.track = quiet.track;
+    quiet.tracking.frame = quiet.source.identity;
+    quiet.tracking.measured_at_ns = quiet.source.identity.captured_at_ns + 1'000'000;
+    quiet.drive.clock.first_sample_index += loud.drive.interleaved_pcm.size();
+    quiet.drive.clock.playback_at_ns = quiet.source.identity.captured_at_ns;
+    quiet.drive.interleaved_pcm.assign(1'600U, 0.0F);
+    quiet.deadline_ns = quiet.source.identity.captured_at_ns + 50'000'000;
+    expect(worker.submit(quiet), "quiet smoothing frame accepted");
+    const auto quiet_result = worker.process_latest(
+        quiet.source.identity, quiet.source.identity.captured_at_ns + 2'000'000);
+    expect(quiet_result.has_residual() &&
+               quiet_result.residual.coefficients.jaw_open > 0.05 &&
+               quiet_result.residual.coefficients.jaw_open <
+                   loud_result.residual.coefficients.jaw_open,
+           "release smooths a speech-to-silence edge without freezing the mouth");
+
+    auto new_segment = quiet;
+    new_segment.source = make_frame(203U, quiet.source.identity.captured_at_ns + 33'000'000);
+    new_segment.tracking.frame = new_segment.source.identity;
+    new_segment.tracking.measured_at_ns = new_segment.source.identity.captured_at_ns + 1'000'000;
+    new_segment.drive.clock.segment_id += 1U;
+    new_segment.drive.clock.first_sample_index = 0U;
+    new_segment.drive.clock.playback_at_ns = new_segment.source.identity.captured_at_ns;
+    new_segment.deadline_ns = new_segment.source.identity.captured_at_ns + 50'000'000;
+    expect(worker.submit(new_segment), "new PCM segment accepted");
+    const auto reset_result = worker.process_latest(
+        new_segment.source.identity, new_segment.source.identity.captured_at_ns + 2'000'000);
+    expect(reset_result.has_residual() && reset_result.residual.coefficients.jaw_open < 0.01,
+           "a new segment resets smoothing instead of leaking the prior utterance");
+}
+
 void test_hard_safety_limits_cannot_be_relaxed() {
     auto item = make_item();
     item.tracking.pose.yaw = 36.0;
@@ -555,6 +609,7 @@ int main() {
     test_cancellation_generation();
     test_safety_gates();
     test_pcm_path_and_determinism();
+    test_pcm_smoothing_preserves_attack_and_release();
     test_hard_safety_limits_cannot_be_relaxed();
     test_public_compositor_rejects_malformed_direct_calls();
 

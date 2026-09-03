@@ -13,6 +13,11 @@ namespace {
     return std::clamp(std::isfinite(value) ? value : 0.0, 0.0, 1.0);
 }
 
+[[nodiscard]] double smooth_unit(const double value) noexcept {
+    const double t = unit(value);
+    return t * t * (3.0 - 2.0 * t);
+}
+
 [[nodiscard]] std::uint8_t byte_from_unit(const double value) noexcept {
     return static_cast<std::uint8_t>(std::lround(unit(value) * 255.0));
 }
@@ -329,8 +334,8 @@ ResidualPatch compose_current_frame_residual(const CpuFrame& source,
     // to measured mouth width, tapered to zero at each corner, and remains
     // inside the same bounded residual used by every other visual path.
     const double maximum_half_gap = std::clamp(
-        std::min(mouth_half_width * 0.16, static_cast<double>(patch.height) * 0.24),
-        1.5, 12.0);
+        std::min(mouth_half_width * 0.18, static_cast<double>(patch.height) * 0.27),
+        1.5, 13.0);
     const double added_half_gap = opening_strength * maximum_half_gap;
 
     for (std::uint32_t y = 0; y < patch.height; ++y) {
@@ -354,8 +359,16 @@ ResidualPatch compose_current_frame_residual(const CpuFrame& source,
             const bool in_cavity = half_gap > 1.0e-6 && std::abs(seam_delta) < half_gap;
             const double source_patch_x = mouth_center_x +
                 (pixel_x - mouth_center_x) / horizontal_scale;
+            // Human jaw opening is not a symmetric split: the upper lip and
+            // philtrum remain comparatively stable while the lower lip and
+            // chin carry most of the displacement.  Preserving that anchor is
+            // especially important when the source frame is already moving.
+            const double upper_displacement = half_gap *
+                (0.42 + coefficients.upper_lip_raise * 0.08);
+            const double lower_displacement = half_gap *
+                (0.94 + coefficients.lower_lip_depress * 0.12);
             const double source_patch_y = pixel_y +
-                (seam_delta < 0.0 ? half_gap : -half_gap);
+                (seam_delta < 0.0 ? upper_displacement : -lower_displacement);
             const double sample_x = static_cast<double>(left) +
                                     source_patch_x - 0.5;
             const double sample_y = static_cast<double>(top) +
@@ -378,6 +391,60 @@ ResidualPatch compose_current_frame_residual(const CpuFrame& source,
                     const double cavity_mix =
                         unit((half_gap - std::abs(seam_delta)) / feather);
                     value = value * (1.0 - cavity_mix) + cavity * cavity_mix;
+
+                    // Add anatomy only when there is enough opening to expose
+                    // it.  The colour is derived from the current frame's
+                    // exposure and kept warm/off-white; a flat pure-white band
+                    // is one of the quickest ways to make a procedural mouth
+                    // read as a sticker.  Restricting it to the central upper
+                    // cavity also avoids "teeth to the corners" artifacts.
+                    const double detail_strength =
+                        smooth_unit((opening_strength - 0.38) / 0.34);
+                    const double central_strength =
+                        smooth_unit((0.82 - std::abs(mouth_x)) / 0.22);
+                    const double detail_feather = std::max(0.45, half_gap * 0.16);
+                    const double teeth_top = -half_gap * 0.76;
+                    const double teeth_bottom = -half_gap * 0.12;
+                    const double teeth_vertical =
+                        smooth_unit((seam_delta - teeth_top) / detail_feather) *
+                        smooth_unit((teeth_bottom - seam_delta) / detail_feather);
+                    const double teeth_mix = detail_strength * central_strength *
+                                             teeth_vertical * cavity_mix * 0.86;
+                    if (teeth_mix > 1.0e-6) {
+                        const double exposure_y = static_cast<double>(top) + seam_y -
+                            std::max(2.0, half_gap * 1.45);
+                        const double exposure_b = sample_channel(
+                            source, seam_sample_x, exposure_y, 0U);
+                        const double exposure_g = sample_channel(
+                            source, seam_sample_x, exposure_y, 1U);
+                        const double exposure_r = sample_channel(
+                            source, seam_sample_x, exposure_y, 2U);
+                        const double exposure_luma = exposure_b * 0.114 +
+                            exposure_g * 0.587 + exposure_r * 0.299;
+                        const double tooth_luma = std::clamp(
+                            exposure_luma * 0.78 + 70.0, 118.0, 210.0);
+                        const double tooth = tooth_luma *
+                            (channel == 2U ? 1.00 : channel == 1U ? 0.96 : 0.90);
+                        value = value * (1.0 - teeth_mix) + tooth * teeth_mix;
+                    }
+
+                    // A low-saturation tongue cue gives deep openings a floor
+                    // without competing with the upper teeth.  It fades out
+                    // entirely for small consonant openings.
+                    const double tongue_top = half_gap * 0.18;
+                    const double tongue_bottom = half_gap * 0.82;
+                    const double tongue_vertical =
+                        smooth_unit((seam_delta - tongue_top) / detail_feather) *
+                        smooth_unit((tongue_bottom - seam_delta) / detail_feather);
+                    const double tongue_mix = detail_strength * central_strength *
+                                              tongue_vertical * cavity_mix * 0.34;
+                    if (tongue_mix > 1.0e-6) {
+                        const double tongue = cavity *
+                            (channel == 2U ? 2.05 : channel == 1U ? 1.10 : 1.20) +
+                            (channel == 2U ? 18.0 : channel == 1U ? 5.0 : 7.0);
+                        value = value * (1.0 - tongue_mix) +
+                                std::clamp(tongue, 0.0, 190.0) * tongue_mix;
+                    }
                 }
                 patch.premultiplied_bgra[output + channel] =
                     static_cast<std::uint8_t>(std::lround(value * alpha));

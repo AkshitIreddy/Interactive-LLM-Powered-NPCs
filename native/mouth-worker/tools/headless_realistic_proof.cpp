@@ -25,6 +25,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -154,6 +155,36 @@ struct WavPcm {
     return frame;
 }
 
+[[nodiscard]] std::vector<CpuFrame> read_source_frames(
+    const std::filesystem::path& source_path) {
+    if (!std::filesystem::is_directory(source_path)) {
+        return {read_ppm(source_path)};
+    }
+    std::vector<std::filesystem::path> paths;
+    for (const auto& entry : std::filesystem::directory_iterator(source_path)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".ppm") {
+            paths.push_back(entry.path());
+        }
+    }
+    std::sort(paths.begin(), paths.end());
+    if (paths.size() < 2U) {
+        throw std::runtime_error("moving source directory requires at least two PPM frames");
+    }
+    std::vector<CpuFrame> frames;
+    frames.reserve(paths.size());
+    for (const auto& path : paths) {
+        auto frame = read_ppm(path);
+        if (!frames.empty() &&
+            (frame.lease.width != frames.front().lease.width ||
+             frame.lease.height != frames.front().lease.height ||
+             frame.lease.stride_bytes != frames.front().lease.stride_bytes)) {
+            throw std::runtime_error("moving source frames must have identical geometry");
+        }
+        frames.push_back(std::move(frame));
+    }
+    return frames;
+}
+
 void write_ppm(const std::filesystem::path& path, const std::vector<std::uint8_t>& bgra,
                const std::uint32_t width, const std::uint32_t height,
                const std::uint32_t stride) {
@@ -240,16 +271,18 @@ int main(int argc, char** argv) {
     try {
         if (argc != 5) {
             throw std::runtime_error(
-                "usage: npc_mouth_worker_headless_realistic_proof <pack-root> <portrait.ppm> <audio.wav> <output-dir>");
+                "usage: npc_mouth_worker_headless_realistic_proof <pack-root> <portrait.ppm|source-frames-dir> <audio.wav> <output-dir>");
         }
         const auto pack_root = std::filesystem::path(argv[1]);
-        const auto portrait_path = std::filesystem::path(argv[2]);
+        const auto source_path = std::filesystem::path(argv[2]);
         const auto audio_path = std::filesystem::path(argv[3]);
         const auto output = std::filesystem::path(argv[4]);
         const auto frames_dir = output / "frames";
         std::filesystem::create_directories(frames_dir);
 
-        auto source_template = read_ppm(portrait_path);
+        auto source_frames = read_source_frames(source_path);
+        const bool moving_source = source_frames.size() > 1U;
+        const auto& source_template = source_frames.front();
         const auto audio = read_wav_pcm16(audio_path);
         constexpr std::uint64_t generation = 1U;
         const TrackBinding track{generation, 0x4d415241U, 0x56454e4eU, 1U};
@@ -279,7 +312,9 @@ int main(int argc, char** argv) {
             work.frame = source.identity;
             work.source_frame_qpc = static_cast<std::uint64_t>(now);
             work.qpc_frequency = 1'000'000'000U;
-            work.seed_face_bounds = {0.20, 0.06, 0.62, 0.68};
+            work.seed_face_bounds = moving_source
+                ? NormalizedRect{0.12, 0.08, 0.76, 0.88}
+                : NormalizedRect{0.20, 0.06, 0.62, 0.68};
             work.source = std::move(source);
             work.deadline_ns = now + 2'000'000'000LL;
             const auto started = std::chrono::steady_clock::now();
@@ -330,20 +365,77 @@ int main(int argc, char** argv) {
         const auto timeline = monotonic_ns();
         ReferenceMouthWorker worker(generation);
         std::vector<double> compositor_ms;
+        std::vector<double> moving_inference_ms;
         std::vector<double> mouth_mean_absolute_delta;
         std::vector<std::uint64_t> frame_digests;
         std::size_t residual_frames{};
         std::size_t changed_frames{};
+        std::size_t changed_source_frames{};
         std::uint64_t previous_digest{};
+        std::uint64_t previous_source_digest{};
+        std::optional<OpenSeeFaceLandmarkPacketV1> final_packet = packet;
+        std::optional<TrackingEvidence> carried_moving_tracking;
+        Nanoseconds last_moving_inference_at_ns = moving_source ? packet->measured_at_ns : 0;
         for (std::size_t frame_index = 0; frame_index < output_frames; ++frame_index) {
             const auto frame_at = timeline + static_cast<Nanoseconds>(frame_index) * frame_ns;
-            auto source = source_template;
+            auto source = source_frames[frame_index % source_frames.size()];
             source.identity = {1'000U + frame_index, 1U, 1U, frame_at};
             source.lease.lease_nonce_low = frame_index + 1U;
             source.lease.expires_at_ns = frame_at + 500'000'000LL;
             auto tracking = tracking_template;
-            tracking.frame = source.identity;
-            tracking.measured_at_ns = frame_at;
+            if (moving_source && frame_index % 2U == 0U) {
+                constexpr Nanoseconds admitted_tracking_period_ns = 67'000'000;
+                if (last_moving_inference_at_ns > 0) {
+                    const auto wait_ns = last_moving_inference_at_ns +
+                        admitted_tracking_period_ns - monotonic_ns();
+                    if (wait_ns > 0) {
+                        std::this_thread::sleep_for(std::chrono::nanoseconds(wait_ns));
+                    }
+                }
+                const auto inference_now = monotonic_ns();
+                auto inference_source = source;
+                inference_source.identity.captured_at_ns = inference_now;
+                inference_source.lease.expires_at_ns = inference_now + 2'000'000'000LL;
+                LandmarkInferenceWorkV1 work{};
+                work.track = track;
+                work.frame = inference_source.identity;
+                work.source_frame_qpc = static_cast<std::uint64_t>(inference_now);
+                work.qpc_frequency = 1'000'000'000U;
+                work.seed_face_bounds = {0.12, 0.05, 0.76, 0.90};
+                work.source = std::move(inference_source);
+                work.deadline_ns = inference_now + 2'000'000'000LL;
+                const auto inference_started = std::chrono::steady_clock::now();
+                auto moving_packet = provider->infer(work, inference_now, failure);
+                moving_inference_ms.push_back(std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - inference_started).count());
+                if (!moving_packet) {
+                    throw std::runtime_error("moving provider inference failed: " + failure);
+                }
+                const auto moving_decision = adapter.adapt(
+                    *moving_packet, appearance, resources, moving_packet->frame,
+                    moving_packet->measured_at_ns + 1'000'000LL);
+                if (!moving_decision.accepted()) {
+                    throw std::runtime_error(
+                        "moving landmark adapter bypassed: " +
+                        std::string(to_string(moving_decision.disposition)));
+                }
+                tracking = *moving_decision.tracking;
+                // The provider is measured on the real offline execution
+                // clock; bind the accepted geometry to the deterministic
+                // output timeline before worker freshness validation.
+                tracking.frame = source.identity;
+                tracking.measured_at_ns = frame_at;
+                carried_moving_tracking = tracking;
+                last_moving_inference_at_ns = inference_now;
+                final_packet = std::move(moving_packet);
+            } else if (moving_source) {
+                tracking = carried_moving_tracking.value_or(tracking_template);
+                tracking.frame = source.identity;
+                tracking.measured_at_ns = frame_at;
+            } else {
+                tracking.frame = source.identity;
+                tracking.measured_at_ns = frame_at;
+            }
             const auto first = frame_index * audio.sample_rate / video_fps;
             const auto last = std::min(audio_frames,
                 (frame_index + 1U) * audio.sample_rate / video_fps);
@@ -387,9 +479,14 @@ int main(int argc, char** argv) {
             mouth_mean_absolute_delta.push_back(
                 delta_samples == 0U ? 0.0 : absolute_delta / static_cast<double>(delta_samples));
             const auto current_digest = digest(composited);
+            const auto current_source_digest = digest(source.bgra);
             frame_digests.push_back(current_digest);
             if (frame_index > 0U && current_digest != previous_digest) ++changed_frames;
+            if (frame_index > 0U && current_source_digest != previous_source_digest) {
+                ++changed_source_frames;
+            }
             previous_digest = current_digest;
+            previous_source_digest = current_source_digest;
             ++residual_frames;
             std::ostringstream name;
             name << "frame-" << std::setfill('0') << std::setw(5) << frame_index << ".ppm";
@@ -404,6 +501,10 @@ int main(int argc, char** argv) {
         const auto p50_inference = percentile(inference_ms, 0.50);
         const auto p95_inference = percentile(inference_ms, 0.95);
         const auto p95_compositor = percentile(compositor_ms, 0.95);
+        const auto moving_inference_p50 = moving_inference_ms.empty()
+            ? 0.0 : percentile(moving_inference_ms, 0.50);
+        const auto moving_inference_p95 = moving_inference_ms.empty()
+            ? 0.0 : percentile(moving_inference_ms, 0.95);
         std::vector<std::uint64_t> distinct = frame_digests;
         std::sort(distinct.begin(), distinct.end());
         distinct.erase(std::unique(distinct.begin(), distinct.end()), distinct.end());
@@ -413,18 +514,26 @@ int main(int argc, char** argv) {
         const auto visibly_changed_frames = static_cast<std::size_t>(std::count_if(
             mouth_mean_absolute_delta.begin(), mouth_mean_absolute_delta.end(),
             [](const double value) { return value >= 1.0; }));
+        const bool source_motion_qualifies =
+            !moving_source || changed_source_frames > output_frames / 4U;
+        const bool moving_tracking_qualifies =
+            !moving_source || (moving_inference_ms.size() == (output_frames + 1U) / 2U &&
+                               moving_inference_p95 <= 40.0);
         const bool qualifies = p95_inference <= 220.0 && p95_compositor <= 8.0 &&
                                residual_frames == output_frames && distinct.size() >= 3U &&
                                changed_frames > output_frames / 4U &&
                                *maximum_mouth_delta >= 2.0 && *minimum_mouth_delta <= 0.25 &&
-                               visibly_changed_frames >= output_frames / 6U;
+                               visibly_changed_frames >= output_frames / 6U &&
+                               source_motion_qualifies && moving_tracking_qualifies;
 
         std::ofstream report(output / "headless-proof.json");
         if (!report) throw std::runtime_error("could not create proof report");
         report << std::fixed << std::setprecision(3)
-               << "{\n  \"schema\": \"interactive-npcs-headless-realistic-lipsync/v2\",\n"
+               << "{\n  \"schema\": \"interactive-npcs-headless-realistic-lipsync/v3\",\n"
                << "  \"status\": \"" << (qualifies ? "passed" : "failed") << "\",\n"
-               << "  \"portrait\": \"" << json_escape(portrait_path.string()) << "\",\n"
+               << "  \"source\": \"" << json_escape(source_path.string()) << "\",\n"
+               << "  \"movingSource\": " << (moving_source ? "true" : "false") << ",\n"
+               << "  \"sourceFrameCount\": " << source_frames.size() << ",\n"
                << "  \"audio\": \"" << json_escape(audio_path.string()) << "\",\n"
                << "  \"model\": \"OpenSeeFace MNV3 + LM1 / ONNX Runtime 1.22.1 CPU\",\n"
                << "  \"width\": " << source_template.lease.width << ",\n"
@@ -435,6 +544,7 @@ int main(int argc, char** argv) {
                << "  \"outputFrames\": " << output_frames << ",\n"
                << "  \"residualFrames\": " << residual_frames << ",\n"
                << "  \"changedAdjacentFrames\": " << changed_frames << ",\n"
+               << "  \"changedAdjacentSourceFrames\": " << changed_source_frames << ",\n"
                << "  \"distinctFrameDigests\": " << distinct.size() << ",\n"
                << "  \"visiblyChangedFrames\": " << visibly_changed_frames << ",\n"
                << "  \"minimumMouthMeanAbsoluteDelta\": " << *minimum_mouth_delta << ",\n"
@@ -444,12 +554,16 @@ int main(int argc, char** argv) {
                << "  \"inferenceMeanMs\": " << mean_inference << ",\n"
                << "  \"inferenceP50Ms\": " << p50_inference << ",\n"
                << "  \"inferenceP95Ms\": " << p95_inference << ",\n"
+               << "  \"movingInferenceSamples\": " << moving_inference_ms.size() << ",\n"
+               << "  \"movingTrackingRateHz\": " << (moving_source ? 15 : 0) << ",\n"
+               << "  \"movingInferenceP50Ms\": " << moving_inference_p50 << ",\n"
+               << "  \"movingInferenceP95Ms\": " << moving_inference_p95 << ",\n"
                << "  \"compositorP95Ms\": " << p95_compositor << ",\n"
                << "  \"privateBytes\": " << private_bytes() << ",\n"
                << "  \"gpuVramBytes\": 0,\n"
-               << "  \"landmarkConfidence\": " << packet->landmark_confidence << ",\n"
-               << "  \"detectorConfidence\": " << packet->detector_confidence << ",\n"
-               << "  \"visibilityRatio\": " << packet->visibility_ratio << "\n}\n";
+               << "  \"landmarkConfidence\": " << final_packet->landmark_confidence << ",\n"
+               << "  \"detectorConfidence\": " << final_packet->detector_confidence << ",\n"
+               << "  \"visibilityRatio\": " << final_packet->visibility_ratio << "\n}\n";
         report.close();
         std::cout << (qualifies ? "PASS" : "FAIL")
                   << ": real OpenSeeFace landmarks + API WAV rendered headlessly\n"
@@ -458,9 +572,11 @@ int main(int argc, char** argv) {
                   << " compositor_p95_ms=" << p95_compositor << '\n'
                   << "frames=" << output_frames << " residuals=" << residual_frames
                   << " changed=" << changed_frames << " distinct=" << distinct.size()
+                  << " source_changed=" << changed_source_frames
                   << " visibly_changed=" << visibly_changed_frames
                   << " mouth_delta_min=" << *minimum_mouth_delta
-                  << " mouth_delta_max=" << *maximum_mouth_delta << '\n'
+                  << " mouth_delta_max=" << *maximum_mouth_delta
+                  << " moving_inference_p95_ms=" << moving_inference_p95 << '\n'
                   << "output=" << output.string() << '\n';
         return qualifies ? 0 : 2;
     } catch (const std::exception& error) {

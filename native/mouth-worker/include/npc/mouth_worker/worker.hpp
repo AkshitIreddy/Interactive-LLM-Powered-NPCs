@@ -31,10 +31,18 @@ private:
     [[nodiscard]] Disposition validate(const WorkItem& item,
                                        const FrameIdentity& current_frame,
                                        Nanoseconds now_ns) const noexcept;
+    [[nodiscard]] MouthCoefficients smooth_pcm_coefficients(
+        const MouthCoefficients& target,
+        const WorkItem& item) noexcept;
+    void reset_pcm_smoothing() noexcept;
 
     std::uint64_t active_generation_{};
     WorkerPolicy policy_;
     std::optional<WorkItem> pending_;
+    std::optional<MouthCoefficients> smoothed_pcm_coefficients_;
+    std::optional<TrackBinding> smoothed_pcm_track_;
+    std::uint64_t smoothed_pcm_segment_id_{};
+    Nanoseconds smoothed_pcm_at_ns_{};
     WorkerStats stats_;
 };
 
