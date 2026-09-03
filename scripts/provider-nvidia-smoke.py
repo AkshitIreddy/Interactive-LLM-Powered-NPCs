@@ -21,6 +21,7 @@ from pathlib import Path
 
 
 MAXIMUM_RESPONSE = 4 * 1024 * 1024
+PREFERRED_STOCK_EN_US_VOICES = ("Jason", "Leo", "Ray")
 
 
 def read_nvidia_key(path: Path) -> str:
@@ -386,7 +387,47 @@ def measure_wav(path: Path) -> dict:
     }
 
 
-def magpie_tts_smoke(key: str, output: Path) -> dict:
+def is_cloning_voice_identifier(voice: str) -> bool:
+    normalized = re.sub(r"[^A-Z0-9]", "", voice.upper())
+    return "ZEROSHOT" in normalized or "CLON" in normalized
+
+
+def stock_en_us_voices(candidates: list[str]) -> list[str]:
+    return sorted(
+        {
+            voice
+            for voice in candidates
+            if "EN-US" in voice.upper() and not is_cloning_voice_identifier(voice)
+        },
+        key=lambda voice: (voice.casefold(), voice),
+    )
+
+
+def select_stock_en_us_voice(
+    candidates: list[str], requested_voice: str | None = None
+) -> str:
+    if requested_voice is not None:
+        if is_cloning_voice_identifier(requested_voice):
+            raise ValueError("tts_voice_cloning_not_allowed")
+        if requested_voice not in candidates:
+            raise ValueError("tts_voice_not_discovered_stock_en_us")
+        return requested_voice
+
+    for preferred_name in PREFERRED_STOCK_EN_US_VOICES:
+        suffix = f".{preferred_name}".casefold()
+        preferred = next(
+            (voice for voice in candidates if voice.casefold().endswith(suffix)), None
+        )
+        if preferred is not None:
+            return preferred
+    if not candidates:
+        raise ValueError("no_stock_english_voice")
+    return candidates[0]
+
+
+def magpie_tts_smoke(
+    key: str, output: Path, requested_voice: str | None = None
+) -> dict:
     base = "https://877104f7-e885-42b9-8de8-f6e4c6303969.invocation.api.nvcf.nvidia.com"
     started = time.perf_counter()
     try:
@@ -410,21 +451,23 @@ def magpie_tts_smoke(key: str, output: Path) -> dict:
                     value = item.get("name") or item.get("voice") or item.get("voice_id")
                     if isinstance(value, str):
                         candidates.append(value)
-        stock = sorted(
-            value
-            for value in candidates
-            if "EN-US" in value.upper() and "ZERO" not in value.upper()
-        )
-        voice = next(
-            (value for value in stock if value.endswith((".Aria", ".Sofia"))),
-            stock[0] if stock else None,
-        )
-        if status != 200 or voice is None:
+        stock = stock_en_us_voices(candidates)
+        if status != 200:
             return {
                 "ok": False,
                 "httpStatus": status,
                 "status": "no_stock_english_voice",
                 "voiceRecordsVisible": len(candidates),
+            }
+        try:
+            voice = select_stock_en_us_voice(stock, requested_voice)
+        except ValueError as error:
+            return {
+                "ok": False,
+                "httpStatus": status,
+                "status": str(error),
+                "voiceRecordsVisible": len(candidates),
+                "stockEnglishVoices": len(stock),
             }
         body, content_type = multipart(
             {
@@ -504,7 +547,7 @@ def nemotron_asr_smoke(key: str, audio: Path) -> dict:
         return sanitized_error(error)
 
 
-def main() -> None:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--credentials", type=Path, default=Path(".secrets/Commonly used Keys.txt")
@@ -512,11 +555,22 @@ def main() -> None:
     parser.add_argument(
         "--out", type=Path, default=Path("artifacts/provider-smoke/nvidia-nim.json")
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--tts-voice",
+        help=(
+            "Exact discovered stock EN-US Magpie voice identifier. "
+            "ZeroShot and cloning identifiers are rejected."
+        ),
+    )
+    return parser.parse_args(argv)
+
+
+def main() -> None:
+    args = parse_args()
     key = read_nvidia_key(args.credentials)
     discovery, models = model_discovery(key)
     tts_path = args.out.parent / "nvidia-magpie-fixture.wav"
-    tts_result = magpie_tts_smoke(key, tts_path)
+    tts_result = magpie_tts_smoke(key, tts_path, args.tts_voice)
     report = {
         "schemaVersion": 1,
         "checkedAtUtc": dt.datetime.now(dt.timezone.utc)
