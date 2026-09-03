@@ -23,6 +23,10 @@ Notable 2.0 changes are recorded here. No 2.0 version has been published; versio
 - Added game discovery parsers and evidence merging for Steam, Epic, GOG, common/manual selections, a privacy-safe diagnostics/export core, and Windows Credential Manager storage.
 - Added the local debug NSIS packaging path with all 20 profiles, provider catalog, project-owned runtime/media sidecars, disabled updater metadata, SHA-256 manifest, and no publication step.
 - Added the bounded D3D12/CPU/RAM game-load harness with DXGI budget awareness, thermal/device aborts, PresentMon-observable output, explicit power-profile metadata, and a dry-run default that never changes Windows or G-Helper power settings.
+- Added a CPU-only exact-frame mouth compositor with causal PCM smoothing,
+  lower-jaw-biased motion, shallow-cavity softening, and restrained
+  exposure-matched teeth/tongue detail. Its headless proof supports acquired
+  face ROI carry and adaptive 10/15 Hz tracking while compositing at 30 FPS.
 - Completed local-only credential and synthetic provider smoke tests for Cohere, ElevenLabs, AssemblyAI, and the qualified NVIDIA NIM routes. Only redacted ignored evidence was retained; keys were never placed in tracked source or logs.
 - Passed a local Debug NSIS install/launch/forced-parent-termination/uninstall smoke with authenticated runtime/media-broker health, direct child topology, protected AppData ACLs, and no orphan process, file, shortcut, or registry residue. Runtime doctor was degraded only by the intentionally unsigned development catalog. The package is permanently classified `unchecked-development-package`, remains local and unsigned, and does not replace the clean Windows 10/11 VM matrix or count as RC evidence.
 
@@ -33,6 +37,11 @@ Notable 2.0 changes are recorded here. No 2.0 version has been published; versio
 - Passed 22 worker tests, all 20 profile validations/replays, and 15 deterministic simulation checks across seven scenarios.
 - Passed 2/2 native media-broker CTests and the inert game-load harness path; no live-game or performance result is claimed.
 - Validated 152 local documentation links and passed current-tree secret scanning, strict license/provenance checks, and deterministic complete CycloneDX SBOM generation.
+- Passed the isolated mouth core on two license-safe moving real-person clips
+  with a real NVIDIA Magpie WAV. The primary 960x720 proof measured 28.825 ms
+  p95 tracking at 10 Hz, 2.027 ms p95 compositing at 30 FPS, and 0 GPU VRAM;
+  unsupported close-up, low-landmark-confidence, and stylized inputs failed
+  closed without weakening production gates.
 
 ### Remaining integration gates
 

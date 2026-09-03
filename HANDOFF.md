@@ -16,8 +16,8 @@ headless artifacts unless the user explicitly asks to resume desktop testing.
 - Native source mirror: `E:\temp\IPNbuild`
 - Review app: `E:\temp\InteractiveNPCs\review-app-v8\interactive-npcs-control.exe`
 - Test game: `E:\temp\local-app-data\test-game\interactive-npcs-synthetic-target.exe`
-- Accepted headless video: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\moving-mara-v5\mara-magpie-moving-lipsync.mp4`
-- Accepted report: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\moving-mara-v5\headless-proof.json`
+- Accepted headless video: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\moving-pexels-man-v8-final\pexels-man-magpie-moving-lipsync.mp4`
+- Accepted report: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\moving-pexels-man-v8-final\headless-proof.json`
 
 The 2.0 overhaul has a local checkpoint at `3386392`. Preserve subsequent work,
 verify status before editing, and do not reset, clean, publish, or rewrite
@@ -27,24 +27,24 @@ commit credentials.
 ## Proven result
 
 The exact pinned OpenSeeFace MNV3+LM1 models and ONNX Runtime 1.22.1 CPU path
-were exercised headlessly against a moving realistic Mara game-idle sequence. A real NVIDIA
+were exercised headlessly against two license-safe real-person motion clips. A real NVIDIA
 Magpie API-generated 22,050 Hz mono PCM WAV drove the actual
 `ReferenceMouthWorker` and current-frame compositor at 30 FPS.
 
 - 42/42 residual frames
 - 41 changed adjacent output frames; 42 distinct frame digests
-- 26 changed adjacent source frames
-- moving OpenSeeFace 25.013 ms p50 / 25.423 ms p95 at 15 Hz
-- compositor 1.488 ms p95 at 30 FPS
-- 169,332,736 process private bytes with all 42 source frames held by the proof harness
+- 34 changed adjacent source frames in the unobstructed primary proof
+- moving OpenSeeFace 26.989 ms p50 / 28.825 ms p95 at adaptive 10 Hz
+- compositor 2.027 ms p95 at 30 FPS
+- 168,960,000 process private bytes with all 42 source frames held by the proof harness
 - 0 GPU VRAM
 - audio -29.149 dBFS RMS / -11.832 dBFS peak
-- 31 frames above the material motion gate; mouth mean absolute delta 0.019 closed / 4.273 maximum
+- 31 frames above the material motion gate; mouth mean absolute delta 0.018 closed / 6.757 maximum
 
 Closed, opening, sustained, and return-to-closed frames were inspected. The
 refined compositor preserves the upper lip, moves the lower jaw more strongly,
-adds restrained exposure-matched teeth/tongue detail, and smooths PCM attack
-and release. The review-app-v8 sidecar predates this refinement and the app
+softens shallow cavity transitions, exposes a narrow exposure-matched teeth
+line, and smooths PCM attack and release. The review-app-v8 sidecar predates this refinement and the app
 presentation path remains unaccepted; do not infer app delivery from the
 headless artifact.
 
