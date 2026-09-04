@@ -159,6 +159,28 @@ void test_viseme_and_audio_drives() {
     expect(normalized_speech_coefficients.jaw_open > 0.45 &&
                normalized_speech_coefficients.lip_close < 0.4,
            "normally normalized hosted speech remains visibly expressive");
+
+    const auto tone = [](const double frequency) {
+        std::vector<float> samples(1'600U);
+        for (std::size_t index = 0; index < samples.size(); ++index) {
+            samples[index] = static_cast<float>(0.12 * std::sin(
+                static_cast<double>(index) * 2.0 * 3.14159265358979323846 *
+                frequency / 48'000.0));
+        }
+        return coefficients_from_pcm(samples, 48'000U, 1U);
+    };
+    const auto rounded_tone = tone(260.0);
+    const auto open_tone = tone(780.0);
+    const auto spread_tone = tone(2'300.0);
+    expect(rounded_tone.pucker > open_tone.pucker + 0.35 &&
+               rounded_tone.funnel > open_tone.funnel + 0.35,
+           "same-level low formant energy selects a rounded mouth shape");
+    expect(open_tone.jaw_open > rounded_tone.jaw_open + 0.15 &&
+               open_tone.lower_lip_depress > rounded_tone.lower_lip_depress + 0.2,
+           "same-level mid formant energy selects a taller open-vowel shape");
+    expect(spread_tone.smile_left > rounded_tone.smile_left + 0.35 &&
+               spread_tone.pucker < rounded_tone.pucker - 0.35,
+           "same-level bright formant energy selects a wider spread-vowel shape");
 }
 
 void test_current_frame_residual_is_bounded_and_premultiplied() {
