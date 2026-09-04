@@ -317,7 +317,7 @@ ResidualPatch compose_current_frame_residual(const CpuFrame& source,
     const double mouth_half_width = std::clamp(
         std::abs(right_corner.first - left_corner.first) * 0.5, 2.0,
         static_cast<double>(patch.width) * 0.48);
-    const double lip_mid_y = (upper_lip.second + lower_lip.second) * 0.5;
+    const double landmark_mid_y = (upper_lip.second + lower_lip.second) * 0.5;
     const double corner_span = right_corner.first - left_corner.first;
     const double measured_seam_slope = std::abs(corner_span) > 1.0e-6
         ? (right_corner.second - left_corner.second) / corner_span
@@ -326,6 +326,45 @@ ResidualPatch compose_current_frame_residual(const CpuFrame& source,
     // diagonal slit.  Keep the measured direction, but cap it to a plausible
     // lip-line slope for this bounded frontal/near-frontal rendering path.
     const double seam_slope = std::clamp(measured_seam_slope, -0.08, 0.08);
+    // OpenSeeFace's stable semantic packet intentionally carries only outer-lip
+    // anchors. Their geometric midpoint can sit inside the upper lip, so refine
+    // the contact seam against current-frame pixels. Search only from the
+    // landmark midpoint toward the lower outer lip: this excludes moustache and
+    // most upper-lip shadow while retaining the true closed-lip contact line.
+    const double lip_landmark_span = std::max(1.0, lower_lip.second - upper_lip.second);
+    double visual_seam_center_y = landmark_mid_y;
+    double best_seam_luma = std::numeric_limits<double>::max();
+    constexpr int seam_row_candidates = 9;
+    constexpr int seam_column_samples = 17;
+    for (int row_candidate = 0; row_candidate < seam_row_candidates; ++row_candidate) {
+        const double fraction = 0.50 + 0.40 *
+            static_cast<double>(row_candidate) /
+            static_cast<double>(seam_row_candidates - 1);
+        const double candidate_center_y = upper_lip.second + lip_landmark_span * fraction;
+        double weighted_luma = 0.0;
+        double total_weight = 0.0;
+        for (int column_sample = 0; column_sample < seam_column_samples; ++column_sample) {
+            const double mouth_sample_x = -0.72 + 1.44 *
+                static_cast<double>(column_sample) /
+                static_cast<double>(seam_column_samples - 1);
+            const double candidate_x = mouth_center_x + mouth_sample_x * mouth_half_width;
+            const double candidate_y = candidate_center_y +
+                (candidate_x - mouth_center_x) * seam_slope;
+            const double source_x = static_cast<double>(left) + candidate_x - 0.5;
+            const double source_y = static_cast<double>(top) + candidate_y - 0.5;
+            const double blue = sample_channel(source, source_x, source_y, 0U);
+            const double green = sample_channel(source, source_x, source_y, 1U);
+            const double red = sample_channel(source, source_x, source_y, 2U);
+            const double weight = 1.0 - std::abs(mouth_sample_x) * 0.32;
+            weighted_luma += (blue * 0.114 + green * 0.587 + red * 0.299) * weight;
+            total_weight += weight;
+        }
+        const double candidate_luma = weighted_luma / total_weight;
+        if (candidate_luma < best_seam_luma) {
+            best_seam_luma = candidate_luma;
+            visual_seam_center_y = candidate_center_y;
+        }
+    }
     const double opening_strength = unit(
         coefficients.jaw_open * (1.0 - coefficients.lip_close * 0.55) +
         coefficients.lower_lip_depress * 0.16);
@@ -336,7 +375,10 @@ ResidualPatch compose_current_frame_residual(const CpuFrame& source,
     const double maximum_half_gap = std::clamp(
         std::min(mouth_half_width * 0.255, static_cast<double>(patch.height) * 0.36),
         1.0, 17.0);
-    const double added_half_gap = opening_strength * maximum_half_gap;
+    // The lower-jaw-only deformation changes fewer pixels than the former
+    // symmetric slit. Give real speech enough downward travel to read clearly
+    // while keeping the protected upper lip stationary.
+    const double added_half_gap = unit(opening_strength * 1.85) * maximum_half_gap;
 
     for (std::uint32_t y = 0; y < patch.height; ++y) {
         for (std::uint32_t x = 0; x < patch.width; ++x) {
@@ -348,8 +390,15 @@ ResidualPatch compose_current_frame_residual(const CpuFrame& source,
             }
             const double taper = std::sqrt(std::max(0.0, 1.0 - mouth_x * mouth_x));
             const double half_gap = std::abs(mouth_x) < 1.0 ? added_half_gap * taper : 0.0;
-            const double seam_y = lip_mid_y + (pixel_x - mouth_center_x) * seam_slope;
+            const double seam_y = visual_seam_center_y +
+                (pixel_x - mouth_center_x) * seam_slope;
             const double seam_delta = pixel_y - seam_y;
+            // Keep the source upper lip entirely intact. Speech opening is a
+            // lower-jaw deformation for this lightweight fallback; even a small
+            // symmetric expansion reads as a punched-out upper lip on moustached
+            // or strongly shaded faces.
+            const double cavity_upper_extent = half_gap * 0.02;
+            const double cavity_lower_extent = half_gap * 1.55;
             const double base_lip_radius = std::max(
                 2.0, std::min(mouth_half_width * 0.22,
                               static_cast<double>(patch.height) * 0.31));
@@ -365,16 +414,17 @@ ResidualPatch compose_current_frame_residual(const CpuFrame& source,
             // A translucent core helps the warped source lips retain their
             // original lighting and beard/skin texture at the blend boundary.
             const double alpha = horizontal_feather * vertical_feather * 0.96;
-            const bool in_cavity = half_gap > 1.0e-6 && std::abs(seam_delta) < half_gap;
+            const bool in_cavity = half_gap > 1.0e-6 &&
+                seam_delta > -cavity_upper_extent &&
+                seam_delta < cavity_lower_extent;
             const double source_patch_x = mouth_center_x +
                 (pixel_x - mouth_center_x) / horizontal_scale;
             const double warp_falloff = smooth_unit(
                 (effect_radius - std::abs(seam_delta)) /
                 std::max(1.0, effect_radius * 0.52));
-            const double upper_displacement = half_gap *
-                (0.52 + coefficients.upper_lip_raise * 0.08);
+            const double upper_displacement = 0.0;
             const double lower_displacement = half_gap *
-                (1.08 + coefficients.lower_lip_depress * 0.14);
+                (1.45 + coefficients.lower_lip_depress * 0.18);
             const double source_patch_y = pixel_y +
                 (seam_delta < 0.0 ? upper_displacement : -lower_displacement) *
                     warp_falloff;
@@ -416,9 +466,12 @@ ResidualPatch compose_current_frame_residual(const CpuFrame& source,
                     const double darkest_source_value = sample_channel(
                         source, seam_sample_x, cavity_sample_y, channel);
                     const double shadow_value = darkest_source_value * 0.72;
-                    const double cavity_feather = std::max(0.55, half_gap * 0.72);
-                    const double cavity_core = unit(
-                        (half_gap - std::abs(seam_delta)) / cavity_feather);
+                    const double cavity_feather = std::max(
+                        0.55, (cavity_upper_extent + cavity_lower_extent) * 0.28);
+                    const double cavity_edge_distance = std::min(
+                        seam_delta + cavity_upper_extent,
+                        cavity_lower_extent - seam_delta);
+                    const double cavity_core = unit(cavity_edge_distance / cavity_feather);
                     const double cavity_mix = cavity_core *
                         smooth_unit((opening_strength - 0.08) / 0.45) * 0.90;
                     value = value * (1.0 - cavity_mix) + shadow_value * cavity_mix;

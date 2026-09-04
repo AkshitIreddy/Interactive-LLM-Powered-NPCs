@@ -263,6 +263,87 @@ void test_pcm_fallback_preserves_source_colour_envelope() {
            "procedural PCM motion does not invent a bright teeth strip");
 }
 
+void test_pcm_fallback_keeps_cavity_below_upper_lip() {
+    auto item = make_item();
+    for (std::size_t offset = 0; offset < item.source.bgra.size(); offset += 4U) {
+        item.source.bgra[offset + 0U] = 80U;
+        item.source.bgra[offset + 1U] = 110U;
+        item.source.bgra[offset + 2U] = 150U;
+        item.source.bgra[offset + 3U] = 255U;
+    }
+
+    constexpr std::uint32_t mouth_left = 138U;
+    constexpr std::uint32_t mouth_right = 181U;
+    for (std::uint32_t y = 110U; y <= 118U; ++y) {
+        for (std::uint32_t x = mouth_left; x <= mouth_right; ++x) {
+            const auto offset = static_cast<std::size_t>(y) * item.source.lease.stride_bytes +
+                                static_cast<std::size_t>(x) * 4U;
+            item.source.bgra[offset + 0U] = 80U;
+            item.source.bgra[offset + 1U] = 72U;
+            item.source.bgra[offset + 2U] = 132U;
+        }
+    }
+    for (std::uint32_t y = 120U; y <= 124U; ++y) {
+        for (std::uint32_t x = mouth_left; x <= mouth_right; ++x) {
+            const auto offset = static_cast<std::size_t>(y) * item.source.lease.stride_bytes +
+                                static_cast<std::size_t>(x) * 4U;
+            item.source.bgra[offset + 0U] = 90U;
+            item.source.bgra[offset + 1U] = 82U;
+            item.source.bgra[offset + 2U] = 145U;
+        }
+    }
+    for (std::uint32_t x = mouth_left; x <= mouth_right; ++x) {
+        const auto offset = static_cast<std::size_t>(119U) * item.source.lease.stride_bytes +
+                            static_cast<std::size_t>(x) * 4U;
+        item.source.bgra[offset + 0U] = 36U;
+        item.source.bgra[offset + 1U] = 30U;
+        item.source.bgra[offset + 2U] = 48U;
+    }
+
+    const auto residual = compose_current_frame_residual(
+        item.source, item.track, item.tracking,
+        coefficients_for_viseme(Viseme::open_vowel, 1.0),
+        item.source.identity.captured_at_ns + 4'000'000);
+    const auto composited = composite_over_source(item.source, residual);
+
+    std::size_t darkened_upper_lip_pixels = 0U;
+    for (std::uint32_t y = 111U; y <= 117U; ++y) {
+        for (std::uint32_t x = 145U; x <= 174U; ++x) {
+            const auto offset = static_cast<std::size_t>(y) * item.source.lease.stride_bytes +
+                                static_cast<std::size_t>(x) * 4U;
+            const auto source_luma =
+                (static_cast<std::uint32_t>(item.source.bgra[offset + 2U]) * 299U +
+                 static_cast<std::uint32_t>(item.source.bgra[offset + 1U]) * 587U +
+                 static_cast<std::uint32_t>(item.source.bgra[offset + 0U]) * 114U) / 1'000U;
+            const auto output_luma =
+                (static_cast<std::uint32_t>(composited[offset + 2U]) * 299U +
+                 static_cast<std::uint32_t>(composited[offset + 1U]) * 587U +
+                 static_cast<std::uint32_t>(composited[offset + 0U]) * 114U) / 1'000U;
+            darkened_upper_lip_pixels += source_luma > output_luma + 10U ? 1U : 0U;
+        }
+    }
+    expect(darkened_upper_lip_pixels == 0U,
+           "procedural cavity begins at the source contact seam, not inside the upper lip");
+
+    std::size_t changed_lower_mouth_pixels = 0U;
+    for (std::uint32_t y = 119U; y <= 135U; ++y) {
+        for (std::uint32_t x = 145U; x <= 174U; ++x) {
+            const auto offset = static_cast<std::size_t>(y) * item.source.lease.stride_bytes +
+                                static_cast<std::size_t>(x) * 4U;
+            const auto channel_delta =
+                std::abs(static_cast<int>(composited[offset + 0U]) -
+                         static_cast<int>(item.source.bgra[offset + 0U])) +
+                std::abs(static_cast<int>(composited[offset + 1U]) -
+                         static_cast<int>(item.source.bgra[offset + 1U])) +
+                std::abs(static_cast<int>(composited[offset + 2U]) -
+                         static_cast<int>(item.source.bgra[offset + 2U]));
+            changed_lower_mouth_pixels += channel_delta > 15 ? 1U : 0U;
+        }
+    }
+    expect(changed_lower_mouth_pixels >= 20U,
+           "upper-lip protection still permits visible lower-jaw motion");
+}
+
 void test_atlas_residual_interpolates_and_binds_to_current_frame() {
     const auto item = make_item();
     const auto closed = make_atlas_patch(30U, 50U, 90U);
@@ -643,6 +724,7 @@ int main() {
     test_viseme_and_audio_drives();
     test_current_frame_residual_is_bounded_and_premultiplied();
     test_pcm_fallback_preserves_source_colour_envelope();
+    test_pcm_fallback_keeps_cavity_below_upper_lip();
     test_atlas_residual_interpolates_and_binds_to_current_frame();
     test_queue_depth_one();
     test_exact_binding_and_no_retained_visual();

@@ -406,6 +406,7 @@ int main(int argc, char** argv) {
         std::vector<double> compositor_ms;
         std::vector<double> moving_inference_ms;
         std::vector<double> mouth_mean_absolute_delta;
+        std::vector<double> upper_lip_darkened_fraction;
         std::vector<std::uint64_t> frame_digests;
         std::size_t residual_frames{};
         std::size_t changed_frames{};
@@ -528,6 +529,66 @@ int main(int argc, char** argv) {
             }
             mouth_mean_absolute_delta.push_back(
                 delta_samples == 0U ? 0.0 : absolute_delta / static_cast<double>(delta_samples));
+
+            // A whole-patch delta can be made larger by corrupting the upper
+            // lip, so guard the failure mode independently. Protect the
+            // central upper-lip band between the outer upper anchor and the
+            // landmark midpoint; a valid lower-jaw opening must not carve a
+            // new dark cavity there.
+            const double source_width = static_cast<double>(source.lease.width);
+            const double source_height = static_cast<double>(source.lease.height);
+            const double left_corner_x =
+                tracking.mouth_landmarks.left_corner.x * source_width;
+            const double right_corner_x =
+                tracking.mouth_landmarks.right_corner.x * source_width;
+            const double upper_lip_y =
+                tracking.mouth_landmarks.upper_lip_center.y * source_height;
+            const double lower_lip_y =
+                tracking.mouth_landmarks.lower_lip_center.y * source_height;
+            const double lip_span = std::max(2.0, lower_lip_y - upper_lip_y);
+            const double mouth_center_x = (left_corner_x + right_corner_x) * 0.5;
+            const double protected_half_width =
+                std::abs(right_corner_x - left_corner_x) * 0.36;
+            const auto protected_left = static_cast<std::uint32_t>(std::clamp(
+                std::floor(mouth_center_x - protected_half_width), 0.0,
+                source_width - 1.0));
+            const auto protected_right = static_cast<std::uint32_t>(std::clamp(
+                std::ceil(mouth_center_x + protected_half_width), 0.0,
+                source_width - 1.0));
+            const auto protected_top = static_cast<std::uint32_t>(std::clamp(
+                std::floor(upper_lip_y + lip_span * 0.10), 0.0,
+                source_height - 1.0));
+            const auto protected_bottom = static_cast<std::uint32_t>(std::clamp(
+                std::floor(upper_lip_y + lip_span * 0.46), 0.0,
+                source_height - 1.0));
+            std::size_t darkened_upper_lip_pixels{};
+            std::size_t protected_upper_lip_pixels{};
+            if (protected_right >= protected_left && protected_bottom >= protected_top) {
+                for (std::uint32_t protected_y = protected_top;
+                     protected_y <= protected_bottom; ++protected_y) {
+                    for (std::uint32_t protected_x = protected_left;
+                         protected_x <= protected_right; ++protected_x) {
+                        const auto offset =
+                            static_cast<std::size_t>(protected_y) * source.lease.stride_bytes +
+                            static_cast<std::size_t>(protected_x) * 4U;
+                        const double source_luma =
+                            static_cast<double>(source.bgra[offset + 2U]) * 0.299 +
+                            static_cast<double>(source.bgra[offset + 1U]) * 0.587 +
+                            static_cast<double>(source.bgra[offset + 0U]) * 0.114;
+                        const double output_luma =
+                            static_cast<double>(composited[offset + 2U]) * 0.299 +
+                            static_cast<double>(composited[offset + 1U]) * 0.587 +
+                            static_cast<double>(composited[offset + 0U]) * 0.114;
+                        darkened_upper_lip_pixels +=
+                            source_luma > output_luma + 10.0 ? 1U : 0U;
+                        ++protected_upper_lip_pixels;
+                    }
+                }
+            }
+            upper_lip_darkened_fraction.push_back(
+                protected_upper_lip_pixels == 0U ? 1.0 :
+                static_cast<double>(darkened_upper_lip_pixels) /
+                    static_cast<double>(protected_upper_lip_pixels));
             const auto current_digest = digest(composited);
             const auto current_source_digest = digest(source.bgra);
             frame_digests.push_back(current_digest);
@@ -564,6 +625,8 @@ int main(int argc, char** argv) {
         const auto visibly_changed_frames = static_cast<std::size_t>(std::count_if(
             mouth_mean_absolute_delta.begin(), mouth_mean_absolute_delta.end(),
             [](const double value) { return value >= 1.0; }));
+        const auto maximum_upper_lip_darkened_fraction = *std::max_element(
+            upper_lip_darkened_fraction.begin(), upper_lip_darkened_fraction.end());
         const bool source_motion_qualifies =
             !moving_source || changed_source_frames > output_frames / 4U;
         const bool moving_tracking_qualifies =
@@ -575,14 +638,15 @@ int main(int argc, char** argv) {
         const bool qualifies = p95_inference <= 220.0 && p95_compositor <= 8.0 &&
                                residual_frames == output_frames && distinct.size() >= 3U &&
                                changed_frames > output_frames / 4U &&
-                               *maximum_mouth_delta >= 2.0 && *minimum_mouth_delta <= 0.25 &&
+                               *maximum_mouth_delta >= 1.25 && *minimum_mouth_delta <= 0.25 &&
                                visibly_changed_frames >= output_frames / 6U &&
+                               maximum_upper_lip_darkened_fraction <= 0.01 &&
                                source_motion_qualifies && moving_tracking_qualifies;
 
         std::ofstream report(output / "headless-proof.json");
         if (!report) throw std::runtime_error("could not create proof report");
         report << std::fixed << std::setprecision(3)
-               << "{\n  \"schema\": \"interactive-npcs-headless-realistic-lipsync/v4\",\n"
+               << "{\n  \"schema\": \"interactive-npcs-headless-realistic-lipsync/v5\",\n"
                << "  \"status\": \"" << (qualifies ? "passed" : "failed") << "\",\n"
                << "  \"source\": \"" << json_escape(source_path.string()) << "\",\n"
                << "  \"movingSource\": " << (moving_source ? "true" : "false") << ",\n"
@@ -602,6 +666,8 @@ int main(int argc, char** argv) {
                << "  \"visiblyChangedFrames\": " << visibly_changed_frames << ",\n"
                << "  \"minimumMouthMeanAbsoluteDelta\": " << *minimum_mouth_delta << ",\n"
                << "  \"maximumMouthMeanAbsoluteDelta\": " << *maximum_mouth_delta << ",\n"
+               << "  \"maximumUpperLipDarkenedFraction\": "
+               << maximum_upper_lip_darkened_fraction << ",\n"
                << "  \"providerLoadMs\": " << load_ms << ",\n"
                << "  \"inferenceSamples\": " << inference_ms.size() << ",\n"
                << "  \"inferenceMeanMs\": " << mean_inference << ",\n"
@@ -633,6 +699,8 @@ int main(int argc, char** argv) {
                   << " visibly_changed=" << visibly_changed_frames
                   << " mouth_delta_min=" << *minimum_mouth_delta
                   << " mouth_delta_max=" << *maximum_mouth_delta
+                  << " upper_lip_darkened_max="
+                  << maximum_upper_lip_darkened_fraction
                   << " moving_inference_p95_ms=" << moving_inference_p95 << '\n'
                   << "output=" << output.string() << '\n';
         return qualifies ? 0 : 2;
