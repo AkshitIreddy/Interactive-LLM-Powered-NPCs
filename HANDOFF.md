@@ -16,9 +16,9 @@ headless artifacts unless the user explicitly asks to resume desktop testing.
 - Native source mirror: `E:\temp\IPNbuild`
 - Review app: `E:\temp\InteractiveNPCs\review-app-v12-sample-clock-visemes\interactive-npcs-control.exe`
 - Test game: `E:\temp\InteractiveNPCs\review-test-game-v12\interactive-npcs-synthetic-target.exe`
-- Current headless video candidate: `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-pexels-man-v30-spectral-balanced\pexels-man-jason-spectral-lipsync.mp4`
-- Current headless report: `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-pexels-man-v30-spectral-balanced\headless-proof.json`
-- Current mouth-detail review: `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-pexels-man-v30-spectral-balanced\review\mouth-detail-sequence.png`
+- Current headless video candidate: `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-pexels-man-v32-wider-opening\pexels-man-jason-wider-opening-lipsync.mp4`
+- Current headless report: `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-pexels-man-v32-wider-opening\headless-proof.json`
+- Current mouth-detail review: `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-pexels-man-v32-wider-opening\review\mouth-detail-sequence.png`
 - Male voice report: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\male-jason-v1\nvidia-nim.json`
 - Rejected v8 evidence: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\moving-pexels-man-v8-final`
 - Rejected v16 evidence: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\moving-pexels-man-v16-jason-source-preserving`
@@ -43,12 +43,12 @@ stock male voice `Magpie-Multilingual.EN-US.Jason` drove the actual
 - 40/40 residual frames
 - 38 changed adjacent output frames; 39 distinct frame digests
 - 32 changed adjacent source frames
-- moving OpenSeeFace 25.302 ms p50 / 27.212 ms p95 at adaptive 10 Hz
-- compositor 2.634 ms p95 at 30 FPS
-- 168,730,624 process private bytes with all source frames held by the proof harness
+- moving OpenSeeFace 27.404 ms p50 / 34.817 ms p95 at adaptive 10 Hz
+- compositor 3.043 ms p95 at 30 FPS
+- 168,382,464 process private bytes with all source frames held by the proof harness
 - 0 GPU VRAM
 - audio RMS 0.045705 / peak 0.373505; zero clipped samples
-- 28 frames above the material motion gate; mouth mean absolute delta 0.000 closed / 11.841 maximum
+- 28 frames above the material motion gate; mouth mean absolute delta 0.000 closed / 13.356 maximum
 - 0.192 maximum articulated rows relative to mouth width
 - 0.000 maximum protected-upper-lip darkened fraction across all 40 frames
 
@@ -92,10 +92,10 @@ compositor.
 
 ## Truth boundary
 
-The v30 headless visual core is the current efficient component candidate. It
+The v32 headless visual core is the current efficient component candidate. It
 prefers exact provider viseme cues and otherwise uses a causal broad-spectrum
 PCM classifier; it is not ASR or a full SadTalker-style head generator. The
-retained Jason WAV did not contain provider viseme events, so the v30 video
+retained Jason WAV did not contain provider viseme events, so the v32 video
 demonstrates the PCM fallback while cross-language tests prove the exact cue
 path. The desktop app/broker presentation path is not
 accepted: the last live attempt did not play/present lip-sync, and no complete

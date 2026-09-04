@@ -42,7 +42,7 @@ identity-correct unseen anatomy.
 
 ## Accepted run
 
-The final v30 headless run passed every harness gate:
+The final v32 headless run passed every harness gate:
 
 | Measurement | Result |
 | --- | ---: |
@@ -51,12 +51,12 @@ The final v30 headless run passed every harness gate:
 | Changed adjacent source frames | 32 |
 | Distinct frame digests | 39 |
 | Frames above material mouth-motion gate | 28 |
-| Maximum mouth mean absolute delta | 11.841 |
+| Maximum mouth mean absolute delta | 13.356 |
 | Maximum protected-upper-lip darkening | 0.000 |
 | Maximum articulated rows / mouth width | 0.192 |
-| OpenSeeFace moving p50 / p95 at 10 Hz | 25.302 / 27.212 ms |
-| Compositor p95 at 30 FPS | 2.634 ms |
-| Process private bytes | 168,730,624 |
+| OpenSeeFace moving p50 / p95 at 10 Hz | 27.404 / 34.817 ms |
+| Compositor p95 at 30 FPS | 3.043 ms |
+| Process private bytes | 168,382,464 |
 | GPU VRAM | 0 bytes |
 
 The 19.2% aperture result exceeds the permanent 10% minimum while preserving
@@ -86,18 +86,18 @@ maintainer desktop because earlier attempts produced flashing and audible output
 
 ## Local artifacts
 
-- Report: `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-pexels-man-v30-spectral-balanced\headless-proof.json`
-- Video: `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-pexels-man-v30-spectral-balanced\pexels-man-jason-spectral-lipsync.mp4`
-- Mouth sequence: `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-pexels-man-v30-spectral-balanced\review\mouth-sequence.png`
-- Mouth-detail sequence: `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-pexels-man-v30-spectral-balanced\review\mouth-detail-sequence.png`
-- Video SHA-256: `9afa4558ebab9870f2b9019728a14a3bb09243cae6c9dc7bfc76a5b502bf32a3`
+- Report: `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-pexels-man-v32-wider-opening\headless-proof.json`
+- Video: `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-pexels-man-v32-wider-opening\pexels-man-jason-wider-opening-lipsync.mp4`
+- Mouth sequence: `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-pexels-man-v32-wider-opening\review\all-40-mouth-frames.png`
+- Mouth-detail sequence: `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-pexels-man-v32-wider-opening\review\mouth-detail-sequence.png`
+- Video SHA-256: `e198b17453a9f4e2c4345534e945c4888ef98bfeefe27c00e12f49be78e5fa80`
 
 ## Truth boundary
 
 This proves a headless component: real moving frames, real provider-generated
 male speech, real OpenSeeFace CPU tracking, the production reference worker,
 and deterministic residual composition. The retained WAV did not include an
-exact provider viseme timeline, so v30 specifically demonstrates the new local
+exact provider viseme timeline, so v32 specifically demonstrates the new local
 spectral fallback. Exact provider cue behavior is established by cross-language
 protocol and sample-clock tests, not by this video.
 

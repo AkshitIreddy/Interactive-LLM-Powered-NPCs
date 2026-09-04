@@ -69,8 +69,8 @@ Notable 2.0 changes are recorded here. No 2.0 version has been published; versio
   whose cavity crossed the upper lip despite passing its numeric motion gate.
   The current 960x720 candidate uses stock male Jason audio, full-contour
   geometry, source-derived contact-seam placement, a locked upper-lip surface,
-  and curved lower-jaw opening. It measured 27.212 ms p95 moving tracking at
-  10 Hz, 2.634 ms p95 compositing at 30 FPS, 0 GPU VRAM, 28 visibly changed
+  and curved lower-jaw opening. It measured 34.817 ms p95 moving tracking at
+  10 Hz, 3.043 ms p95 compositing at 30 FPS, 0 GPU VRAM, 28 visibly changed
   frames, a 19.2% maximum articulated aperture relative to mouth width, and
   zero protected-upper-lip darkening.
 
