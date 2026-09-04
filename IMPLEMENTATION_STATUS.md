@@ -42,7 +42,7 @@ item requires implementation evidence; prose progress alone does not count.
 - [x] Rewrite README and documentation; add ADRs, diagrams, troubleshooting, legal/provenance, and contributor setup.
 - [x] Generate and visually inspect the copyright-safe Gifsmith simulated demo.
 - [x] Stage and smoke-test a local unsigned Debug installer on this development machine. Its manifest permanently classifies it as an `unchecked-development-package`; it is not RC evidence.
-- [ ] Regenerate and reconcile the local review installer with the replacement upper-lip-protected CPU mouth worker. The prior v9 package passed closed-world reconciliation but its mouth compositor was later rejected visually. The v11 local review directory overlays the warning-as-error-built, PE-audited sidecar and reconciled nested manifests without launching the app, but that directory is not newly reconciled installer evidence.
+- [ ] Reconcile the current local review installer with the full-contour, sample-clocked lip-sync build. The prior v9 package passed closed-world reconciliation but its mouth compositor was later rejected visually. A clean-source `bf97079` Debug-review installer and v12 loose review directory now contain the current control/runtime and warning-as-error-built, PE-audited native sidecars with matching nested manifests. Neither was launched or installed, so v12 is still unchecked development/package-build evidence rather than installed-distribution or desktop-presentation evidence.
 - [ ] Produce a source-identified local RC and pass or explicitly defer every RC gate.
 
 ## Benchmark environment note

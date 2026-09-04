@@ -14,15 +14,16 @@ headless artifacts unless the user explicitly asks to resume desktop testing.
 - Checkout: `C:\Users\akshi\Desktop\Code Palace\interactive llm\Interactive-LLM-Powered-NPCs`
 - Large build/model/cache root: `E:\temp\InteractiveNPCs`
 - Native source mirror: `E:\temp\IPNbuild`
-- Review app: `E:\temp\InteractiveNPCs\review-app-v11-upper-lip-protected\interactive-npcs-control.exe`
-- Test game: `E:\temp\local-app-data\test-game\interactive-npcs-synthetic-target.exe`
+- Review app: `E:\temp\InteractiveNPCs\review-app-v12-sample-clock-visemes\interactive-npcs-control.exe`
+- Test game: `E:\temp\InteractiveNPCs\review-test-game-v12\interactive-npcs-synthetic-target.exe`
 - Current headless video candidate: `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-pexels-man-v30-spectral-balanced\pexels-man-jason-spectral-lipsync.mp4`
 - Current headless report: `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-pexels-man-v30-spectral-balanced\headless-proof.json`
 - Current mouth-detail review: `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-pexels-man-v30-spectral-balanced\review\mouth-detail-sequence.png`
 - Male voice report: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\male-jason-v1\nvidia-nim.json`
 - Rejected v8 evidence: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\moving-pexels-man-v8-final`
 - Rejected v16 evidence: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\moving-pexels-man-v16-jason-source-preserving`
-- Local package manifest: `E:\temp\InteractiveNPCs\package-v9-refined\20260903T084130Z-d0670c5a63ea4dff9ff67d3ca1c917f0\package-manifest.json`
+- Local package manifest: `E:\temp\InteractiveNPCs\package-v12-viseme-cues\20260904T074412Z-d0a9875c90c54bbf934ffb0a2036dbea\package-manifest.json`
+- Local unchecked installer: `E:\temp\InteractiveNPCs\package-v12-viseme-cues\20260904T074412Z-d0a9875c90c54bbf934ffb0a2036dbea\Interactive NPCs Response Console_2.0.0-alpha.1_x64-setup.exe`
 - Installed reconciliation: `E:\temp\InteractiveNPCs\package-v9-refined\20260903T084130Z-d0670c5a63ea4dff9ff67d3ca1c917f0\installed-review-v9-manifest.json`
 
 The 2.0 overhaul has current lip-sync checkpoints at `236d5fe` and `32db853`.
@@ -62,10 +63,14 @@ gates protected-upper-lip darkening separately so corrupt pixels cannot inflate
 the whole-mouth motion score. The earlier v8 render also remains rejected for its
 detached dark slit, flat white anatomy, and female Aria fixture on a male subject.
 
-Review-app-v11 is a local copy of the reconciled v9 review tree with the new
-warning-as-error-built and PE-audited mouth sidecar plus matching nested manifests.
-It has not been launched and is not a newly reconciled installer. The older v9
-package remains useful package evidence but contains the rejected compositor.
+Review-app-v12 is a local copy of the reconciled v9 review tree with the clean
+`bf97079` Debug-review control/runtime, warning-as-error-built Release native
+sidecars, and matching nested manifests. Its loose app matches the package
+manifest's pre-bundle SHA-256; all four sidecars match by SHA-256 and size, and
+all five executables passed GUI-subsystem/import audit. It has not been launched
+or installed and is not newly reconciled installer evidence. The older v9
+package remains useful historical package evidence but contains a rejected
+compositor.
 
 ## Verification completed
 
