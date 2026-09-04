@@ -481,10 +481,10 @@ void render_resolved_current_frame(MouthProductRuntime& runtime,
             mouth_bottom = std::max(mouth_bottom, point.y);
         }
     }
-    const double upper_lip_y = (landmarks.landmarks[50U].y + landmarks.landmarks[51U].y +
-                                landmarks.landmarks[52U].y) / 3.0;
-    const double lower_lip_y = (landmarks.landmarks[56U].y + landmarks.landmarks[57U].y +
-                                landmarks.landmarks[58U].y) / 3.0;
+    const double upper_lip_y = (landmarks.landmarks[59U].y + landmarks.landmarks[60U].y +
+                                landmarks.landmarks[61U].y) / 3.0;
+    const double lower_lip_y = (landmarks.landmarks[63U].y + landmarks.landmarks[64U].y +
+                                landmarks.landmarks[65U].y) / 3.0;
     const std::string packet_metrics =
         ":det=" + std::to_string(detector_confidence) +
         ":lm=" + std::to_string(landmark_confidence) +
@@ -497,8 +497,8 @@ void render_resolved_current_frame(MouthProductRuntime& runtime,
         std::to_string(landmarks.face_bounds.height) +
         ":mouth=" + std::to_string(mouth_left) + "," + std::to_string(mouth_top) + "," +
         std::to_string(mouth_right) + "," + std::to_string(mouth_bottom) +
-        ":corners=" + std::to_string(landmarks.landmarks[48U].x) + "," +
-        std::to_string(landmarks.landmarks[54U].x) +
+        ":corners=" + std::to_string(landmarks.landmarks[58U].x) + "," +
+        std::to_string(landmarks.landmarks[62U].x) +
         ":lips_y=" + std::to_string(upper_lip_y) + "," + std::to_string(lower_lip_y);
     const auto audio_skew_ns = drive.clock.playback_at_ns >= frame.captured_at_ns
         ? drive.clock.playback_at_ns - frame.captured_at_ns

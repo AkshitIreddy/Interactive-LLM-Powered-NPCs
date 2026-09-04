@@ -284,13 +284,14 @@ public:
         packet.landmarks[57U] = {0.50, 0.66, 0.97};
         packet.landmarks[58U] = {0.48, 0.655, 0.97};
         packet.landmarks[59U] = {0.46, 0.64, 0.97};
-        for (std::size_t index = 60U; index < 66U; ++index) {
-            packet.landmarks[index] = {
-                0.47 + static_cast<double>(index - 60U) * 0.012,
-                index < 63U ? 0.595 : 0.63,
-                0.96,
-            };
-        }
+        packet.landmarks[58U] = {0.57, 0.60, 0.96};
+        packet.landmarks[59U] = {0.54, 0.585, 0.96};
+        packet.landmarks[60U] = {0.50, 0.578, 0.96};
+        packet.landmarks[61U] = {0.46, 0.585, 0.96};
+        packet.landmarks[62U] = {0.43, 0.60, 0.96};
+        packet.landmarks[63U] = {0.46, 0.63, 0.96};
+        packet.landmarks[64U] = {0.50, 0.642, 0.96};
+        packet.landmarks[65U] = {0.54, 0.63, 0.96};
         packet.detector_confidence = 0.96;
         packet.landmark_confidence = 0.95;
         packet.visibility_ratio = 0.94;
@@ -515,13 +516,14 @@ int wmain(const int argc, wchar_t** argv) {
     render.landmarks.landmarks[57U] = {0.50, 0.66, 0.97};
     render.landmarks.landmarks[58U] = {0.48, 0.655, 0.97};
     render.landmarks.landmarks[59U] = {0.46, 0.64, 0.97};
-    for (std::size_t index = 60U; index < 66U; ++index) {
-        render.landmarks.landmarks[index] = {
-            0.47 + static_cast<double>(index - 60U) * 0.012,
-            index < 63U ? 0.595 : 0.63,
-            0.96,
-        };
-    }
+    render.landmarks.landmarks[58U] = {0.57, 0.60, 0.96};
+    render.landmarks.landmarks[59U] = {0.54, 0.585, 0.96};
+    render.landmarks.landmarks[60U] = {0.50, 0.578, 0.96};
+    render.landmarks.landmarks[61U] = {0.46, 0.585, 0.96};
+    render.landmarks.landmarks[62U] = {0.43, 0.60, 0.96};
+    render.landmarks.landmarks[63U] = {0.46, 0.63, 0.96};
+    render.landmarks.landmarks[64U] = {0.50, 0.642, 0.96};
+    render.landmarks.landmarks[65U] = {0.54, 0.63, 0.96};
     render.landmarks.detector_confidence = 0.96;
     render.landmarks.landmark_confidence = 0.95;
     render.landmarks.visibility_ratio = 0.94;

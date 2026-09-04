@@ -70,13 +70,26 @@ constexpr Nanoseconds smoothing_continuity_limit_ns = 180'000'000;
 [[nodiscard]] bool valid_landmarks(const MouthLandmarks& landmarks,
                                    const NormalizedRect& mouth_bounds,
                                    const double minimum_confidence) noexcept {
-    return landmarks.schema_version == 1U && landmarks.provider_instance_id != 0U &&
-           valid_landmark(landmarks.left_corner, mouth_bounds, minimum_confidence) &&
-           valid_landmark(landmarks.right_corner, mouth_bounds, minimum_confidence) &&
-           valid_landmark(landmarks.upper_lip_center, mouth_bounds, minimum_confidence) &&
-           valid_landmark(landmarks.lower_lip_center, mouth_bounds, minimum_confidence) &&
-           landmarks.left_corner.x < landmarks.right_corner.x &&
-           landmarks.upper_lip_center.y < landmarks.lower_lip_center.y;
+    if ((landmarks.schema_version != 1U && landmarks.schema_version != 2U) ||
+        landmarks.provider_instance_id == 0U ||
+        !valid_landmark(landmarks.left_corner, mouth_bounds, minimum_confidence) ||
+        !valid_landmark(landmarks.right_corner, mouth_bounds, minimum_confidence) ||
+        !valid_landmark(landmarks.upper_lip_center, mouth_bounds, minimum_confidence) ||
+        !valid_landmark(landmarks.lower_lip_center, mouth_bounds, minimum_confidence) ||
+        landmarks.left_corner.x >= landmarks.right_corner.x ||
+        landmarks.upper_lip_center.y >= landmarks.lower_lip_center.y) {
+        return false;
+    }
+    if (landmarks.schema_version == 1U) {
+        return landmarks.contour_points == 0U;
+    }
+    if (landmarks.contour_points != landmarks.contour.size()) {
+        return false;
+    }
+    return std::all_of(landmarks.contour.begin(), landmarks.contour.end(),
+                       [&](const NormalizedLandmark& point) {
+                           return valid_landmark(point, mouth_bounds, minimum_confidence);
+                       });
 }
 
 [[nodiscard]] bool landmark_inside(const NormalizedLandmark& landmark,

@@ -18,6 +18,32 @@ namespace {
     return t * t * (3.0 - 2.0 * t);
 }
 
+[[nodiscard]] double smoother_unit(const double value) noexcept {
+    const double t = unit(value);
+    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+}
+
+struct PixelPoint {
+    double x{};
+    double y{};
+};
+
+// A stable three-control parabola is preferable to a high-order fit here:
+// landmark trackers occasionally reorder neighbouring confidence peaks, while
+// this curve always stays pinned to both mouth corners and the measured centre.
+[[nodiscard]] double bowed_curve_y(const PixelPoint left,
+                                   const PixelPoint centre,
+                                   const PixelPoint right,
+                                   const double x) noexcept {
+    const double width = std::max(1.0e-6, right.x - left.x);
+    const double u = unit((x - left.x) / width);
+    const double centre_u = std::clamp((centre.x - left.x) / width, 0.2, 0.8);
+    const double line_y = left.y + (right.y - left.y) * u;
+    const double line_at_centre = left.y + (right.y - left.y) * centre_u;
+    const double denominator = std::max(0.16, 4.0 * centre_u * (1.0 - centre_u));
+    return line_y + (centre.y - line_at_centre) * 4.0 * u * (1.0 - u) / denominator;
+}
+
 [[nodiscard]] std::uint8_t byte_from_unit(const double value) noexcept {
     return static_cast<std::uint8_t>(std::lround(unit(value) * 255.0));
 }
@@ -44,6 +70,17 @@ namespace {
     const double top = at(x0, y0) * (1.0 - fx) + at(x1, y0) * fx;
     const double bottom = at(x0, y1) * (1.0 - fx) + at(x1, y1) * fx;
     return top * (1.0 - fy) + bottom * fy;
+}
+
+[[nodiscard]] double sample_channel_soft_x(const CpuFrame& frame,
+                                           const double x,
+                                           const double y,
+                                           const std::size_t channel) noexcept {
+    return (sample_channel(frame, x - 2.0, y, channel) +
+            sample_channel(frame, x - 1.0, y, channel) * 2.0 +
+            sample_channel(frame, x, y, channel) * 3.0 +
+            sample_channel(frame, x + 1.0, y, channel) * 2.0 +
+            sample_channel(frame, x + 2.0, y, channel)) / 9.0;
 }
 
 [[nodiscard]] MouthCoefficients clamp_coefficients(MouthCoefficients value) noexcept {
@@ -301,8 +338,11 @@ ResidualPatch compose_current_frame_residual(const CpuFrame& source,
                                  right - left, bottom - top, produced_at_ns);
 
     const double smile = (coefficients.smile_left + coefficients.smile_right) * 0.5;
+    const double rounding = std::max(coefficients.funnel, coefficients.pucker);
     const double horizontal_scale = std::clamp(
-        1.0 + smile * 0.14 - coefficients.pucker * 0.16, 0.82, 1.16);
+        1.0 + smile * 0.20 - coefficients.funnel * 0.20 -
+            coefficients.pucker * 0.27,
+        0.68, 1.20);
     const auto to_patch_pixel = [&](const NormalizedLandmark& landmark) {
         return std::pair{
             landmark.x * source_width - static_cast<double>(left),
@@ -317,30 +357,61 @@ ResidualPatch compose_current_frame_residual(const CpuFrame& source,
     const double mouth_half_width = std::clamp(
         std::abs(right_corner.first - left_corner.first) * 0.5, 2.0,
         static_cast<double>(patch.width) * 0.48);
-    const double landmark_mid_y = (upper_lip.second + lower_lip.second) * 0.5;
-    const double corner_span = right_corner.first - left_corner.first;
+    const bool has_contour = tracking.mouth_landmarks.schema_version >= 2U &&
+        tracking.mouth_landmarks.contour_points ==
+            tracking.mouth_landmarks.contour.size();
+    const auto contour_pixel = [&](const std::size_t point) {
+        const auto& landmark = tracking.mouth_landmarks.contour[point];
+        return PixelPoint{landmark.x * source_width - static_cast<double>(left),
+                          landmark.y * source_height - static_cast<double>(top)};
+    };
+    const PixelPoint curve_left{left_corner.first, left_corner.second};
+    const PixelPoint curve_right{right_corner.first, right_corner.second};
+    PixelPoint upper_centre{upper_lip.first, upper_lip.second};
+    PixelPoint lower_centre{lower_lip.first, lower_lip.second};
+    if (has_contour) {
+        upper_centre = {
+            (contour_pixel(11U).x + contour_pixel(12U).x + contour_pixel(13U).x) / 3.0,
+            (contour_pixel(11U).y + contour_pixel(12U).y + contour_pixel(13U).y) / 3.0,
+        };
+        lower_centre = {
+            (contour_pixel(15U).x + contour_pixel(16U).x + contour_pixel(17U).x) / 3.0,
+            (contour_pixel(15U).y + contour_pixel(16U).y + contour_pixel(17U).y) / 3.0,
+        };
+    }
+    const double landmark_mid_y = (upper_centre.y + lower_centre.y) * 0.5;
+    const double lip_landmark_span = std::max(1.0, lower_centre.y - upper_centre.y);
+    double outer_top_y = upper_centre.y - std::max(1.5, lip_landmark_span * 0.8);
+    double outer_bottom_y = lower_centre.y + std::max(1.5, lip_landmark_span * 0.8);
+    if (has_contour) {
+        outer_top_y = std::numeric_limits<double>::max();
+        outer_bottom_y = std::numeric_limits<double>::lowest();
+        for (std::size_t point = 0U; point < 10U; ++point) {
+            outer_top_y = std::min(outer_top_y, contour_pixel(point).y);
+            outer_bottom_y = std::max(outer_bottom_y, contour_pixel(point).y);
+        }
+    }
+    const double outer_lip_span = std::max(2.0, outer_bottom_y - outer_top_y);
+    const double corner_span = curve_right.x - curve_left.x;
     const double measured_seam_slope = std::abs(corner_span) > 1.0e-6
-        ? (right_corner.second - left_corner.second) / corner_span
+        ? std::clamp((curve_right.y - curve_left.y) / corner_span, -0.08, 0.08)
         : 0.0;
-    // A single noisy corner can otherwise turn the generated cavity into a
-    // diagonal slit.  Keep the measured direction, but cap it to a plausible
-    // lip-line slope for this bounded frontal/near-frontal rendering path.
-    const double seam_slope = std::clamp(measured_seam_slope, -0.08, 0.08);
-    // OpenSeeFace's stable semantic packet intentionally carries only outer-lip
-    // anchors. Their geometric midpoint can sit inside the upper lip, so refine
-    // the contact seam against current-frame pixels. Search only from the
-    // landmark midpoint toward the lower outer lip: this excludes moustache and
-    // most upper-lip shadow while retaining the true closed-lip contact line.
-    const double lip_landmark_span = std::max(1.0, lower_lip.second - upper_lip.second);
+
+    // OpenSeeFace is optimized for stable avatar controls rather than exact
+    // source-pixel fitting. Align its contour to the darkest current-frame lip
+    // contact within a tightly bounded vertical neighbourhood, then retain the
+    // measured bow and roll instead of replacing them with a straight seam.
     double visual_seam_center_y = landmark_mid_y;
     double best_seam_luma = std::numeric_limits<double>::max();
-    constexpr int seam_row_candidates = 9;
-    constexpr int seam_column_samples = 17;
+    constexpr int seam_row_candidates = 11;
+    constexpr int seam_column_samples = 19;
     for (int row_candidate = 0; row_candidate < seam_row_candidates; ++row_candidate) {
-        const double fraction = 0.50 + 0.40 *
+        const double fraction = 0.48 + 0.32 *
             static_cast<double>(row_candidate) /
             static_cast<double>(seam_row_candidates - 1);
-        const double candidate_center_y = upper_lip.second + lip_landmark_span * fraction;
+        const double candidate_center_y = has_contour
+            ? outer_top_y + outer_lip_span * fraction
+            : upper_centre.y + lip_landmark_span * (0.50 + fraction * 0.40);
         double weighted_luma = 0.0;
         double total_weight = 0.0;
         for (int column_sample = 0; column_sample < seam_column_samples; ++column_sample) {
@@ -349,7 +420,7 @@ ResidualPatch compose_current_frame_residual(const CpuFrame& source,
                 static_cast<double>(seam_column_samples - 1);
             const double candidate_x = mouth_center_x + mouth_sample_x * mouth_half_width;
             const double candidate_y = candidate_center_y +
-                (candidate_x - mouth_center_x) * seam_slope;
+                (candidate_x - mouth_center_x) * measured_seam_slope;
             const double source_x = static_cast<double>(left) + candidate_x - 0.5;
             const double source_y = static_cast<double>(top) + candidate_y - 0.5;
             const double blue = sample_channel(source, source_x, source_y, 0U);
@@ -365,86 +436,125 @@ ResidualPatch compose_current_frame_residual(const CpuFrame& source,
             visual_seam_center_y = candidate_center_y;
         }
     }
+    const PixelPoint legacy_curve_left{
+        curve_left.x,
+        visual_seam_center_y + (curve_left.x - mouth_center_x) * measured_seam_slope,
+    };
+    const PixelPoint legacy_curve_right{
+        curve_right.x,
+        visual_seam_center_y + (curve_right.x - mouth_center_x) * measured_seam_slope,
+    };
     const double opening_strength = unit(
-        coefficients.jaw_open * (1.0 - coefficients.lip_close * 0.55) +
-        coefficients.lower_lip_depress * 0.16);
-    // The PCM fallback has no phoneme or identity-specific mouth atlas, so it
-    // must remain deliberately conservative.  Move the source lips a few
-    // pixels and add only a soft, source-derived seam; never invent teeth or
-    // tongue anatomy that cannot be inferred from this frame.
-    const double maximum_half_gap = std::clamp(
-        std::min(mouth_half_width * 0.255, static_cast<double>(patch.height) * 0.36),
-        1.0, 17.0);
-    // The lower-jaw-only deformation changes fewer pixels than the former
-    // symmetric slit. Give real speech enough downward travel to read clearly
-    // while keeping the protected upper lip stationary.
-    const double added_half_gap = unit(opening_strength * 1.85) * maximum_half_gap;
+        coefficients.jaw_open * (1.0 - coefficients.lip_close * 0.90) +
+        coefficients.lower_lip_depress * 0.18);
+    const double maximum_added_gap = std::clamp(
+        std::min(mouth_half_width * 0.52, static_cast<double>(patch.height) * 0.52),
+        3.0, 24.0);
+    const double added_gap = smoother_unit(opening_strength * 1.18) * maximum_added_gap;
+    const double upper_lip_thickness = std::clamp(
+        upper_centre.y - outer_top_y, 1.5, std::max(2.0, mouth_half_width * 0.22));
+    const double lower_lip_thickness = std::clamp(
+        outer_bottom_y - lower_centre.y, 1.5, std::max(2.0, mouth_half_width * 0.25));
+    const double articulation_activity = unit(
+        std::max(opening_strength, std::abs(horizontal_scale - 1.0) * 3.2));
 
     for (std::uint32_t y = 0; y < patch.height; ++y) {
         for (std::uint32_t x = 0; x < patch.width; ++x) {
             const double pixel_x = static_cast<double>(x) + 0.5;
             const double pixel_y = static_cast<double>(y) + 0.5;
-            const double mouth_x = (pixel_x - mouth_center_x) / mouth_half_width;
-            if (std::abs(mouth_x) >= 1.12) {
+            const double target_half_width = mouth_half_width * horizontal_scale;
+            const double target_x = (pixel_x - mouth_center_x) / target_half_width;
+            if (std::abs(target_x) >= 1.14 || articulation_activity <= 1.0e-5) {
                 continue;
             }
-            const double taper = std::sqrt(std::max(0.0, 1.0 - mouth_x * mouth_x));
-            const double half_gap = std::abs(mouth_x) < 1.0 ? added_half_gap * taper : 0.0;
-            const double seam_y = visual_seam_center_y +
-                (pixel_x - mouth_center_x) * seam_slope;
-            const double seam_delta = pixel_y - seam_y;
-            // Keep the source upper lip entirely intact. Speech opening is a
-            // lower-jaw deformation for this lightweight fallback; even a small
-            // symmetric expansion reads as a punched-out upper lip on moustached
-            // or strongly shaded faces.
-            const double cavity_upper_extent = half_gap * 0.02;
-            const double cavity_lower_extent = half_gap * 1.55;
-            const double base_lip_radius = std::max(
-                2.0, std::min(mouth_half_width * 0.22,
-                              static_cast<double>(patch.height) * 0.31));
-            const double effect_radius = base_lip_radius + half_gap * 0.95;
-            if (std::abs(seam_delta) >= effect_radius) {
+            const double source_patch_x = mouth_center_x +
+                (pixel_x - mouth_center_x) / horizontal_scale;
+            PixelPoint legacy_seam_centre{mouth_center_x, visual_seam_center_y};
+            const double visual_contact_curve = bowed_curve_y(
+                legacy_curve_left, legacy_seam_centre, legacy_curve_right,
+                source_patch_x);
+            // Tracker inner-lip points describe articulation well but can sit
+            // several pixels inside an upper lip on moustached or shaded faces.
+            // The darkest current-frame contact curve is the only safe place to
+            // begin a synthetic cavity. Preserve that upper surface exactly and
+            // use only a tiny fraction of a measured pre-existing aperture.
+            const double tracked_source_gap = has_contour
+                ? std::max(0.0,
+                    bowed_curve_y(curve_left, lower_centre, curve_right,
+                                   source_patch_x) -
+                    bowed_curve_y(curve_left, upper_centre, curve_right,
+                                   source_patch_x))
+                : 0.0;
+            const double source_upper_curve = visual_contact_curve;
+            const double source_lower_curve = visual_contact_curve +
+                std::min(1.0, tracked_source_gap * 0.12);
+            const double ellipse = std::sqrt(std::max(0.0, 1.0 - target_x * target_x));
+            const double rounded_taper = std::pow(ellipse, 1.48 + rounding * 0.30);
+            const double local_added_gap = added_gap * rounded_taper;
+            const double upper_share = 0.0;
+            const double lower_share = 0.86 + coefficients.lower_lip_depress * 0.10;
+            const double target_upper_curve = source_upper_curve -
+                local_added_gap * upper_share;
+            const double target_lower_curve = source_lower_curve +
+                local_added_gap * lower_share;
+            const double target_gap = std::max(0.0, target_lower_curve - target_upper_curve);
+            const double upper_effect_top = source_upper_curve - upper_lip_thickness * 1.55 -
+                                            local_added_gap * 0.10;
+            const double lower_effect_bottom = source_lower_curve + lower_lip_thickness * 2.25 +
+                                               local_added_gap * 1.22;
+            if (pixel_y <= upper_effect_top || pixel_y >= lower_effect_bottom) {
                 continue;
             }
             const double horizontal_feather =
-                smooth_unit((1.12 - std::abs(mouth_x)) / 0.18);
-            const double vertical_feather = smooth_unit(
-                (effect_radius - std::abs(seam_delta)) /
-                std::max(1.0, effect_radius * 0.34));
-            // A translucent core helps the warped source lips retain their
-            // original lighting and beard/skin texture at the blend boundary.
-            const double alpha = horizontal_feather * vertical_feather * 0.96;
-            const bool in_cavity = half_gap > 1.0e-6 &&
-                seam_delta > -cavity_upper_extent &&
-                seam_delta < cavity_lower_extent;
-            const double source_patch_x = mouth_center_x +
-                (pixel_x - mouth_center_x) / horizontal_scale;
-            const double warp_falloff = smooth_unit(
-                (effect_radius - std::abs(seam_delta)) /
-                std::max(1.0, effect_radius * 0.52));
-            const double upper_displacement = 0.0;
-            const double lower_displacement = half_gap *
-                (1.45 + coefficients.lower_lip_depress * 0.18);
-            const double source_patch_y = pixel_y +
-                (seam_delta < 0.0 ? upper_displacement : -lower_displacement) *
-                    warp_falloff;
+                smoother_unit((1.14 - std::abs(target_x)) / 0.18);
+            const double edge_distance = std::min(pixel_y - upper_effect_top,
+                                                  lower_effect_bottom - pixel_y);
+            const double vertical_feather = smoother_unit(
+                edge_distance / std::max(1.0, (upper_lip_thickness + lower_lip_thickness) * 0.42));
+            const double alpha = horizontal_feather * vertical_feather *
+                                 smoother_unit(articulation_activity * 2.2) * 0.985;
+            const bool in_cavity = target_gap > 1.0 &&
+                pixel_y > target_upper_curve && pixel_y < target_lower_curve;
+            double source_patch_y = pixel_y;
+            if (in_cavity) {
+                const double cavity_position = unit(
+                    (pixel_y - target_upper_curve) / std::max(1.0, target_gap));
+                source_patch_y = source_upper_curve +
+                    (source_lower_curve - source_upper_curve) * cavity_position;
+            } else if (pixel_y <= target_upper_curve) {
+                const double displacement = target_upper_curve - source_upper_curve;
+                const double distance = target_upper_curve - pixel_y;
+                const double falloff = smoother_unit(
+                    (upper_lip_thickness * 1.65 - distance) /
+                    std::max(1.0, upper_lip_thickness * 1.65));
+                source_patch_y -= displacement * falloff;
+            } else if (pixel_y >= target_lower_curve) {
+                const double displacement = target_lower_curve - source_lower_curve;
+                const double distance = pixel_y - target_lower_curve;
+                const double falloff = smoother_unit(
+                    (lower_lip_thickness * 2.25 + local_added_gap * 0.44 - distance) /
+                    std::max(1.0, lower_lip_thickness * 2.25 + local_added_gap * 0.44));
+                source_patch_y -= displacement * falloff;
+            }
             const double sample_x = static_cast<double>(left) +
-                                    source_patch_x - 0.5;
+                                     source_patch_x - 0.5;
             const double sample_y = static_cast<double>(top) +
-                                    source_patch_y - 0.5;
+                                     source_patch_y - 0.5;
             const auto output = static_cast<std::size_t>(y) * patch.stride_bytes +
                                 static_cast<std::size_t>(x) * 4U;
-            const double seam_sample_x = static_cast<double>(left) +
-                source_patch_x - 0.5;
-            double cavity_sample_y = static_cast<double>(top) + seam_y - 0.5;
+            const double seam_sample_x = static_cast<double>(left) + source_patch_x - 0.5;
+            const double source_seam_y = (source_upper_curve + source_lower_curve) * 0.5;
+            double cavity_sample_y = static_cast<double>(top) + source_seam_y - 0.5;
             if (in_cavity) {
-                // Find the darkest real lip/seam texel in a narrow vertical
-                // neighbourhood. This preserves local colour variation and
-                // avoids turning a light lower-lip sample into a flat stripe.
-                const double search_radius = std::max(1.0, base_lip_radius * 0.58);
+                // Expand the darkest real contact texel into a curved oral
+                // interior, preserving the source lighting and local beard/lip
+                // colour. A soft tongue tint and conditional enamel reflection
+                // add depth without replacing the source identity texture.
+                const double search_radius = std::max(
+                    1.0, (upper_lip_thickness + lower_lip_thickness) * 0.44);
                 double darkest_luma = std::numeric_limits<double>::max();
                 for (int candidate = -3; candidate <= 3; ++candidate) {
-                    const double candidate_y = static_cast<double>(top) + seam_y - 0.5 +
+                    const double candidate_y = static_cast<double>(top) + source_seam_y - 0.5 +
                         search_radius * static_cast<double>(candidate) / 3.0;
                     const double candidate_blue = sample_channel(
                         source, seam_sample_x, candidate_y, 0U);
@@ -460,21 +570,66 @@ ResidualPatch compose_current_frame_residual(const CpuFrame& source,
                     }
                 }
             }
+            const double cavity_v = in_cavity
+                ? unit((pixel_y - target_upper_curve) / std::max(1.0, target_gap))
+                : 0.0;
+            const double cavity_edge = in_cavity
+                ? smoother_unit(std::min(pixel_y - target_upper_curve,
+                                         target_lower_curve - pixel_y) / 2.1)
+                : 0.0;
+            const double centrality = smoother_unit((0.94 - std::abs(target_x)) / 0.26);
+            const double tooth_bottom = 0.30 +
+                0.055 * (1.0 - target_x * target_x) +
+                0.010 * std::cos(target_x * 3.0 * 3.14159265358979323846);
+            const double teeth_strength = has_contour && in_cavity && target_gap >= 5.0
+                ? smoother_unit((opening_strength - 0.14) / 0.30) *
+                    (1.0 - rounding * 0.82) * centrality *
+                    smoother_unit((cavity_v - 0.10) / 0.085) *
+                    smoother_unit((tooth_bottom - cavity_v) / 0.075) * 0.96
+                : 0.0;
+            const double tongue_strength = has_contour && in_cavity
+                ? smoother_unit((opening_strength - 0.34) / 0.42) * centrality *
+                    smoother_unit((cavity_v - 0.58) / 0.15) * 0.28
+                : 0.0;
+            const double skin_sample_y = static_cast<double>(top) + outer_top_y -
+                upper_lip_thickness * 0.65 - 0.5;
+            const double skin_blue = sample_channel_soft_x(
+                source, seam_sample_x, skin_sample_y, 0U);
+            const double skin_green = sample_channel_soft_x(
+                source, seam_sample_x, skin_sample_y, 1U);
+            const double skin_red = sample_channel_soft_x(
+                source, seam_sample_x, skin_sample_y, 2U);
+            const double skin_luma = skin_blue * 0.114 + skin_green * 0.587 +
+                                     skin_red * 0.299;
+            const double enamel_luma = std::clamp(skin_luma * 0.55 + 110.0,
+                                                  154.0, 228.0);
             for (std::size_t channel = 0; channel < 3U; ++channel) {
                 double value = sample_channel(source, sample_x, sample_y, channel);
                 if (in_cavity) {
-                    const double darkest_source_value = sample_channel(
+                    const double darkest_source_value = sample_channel_soft_x(
                         source, seam_sample_x, cavity_sample_y, channel);
-                    const double shadow_value = darkest_source_value * 0.72;
-                    const double cavity_feather = std::max(
-                        0.55, (cavity_upper_extent + cavity_lower_extent) * 0.28);
-                    const double cavity_edge_distance = std::min(
-                        seam_delta + cavity_upper_extent,
-                        cavity_lower_extent - seam_delta);
-                    const double cavity_core = unit(cavity_edge_distance / cavity_feather);
-                    const double cavity_mix = cavity_core *
-                        smooth_unit((opening_strength - 0.08) / 0.45) * 0.90;
-                    value = value * (1.0 - cavity_mix) + shadow_value * cavity_mix;
+                    const double oral_scale = has_contour
+                        ? (channel == 2U ? 0.76 : (channel == 1U ? 0.61 : 0.57))
+                        : 0.72;
+                    const double depth = has_contour
+                        ? 0.94 - 0.16 * std::sin(
+                            cavity_v * 3.14159265358979323846)
+                        : 1.0;
+                    double oral_value = darkest_source_value * oral_scale * depth;
+                    const double lower_lip_value = sample_channel_soft_x(
+                        source, seam_sample_x,
+                        static_cast<double>(top) + source_lower_curve +
+                            lower_lip_thickness * 0.45 - 0.5,
+                        channel);
+                    const double tongue_scale = channel == 2U ? 0.78 :
+                                                (channel == 1U ? 0.54 : 0.58);
+                    oral_value = oral_value * (1.0 - tongue_strength) +
+                                 lower_lip_value * tongue_scale * tongue_strength;
+                    const double enamel_value = enamel_luma *
+                        (channel == 2U ? 1.02 : (channel == 1U ? 0.96 : 0.86));
+                    oral_value = oral_value * (1.0 - teeth_strength) +
+                                 enamel_value * teeth_strength;
+                    value = value * (1.0 - cavity_edge) + oral_value * cavity_edge;
                 }
                 patch.premultiplied_bgra[output + channel] =
                     static_cast<std::uint8_t>(std::lround(value * alpha));

@@ -64,13 +64,14 @@ ProductFrameRequest make_request(const std::uint64_t request_id,
     request.landmarks.landmarks[57U] = {0.50, 0.66, 0.97};
     request.landmarks.landmarks[58U] = {0.48, 0.655, 0.97};
     request.landmarks.landmarks[59U] = {0.46, 0.64, 0.97};
-    for (std::size_t index = 60U; index < 66U; ++index) {
-        request.landmarks.landmarks[index] = {
-            0.47 + static_cast<double>(index - 60U) * 0.012,
-            index < 63U ? 0.595 : 0.63,
-            0.96,
-        };
-    }
+    request.landmarks.landmarks[58U] = {0.57, 0.60, 0.96};
+    request.landmarks.landmarks[59U] = {0.54, 0.585, 0.96};
+    request.landmarks.landmarks[60U] = {0.50, 0.578, 0.96};
+    request.landmarks.landmarks[61U] = {0.46, 0.585, 0.96};
+    request.landmarks.landmarks[62U] = {0.43, 0.60, 0.96};
+    request.landmarks.landmarks[63U] = {0.46, 0.63, 0.96};
+    request.landmarks.landmarks[64U] = {0.50, 0.642, 0.96};
+    request.landmarks.landmarks[65U] = {0.54, 0.63, 0.96};
     request.landmarks.pose = {2.0, -1.0, 1.0};
     request.landmarks.detector_confidence = 0.96;
     request.landmarks.landmark_confidence = 0.95;
@@ -107,15 +108,26 @@ void test_typed_openseeface_mapping_and_rate_policy() {
     expect(accepted.accepted(), "qualified typed OpenSeeFace packet is accepted");
     expect(accepted.admitted_signal_rate_hz == 15U, "nominal signal is capped at 15 Hz");
     expect(accepted.tracking->mouth_landmarks.left_corner.x ==
-               request.landmarks.landmarks[48U].x &&
+               request.landmarks.landmarks[62U].x &&
                accepted.tracking->mouth_landmarks.left_corner.y ==
-                   request.landmarks.landmarks[48U].y,
-           "index 48 maps to the semantic left mouth corner");
+                   request.landmarks.landmarks[62U].y,
+           "OpenSeeFace inner-corner index 62 maps to the semantic left corner");
     expect(accepted.tracking->mouth_landmarks.right_corner.x ==
-               request.landmarks.landmarks[54U].x &&
+               request.landmarks.landmarks[58U].x &&
                accepted.tracking->mouth_landmarks.right_corner.y ==
-                   request.landmarks.landmarks[54U].y,
-           "index 54 maps to the semantic right mouth corner");
+                   request.landmarks.landmarks[58U].y,
+           "OpenSeeFace inner-corner index 58 maps to the semantic right corner");
+    expect(accepted.tracking->mouth_landmarks.upper_lip_center.y <
+               accepted.tracking->mouth_landmarks.lower_lip_center.y,
+           "OpenSeeFace 59..61 and 63..65 map to upper and lower aperture lines");
+    expect(accepted.tracking->mouth_landmarks.schema_version == 2U &&
+               accepted.tracking->mouth_landmarks.contour_points ==
+                   mouth_contour_point_count &&
+               accepted.tracking->mouth_landmarks.contour[10U].x ==
+                   request.landmarks.landmarks[58U].x &&
+               accepted.tracking->mouth_landmarks.contour[17U].y ==
+                   request.landmarks.landmarks[65U].y,
+           "semantic schema 2 preserves all ordered OpenSeeFace mouth points 48..65");
     expect(accepted.tracking->mouth_bounds.width < request.landmarks.face_bounds.width,
            "dynamic mouth mask remains contained by the current face");
 

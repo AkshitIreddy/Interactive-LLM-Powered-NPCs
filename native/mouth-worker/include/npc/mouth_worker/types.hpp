@@ -51,8 +51,13 @@ struct NormalizedLandmark {
     double confidence{};
 };
 
-// Model-independent semantic adapter. A tracker pack maps its native indices
-// into these four stable anchors before crossing the worker boundary.
+inline constexpr std::size_t mouth_contour_point_count = 18U;
+
+// Model-independent semantic adapter. Schema 2 retains the tracker-neutral
+// anchors and the complete ordered mouth contour. The contour is deliberately
+// local to the worker contract: raw provider packets remain versioned at their
+// ingress boundary, while the compositor gets enough geometry to follow the
+// actual lip curves instead of drawing a four-anchor slit.
 struct MouthLandmarks {
     std::uint32_t schema_version{1};
     std::uint64_t provider_instance_id{};
@@ -60,6 +65,8 @@ struct MouthLandmarks {
     NormalizedLandmark right_corner;
     NormalizedLandmark upper_lip_center;
     NormalizedLandmark lower_lip_center;
+    std::uint32_t contour_points{};
+    std::array<NormalizedLandmark, mouth_contour_point_count> contour{};
 };
 
 struct TrackingEvidence {

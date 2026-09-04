@@ -139,14 +139,24 @@ constexpr double hard_maximum_area_delta_fraction = 0.60;
 [[nodiscard]] MouthLandmarks semantic_mouth_landmarks(
     const OpenSeeFaceLandmarkPacketV1& packet) noexcept {
     MouthLandmarks result{};
-    result.schema_version = 1U;
+    result.schema_version = 2U;
     result.provider_instance_id = packet.provider_instance_id;
-    result.left_corner = packet.landmarks[48U];
-    result.right_corner = packet.landmarks[54U];
-    result.upper_lip_center = average(packet.landmarks[50U], packet.landmarks[51U],
-                                      packet.landmarks[52U]);
-    result.lower_lip_center = average(packet.landmarks[56U], packet.landmarks[57U],
-                                      packet.landmarks[58U]);
+    // OpenSeeFace's 66-point layout is close to iBUG-68 but removes two mouth
+    // corner points; it is not the ordinary dlib 68-point ordering. Its own
+    // FeatureExtractor measures mouth width from 58/62, upper opening from
+    // 59..61, and lower opening from 63..65. The previous dlib-style 48/54
+    // mapping selected unrelated outer-contour points and collapsed the
+    // renderer's effective aperture.
+    const auto& first_corner = packet.landmarks[58U];
+    const auto& second_corner = packet.landmarks[62U];
+    result.left_corner = first_corner.x < second_corner.x ? first_corner : second_corner;
+    result.right_corner = first_corner.x < second_corner.x ? second_corner : first_corner;
+    result.upper_lip_center = average(packet.landmarks[59U], packet.landmarks[60U],
+                                      packet.landmarks[61U]);
+    result.lower_lip_center = average(packet.landmarks[63U], packet.landmarks[64U],
+                                      packet.landmarks[65U]);
+    result.contour_points = static_cast<std::uint32_t>(result.contour.size());
+    std::copy_n(packet.landmarks.begin() + 48U, result.contour.size(), result.contour.begin());
     return result;
 }
 
@@ -320,6 +330,10 @@ SignalDecision OpenSeeFaceSignalAdapter::adapt(const OpenSeeFaceLandmarkPacketV1
                                            stable_->mouth_landmarks.upper_lip_center, alpha);
         semantic.lower_lip_center = smooth(semantic.lower_lip_center,
                                            stable_->mouth_landmarks.lower_lip_center, alpha);
+        for (std::size_t index = 0; index < semantic.contour.size(); ++index) {
+            semantic.contour[index] = smooth(semantic.contour[index],
+                                             stable_->mouth_landmarks.contour[index], alpha);
+        }
     } else {
         ++latch_generation_;
         stable_.reset();

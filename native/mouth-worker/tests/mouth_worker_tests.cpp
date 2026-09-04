@@ -344,6 +344,79 @@ void test_pcm_fallback_keeps_cavity_below_upper_lip() {
            "upper-lip protection still permits visible lower-jaw motion");
 }
 
+void test_full_contour_visemes_have_distinct_geometry() {
+    auto item = make_item();
+    auto& mouth = item.tracking.mouth_landmarks;
+    mouth.schema_version = 2U;
+    mouth.contour_points = static_cast<std::uint32_t>(mouth.contour.size());
+    mouth.contour = {{
+        {0.442, 0.646, 0.96}, {0.458, 0.624, 0.96},
+        {0.482, 0.612, 0.96}, {0.518, 0.612, 0.96},
+        {0.542, 0.624, 0.96}, {0.558, 0.646, 0.96},
+        {0.542, 0.671, 0.96}, {0.518, 0.682, 0.96},
+        {0.482, 0.682, 0.96}, {0.458, 0.671, 0.96},
+        {0.558, 0.649, 0.96}, {0.535, 0.641, 0.96},
+        {0.500, 0.638, 0.96}, {0.465, 0.641, 0.96},
+        {0.442, 0.649, 0.96}, {0.465, 0.658, 0.96},
+        {0.500, 0.662, 0.96}, {0.535, 0.658, 0.96},
+    }};
+    mouth.left_corner = mouth.contour[14U];
+    mouth.right_corner = mouth.contour[10U];
+    mouth.upper_lip_center = {0.500, 0.640, 0.96};
+    mouth.lower_lip_center = {0.500, 0.659, 0.96};
+
+    const auto render = [&](const Viseme viseme) {
+        return compose_current_frame_residual(
+            item.source, item.track, item.tracking,
+            coefficients_for_viseme(viseme, 1.0),
+            item.source.identity.captured_at_ns + 4'000'000);
+    };
+    const auto open = render(Viseme::open_vowel);
+    const auto rounded = render(Viseme::rounded);
+    const auto spread = render(Viseme::spread_vowel);
+    const auto bilabial = render(Viseme::bilabial);
+    expect(!open.premultiplied_bgra.empty() && !rounded.premultiplied_bgra.empty() &&
+               !spread.premultiplied_bgra.empty() &&
+               !bilabial.premultiplied_bgra.empty(),
+           "all principal full-contour viseme families produce bounded residuals");
+    expect(digest(open.premultiplied_bgra) != digest(rounded.premultiplied_bgra) &&
+               digest(rounded.premultiplied_bgra) != digest(spread.premultiplied_bgra) &&
+               digest(spread.premultiplied_bgra) != digest(bilabial.premultiplied_bgra),
+           "open, rounded, spread, and bilabial visemes remain visually separable");
+
+    const auto opaque_extent = [](const ResidualPatch& patch) {
+        std::uint32_t minimum_x = patch.width;
+        std::uint32_t minimum_y = patch.height;
+        std::uint32_t maximum_x{};
+        std::uint32_t maximum_y{};
+        bool found = false;
+        for (std::uint32_t y = 0; y < patch.height; ++y) {
+            for (std::uint32_t x = 0; x < patch.width; ++x) {
+                const auto alpha = patch.premultiplied_bgra[
+                    static_cast<std::size_t>(y) * patch.stride_bytes +
+                    static_cast<std::size_t>(x) * 4U + 3U];
+                if (alpha < 64U) continue;
+                found = true;
+                minimum_x = std::min(minimum_x, x);
+                minimum_y = std::min(minimum_y, y);
+                maximum_x = std::max(maximum_x, x);
+                maximum_y = std::max(maximum_y, y);
+            }
+        }
+        return std::pair{
+            found ? maximum_x - minimum_x + 1U : 0U,
+            found ? maximum_y - minimum_y + 1U : 0U,
+        };
+    };
+    const auto open_extent = opaque_extent(open);
+    const auto rounded_extent = opaque_extent(rounded);
+    const auto spread_extent = opaque_extent(spread);
+    expect(open_extent.second > rounded_extent.second,
+           "open vowel has more vertical articulation than rounded speech");
+    expect(spread_extent.first > rounded_extent.first,
+           "spread vowel is wider than a rounded/puckered mouth");
+}
+
 void test_atlas_residual_interpolates_and_binds_to_current_frame() {
     const auto item = make_item();
     const auto closed = make_atlas_patch(30U, 50U, 90U);
@@ -725,6 +798,7 @@ int main() {
     test_current_frame_residual_is_bounded_and_premultiplied();
     test_pcm_fallback_preserves_source_colour_envelope();
     test_pcm_fallback_keeps_cavity_below_upper_lip();
+    test_full_contour_visemes_have_distinct_geometry();
     test_atlas_residual_interpolates_and_binds_to_current_frame();
     test_queue_depth_one();
     test_exact_binding_and_no_retained_visual();

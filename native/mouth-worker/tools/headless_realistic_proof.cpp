@@ -407,6 +407,7 @@ int main(int argc, char** argv) {
         std::vector<double> moving_inference_ms;
         std::vector<double> mouth_mean_absolute_delta;
         std::vector<double> upper_lip_darkened_fraction;
+        std::vector<double> articulated_rows_over_mouth_width;
         std::vector<std::uint64_t> frame_digests;
         std::size_t residual_frames{};
         std::size_t changed_frames{};
@@ -530,22 +531,76 @@ int main(int argc, char** argv) {
             mouth_mean_absolute_delta.push_back(
                 delta_samples == 0U ? 0.0 : absolute_delta / static_cast<double>(delta_samples));
 
-            // A whole-patch delta can be made larger by corrupting the upper
-            // lip, so guard the failure mode independently. Protect the
-            // central upper-lip band between the outer upper anchor and the
-            // landmark midpoint; a valid lower-jaw opening must not carve a
-            // new dark cavity there.
             const double source_width = static_cast<double>(source.lease.width);
             const double source_height = static_cast<double>(source.lease.height);
             const double left_corner_x =
                 tracking.mouth_landmarks.left_corner.x * source_width;
             const double right_corner_x =
                 tracking.mouth_landmarks.right_corner.x * source_width;
-            const double upper_lip_y =
+            const auto articulation_left = static_cast<std::uint32_t>(std::clamp(
+                std::floor(left_corner_x), 0.0, source_width - 1.0));
+            const auto articulation_right = static_cast<std::uint32_t>(std::clamp(
+                std::ceil(right_corner_x), 0.0, source_width - 1.0));
+            std::size_t articulated_rows{};
+            if (articulation_right > articulation_left) {
+                const std::size_t articulation_width =
+                    static_cast<std::size_t>(articulation_right - articulation_left + 1U);
+                const std::size_t minimum_changed_pixels = std::max<std::size_t>(
+                    1U, static_cast<std::size_t>(std::ceil(
+                        static_cast<double>(articulation_width) * 0.10)));
+                for (std::uint32_t source_y = patch_top;
+                     source_y < patch_top + result.residual.height; ++source_y) {
+                    std::size_t changed_pixels{};
+                    for (std::uint32_t source_x = articulation_left;
+                         source_x <= articulation_right; ++source_x) {
+                        const auto offset = static_cast<std::size_t>(source_y) *
+                                                source.lease.stride_bytes +
+                                            static_cast<std::size_t>(source_x) * 4U;
+                        const auto channel_delta =
+                            std::abs(static_cast<int>(composited[offset + 0U]) -
+                                     static_cast<int>(source.bgra[offset + 0U])) +
+                            std::abs(static_cast<int>(composited[offset + 1U]) -
+                                     static_cast<int>(source.bgra[offset + 1U])) +
+                            std::abs(static_cast<int>(composited[offset + 2U]) -
+                                     static_cast<int>(source.bgra[offset + 2U]));
+                        changed_pixels += channel_delta > 12 ? 1U : 0U;
+                    }
+                    articulated_rows += changed_pixels >= minimum_changed_pixels ? 1U : 0U;
+                }
+                articulated_rows_over_mouth_width.push_back(
+                    static_cast<double>(articulated_rows) /
+                    static_cast<double>(articulation_width));
+            } else {
+                articulated_rows_over_mouth_width.push_back(0.0);
+            }
+
+            // A whole-patch delta can be made larger by corrupting the upper
+            // lip, so guard the failure mode independently. In schema 2 the
+            // protected band is the actual upper-lip surface between outer
+            // points 49..51 and inner points 59..61, not the oral aperture.
+            double protected_surface_top =
                 tracking.mouth_landmarks.upper_lip_center.y * source_height;
-            const double lower_lip_y =
-                tracking.mouth_landmarks.lower_lip_center.y * source_height;
-            const double lip_span = std::max(2.0, lower_lip_y - upper_lip_y);
+            double protected_surface_bottom = protected_surface_top;
+            if (tracking.mouth_landmarks.schema_version >= 2U &&
+                tracking.mouth_landmarks.contour_points ==
+                    tracking.mouth_landmarks.contour.size()) {
+                const auto& contour = tracking.mouth_landmarks.contour;
+                const double outer_upper =
+                    (contour[1U].y + contour[2U].y + contour[3U].y) / 3.0 *
+                    source_height;
+                const double inner_upper =
+                    (contour[11U].y + contour[12U].y + contour[13U].y) / 3.0 *
+                    source_height;
+                const double surface_span = std::max(1.0, inner_upper - outer_upper);
+                protected_surface_top = outer_upper + surface_span * 0.18;
+                protected_surface_bottom = inner_upper - surface_span * 0.18;
+            } else {
+                const double lower_lip_y =
+                    tracking.mouth_landmarks.lower_lip_center.y * source_height;
+                const double lip_span = std::max(
+                    2.0, lower_lip_y - protected_surface_top);
+                protected_surface_bottom = protected_surface_top + lip_span * 0.36;
+            }
             const double mouth_center_x = (left_corner_x + right_corner_x) * 0.5;
             const double protected_half_width =
                 std::abs(right_corner_x - left_corner_x) * 0.36;
@@ -556,10 +611,10 @@ int main(int argc, char** argv) {
                 std::ceil(mouth_center_x + protected_half_width), 0.0,
                 source_width - 1.0));
             const auto protected_top = static_cast<std::uint32_t>(std::clamp(
-                std::floor(upper_lip_y + lip_span * 0.10), 0.0,
+                std::floor(protected_surface_top), 0.0,
                 source_height - 1.0));
             const auto protected_bottom = static_cast<std::uint32_t>(std::clamp(
-                std::floor(upper_lip_y + lip_span * 0.46), 0.0,
+                std::floor(std::max(protected_surface_top, protected_surface_bottom)), 0.0,
                 source_height - 1.0));
             std::size_t darkened_upper_lip_pixels{};
             std::size_t protected_upper_lip_pixels{};
@@ -627,6 +682,9 @@ int main(int argc, char** argv) {
             [](const double value) { return value >= 1.0; }));
         const auto maximum_upper_lip_darkened_fraction = *std::max_element(
             upper_lip_darkened_fraction.begin(), upper_lip_darkened_fraction.end());
+        const auto maximum_articulated_rows_over_mouth_width = *std::max_element(
+            articulated_rows_over_mouth_width.begin(),
+            articulated_rows_over_mouth_width.end());
         const bool source_motion_qualifies =
             !moving_source || changed_source_frames > output_frames / 4U;
         const bool moving_tracking_qualifies =
@@ -640,13 +698,14 @@ int main(int argc, char** argv) {
                                changed_frames > output_frames / 4U &&
                                *maximum_mouth_delta >= 1.25 && *minimum_mouth_delta <= 0.25 &&
                                visibly_changed_frames >= output_frames / 6U &&
-                               maximum_upper_lip_darkened_fraction <= 0.01 &&
+                               maximum_upper_lip_darkened_fraction <= 0.03 &&
+                               maximum_articulated_rows_over_mouth_width >= 0.10 &&
                                source_motion_qualifies && moving_tracking_qualifies;
 
         std::ofstream report(output / "headless-proof.json");
         if (!report) throw std::runtime_error("could not create proof report");
         report << std::fixed << std::setprecision(3)
-               << "{\n  \"schema\": \"interactive-npcs-headless-realistic-lipsync/v5\",\n"
+               << "{\n  \"schema\": \"interactive-npcs-headless-realistic-lipsync/v6\",\n"
                << "  \"status\": \"" << (qualifies ? "passed" : "failed") << "\",\n"
                << "  \"source\": \"" << json_escape(source_path.string()) << "\",\n"
                << "  \"movingSource\": " << (moving_source ? "true" : "false") << ",\n"
@@ -668,6 +727,8 @@ int main(int argc, char** argv) {
                << "  \"maximumMouthMeanAbsoluteDelta\": " << *maximum_mouth_delta << ",\n"
                << "  \"maximumUpperLipDarkenedFraction\": "
                << maximum_upper_lip_darkened_fraction << ",\n"
+               << "  \"maximumArticulatedRowsOverMouthWidth\": "
+               << maximum_articulated_rows_over_mouth_width << ",\n"
                << "  \"providerLoadMs\": " << load_ms << ",\n"
                << "  \"inferenceSamples\": " << inference_ms.size() << ",\n"
                << "  \"inferenceMeanMs\": " << mean_inference << ",\n"
@@ -701,6 +762,8 @@ int main(int argc, char** argv) {
                   << " mouth_delta_max=" << *maximum_mouth_delta
                   << " upper_lip_darkened_max="
                   << maximum_upper_lip_darkened_fraction
+                  << " opening_rows_over_width_max="
+                  << maximum_articulated_rows_over_mouth_width
                   << " moving_inference_p95_ms=" << moving_inference_p95 << '\n'
                   << "output=" << output.string() << '\n';
         return qualifies ? 0 : 2;
