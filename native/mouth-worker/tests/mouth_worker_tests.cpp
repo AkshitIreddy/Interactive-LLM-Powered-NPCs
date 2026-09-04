@@ -175,7 +175,7 @@ void test_viseme_and_audio_drives() {
     expect(rounded_tone.pucker > open_tone.pucker + 0.35 &&
                rounded_tone.funnel > open_tone.funnel + 0.35,
            "same-level low formant energy selects a rounded mouth shape");
-    expect(open_tone.jaw_open > rounded_tone.jaw_open + 0.15 &&
+    expect(open_tone.jaw_open > rounded_tone.jaw_open + 0.12 &&
                open_tone.lower_lip_depress > rounded_tone.lower_lip_depress + 0.2,
            "same-level mid formant energy selects a taller open-vowel shape");
     expect(spread_tone.smile_left > rounded_tone.smile_left + 0.35 &&

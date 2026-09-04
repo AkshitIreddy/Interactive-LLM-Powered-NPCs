@@ -383,14 +383,14 @@ MouthCoefficients coefficients_from_pcm(const std::span<const float> interleaved
         smooth_unit((crossing_ratio - 0.08) * 3.2));
 
     MouthCoefficients value{};
-    value.jaw_open = open * unit(0.80 + open_vowel * 0.19 + spread * 0.04 - frication * 0.08);
+    value.jaw_open = open * unit(0.84 + open_vowel * 0.16 + spread * 0.03 - frication * 0.06);
     value.lip_close = unit(1.0 - open * 1.8);
     value.funnel = open * unit(rounded * 0.82 + frication * 0.24);
     value.pucker = open * rounded * (1.0 - frication * 0.55) * 0.58;
     value.smile_left = open * spread * (1.0 - frication * 0.4) * 0.72;
     value.smile_right = value.smile_left;
     value.upper_lip_raise = open * unit(spread * 0.28 + frication * 0.34);
-    value.lower_lip_depress = open * unit(0.34 + open_vowel * 0.42 + spread * 0.08);
+    value.lower_lip_depress = open * unit(0.46 + open_vowel * 0.42 + spread * 0.08);
     return clamp_coefficients(value);
 }
 
@@ -549,8 +549,8 @@ ResidualPatch compose_current_frame_residual(const CpuFrame& source,
         coefficients.jaw_open * (1.0 - coefficients.lip_close * 0.90) +
         coefficients.lower_lip_depress * 0.18);
     const double maximum_added_gap = std::clamp(
-        std::min(mouth_half_width * 0.52, static_cast<double>(patch.height) * 0.52),
-        3.0, 24.0);
+        std::min(mouth_half_width * 0.62, static_cast<double>(patch.height) * 0.58),
+        3.0, 28.0);
     const double added_gap = smoother_unit(opening_strength * 1.18) * maximum_added_gap;
     const double upper_lip_thickness = std::clamp(
         upper_centre.y - outer_top_y, 1.5, std::max(2.0, mouth_half_width * 0.22));
