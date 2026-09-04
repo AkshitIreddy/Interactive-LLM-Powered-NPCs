@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <iostream>
 #include <string_view>
+#include <utility>
 
 namespace {
 
@@ -97,6 +98,35 @@ RenderWithAdmittedLandmarksCommandV1 admitted_render_command() {
     value.resources = supplied.resources;
     value.drive = supplied.drive;
     value.deadline_ns = supplied.deadline_ns;
+    return value;
+}
+
+InstallCharacterMouthAtlasCommandV1 atlas_command() {
+    InstallCharacterMouthAtlasCommandV1 value{};
+    value.atlas.cancellation_generation = 7U;
+    value.atlas.actor_id = 8U;
+    value.atlas.identity_revision = 91U;
+    for (std::uint32_t index = 0U; index < 4U; ++index) {
+        MouthAtlasState state{};
+        state.coefficients.jaw_open = static_cast<double>(index) / 3.0;
+        state.coefficients.lip_close = 1.0 - state.coefficients.jaw_open;
+        state.appearance.width = 24U;
+        state.appearance.height = 16U;
+        state.appearance.stride_bytes = 96U;
+        state.appearance.enrolled_pose = {
+            static_cast<double>(index), -static_cast<double>(index), 0.5,
+        };
+        state.appearance.premultiplied_bgra.assign(96U * 16U, 0U);
+        for (std::size_t offset = 0U;
+             offset < state.appearance.premultiplied_bgra.size(); offset += 4U) {
+            state.appearance.premultiplied_bgra[offset] =
+                static_cast<std::uint8_t>(20U + index);
+            state.appearance.premultiplied_bgra[offset + 1U] = 40U;
+            state.appearance.premultiplied_bgra[offset + 2U] = 80U;
+            state.appearance.premultiplied_bgra[offset + 3U] = 255U;
+        }
+        value.atlas.states.push_back(std::move(state));
+    }
     return value;
 }
 
@@ -250,6 +280,31 @@ void test_provider_configuration_round_trip() {
            "exact provider paths, sizes, hashes, envelope, and target survive authenticated wire");
 }
 
+void test_character_mouth_atlas_round_trip() {
+    const auto source = atlas_command();
+    const auto encoded = encode_character_mouth_atlas(source);
+    const auto decoded = encoded ? decode_character_mouth_atlas(*encoded) : std::nullopt;
+    expect(decoded && decoded->atlas.actor_id == source.atlas.actor_id &&
+               decoded->atlas.identity_revision == source.atlas.identity_revision &&
+               decoded->atlas.states.size() == source.atlas.states.size(),
+           "identity atlas ownership and state count survive the authenticated wire");
+    expect(decoded &&
+               decoded->atlas.states[3U].appearance.enrolled_pose.yaw == 3.0 &&
+               decoded->atlas.states[3U].coefficients.jaw_open == 1.0 &&
+               decoded->atlas.states[3U].appearance.premultiplied_bgra ==
+                   source.atlas.states[3U].appearance.premultiplied_bgra,
+           "atlas coefficients, pose, and premultiplied pixels round-trip byte-exactly");
+
+    auto truncated = *encoded;
+    truncated.pop_back();
+    expect(!decode_character_mouth_atlas(truncated),
+           "truncated identity atlas fails closed");
+    auto too_few_states = source;
+    too_few_states.atlas.states.resize(3U);
+    expect(!encode_character_mouth_atlas(too_few_states),
+           "underspecified identity atlas is rejected before transport");
+}
+
 void test_malformed_and_bounded_payloads() {
     auto encoded = *encode_render_command(render_command());
     encoded.pop_back();
@@ -279,6 +334,7 @@ int main() {
     test_authenticated_envelope_and_framing();
     test_admitted_provider_command_round_trip();
     test_provider_configuration_round_trip();
+    test_character_mouth_atlas_round_trip();
     test_malformed_and_bounded_payloads();
     if (failures != 0) {
         std::cerr << failures << " service protocol assertion(s) failed\n";

@@ -127,6 +127,20 @@ void expect(const bool condition, const std::string_view message) {
     return patch;
 }
 
+[[nodiscard]] CharacterMouthAtlas make_character_atlas(const WorkItem& item) {
+    CharacterMouthAtlas atlas{};
+    atlas.cancellation_generation = item.track.cancellation_generation;
+    atlas.actor_id = item.track.actor_id;
+    atlas.identity_revision = 17U;
+    atlas.states = {
+        {coefficients_for_viseme(Viseme::silence), make_atlas_patch(22U, 42U, 78U)},
+        {coefficients_for_viseme(Viseme::rounded), make_atlas_patch(56U, 86U, 126U)},
+        {coefficients_for_viseme(Viseme::open_vowel), make_atlas_patch(96U, 142U, 204U)},
+        {coefficients_for_viseme(Viseme::spread_vowel), make_atlas_patch(42U, 118U, 188U)},
+    };
+    return atlas;
+}
+
 void test_viseme_and_audio_drives() {
     const auto silence = coefficients_for_viseme(Viseme::silence);
     const auto open = coefficients_for_viseme(Viseme::open_vowel, 1.0);
@@ -507,6 +521,109 @@ void test_atlas_residual_interpolates_and_binds_to_current_frame() {
            "atlas compositor rejects an out-of-range interpolation weight");
 }
 
+void test_observed_patch_extraction_preserves_real_source_pixels() {
+    const auto item = make_item();
+    const auto patch = extract_canonical_mouth_patch(item.source, item.tracking, 96U, 60U);
+    expect(patch.width == 96U && patch.height == 60U &&
+               patch.stride_bytes == 96U * 4U &&
+               patch.enrolled_pose.yaw == item.tracking.pose.yaw,
+           "observed mouth extraction records canonical geometry and enrolled pose");
+    bool saw_transparent = false;
+    bool saw_opaque = false;
+    bool saw_source_colour = false;
+    for (std::size_t offset = 0U; offset < patch.premultiplied_bgra.size(); offset += 4U) {
+        const auto alpha = patch.premultiplied_bgra[offset + 3U];
+        saw_transparent = saw_transparent || alpha == 0U;
+        saw_opaque = saw_opaque || alpha >= 250U;
+        saw_source_colour = saw_source_colour ||
+            patch.premultiplied_bgra[offset + 0U] !=
+                patch.premultiplied_bgra[offset + 1U] ||
+            patch.premultiplied_bgra[offset + 1U] !=
+                patch.premultiplied_bgra[offset + 2U];
+        expect(patch.premultiplied_bgra[offset + 0U] <= alpha &&
+                   patch.premultiplied_bgra[offset + 1U] <= alpha &&
+                   patch.premultiplied_bgra[offset + 2U] <= alpha,
+               "observed atlas extraction remains premultiplied");
+    }
+    expect(saw_transparent && saw_opaque,
+           "observed atlas extraction has a feathered curved support");
+    expect(saw_source_colour,
+           "observed atlas extraction retains source colour instead of a synthetic cavity");
+
+    auto wrong_frame = item.tracking;
+    ++wrong_frame.frame.sequence;
+    expect(extract_canonical_mouth_patch(item.source, wrong_frame).premultiplied_bgra.empty(),
+           "observed atlas extraction rejects tracking from another frame");
+}
+
+void test_worker_uses_identity_bound_atlas_and_clears_on_cancel() {
+    auto item = make_item();
+    item.drive.viseme_strength = 1.0;
+    auto atlas = make_character_atlas(item);
+    const auto expected = compose_atlas_residual(
+        item.source, item.track, item.tracking,
+        atlas.states[2U].appearance, atlas.states[2U].appearance, 0.0,
+        item.source.identity.captured_at_ns + 10'000'000);
+
+    ReferenceMouthWorker worker(item.track.cancellation_generation);
+    expect(worker.install_atlas(atlas), "valid identity atlas installs atomically");
+    expect(worker.submit(item), "atlas-backed work enters the bounded queue");
+    const auto result = worker.process_latest(
+        item.source.identity, item.source.identity.captured_at_ns + 10'000'000);
+    expect(result.has_residual(), "identity atlas produces a current-frame residual");
+    expect(digest(result.residual.premultiplied_bgra) ==
+               digest(expected.premultiplied_bgra),
+           "exact provider viseme selects the matching observed atlas state");
+    expect(result.residual.coefficients.jaw_open > 0.8,
+           "atlas residual keeps the authoritative drive coefficients");
+
+    auto wrong_generation = atlas;
+    ++wrong_generation.cancellation_generation;
+    expect(!worker.install_atlas(std::move(wrong_generation)),
+           "cross-generation atlas installation is rejected");
+    auto malformed = atlas;
+    malformed.states[1U].appearance.premultiplied_bgra[0U] = 255U;
+    malformed.states[1U].appearance.premultiplied_bgra[3U] = 0U;
+    expect(!worker.install_atlas(std::move(malformed)),
+           "non-premultiplied atlas installation is rejected");
+
+    const auto next_generation = item.track.cancellation_generation + 1U;
+    expect(worker.cancel_to(next_generation),
+           "cancellation advances and synchronously destroys the installed atlas");
+    item.track.cancellation_generation = next_generation;
+    item.tracking.track = item.track;
+    item.drive.clock.stream_generation = next_generation;
+    expect(worker.submit(item), "new-generation work remains usable after atlas cancellation");
+    const auto fallback = worker.process_latest(
+        item.source.identity, item.source.identity.captured_at_ns + 10'000'000);
+    expect(fallback.has_residual() &&
+               digest(fallback.residual.premultiplied_bgra) !=
+                   digest(result.residual.premultiplied_bgra),
+           "cancelled atlas pixels cannot leak into the new generation");
+}
+
+void test_worker_never_applies_an_atlas_to_another_actor() {
+    auto item = make_item();
+    auto atlas = make_character_atlas(item);
+    ReferenceMouthWorker atlas_worker(item.track.cancellation_generation);
+    expect(atlas_worker.install_atlas(atlas), "actor-bound atlas installs");
+
+    ++item.track.actor_id;
+    item.tracking.track = item.track;
+    expect(atlas_worker.submit(item), "other actor work remains valid input");
+    const auto guarded = atlas_worker.process_latest(
+        item.source.identity, item.source.identity.captured_at_ns + 10'000'000);
+
+    ReferenceMouthWorker baseline(item.track.cancellation_generation);
+    expect(baseline.submit(item), "other actor baseline work enters the queue");
+    const auto expected_fallback = baseline.process_latest(
+        item.source.identity, item.source.identity.captured_at_ns + 10'000'000);
+    expect(guarded.has_residual() && expected_fallback.has_residual() &&
+               digest(guarded.residual.premultiplied_bgra) ==
+                   digest(expected_fallback.residual.premultiplied_bgra),
+           "an actor mismatch never renders identity pixels from the installed atlas");
+}
+
 void test_queue_depth_one() {
     auto older = make_item(80U);
     auto newer = make_item(81U);
@@ -822,6 +939,9 @@ int main() {
     test_pcm_fallback_keeps_cavity_below_upper_lip();
     test_full_contour_visemes_have_distinct_geometry();
     test_atlas_residual_interpolates_and_binds_to_current_frame();
+    test_observed_patch_extraction_preserves_real_source_pixels();
+    test_worker_uses_identity_bound_atlas_and_clears_on_cancel();
+    test_worker_never_applies_an_atlas_to_another_actor();
     test_queue_depth_one();
     test_exact_binding_and_no_retained_visual();
     test_cancellation_generation();

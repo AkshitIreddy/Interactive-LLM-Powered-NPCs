@@ -729,6 +729,29 @@ int run_windows_service(const WindowsServiceConfig& config,
                 response.detail = "admitted_landmark_provider_ready";
                 break;
             }
+            case CommandKind::install_character_mouth_atlas: {
+                auto command = decode_character_mouth_atlas(envelope->payload);
+                if (!command ||
+                    command->atlas.cancellation_generation != runtime.active_generation() ||
+                    !runtime.install_atlas(std::move(command->atlas))) {
+                    response.status = StatusCode::payload_invalid;
+                    response.detail = "character_mouth_atlas_invalid";
+                    break;
+                }
+                renderer.cancel_all();
+                response.detail = "character_mouth_atlas_ready";
+                break;
+            }
+            case CommandKind::clear_character_mouth_atlas:
+                if (!envelope->payload.empty()) {
+                    response.status = StatusCode::payload_invalid;
+                    response.detail = "character_mouth_atlas_clear_payload_invalid";
+                    break;
+                }
+                runtime.clear_atlas();
+                renderer.cancel_all();
+                response.detail = "character_mouth_atlas_cleared";
+                break;
             case CommandKind::cancel_generation: {
                 const auto command = decode_cancel_command(envelope->payload);
                 if (!command || command->new_generation <= runtime.active_generation()) {

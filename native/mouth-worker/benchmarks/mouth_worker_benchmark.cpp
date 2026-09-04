@@ -2,6 +2,7 @@
 #include "npc/mouth_worker/worker.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -169,6 +170,54 @@ int main() {
     const double atlas_mean = std::accumulate(
         atlas_milliseconds.begin(), atlas_milliseconds.end(), 0.0) /
         static_cast<double>(atlas_milliseconds.size());
+    CharacterMouthAtlas atlas{};
+    atlas.cancellation_generation = prototype.track.cancellation_generation;
+    atlas.actor_id = prototype.track.actor_id;
+    atlas.identity_revision = 1U;
+    atlas.states = {
+        {coefficients_for_viseme(Viseme::silence), make_atlas_patch(112U)},
+        {coefficients_for_viseme(Viseme::rounded), make_atlas_patch(146U)},
+        {coefficients_for_viseme(Viseme::open_vowel), make_atlas_patch(210U)},
+        {coefficients_for_viseme(Viseme::spread_vowel), make_atlas_patch(184U)},
+    };
+    ReferenceMouthWorker atlas_worker(prototype.track.cancellation_generation);
+    if (!atlas_worker.install_atlas(std::move(atlas))) {
+        std::cerr << "atlas benchmark failed to install the identity atlas\n";
+        return 1;
+    }
+    const std::array visemes{
+        Viseme::silence, Viseme::rounded, Viseme::open_vowel, Viseme::spread_vowel,
+    };
+    std::vector<double> atlas_worker_milliseconds;
+    atlas_worker_milliseconds.reserve(measured_iterations);
+    for (std::size_t iteration = 0U;
+         iteration < warmup_iterations + measured_iterations; ++iteration) {
+        auto item = prototype;
+        item.source.identity.sequence = static_cast<std::uint64_t>(iteration + 10'000U);
+        item.source.lease.lease_nonce_low = item.source.identity.sequence;
+        item.tracking.frame = item.source.identity;
+        item.drive.viseme = visemes[iteration % visemes.size()];
+        item.drive.viseme_strength = 1.0;
+        const auto identity = item.source.identity;
+        const auto start = std::chrono::steady_clock::now();
+        (void)atlas_worker.submit(std::move(item));
+        const auto result = atlas_worker.process_latest(identity, captured_at_ns + 5'000'000);
+        const auto finish = std::chrono::steady_clock::now();
+        if (!result.has_residual()) {
+            std::cerr << "atlas worker benchmark failed to produce a residual\n";
+            return 1;
+        }
+        for (const auto byte : result.residual.premultiplied_bgra) {
+            output_checksum = output_checksum * 131U + byte;
+        }
+        if (iteration >= warmup_iterations) {
+            atlas_worker_milliseconds.push_back(
+                std::chrono::duration<double, std::milli>(finish - start).count());
+        }
+    }
+    const double atlas_worker_mean = std::accumulate(
+        atlas_worker_milliseconds.begin(), atlas_worker_milliseconds.end(), 0.0) /
+        static_cast<double>(atlas_worker_milliseconds.size());
     std::cout << std::fixed << std::setprecision(3)
               << "1920x1080 leased source, 173x71 queue+mouth residual, "
               << measured_iterations << " iterations\n"
@@ -180,6 +229,11 @@ int main() {
               << " p50_ms=" << percentile(atlas_milliseconds, 0.50)
               << " p95_ms=" << percentile(atlas_milliseconds, 0.95)
               << " p99_ms=" << percentile(atlas_milliseconds, 0.99)
+              << '\n'
+              << "atlas_worker_select_and_compose_mean_ms=" << atlas_worker_mean
+              << " p50_ms=" << percentile(atlas_worker_milliseconds, 0.50)
+              << " p95_ms=" << percentile(atlas_worker_milliseconds, 0.95)
+              << " p99_ms=" << percentile(atlas_worker_milliseconds, 0.99)
               << " checksum=" << output_checksum << '\n';
     return 0;
 }

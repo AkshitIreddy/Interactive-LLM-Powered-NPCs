@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 namespace npc::mouth {
@@ -24,6 +25,9 @@ constexpr double hard_maximum_mouth_height_fraction = 0.35;
 constexpr double hard_maximum_mouth_area_fraction = 0.12;
 constexpr double hard_maximum_mask_feather_face_fraction = 0.08;
 constexpr Nanoseconds smoothing_continuity_limit_ns = 180'000'000;
+constexpr std::size_t minimum_atlas_states = 4U;
+constexpr std::size_t maximum_atlas_states = 64U;
+constexpr std::uint32_t maximum_atlas_dimension = 512U;
 
 [[nodiscard]] double blend_toward(const double current,
                                   const double target,
@@ -149,6 +153,109 @@ constexpr Nanoseconds smoothing_continuity_limit_ns = 180'000'000;
     return false;
 }
 
+[[nodiscard]] bool unit_coefficient(const double value) noexcept {
+    return std::isfinite(value) && value >= 0.0 && value <= 1.0;
+}
+
+[[nodiscard]] bool valid_coefficients(const MouthCoefficients& coefficients) noexcept {
+    return unit_coefficient(coefficients.jaw_open) &&
+           unit_coefficient(coefficients.lip_close) &&
+           unit_coefficient(coefficients.funnel) &&
+           unit_coefficient(coefficients.pucker) &&
+           unit_coefficient(coefficients.smile_left) &&
+           unit_coefficient(coefficients.smile_right) &&
+           unit_coefficient(coefficients.upper_lip_raise) &&
+           unit_coefficient(coefficients.lower_lip_depress);
+}
+
+[[nodiscard]] bool valid_atlas_patch_for_install(const CanonicalMouthPatch& patch) noexcept {
+    if (patch.width < 16U || patch.height < 16U ||
+        patch.width > maximum_atlas_dimension || patch.height > maximum_atlas_dimension ||
+        patch.stride_bytes < patch.width * 4U ||
+        patch.stride_bytes > maximum_atlas_dimension * 4U ||
+        patch.premultiplied_bgra.size() !=
+            static_cast<std::size_t>(patch.stride_bytes) * patch.height ||
+        !finite_pose(patch.enrolled_pose)) {
+        return false;
+    }
+    for (std::size_t offset = 0U; offset < patch.premultiplied_bgra.size(); offset += 4U) {
+        const auto alpha = patch.premultiplied_bgra[offset + 3U];
+        if (patch.premultiplied_bgra[offset] > alpha ||
+            patch.premultiplied_bgra[offset + 1U] > alpha ||
+            patch.premultiplied_bgra[offset + 2U] > alpha) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] double coefficient_distance(const MouthCoefficients& first,
+                                          const MouthCoefficients& second) noexcept {
+    const auto squared = [](const double value) { return value * value; };
+    // Jaw and closure dominate perceived timing. Shape dimensions retain
+    // enough weight to distinguish rounded, spread, and labiodental states.
+    return 2.8 * squared(first.jaw_open - second.jaw_open) +
+           3.2 * squared(first.lip_close - second.lip_close) +
+           1.5 * squared(first.funnel - second.funnel) +
+           1.2 * squared(first.pucker - second.pucker) +
+           0.7 * squared(first.smile_left - second.smile_left) +
+           0.7 * squared(first.smile_right - second.smile_right) +
+           0.8 * squared(first.upper_lip_raise - second.upper_lip_raise) +
+           1.0 * squared(first.lower_lip_depress - second.lower_lip_depress);
+}
+
+struct AtlasSelection {
+    const MouthAtlasState* primary{};
+    const MouthAtlasState* secondary{};
+    double secondary_weight{};
+};
+
+[[nodiscard]] AtlasSelection select_atlas_states(const CharacterMouthAtlas& atlas,
+                                                 const MouthCoefficients& target,
+                                                 const HeadPoseDegrees& target_pose) noexcept {
+    std::size_t primary_index{};
+    std::size_t secondary_index{};
+    double primary_distance = std::numeric_limits<double>::infinity();
+    double secondary_distance = std::numeric_limits<double>::infinity();
+    for (std::size_t index = 0U; index < atlas.states.size(); ++index) {
+        const auto& state = atlas.states[index];
+        const double yaw_delta = (state.appearance.enrolled_pose.yaw - target_pose.yaw) / 35.0;
+        const double pitch_delta =
+            (state.appearance.enrolled_pose.pitch - target_pose.pitch) / 25.0;
+        const double roll_delta = (state.appearance.enrolled_pose.roll - target_pose.roll) / 45.0;
+        const double distance = coefficient_distance(state.coefficients, target) +
+                                0.45 * yaw_delta * yaw_delta +
+                                0.30 * pitch_delta * pitch_delta +
+                                0.10 * roll_delta * roll_delta;
+        if (distance < primary_distance) {
+            secondary_distance = primary_distance;
+            secondary_index = primary_index;
+            primary_distance = distance;
+            primary_index = index;
+        } else if (distance < secondary_distance) {
+            secondary_distance = distance;
+            secondary_index = index;
+        }
+    }
+    if (!std::isfinite(primary_distance)) {
+        return {};
+    }
+    if (!std::isfinite(secondary_distance) || primary_index == secondary_index) {
+        return {&atlas.states[primary_index], &atlas.states[primary_index], 0.0};
+    }
+    if (coefficient_distance(atlas.states[primary_index].coefficients, target) <= 1e-9) {
+        return {&atlas.states[primary_index], &atlas.states[primary_index], 0.0};
+    }
+    const double denominator = primary_distance + secondary_distance;
+    // Blend continuously at the nearest-state boundary. The secondary state
+    // never outweighs the nearest observation, while the 0.5 endpoint avoids
+    // a visible texture jump when the two distances cross.
+    const double weight = denominator <= 1e-9
+        ? 0.0
+        : std::clamp(primary_distance / denominator, 0.0, 0.50);
+    return {&atlas.states[primary_index], &atlas.states[secondary_index], weight};
+}
+
 } // namespace
 
 ReferenceMouthWorker::ReferenceMouthWorker(const std::uint64_t initial_generation,
@@ -177,8 +284,41 @@ bool ReferenceMouthWorker::cancel_to(const std::uint64_t new_generation) noexcep
         pending_.reset();
         ++stats_.cancelled;
     }
+    atlas_.reset();
     reset_pcm_smoothing();
     return true;
+}
+
+bool ReferenceMouthWorker::install_atlas(CharacterMouthAtlas atlas) {
+    if (atlas.schema_version != 1U ||
+        atlas.cancellation_generation != active_generation_ ||
+        atlas.actor_id == 0U || atlas.identity_revision == 0U ||
+        atlas.states.size() < minimum_atlas_states ||
+        atlas.states.size() > maximum_atlas_states) {
+        return false;
+    }
+    const auto width = atlas.states.front().appearance.width;
+    const auto height = atlas.states.front().appearance.height;
+    const auto stride = atlas.states.front().appearance.stride_bytes;
+    const bool all_valid = std::all_of(
+        atlas.states.begin(), atlas.states.end(),
+        [width, height, stride](const MouthAtlasState& state) {
+            return valid_coefficients(state.coefficients) &&
+                   valid_atlas_patch_for_install(state.appearance) &&
+                   state.appearance.width == width &&
+                   state.appearance.height == height &&
+                   state.appearance.stride_bytes == stride;
+        });
+    if (!all_valid) {
+        return false;
+    }
+    atlas_ = std::move(atlas);
+    reset_pcm_smoothing();
+    return true;
+}
+
+void ReferenceMouthWorker::clear_atlas() noexcept {
+    atlas_.reset();
 }
 
 ProcessResult ReferenceMouthWorker::process_latest(const FrameIdentity& current_frame,
@@ -211,8 +351,22 @@ ProcessResult ReferenceMouthWorker::process_latest(const FrameIdentity& current_
         break;
     }
 
-    auto residual = compose_current_frame_residual(item.source, item.track, item.tracking,
-                                                   coefficients, now_ns);
+    ResidualPatch residual{};
+    if (atlas_.has_value() &&
+        atlas_->cancellation_generation == item.track.cancellation_generation &&
+        atlas_->actor_id == item.track.actor_id) {
+        const auto selection = select_atlas_states(*atlas_, coefficients, item.tracking.pose);
+        if (selection.primary != nullptr && selection.secondary != nullptr) {
+            residual = compose_atlas_residual(item.source, item.track, item.tracking,
+                                              selection.primary->appearance,
+                                              selection.secondary->appearance,
+                                              selection.secondary_weight, now_ns);
+            residual.coefficients = coefficients;
+        }
+    } else {
+        residual = compose_current_frame_residual(item.source, item.track, item.tracking,
+                                                  coefficients, now_ns);
+    }
     if (residual.premultiplied_bgra.empty()) {
         return bypass(Disposition::bypass_unsafe_bounds);
     }

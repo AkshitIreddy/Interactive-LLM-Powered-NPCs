@@ -407,6 +407,84 @@ bool valid_cpu_frame(const CpuFrame& frame) noexcept {
            frame.bgra.size() >= static_cast<std::size_t>(required);
 }
 
+CanonicalMouthPatch extract_canonical_mouth_patch(
+    const CpuFrame& source,
+    const TrackingEvidence& tracking,
+    const std::uint32_t canonical_width,
+    const std::uint32_t canonical_height) {
+    CanonicalMouthPatch patch{};
+    const auto& landmarks = tracking.mouth_landmarks;
+    const auto finite_point = [](const NormalizedLandmark& point) {
+        return std::isfinite(point.x) && std::isfinite(point.y) &&
+               point.x >= 0.0 && point.x <= 1.0 && point.y >= 0.0 && point.y <= 1.0;
+    };
+    if (!valid_cpu_frame(source) || tracking.frame != source.identity ||
+        !finite_point(landmarks.left_corner) || !finite_point(landmarks.right_corner) ||
+        !finite_point(landmarks.upper_lip_center) || !finite_point(landmarks.lower_lip_center) ||
+        landmarks.left_corner.x >= landmarks.right_corner.x ||
+        canonical_width < 16U || canonical_height < 16U ||
+        canonical_width > 512U || canonical_height > 512U) {
+        return patch;
+    }
+
+    const double source_width = static_cast<double>(source.lease.width);
+    const double source_height = static_cast<double>(source.lease.height);
+    const PixelPoint left_corner{landmarks.left_corner.x * source_width,
+                                 landmarks.left_corner.y * source_height};
+    const PixelPoint right_corner{landmarks.right_corner.x * source_width,
+                                  landmarks.right_corner.y * source_height};
+    const double corner_dx = right_corner.x - left_corner.x;
+    const double corner_dy = right_corner.y - left_corner.y;
+    const double mouth_width = std::hypot(corner_dx, corner_dy);
+    if (!std::isfinite(mouth_width) || mouth_width < 4.0 ||
+        mouth_width > source_width * 0.55) {
+        return patch;
+    }
+    const double center_x = (left_corner.x + right_corner.x) * 0.5;
+    const double center_y = (landmarks.upper_lip_center.y + landmarks.lower_lip_center.y) *
+                            0.5 * source_height;
+    const double roll = std::atan2(corner_dy, corner_dx);
+    const double cosine = std::cos(roll);
+    const double sine = std::sin(roll);
+    const double crop_width = mouth_width * 1.34;
+    const double crop_height = crop_width * 0.625;
+
+    patch.width = canonical_width;
+    patch.height = canonical_height;
+    patch.stride_bytes = canonical_width * 4U;
+    patch.enrolled_pose = tracking.pose;
+    patch.premultiplied_bgra.assign(
+        static_cast<std::size_t>(patch.stride_bytes) * patch.height, 0U);
+    for (std::uint32_t y = 0U; y < patch.height; ++y) {
+        for (std::uint32_t x = 0U; x < patch.width; ++x) {
+            const double nx = (static_cast<double>(x) + 0.5) /
+                                  static_cast<double>(patch.width) * 2.0 - 1.0;
+            const double ny = (static_cast<double>(y) + 0.5) /
+                                  static_cast<double>(patch.height) * 2.0 - 1.0;
+            const double local_x = nx * crop_width * 0.5;
+            const double local_y = ny * crop_height * 0.5;
+            const double sample_x = center_x + cosine * local_x - sine * local_y;
+            const double sample_y = center_y + sine * local_x + cosine * local_y;
+            const double superellipse = std::pow(std::abs(nx), 3.4) +
+                                        std::pow(std::abs(ny), 2.8);
+            const double alpha = smoother_unit((1.0 - superellipse) / 0.22);
+            if (alpha <= 0.0 || sample_x < 0.0 || sample_y < 0.0 ||
+                sample_x > source_width - 1.0 || sample_y > source_height - 1.0) {
+                continue;
+            }
+            const auto output = static_cast<std::size_t>(y) * patch.stride_bytes +
+                                static_cast<std::size_t>(x) * 4U;
+            for (std::size_t channel = 0U; channel < 3U; ++channel) {
+                patch.premultiplied_bgra[output + channel] = static_cast<std::uint8_t>(
+                    std::clamp(std::lround(sample_channel(source, sample_x, sample_y, channel) *
+                                           alpha), 0L, 255L));
+            }
+            patch.premultiplied_bgra[output + 3U] = byte_from_unit(alpha);
+        }
+    }
+    return patch;
+}
+
 ResidualPatch compose_current_frame_residual(const CpuFrame& source,
                                              const TrackBinding& track,
                                              const TrackingEvidence& tracking,
@@ -765,12 +843,42 @@ ResidualPatch compose_atlas_residual(const CpuFrame& source,
     }
     const double source_width = static_cast<double>(source.lease.width);
     const double source_height = static_cast<double>(source.lease.height);
-    const auto left = static_cast<std::uint32_t>(std::floor(tracking.mouth_bounds.x * source_width));
-    const auto top = static_cast<std::uint32_t>(std::floor(tracking.mouth_bounds.y * source_height));
-    const auto right = static_cast<std::uint32_t>(std::ceil(
-        tracking.mouth_bounds.right() * source_width));
-    const auto bottom = static_cast<std::uint32_t>(std::ceil(
-        tracking.mouth_bounds.bottom() * source_height));
+    const auto& landmarks = tracking.mouth_landmarks;
+    const double left_corner_x = landmarks.left_corner.x * source_width;
+    const double left_corner_y = landmarks.left_corner.y * source_height;
+    const double right_corner_x = landmarks.right_corner.x * source_width;
+    const double right_corner_y = landmarks.right_corner.y * source_height;
+    const double landmark_dx = right_corner_x - left_corner_x;
+    const double landmark_dy = right_corner_y - left_corner_y;
+    const double mouth_width = std::hypot(landmark_dx, landmark_dy);
+    if (!std::isfinite(mouth_width) || mouth_width < 4.0 ||
+        mouth_width > source_width * 0.55) {
+        return patch;
+    }
+    const double center_x = (left_corner_x + right_corner_x) * 0.5;
+    const double center_y = (landmarks.upper_lip_center.y + landmarks.lower_lip_center.y) *
+                            0.5 * source_height;
+    const double roll_radians = std::atan2(landmark_dy, landmark_dx);
+    const double cosine = std::cos(roll_radians);
+    const double sine = std::sin(roll_radians);
+    const double canonical_width_pixels = mouth_width * 1.34;
+    const double canonical_height_pixels = canonical_width_pixels * 0.625;
+    const double extent_x = std::abs(cosine) * canonical_width_pixels * 0.5 +
+                            std::abs(sine) * canonical_height_pixels * 0.5;
+    const double extent_y = std::abs(sine) * canonical_width_pixels * 0.5 +
+                            std::abs(cosine) * canonical_height_pixels * 0.5;
+    const double mouth_left = tracking.mouth_bounds.x * source_width;
+    const double mouth_top = tracking.mouth_bounds.y * source_height;
+    const double mouth_right = tracking.mouth_bounds.right() * source_width;
+    const double mouth_bottom = tracking.mouth_bounds.bottom() * source_height;
+    const auto left = static_cast<std::uint32_t>(std::clamp(
+        std::floor(std::min(center_x - extent_x, mouth_left)), 0.0, source_width - 1.0));
+    const auto top = static_cast<std::uint32_t>(std::clamp(
+        std::floor(std::min(center_y - extent_y, mouth_top)), 0.0, source_height - 1.0));
+    const auto right = static_cast<std::uint32_t>(std::clamp(
+        std::ceil(std::max(center_x + extent_x, mouth_right)), 1.0, source_width));
+    const auto bottom = static_cast<std::uint32_t>(std::clamp(
+        std::ceil(std::max(center_y + extent_y, mouth_bottom)), 1.0, source_height));
     if (right <= left || bottom <= top || right > source.lease.width || bottom > source.lease.height) {
         return patch;
     }
@@ -783,23 +891,18 @@ ResidualPatch compose_atlas_residual(const CpuFrame& source,
     initialize_residual_metadata(patch, source, track, output_bounds,
                                  right - left, bottom - top, produced_at_ns);
 
-    const double landmark_dx = tracking.mouth_landmarks.right_corner.x -
-                               tracking.mouth_landmarks.left_corner.x;
-    const double landmark_dy = tracking.mouth_landmarks.right_corner.y -
-                               tracking.mouth_landmarks.left_corner.y;
-    const double roll_radians = std::atan2(landmark_dy, landmark_dx);
-    const double cosine = std::cos(roll_radians);
-    const double sine = std::sin(roll_radians);
     const double primary_weight = 1.0 - secondary_weight;
 
     for (std::uint32_t y = 0; y < patch.height; ++y) {
         for (std::uint32_t x = 0; x < patch.width; ++x) {
-            const double normalized_x = (static_cast<double>(x) + 0.5) /
-                                            static_cast<double>(patch.width) * 2.0 - 1.0;
-            const double normalized_y = (static_cast<double>(y) + 0.5) /
-                                            static_cast<double>(patch.height) * 2.0 - 1.0;
-            const double canonical_x = cosine * normalized_x + sine * normalized_y;
-            const double canonical_y = -sine * normalized_x + cosine * normalized_y;
+            const double frame_x = static_cast<double>(left + x) + 0.5;
+            const double frame_y = static_cast<double>(top + y) + 0.5;
+            const double delta_x = frame_x - center_x;
+            const double delta_y = frame_y - center_y;
+            const double canonical_x =
+                (cosine * delta_x + sine * delta_y) / (canonical_width_pixels * 0.5);
+            const double canonical_y =
+                (-sine * delta_x + cosine * delta_y) / (canonical_height_pixels * 0.5);
             if (std::abs(canonical_x) > 1.0 || std::abs(canonical_y) > 1.0) {
                 continue;
             }
@@ -848,6 +951,70 @@ ResidualPatch compose_atlas_residual(const CpuFrame& source,
                                      sample(secondary) * secondary_weight;
                 patch.premultiplied_bgra[output + channel] = static_cast<std::uint8_t>(
                     std::clamp(std::lround(value), 0L, 255L));
+            }
+        }
+    }
+
+    // Match only the exterior support ring. The oral interior and teeth remain
+    // untouched identity pixels; applying a skin-colour transform there causes
+    // the bleached/flat dentition seen in older atlas experiments.
+    std::array<double, 3U> source_sum{};
+    std::array<double, 3U> atlas_sum{};
+    std::size_t ring_samples{};
+    for (std::uint32_t y = 0U; y < patch.height; ++y) {
+        for (std::uint32_t x = 0U; x < patch.width; ++x) {
+            const double frame_x = static_cast<double>(left + x) + 0.5;
+            const double frame_y = static_cast<double>(top + y) + 0.5;
+            const double delta_x = frame_x - center_x;
+            const double delta_y = frame_y - center_y;
+            const double nx = (cosine * delta_x + sine * delta_y) /
+                              (canonical_width_pixels * 0.5);
+            const double ny = (-sine * delta_x + cosine * delta_y) /
+                              (canonical_height_pixels * 0.5);
+            const double radius = std::sqrt(nx * nx + ny * ny);
+            const auto offset = static_cast<std::size_t>(y) * patch.stride_bytes +
+                                static_cast<std::size_t>(x) * 4U;
+            const double alpha = static_cast<double>(patch.premultiplied_bgra[offset + 3U]);
+            if (radius < 0.64 || radius > 0.88 || alpha < 96.0) continue;
+            const auto source_offset = static_cast<std::size_t>(top + y) * source.lease.stride_bytes +
+                                       static_cast<std::size_t>(left + x) * 4U;
+            for (std::size_t channel = 0U; channel < 3U; ++channel) {
+                source_sum[channel] += source.bgra[source_offset + channel];
+                atlas_sum[channel] += patch.premultiplied_bgra[offset + channel] * 255.0 / alpha;
+            }
+            ++ring_samples;
+        }
+    }
+    if (ring_samples >= 16U) {
+        std::array<double, 3U> channel_delta{};
+        for (std::size_t channel = 0U; channel < 3U; ++channel) {
+            channel_delta[channel] = std::clamp(
+                (source_sum[channel] - atlas_sum[channel]) /
+                    static_cast<double>(ring_samples), -10.0, 10.0);
+        }
+        for (std::uint32_t y = 0U; y < patch.height; ++y) {
+            for (std::uint32_t x = 0U; x < patch.width; ++x) {
+                const double frame_x = static_cast<double>(left + x) + 0.5;
+                const double frame_y = static_cast<double>(top + y) + 0.5;
+                const double delta_x = frame_x - center_x;
+                const double delta_y = frame_y - center_y;
+                const double nx = (cosine * delta_x + sine * delta_y) /
+                                  (canonical_width_pixels * 0.5);
+                const double ny = (-sine * delta_x + cosine * delta_y) /
+                                  (canonical_height_pixels * 0.5);
+                const double radius = std::sqrt(nx * nx + ny * ny);
+                const double exterior = smoother_unit((radius - 0.28) / 0.42);
+                const auto offset = static_cast<std::size_t>(y) * patch.stride_bytes +
+                                    static_cast<std::size_t>(x) * 4U;
+                const double alpha = static_cast<double>(patch.premultiplied_bgra[offset + 3U]) /
+                                     255.0;
+                if (alpha <= 0.0 || exterior <= 0.0) continue;
+                for (std::size_t channel = 0U; channel < 3U; ++channel) {
+                    patch.premultiplied_bgra[offset + channel] = static_cast<std::uint8_t>(
+                        std::clamp(std::lround(
+                            patch.premultiplied_bgra[offset + channel] +
+                            channel_delta[channel] * alpha * exterior), 0L, 255L));
+                }
             }
         }
     }

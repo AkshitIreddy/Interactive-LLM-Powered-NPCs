@@ -14,6 +14,7 @@ struct CanonicalMouthPatch {
     std::uint32_t width{};
     std::uint32_t height{};
     std::uint32_t stride_bytes{};
+    HeadPoseDegrees enrolled_pose;
     std::vector<std::uint8_t> premultiplied_bgra;
 };
 
@@ -27,6 +28,15 @@ struct CanonicalMouthPatch {
                                                       std::uint16_t channels) noexcept;
 
 [[nodiscard]] bool valid_cpu_frame(const CpuFrame& frame) noexcept;
+
+// Normalize an identity-authorized reference frame into mouth-corner space.
+// The resulting patch contains real observed lip/oral pixels and a curved,
+// feathered alpha support; it never synthesizes teeth, tongue, or a cavity.
+[[nodiscard]] CanonicalMouthPatch extract_canonical_mouth_patch(
+    const CpuFrame& source,
+    const TrackingEvidence& tracking,
+    std::uint32_t canonical_width = 192U,
+    std::uint32_t canonical_height = 120U);
 
 [[nodiscard]] ResidualPatch compose_current_frame_residual(const CpuFrame& source,
                                                            const TrackBinding& track,

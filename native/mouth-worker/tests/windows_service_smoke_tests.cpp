@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -23,6 +24,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -338,6 +340,49 @@ private:
     return value;
 }
 
+[[nodiscard]] InstallCharacterMouthAtlasCommandV1 service_atlas(
+    const std::uint64_t generation,
+    const std::uint64_t actor_id) {
+    InstallCharacterMouthAtlasCommandV1 command{};
+    command.atlas.cancellation_generation = generation;
+    command.atlas.actor_id = actor_id;
+    command.atlas.identity_revision = 1U;
+    const std::array visemes{
+        Viseme::silence, Viseme::rounded, Viseme::open_vowel, Viseme::spread_vowel,
+    };
+    for (std::size_t state_index = 0U; state_index < visemes.size(); ++state_index) {
+        MouthAtlasState state{};
+        state.coefficients = coefficients_for_viseme(visemes[state_index]);
+        state.appearance.width = 48U;
+        state.appearance.height = 32U;
+        state.appearance.stride_bytes = 48U * 4U;
+        state.appearance.premultiplied_bgra.assign(48U * 32U * 4U, 0U);
+        for (std::uint32_t y = 0U; y < state.appearance.height; ++y) {
+            for (std::uint32_t x = 0U; x < state.appearance.width; ++x) {
+                const double nx = (static_cast<double>(x) + 0.5) / 24.0 - 1.0;
+                const double ny = (static_cast<double>(y) + 0.5) / 16.0 - 1.0;
+                const double radius = std::sqrt(nx * nx + ny * ny);
+                const auto alpha = static_cast<std::uint8_t>(std::lround(
+                    std::clamp((1.0 - radius) / 0.22, 0.0, 1.0) * 255.0));
+                const auto offset = (static_cast<std::size_t>(y) * 48U + x) * 4U;
+                const std::array color{
+                    static_cast<std::uint8_t>(30U + state_index * 12U),
+                    static_cast<std::uint8_t>(58U + state_index * 18U),
+                    static_cast<std::uint8_t>(100U + state_index * 28U),
+                };
+                for (std::size_t channel = 0U; channel < color.size(); ++channel) {
+                    state.appearance.premultiplied_bgra[offset + channel] =
+                        static_cast<std::uint8_t>(
+                            (static_cast<std::uint32_t>(color[channel]) * alpha + 127U) / 255U);
+                }
+                state.appearance.premultiplied_bgra[offset + 3U] = alpha;
+            }
+        }
+        command.atlas.states.push_back(std::move(state));
+    }
+    return command;
+}
+
 } // namespace
 
 int wmain(const int argc, wchar_t** argv) {
@@ -536,10 +581,18 @@ int wmain(const int argc, wchar_t** argv) {
     render.drive.viseme = Viseme::open_vowel;
     render.drive.viseme_strength = 0.8;
     render.deadline_ns = captured + 500'000'000;
+    const auto encoded_atlas = encode_character_mouth_atlas(service_atlas(1U, 41U));
+    expect(encoded_atlas.has_value(), "bounded identity atlas encodes for service transport");
+    const auto installed_atlas = request(pipe.get(), envelope(
+        session, CommandKind::install_character_mouth_atlas, 2U, 1U,
+        encoded_atlas.value_or(std::vector<std::byte>{})));
+    expect(installed_atlas && installed_atlas->status == StatusCode::ok &&
+               installed_atlas->detail == "character_mouth_atlas_ready",
+           "authenticated service installs an exact actor-bound mouth atlas");
     const auto encoded_render = encode_render_command(render);
     auto rendered = request(pipe.get(), envelope(session,
-        CommandKind::render_current_frame, 2U, 1U, *encoded_render));
-    std::uint64_t next_sequence = 3U;
+        CommandKind::render_current_frame, 3U, 1U, *encoded_render));
+    std::uint64_t next_sequence = 4U;
     if (rendered && rendered->status == StatusCode::ok && !rendered->residual &&
         rendered->receipt.worker_disposition == Disposition::bypass_stale_frame) {
         // First-use D3D adapter initialization may outlive the hard 80 ms frame

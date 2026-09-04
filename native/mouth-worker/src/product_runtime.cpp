@@ -121,6 +121,14 @@ std::optional<PresentationReceiptV1> MouthProductRuntime::cancel_to(
     return receipt;
 }
 
+bool MouthProductRuntime::install_atlas(CharacterMouthAtlas atlas) {
+    return worker_.install_atlas(std::move(atlas));
+}
+
+void MouthProductRuntime::clear_atlas() noexcept {
+    worker_.clear_atlas();
+}
+
 std::uint64_t MouthProductRuntime::active_generation() const noexcept {
     return worker_.active_generation();
 }

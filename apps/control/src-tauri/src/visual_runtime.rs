@@ -21,7 +21,7 @@ use crate::media_broker::{
 };
 use crate::sidecar_supervisor::RuntimeSupervisor;
 use async_trait::async_trait;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::VecDeque;
 use std::io::{Read, Write};
@@ -38,7 +38,8 @@ const WORKER_FILE_NAME: &str = if cfg!(windows) {
 };
 const PROTOCOL_MAGIC: u32 = 0x3152_574d;
 const PROTOCOL_VERSION: u16 = 1;
-const MAX_MESSAGE_BYTES: usize = 256 * 1024;
+const MAX_ATLAS_BYTES: usize = 16 * 1024 * 1024;
+const MAX_MESSAGE_BYTES: usize = MAX_ATLAS_BYTES + 512 * 1024;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_millis(500);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
@@ -86,6 +87,8 @@ pub struct MouthWorkerLaunchConfig {
     pub development_fixture_allowed: bool,
     #[cfg(debug_assertions)]
     pub review_openseeface_root: Option<PathBuf>,
+    #[cfg(debug_assertions)]
+    pub review_mouth_atlas_root: Option<PathBuf>,
 }
 
 impl MouthWorkerLaunchConfig {
@@ -118,11 +121,21 @@ impl MouthWorkerLaunchConfig {
                 )
             }
         };
+        #[cfg(debug_assertions)]
+        let review_mouth_atlas_root = {
+            let portable = executable
+                .parent()
+                .ok_or(VisualRuntimeError::InvalidBundle)?
+                .join("review-mouth-atlas");
+            portable.is_dir().then_some(portable)
+        };
         Ok(Self {
             executable,
             development_fixture_allowed,
             #[cfg(debug_assertions)]
             review_openseeface_root,
+            #[cfg(debug_assertions)]
+            review_mouth_atlas_root,
         })
     }
 }
@@ -1418,8 +1431,16 @@ impl MouthWorkerSupervisor {
             self.config.review_openseeface_root.as_deref(),
             evidence.selected_process_id,
         )?;
+        let review_actor_id = stable_nonzero_id("eclipse-harbor:mara-venn");
+        let atlas = resolve_project_owned_review_atlas(
+            self.config.review_mouth_atlas_root.as_deref(),
+            generation,
+            review_actor_id,
+        )?;
         let (client, worker) = self.ensure_ready(generation).await?;
         self.configure_project_owned_review_provider(&client, generation, &launch)
+            .await?;
+        self.configure_project_owned_review_atlas(&client, generation, &atlas)
             .await?;
 
         // Provider startup is the expensive cold-path operation. Read the
@@ -1441,7 +1462,7 @@ impl MouthWorkerSupervisor {
             })?;
 
         let track = VisualTrackBinding {
-            actor_id: stable_nonzero_id("eclipse-harbor:mara-venn"),
+            actor_id: review_actor_id,
             track_id: stable_nonzero_id("eclipse-harbor:mara-venn:project-owned-review-track"),
             track_epoch: generation,
         };
@@ -1818,6 +1839,40 @@ impl MouthWorkerSupervisor {
         Ok(())
     }
 
+    #[cfg(debug_assertions)]
+    async fn configure_project_owned_review_atlas(
+        &self,
+        client: &WorkerClient,
+        generation: u64,
+        atlas: &CharacterMouthAtlas,
+    ) -> Result<(), VisualRuntimeError> {
+        let binding = AtlasBinding {
+            content_sha256: atlas.content_sha256.clone(),
+            actor_id: atlas.actor_id,
+            identity_revision: atlas.identity_revision,
+        };
+        if self
+            .managed
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|worker| worker.atlas_binding.as_ref())
+            == Some(&binding)
+        {
+            return Ok(());
+        }
+        client
+            .install_atlas(generation, encode_character_mouth_atlas(atlas)?)
+            .await?;
+        let mut managed = self.managed.lock().await;
+        let worker = managed.as_mut().ok_or(VisualRuntimeError::State)?;
+        if worker.generation != generation {
+            return Err(VisualRuntimeError::State);
+        }
+        worker.atlas_binding = Some(binding);
+        Ok(())
+    }
+
     pub async fn shutdown(&self) {
         if let Some(mut managed) = self.managed.lock().await.take() {
             let _ = managed.client.shutdown(managed.generation).await;
@@ -1846,6 +1901,7 @@ impl MouthWorkerSupervisor {
                             .cancel_to(worker.generation, generation)
                             .await?;
                         worker.generation = generation;
+                        worker.atlas_binding = None;
                     } else if worker.generation > generation {
                         drop(managed);
                         self.discard_worker().await;
@@ -1909,6 +1965,7 @@ impl MouthWorkerSupervisor {
             identity: identity.clone(),
             generation,
             provider_binding: None,
+            atlas_binding: None,
         };
         *self.managed.lock().await = Some(managed);
         Ok((client, identity))
@@ -1938,6 +1995,7 @@ struct ManagedWorker {
     identity: VisualWorkerIdentity,
     generation: u64,
     provider_binding: Option<ProviderBinding>,
+    atlas_binding: Option<AtlasBinding>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1945,6 +2003,13 @@ struct ProviderBinding {
     installed_content_tree_sha256: String,
     measured_envelope_sha256: String,
     exact_target_pid: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AtlasBinding {
+    content_sha256: String,
+    actor_id: u64,
+    identity_revision: u64,
 }
 
 #[cfg(debug_assertions)]
@@ -1966,6 +2031,57 @@ struct ReviewOpenSeeFaceLaunch {
     content_tree_sha256: String,
     measurement_sha256: String,
     exact_target_pid: u32,
+}
+
+#[cfg(debug_assertions)]
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ReviewMouthAtlasManifestV1 {
+    schema_version: u32,
+    identity_revision: u64,
+    texture: ReviewMouthAtlasTextureV1,
+    states: Vec<ReviewMouthAtlasStateV1>,
+}
+
+#[cfg(debug_assertions)]
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ReviewMouthAtlasTextureV1 {
+    file: String,
+    sha256: String,
+    width: u32,
+    height: u32,
+    stride_bytes: u32,
+    state_count: u32,
+    state_bytes: u32,
+}
+
+#[cfg(debug_assertions)]
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ReviewMouthAtlasStateV1 {
+    index: u32,
+    coefficients: [f64; 8],
+    enrolled_pose: [f64; 3],
+}
+
+#[derive(Clone, Debug)]
+struct CharacterMouthAtlasState {
+    coefficients: [f64; 8],
+    width: u32,
+    height: u32,
+    stride_bytes: u32,
+    enrolled_pose: [f64; 3],
+    premultiplied_bgra: Vec<u8>,
+}
+
+#[derive(Clone, Debug)]
+struct CharacterMouthAtlas {
+    cancellation_generation: u64,
+    actor_id: u64,
+    identity_revision: u64,
+    content_sha256: String,
+    states: Vec<CharacterMouthAtlasState>,
 }
 
 #[derive(Clone)]
@@ -2063,6 +2179,23 @@ impl WorkerClient {
             .ok_or(VisualRuntimeError::Worker(response.detail))
     }
 
+    async fn install_atlas(
+        &self,
+        generation: u64,
+        payload: Vec<u8>,
+    ) -> Result<(), VisualRuntimeError> {
+        let response = self
+            .request(
+                WorkerCommand::InstallCharacterMouthAtlas,
+                generation,
+                payload,
+            )
+            .await?;
+        (response.status == 0 && response.detail == "character_mouth_atlas_ready")
+            .then_some(())
+            .ok_or(VisualRuntimeError::Worker(response.detail))
+    }
+
     async fn shutdown(&self, generation: u64) -> Result<(), VisualRuntimeError> {
         self.request(WorkerCommand::Shutdown, generation, Vec::new())
             .await
@@ -2098,6 +2231,7 @@ enum WorkerCommand {
     Shutdown = 5,
     RenderWithAdmittedLandmarks = 6,
     ConfigureAdmittedLandmarkProvider = 7,
+    InstallCharacterMouthAtlas = 8,
 }
 
 fn worker_request_blocking(
@@ -2583,6 +2717,74 @@ fn encode_review_provider_configuration(
     wire.u32(15);
     wire.u32(1);
     wire.u32(launch.exact_target_pid);
+    let bytes = wire.take();
+    (bytes.len() <= MAX_MESSAGE_BYTES)
+        .then_some(bytes)
+        .ok_or(VisualRuntimeError::Payload)
+}
+
+fn encode_character_mouth_atlas(
+    atlas: &CharacterMouthAtlas,
+) -> Result<Vec<u8>, VisualRuntimeError> {
+    if atlas.cancellation_generation == 0
+        || atlas.actor_id == 0
+        || atlas.identity_revision == 0
+        || atlas.states.len() < 4
+        || atlas.states.len() > 16
+    {
+        return Err(VisualRuntimeError::Payload);
+    }
+    let first = atlas.states.first().ok_or(VisualRuntimeError::Payload)?;
+    let mut total_pixels = 0_usize;
+    let mut wire = WireWriter::default();
+    wire.u32(1);
+    wire.u64(atlas.cancellation_generation);
+    wire.u64(atlas.actor_id);
+    wire.u64(atlas.identity_revision);
+    wire.u32(u32::try_from(atlas.states.len()).map_err(|_| VisualRuntimeError::Payload)?);
+    for state in &atlas.states {
+        let coefficients_valid = state
+            .coefficients
+            .iter()
+            .all(|value| value.is_finite() && (0.0..=1.0).contains(value));
+        let pose_valid = state.enrolled_pose.iter().all(|value| value.is_finite());
+        let pixels_valid = state.width >= 16
+            && state.height >= 16
+            && state.width <= 512
+            && state.height <= 512
+            && state.stride_bytes >= state.width.saturating_mul(4)
+            && state.width == first.width
+            && state.height == first.height
+            && state.stride_bytes == first.stride_bytes
+            && usize::try_from(state.stride_bytes).ok().and_then(|stride| {
+                usize::try_from(state.height)
+                    .ok()
+                    .and_then(|height| stride.checked_mul(height))
+            }) == Some(state.premultiplied_bgra.len())
+            && state
+                .premultiplied_bgra
+                .chunks_exact(4)
+                .all(|pixel| pixel[0] <= pixel[3] && pixel[1] <= pixel[3] && pixel[2] <= pixel[3]);
+        if !coefficients_valid || !pose_valid || !pixels_valid {
+            return Err(VisualRuntimeError::Payload);
+        }
+        total_pixels = total_pixels
+            .checked_add(state.premultiplied_bgra.len())
+            .ok_or(VisualRuntimeError::Payload)?;
+        if total_pixels > MAX_ATLAS_BYTES {
+            return Err(VisualRuntimeError::Payload);
+        }
+        for coefficient in state.coefficients {
+            wire.f64(coefficient);
+        }
+        wire.u32(state.width);
+        wire.u32(state.height);
+        wire.u32(state.stride_bytes);
+        for pose in state.enrolled_pose {
+            wire.f64(pose);
+        }
+        wire.bytes(&state.premultiplied_bgra)?;
+    }
     let bytes = wire.take();
     (bytes.len() <= MAX_MESSAGE_BYTES)
         .then_some(bytes)
@@ -3554,6 +3756,158 @@ fn resolve_project_owned_review_provider(
 }
 
 #[cfg(debug_assertions)]
+fn resolve_project_owned_review_atlas(
+    configured_root: Option<&Path>,
+    generation: u64,
+    actor_id: u64,
+) -> Result<CharacterMouthAtlas, VisualRuntimeError> {
+    if generation == 0 || actor_id == 0 {
+        return Err(VisualRuntimeError::Admission(
+            "review atlas has no active actor generation".into(),
+        ));
+    }
+    let configured_root = configured_root.ok_or_else(|| {
+        VisualRuntimeError::Admission("review mouth atlas is not configured".into())
+    })?;
+    let root_metadata = std::fs::symlink_metadata(configured_root)
+        .map_err(|_| VisualRuntimeError::Admission("review mouth atlas is not installed".into()))?;
+    if !root_metadata.is_dir() || root_metadata.file_type().is_symlink() {
+        return Err(VisualRuntimeError::Admission(
+            "review mouth atlas root is not a normal directory".into(),
+        ));
+    }
+    let root = configured_root.canonicalize().map_err(|_| {
+        VisualRuntimeError::Admission("review mouth atlas root cannot be resolved".into())
+    })?;
+    let manifest_path = root.join("atlas.json");
+    let manifest_metadata = std::fs::symlink_metadata(&manifest_path).map_err(|_| {
+        VisualRuntimeError::Admission("review mouth atlas manifest is missing".into())
+    })?;
+    if !manifest_metadata.is_file()
+        || manifest_metadata.file_type().is_symlink()
+        || manifest_metadata.len() > 64 * 1024
+    {
+        return Err(VisualRuntimeError::Admission(
+            "review mouth atlas manifest authority is invalid".into(),
+        ));
+    }
+    let manifest_bytes = std::fs::read(&manifest_path).map_err(|_| {
+        VisualRuntimeError::Admission("review mouth atlas manifest cannot be read".into())
+    })?;
+    let manifest: ReviewMouthAtlasManifestV1 =
+        serde_json::from_slice(&manifest_bytes).map_err(|_| {
+            VisualRuntimeError::Admission("review mouth atlas manifest is invalid".into())
+        })?;
+    let texture = &manifest.texture;
+    let file_name = Path::new(&texture.file);
+    let dimensions_valid = manifest.schema_version == 1
+        && manifest.identity_revision != 0
+        && texture.width >= 16
+        && texture.height >= 16
+        && texture.width <= 512
+        && texture.height <= 512
+        && texture.stride_bytes >= texture.width.saturating_mul(4)
+        && texture.state_count >= 4
+        && texture.state_count <= 16
+        && manifest.states.len() == texture.state_count as usize
+        && texture.state_bytes
+            == texture
+                .stride_bytes
+                .checked_mul(texture.height)
+                .unwrap_or_default()
+        && file_name.components().count() == 1
+        && file_name.extension().and_then(|value| value.to_str()) == Some("bin")
+        && texture.sha256.len() == 64
+        && texture.sha256.bytes().all(|byte| byte.is_ascii_hexdigit());
+    if !dimensions_valid {
+        return Err(VisualRuntimeError::Admission(
+            "review mouth atlas dimensions are invalid".into(),
+        ));
+    }
+    let expected_bytes = usize::try_from(texture.state_bytes)
+        .ok()
+        .and_then(|bytes| bytes.checked_mul(texture.state_count as usize))
+        .filter(|bytes| *bytes <= MAX_ATLAS_BYTES)
+        .ok_or_else(|| VisualRuntimeError::Admission("review mouth atlas is oversized".into()))?;
+    let texture_path = root.join(file_name);
+    let texture_metadata = std::fs::symlink_metadata(&texture_path).map_err(|_| {
+        VisualRuntimeError::Admission("review mouth atlas texture is missing".into())
+    })?;
+    let canonical_texture = texture_path.canonicalize().map_err(|_| {
+        VisualRuntimeError::Admission("review mouth atlas texture cannot be resolved".into())
+    })?;
+    if !texture_metadata.is_file()
+        || texture_metadata.file_type().is_symlink()
+        || texture_metadata.len() != expected_bytes as u64
+        || !canonical_texture.starts_with(&root)
+    {
+        return Err(VisualRuntimeError::Admission(
+            "review mouth atlas texture authority is invalid".into(),
+        ));
+    }
+    let pixels = std::fs::read(&canonical_texture).map_err(|_| {
+        VisualRuntimeError::Admission("review mouth atlas texture cannot be read".into())
+    })?;
+    let actual_texture_sha256 = sha256_hex(&pixels);
+    if !actual_texture_sha256.eq_ignore_ascii_case(&texture.sha256) {
+        return Err(VisualRuntimeError::Admission(
+            "review mouth atlas texture hash mismatch".into(),
+        ));
+    }
+    let state_bytes = texture.state_bytes as usize;
+    let mut states = Vec::with_capacity(manifest.states.len());
+    for (expected_index, state) in manifest.states.into_iter().enumerate() {
+        if state.index as usize != expected_index
+            || !state
+                .coefficients
+                .iter()
+                .all(|value| value.is_finite() && (0.0..=1.0).contains(value))
+            || !state.enrolled_pose.iter().all(|value| value.is_finite())
+        {
+            return Err(VisualRuntimeError::Admission(
+                "review mouth atlas state metadata is invalid".into(),
+            ));
+        }
+        let first = expected_index
+            .checked_mul(state_bytes)
+            .ok_or(VisualRuntimeError::Payload)?;
+        let last = first
+            .checked_add(state_bytes)
+            .ok_or(VisualRuntimeError::Payload)?;
+        let state_pixels = pixels
+            .get(first..last)
+            .ok_or(VisualRuntimeError::Payload)?
+            .to_vec();
+        if !state_pixels
+            .chunks_exact(4)
+            .all(|pixel| pixel[0] <= pixel[3] && pixel[1] <= pixel[3] && pixel[2] <= pixel[3])
+        {
+            return Err(VisualRuntimeError::Admission(
+                "review mouth atlas is not premultiplied BGRA".into(),
+            ));
+        }
+        states.push(CharacterMouthAtlasState {
+            coefficients: state.coefficients,
+            width: texture.width,
+            height: texture.height,
+            stride_bytes: texture.stride_bytes,
+            enrolled_pose: state.enrolled_pose,
+            premultiplied_bgra: state_pixels,
+        });
+    }
+    let manifest_sha256 = sha256_hex(&manifest_bytes);
+    Ok(CharacterMouthAtlas {
+        cancellation_generation: generation,
+        actor_id,
+        identity_revision: manifest.identity_revision,
+        content_sha256: sha256_hex(
+            format!("{manifest_sha256}\n{actual_texture_sha256}").as_bytes(),
+        ),
+        states,
+    })
+}
+
+#[cfg(debug_assertions)]
 fn verify_review_provider_file(
     root: &Path,
     relative: &Path,
@@ -3996,6 +4350,115 @@ pub enum VisualRuntimeError {
 mod tests {
     use super::*;
 
+    fn test_character_mouth_atlas() -> CharacterMouthAtlas {
+        let state = |jaw_open: f64, lip_close: f64, color: u8| {
+            let mut pixels = vec![0_u8; 24 * 16 * 4];
+            for pixel in pixels.chunks_exact_mut(4) {
+                pixel.copy_from_slice(&[
+                    color,
+                    color.saturating_add(1),
+                    color.saturating_add(2),
+                    255,
+                ]);
+            }
+            CharacterMouthAtlasState {
+                coefficients: [jaw_open, lip_close, 0.0, 0.0, 0.0, 0.0, 0.0, jaw_open],
+                width: 24,
+                height: 16,
+                stride_bytes: 96,
+                enrolled_pose: [0.0, 0.0, 0.0],
+                premultiplied_bgra: pixels,
+            }
+        };
+        CharacterMouthAtlas {
+            cancellation_generation: 7,
+            actor_id: 41,
+            identity_revision: 3,
+            content_sha256: "a".repeat(64),
+            states: vec![
+                state(0.0, 1.0, 20),
+                state(0.3, 0.2, 40),
+                state(0.7, 0.0, 60),
+                state(1.0, 0.0, 80),
+            ],
+        }
+    }
+
+    #[test]
+    fn character_mouth_atlas_wire_is_bounded_and_premultiplied() {
+        let atlas = test_character_mouth_atlas();
+        let encoded = encode_character_mouth_atlas(&atlas).expect("valid atlas wire");
+        assert!(encoded.len() < MAX_MESSAGE_BYTES);
+        assert_eq!(u32::from_le_bytes(encoded[0..4].try_into().unwrap()), 1);
+        assert_eq!(u64::from_le_bytes(encoded[4..12].try_into().unwrap()), 7);
+        assert_eq!(u64::from_le_bytes(encoded[12..20].try_into().unwrap()), 41);
+
+        let mut invalid = atlas;
+        invalid.states[0].premultiplied_bgra[0] = 255;
+        invalid.states[0].premultiplied_bgra[3] = 0;
+        assert!(matches!(
+            encode_character_mouth_atlas(&invalid),
+            Err(VisualRuntimeError::Payload)
+        ));
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn review_atlas_loader_hashes_and_binds_exact_pixels() {
+        let directory = tempfile::tempdir().expect("atlas scratch");
+        let state_bytes = 24 * 16 * 4;
+        let mut pixels = vec![0_u8; state_bytes * 4];
+        for pixel in pixels.chunks_exact_mut(4) {
+            pixel.copy_from_slice(&[20, 40, 80, 255]);
+        }
+        std::fs::write(directory.path().join("atlas.bin"), &pixels).expect("atlas pixels");
+        let texture_sha256 = sha256_hex(&pixels);
+        let states = (0..4)
+            .map(|index| {
+                serde_json::json!({
+                    "index": index,
+                    "coefficients": [index as f64 / 3.0, 1.0 - index as f64 / 3.0,
+                                      0.0, 0.0, 0.0, 0.0, 0.0, index as f64 / 3.0],
+                    "enrolledPose": [0.0, 0.0, 0.0]
+                })
+            })
+            .collect::<Vec<_>>();
+        let manifest = serde_json::json!({
+            "schemaVersion": 1,
+            "identityRevision": 19,
+            "texture": {
+                "file": "atlas.bin",
+                "sha256": texture_sha256,
+                "width": 24,
+                "height": 16,
+                "strideBytes": 96,
+                "stateCount": 4,
+                "stateBytes": state_bytes
+            },
+            "states": states
+        });
+        std::fs::write(
+            directory.path().join("atlas.json"),
+            serde_json::to_vec_pretty(&manifest).unwrap(),
+        )
+        .expect("atlas manifest");
+
+        let loaded = resolve_project_owned_review_atlas(Some(directory.path()), 7, 41)
+            .expect("verified atlas");
+        assert_eq!(loaded.cancellation_generation, 7);
+        assert_eq!(loaded.actor_id, 41);
+        assert_eq!(loaded.identity_revision, 19);
+        assert_eq!(loaded.states.len(), 4);
+        assert_eq!(loaded.states[3].premultiplied_bgra.len(), state_bytes);
+
+        pixels[0] ^= 1;
+        std::fs::write(directory.path().join("atlas.bin"), &pixels).expect("corrupt atlas");
+        assert!(matches!(
+            resolve_project_owned_review_atlas(Some(directory.path()), 7, 41),
+            Err(VisualRuntimeError::Admission(_))
+        ));
+    }
+
     #[test]
     fn visual_audio_binding_accepts_the_full_runtime_playback_pool() {
         let leases = (0..crate::media_broker::MAX_PLAYBACK_LEASES_PER_TURN)
@@ -4105,6 +4568,8 @@ mod tests {
                 development_fixture_allowed: true,
                 #[cfg(debug_assertions)]
                 review_openseeface_root: None,
+                #[cfg(debug_assertions)]
+                review_mouth_atlas_root: None,
             },
             parent,
             broker,
@@ -4175,6 +4640,8 @@ mod tests {
                 development_fixture_allowed: false,
                 #[cfg(debug_assertions)]
                 review_openseeface_root: None,
+                #[cfg(debug_assertions)]
+                review_mouth_atlas_root: None,
             },
             parent,
             broker,

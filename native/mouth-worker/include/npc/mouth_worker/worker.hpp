@@ -1,6 +1,6 @@
 #pragma once
 
-#include "npc/mouth_worker/types.hpp"
+#include "npc/mouth_worker/atlas.hpp"
 
 #include <optional>
 
@@ -16,6 +16,11 @@ public:
 
     // Generations only advance. Cancellation clears pending work synchronously.
     [[nodiscard]] bool cancel_to(std::uint64_t new_generation) noexcept;
+
+    // Atomically replace the optional identity-bound runtime atlas. Invalid,
+    // oversized, cross-generation, or cross-actor artifacts are rejected.
+    [[nodiscard]] bool install_atlas(CharacterMouthAtlas atlas);
+    void clear_atlas() noexcept;
 
     // The caller supplies the frame currently eligible for presentation. A job
     // for any other frame is consumed and fails open with no retained residual.
@@ -39,6 +44,7 @@ private:
     std::uint64_t active_generation_{};
     WorkerPolicy policy_;
     std::optional<WorkItem> pending_;
+    std::optional<CharacterMouthAtlas> atlas_;
     std::optional<MouthCoefficients> smoothed_pcm_coefficients_;
     std::optional<TrackBinding> smoothed_pcm_track_;
     std::uint64_t smoothed_pcm_segment_id_{};

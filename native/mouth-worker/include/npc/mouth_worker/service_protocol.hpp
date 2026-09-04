@@ -17,7 +17,8 @@ namespace npc::mouth::service {
 inline constexpr std::uint32_t protocol_magic = 0x3152574dU; // MWR1, little endian
 inline constexpr std::uint16_t protocol_version = 1U;
 inline constexpr std::size_t session_nonce_bytes = 32U;
-inline constexpr std::uint32_t maximum_message_bytes = 256U * 1024U;
+inline constexpr std::uint32_t maximum_atlas_bytes = 16U * 1024U * 1024U;
+inline constexpr std::uint32_t maximum_message_bytes = maximum_atlas_bytes + 512U * 1024U;
 inline constexpr std::uint32_t maximum_pcm_samples = 32U * 1024U;
 
 enum class CommandKind : std::uint16_t {
@@ -31,6 +32,8 @@ enum class CommandKind : std::uint16_t {
     // leased frame; it cannot inject landmark coordinates.
     render_with_admitted_landmarks = 6,
     configure_admitted_landmark_provider = 7,
+    install_character_mouth_atlas = 8,
+    clear_character_mouth_atlas = 9,
 };
 
 enum class StatusCode : std::uint16_t {
@@ -94,6 +97,10 @@ struct CancelGenerationCommandV1 {
 
 struct ConfigureAdmittedLandmarkProviderCommandV1 {
     AdmittedLandmarkProviderLaunchV1 launch;
+};
+
+struct InstallCharacterMouthAtlasCommandV1 {
+    CharacterMouthAtlas atlas;
 };
 
 struct AcknowledgeResidualCommandV1 {
@@ -181,6 +188,10 @@ decode_admitted_render_command(std::span<const std::byte> bytes);
     const ConfigureAdmittedLandmarkProviderCommandV1& command);
 [[nodiscard]] std::optional<ConfigureAdmittedLandmarkProviderCommandV1>
 decode_provider_configuration(std::span<const std::byte> bytes);
+[[nodiscard]] std::optional<std::vector<std::byte>> encode_character_mouth_atlas(
+    const InstallCharacterMouthAtlasCommandV1& command);
+[[nodiscard]] std::optional<InstallCharacterMouthAtlasCommandV1>
+decode_character_mouth_atlas(std::span<const std::byte> bytes);
 [[nodiscard]] std::vector<std::byte> encode_cancel_command(
     const CancelGenerationCommandV1& command);
 [[nodiscard]] std::optional<CancelGenerationCommandV1> decode_cancel_command(

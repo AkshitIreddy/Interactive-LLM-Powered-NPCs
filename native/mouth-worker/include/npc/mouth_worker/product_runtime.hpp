@@ -97,6 +97,9 @@ public:
         std::uint64_t new_generation,
         Nanoseconds now_ns) noexcept;
 
+    [[nodiscard]] bool install_atlas(CharacterMouthAtlas atlas);
+    void clear_atlas() noexcept;
+
     [[nodiscard]] std::uint64_t active_generation() const noexcept;
     [[nodiscard]] const WorkerStats& worker_stats() const noexcept;
 

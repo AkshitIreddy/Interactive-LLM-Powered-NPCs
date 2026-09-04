@@ -232,6 +232,17 @@ void write_coefficients(Writer& writer, const MouthCoefficients& value) {
     writer.floating(value.lower_lip_depress);
 }
 
+void write_pose(Writer& writer, const HeadPoseDegrees& value) {
+    writer.floating(value.yaw);
+    writer.floating(value.pitch);
+    writer.floating(value.roll);
+}
+
+[[nodiscard]] bool read_pose(Reader& reader, HeadPoseDegrees& value) {
+    return reader.floating(value.yaw) && reader.floating(value.pitch) &&
+           reader.floating(value.roll);
+}
+
 [[nodiscard]] bool read_coefficients(Reader& reader, MouthCoefficients& value) {
     return reader.floating(value.jaw_open) && reader.floating(value.lip_close) &&
            reader.floating(value.funnel) && reader.floating(value.pucker) &&
@@ -702,6 +713,72 @@ std::optional<ConfigureAdmittedLandmarkProviderCommandV1> decode_provider_config
     value.launch.runtime_library = path_from_utf8(runtime);
     value.launch.runtime_shared_library = path_from_utf8(runtime_shared);
     if (!validate_landmark_provider_launch_v1(value.launch)) return std::nullopt;
+    return value;
+}
+
+std::optional<std::vector<std::byte>> encode_character_mouth_atlas(
+    const InstallCharacterMouthAtlasCommandV1& command) {
+    const auto& atlas = command.atlas;
+    if (atlas.states.size() < 4U || atlas.states.size() > 16U) return std::nullopt;
+    std::uint64_t total_pixels{};
+    Writer writer;
+    writer.scalar(atlas.schema_version);
+    writer.scalar(atlas.cancellation_generation);
+    writer.scalar(atlas.actor_id);
+    writer.scalar(atlas.identity_revision);
+    writer.scalar(static_cast<std::uint32_t>(atlas.states.size()));
+    for (const auto& state : atlas.states) {
+        const auto& appearance = state.appearance;
+        if (appearance.premultiplied_bgra.size() > maximum_atlas_bytes) return std::nullopt;
+        total_pixels += appearance.premultiplied_bgra.size();
+        if (total_pixels > maximum_atlas_bytes) return std::nullopt;
+        write_coefficients(writer, state.coefficients);
+        writer.scalar(appearance.width);
+        writer.scalar(appearance.height);
+        writer.scalar(appearance.stride_bytes);
+        write_pose(writer, appearance.enrolled_pose);
+        writer.scalar(static_cast<std::uint32_t>(appearance.premultiplied_bgra.size()));
+        writer.raw(std::as_bytes(std::span{
+            appearance.premultiplied_bgra.data(), appearance.premultiplied_bgra.size()}));
+    }
+    auto result = std::move(writer).take();
+    if (result.size() > maximum_message_bytes) return std::nullopt;
+    return result;
+}
+
+std::optional<InstallCharacterMouthAtlasCommandV1> decode_character_mouth_atlas(
+    const std::span<const std::byte> bytes) {
+    if (bytes.empty() || bytes.size() > maximum_message_bytes) return std::nullopt;
+    Reader reader(bytes);
+    InstallCharacterMouthAtlasCommandV1 value{};
+    std::uint32_t state_count{};
+    if (!reader.scalar(value.atlas.schema_version) ||
+        !reader.scalar(value.atlas.cancellation_generation) ||
+        !reader.scalar(value.atlas.actor_id) ||
+        !reader.scalar(value.atlas.identity_revision) ||
+        !reader.scalar(state_count) || state_count < 4U || state_count > 16U) {
+        return std::nullopt;
+    }
+    value.atlas.states.reserve(state_count);
+    std::uint64_t total_pixels{};
+    for (std::uint32_t index = 0U; index < state_count; ++index) {
+        MouthAtlasState state{};
+        std::vector<std::byte> pixels;
+        if (!read_coefficients(reader, state.coefficients) ||
+            !reader.scalar(state.appearance.width) ||
+            !reader.scalar(state.appearance.height) ||
+            !reader.scalar(state.appearance.stride_bytes) ||
+            !read_pose(reader, state.appearance.enrolled_pose) ||
+            !reader.vector(pixels, maximum_atlas_bytes)) {
+            return std::nullopt;
+        }
+        total_pixels += pixels.size();
+        if (total_pixels > maximum_atlas_bytes) return std::nullopt;
+        state.appearance.premultiplied_bgra.resize(pixels.size());
+        std::memcpy(state.appearance.premultiplied_bgra.data(), pixels.data(), pixels.size());
+        value.atlas.states.push_back(std::move(state));
+    }
+    if (!reader.done()) return std::nullopt;
     return value;
 }
 
