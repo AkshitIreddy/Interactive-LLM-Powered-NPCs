@@ -1,6 +1,6 @@
 # Full-contour, spectrally driven headless lip-sync proof
 
-Date: 2026-09-04  
+Date: 2026-09-04
 Status: accepted isolated CPU component candidate; desktop and live-game gates remain open
 
 ## What changed

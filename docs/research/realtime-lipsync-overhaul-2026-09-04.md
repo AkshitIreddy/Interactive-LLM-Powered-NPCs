@@ -1,6 +1,6 @@
 # Real-time lip-sync overhaul: signal, renderer, and optional neural paths
 
-Research date: 2026-09-04  
+Research date: 2026-09-04
 Target: Windows 10/11, NVIDIA gaming laptops/desktops, API-first conversation,
 arbitrary externally captured moving faces, and a CPU-safe default lip renderer.
 
