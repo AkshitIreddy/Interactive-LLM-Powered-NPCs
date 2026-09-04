@@ -50,11 +50,11 @@ Notable 2.0 changes are recorded here. No 2.0 version has been published; versio
 - Completed local-only credential and synthetic provider smoke tests for Cohere, ElevenLabs, AssemblyAI, and the qualified NVIDIA NIM routes. Only redacted ignored evidence was retained; keys were never placed in tracked source or logs.
 - Passed a local Debug NSIS install/launch/forced-parent-termination/uninstall smoke with authenticated runtime/media-broker health, direct child topology, protected AppData ACLs, and no orphan process, file, shortcut, or registry residue. Runtime doctor was degraded only by the intentionally unsigned development catalog. The package is permanently classified `unchecked-development-package`, remains local and unsigned, and does not replace the clean Windows 10/11 VM matrix or count as RC evidence.
 - Regenerated a source-clean local Debug package at `cb43a7f` with the then-current 185,856-byte CPU mouth worker, silently installed it without launching the app, and passed closed-world reconciliation for 756 installed files, 755 manifested payload files, exact four-sidecar hashes, legal resources, and unclassified-file rejection. Later visual review rejected that mouth sidecar, so the v9 package is no longer valid lip-sync quality evidence. A v10 local directory overlays the replacement audited sidecar but is not newly reconciled installer evidence. Unsafe Windows broker GUI smoke tests remained excluded, so desktop lip-sync presentation is still unaccepted.
-- Built a clean-source `bf97079` Debug-review package after the sample-clocked
-  cue and spectral/full-contour upgrades. The v12 loose review directory and all
+- Built a clean-source `573f84a` Debug-review package after the sample-clocked
+  cue, spectral/full-contour, and stronger-jaw upgrades. The v13 loose review directory and all
   four sidecars are SHA-256/size matched to their manifests and pass GUI-
   subsystem/import audit. The app and installer were not launched or installed;
-  v12 remains `unchecked-development-package` and is not reconciliation or
+  v13 remains `unchecked-development-package` and is not reconciliation or
   desktop lip-sync presentation evidence.
 
 ### Verified locally

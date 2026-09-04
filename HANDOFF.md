@@ -14,19 +14,20 @@ headless artifacts unless the user explicitly asks to resume desktop testing.
 - Checkout: `C:\Users\akshi\Desktop\Code Palace\interactive llm\Interactive-LLM-Powered-NPCs`
 - Large build/model/cache root: `E:\temp\InteractiveNPCs`
 - Native source mirror: `E:\temp\IPNbuild`
-- Review app: `E:\temp\InteractiveNPCs\review-app-v12-sample-clock-visemes\interactive-npcs-control.exe`
-- Test game: `E:\temp\InteractiveNPCs\review-test-game-v12\interactive-npcs-synthetic-target.exe`
+- Review app: `E:\temp\InteractiveNPCs\review-app-v13-stronger-mouth\interactive-npcs-control.exe`
+- Test game: `E:\temp\InteractiveNPCs\review-test-game-v13\interactive-npcs-synthetic-target.exe`
 - Current headless video candidate: `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-pexels-man-v32-wider-opening\pexels-man-jason-wider-opening-lipsync.mp4`
 - Current headless report: `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-pexels-man-v32-wider-opening\headless-proof.json`
 - Current mouth-detail review: `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-pexels-man-v32-wider-opening\review\mouth-detail-sequence.png`
 - Male voice report: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\male-jason-v1\nvidia-nim.json`
 - Rejected v8 evidence: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\moving-pexels-man-v8-final`
 - Rejected v16 evidence: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\moving-pexels-man-v16-jason-source-preserving`
-- Local package manifest: `E:\temp\InteractiveNPCs\package-v12-viseme-cues\20260904T074412Z-d0a9875c90c54bbf934ffb0a2036dbea\package-manifest.json`
-- Local unchecked installer: `E:\temp\InteractiveNPCs\package-v12-viseme-cues\20260904T074412Z-d0a9875c90c54bbf934ffb0a2036dbea\Interactive NPCs Response Console_2.0.0-alpha.1_x64-setup.exe`
+- Local package manifest: `E:\temp\InteractiveNPCs\package-v13-stronger-mouth\20260904T080131Z-6f8a72b4495641edbc3b9b47ad788cbe\package-manifest.json`
+- Local unchecked installer: `E:\temp\InteractiveNPCs\package-v13-stronger-mouth\20260904T080131Z-6f8a72b4495641edbc3b9b47ad788cbe\Interactive NPCs Response Console_2.0.0-alpha.1_x64-setup.exe`
 - Installed reconciliation: `E:\temp\InteractiveNPCs\package-v9-refined\20260903T084130Z-d0670c5a63ea4dff9ff67d3ca1c917f0\installed-review-v9-manifest.json`
 
-The 2.0 overhaul has current lip-sync checkpoints at `236d5fe` and `32db853`.
+The 2.0 overhaul has current lip-sync checkpoints at `236d5fe`, `32db853`,
+and `ff54adc`.
 Preserve subsequent work,
 verify status before editing, and do not reset, clean, publish, or rewrite
 history without an explicit user request. Do not print, copy into logs, or
@@ -63,9 +64,9 @@ gates protected-upper-lip darkening separately so corrupt pixels cannot inflate
 the whole-mouth motion score. The earlier v8 render also remains rejected for its
 detached dark slit, flat white anatomy, and female Aria fixture on a male subject.
 
-Review-app-v12 is a local copy of the reconciled v9 review tree with the clean
-`bf97079` Debug-review control/runtime, warning-as-error-built Release native
-sidecars, and matching nested manifests. Its loose app matches the package
+Review-app-v13 is a local copy of the reconciled v9 review tree with the clean
+`573f84a` Debug-review control/runtime, warning-as-error-built Release native
+sidecars, the stronger-jaw mouth worker, and matching nested manifests. Its loose app matches the package
 manifest's pre-bundle SHA-256; all four sidecars match by SHA-256 and size, and
 all five executables passed GUI-subsystem/import audit. It has not been launched
 or installed and is not newly reconciled installer evidence. The older v9
@@ -84,7 +85,7 @@ compositor.
 - Media broker non-GUI suites: core, simulated display matrix, input transport,
   playback transport, and presentation context all passed
 - H.264/AAC output: 960x720, 30 FPS, 1.300 seconds, male Jason audio
-- Refined local Debug package: source-clean at `cb43a7f`, unsigned,
+- Current local Debug package: source-clean at `573f84a`, unsigned,
   `unchecked-development-package`, no publication/update-feed action
 - Silent install reconciliation: 756 installed files, 755 manifested payload
   files, exact four-sidecar and legal-resource reconciliation passed
