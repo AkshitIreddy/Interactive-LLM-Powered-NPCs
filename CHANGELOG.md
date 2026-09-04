@@ -28,6 +28,11 @@ Notable 2.0 changes are recorded here. No 2.0 version has been published; versio
   source-derived cavity shadow. The PCM fallback no longer paints procedural
   teeth or tongue. Its headless proof supports acquired face ROI carry and
   adaptive 10/15 Hz tracking while compositing at 30 FPS.
+- Corrected the source-preserving compositor after user review found that its
+  geometric seam and symmetric cavity cut through the upper lip. The fallback
+  now refines the contact seam from current-frame pixels, keeps the upper lip
+  stationary, opens downward through the lower jaw, and gates protected-upper-
+  lip darkening independently from whole-mouth motion.
 - Added explicit NVIDIA Magpie stock-voice selection to the provider smoke
   runner. It rejects ZeroShot/cloning identifiers and defaults deterministically
   to Jason, Leo, then Ray instead of preferring Aria/Sofia.
@@ -42,12 +47,13 @@ Notable 2.0 changes are recorded here. No 2.0 version has been published; versio
 - Passed 30 worker tests, 21 deterministic benchmark-harness tests, all 20 authored profile validations plus the synthetic review profile, and 22 deterministic simulation tests with 127 assertions across 13 scenarios.
 - Passed the five native media-broker non-GUI CTests plus the headless synthetic renderer/review-game contract. Unsafe Windows broker GUI smoke tests were not run; no live-game or performance result is claimed.
 - Validated 777 local documentation links across 150 files and passed current-tree secret scanning, strict license/provenance checks, and deterministic complete CycloneDX SBOM generation.
-- Rejected the first isolated mouth proof after close-up review found a detached
-  dark slit, flat synthetic teeth, and a female Aria fixture on a male subject;
-  its timing figures are retained only as failure evidence. The replacement
-  960x720 proof uses stock male Jason audio, source-preserving lip motion, and no
-  generated anatomy. It measured 29.251 ms p95 tracking at 10 Hz, 1.337 ms p95
-  compositing at 30 FPS, 0 GPU VRAM, and passed its headless motion gate.
+- Rejected both the first isolated mouth proof, which had a detached dark slit,
+  flat synthetic teeth, and a female Aria fixture, and the later v16 proof,
+  whose cavity crossed the upper lip despite passing its numeric motion gate.
+  The current 960x720 candidate uses stock male Jason audio, source-derived
+  contact-seam placement, stationary upper-lip pixels, and lower-jaw-only
+  opening. It measured 58.284 ms p95 moving tracking at 10 Hz, 1.847 ms p95
+  compositing at 30 FPS, 0 GPU VRAM, and zero protected-upper-lip darkening.
 
 ### Remaining integration gates
 

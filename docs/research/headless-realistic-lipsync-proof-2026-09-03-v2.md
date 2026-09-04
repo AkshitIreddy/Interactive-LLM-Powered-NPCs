@@ -1,8 +1,14 @@
 # Source-preserving headless lip-sync proof — 2026-09-03
 
+> **Rejected after user visual review on 2026-09-04.** The geometric midpoint
+> and symmetric cavity cut a dark hole through the subject's upper lip. Its
+> numeric motion gate rewarded those corrupt pixels. This file is retained as
+> failure evidence; see the
+> [upper-lip-protected replacement](headless-realistic-lipsync-proof-2026-09-04-v3.md).
+
 ## Verdict
 
-**Accepted as isolated component-review evidence.** This replacement addresses
+**Superseded failure evidence.** This revision addressed
 the two observed defects in the rejected v8 artifact: it uses the explicitly
 selected NVIDIA Magpie stock male voice
 `Magpie-Multilingual.EN-US.Jason`, and its PCM fallback warps source lip pixels

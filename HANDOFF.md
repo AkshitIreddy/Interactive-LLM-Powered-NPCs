@@ -1,6 +1,6 @@
 # Interactive LLM Powered NPCs 2.0 — headless visual-core handoff
 
-Updated: 2026-09-03 IST
+Updated: 2026-09-04 IST
 
 ## Current decision
 
@@ -14,12 +14,14 @@ headless artifacts unless the user explicitly asks to resume desktop testing.
 - Checkout: `C:\Users\akshi\Desktop\Code Palace\interactive llm\Interactive-LLM-Powered-NPCs`
 - Large build/model/cache root: `E:\temp\InteractiveNPCs`
 - Native source mirror: `E:\temp\IPNbuild`
-- Review app: `E:\temp\InteractiveNPCs\review-app-v10-source-preserving\interactive-npcs-control.exe`
+- Review app: `E:\temp\InteractiveNPCs\review-app-v11-upper-lip-protected\interactive-npcs-control.exe`
 - Test game: `E:\temp\local-app-data\test-game\interactive-npcs-synthetic-target.exe`
-- Accepted headless video: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\moving-pexels-man-v16-jason-source-preserving\pexels-man-jason-source-preserving-lipsync.mp4`
-- Accepted report: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\moving-pexels-man-v16-jason-source-preserving\headless-proof.json`
+- Current headless video candidate: `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-pexels-man-v21-upper-lip-protected\pexels-man-jason-upper-lip-protected.mp4`
+- Current headless report: `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-pexels-man-v21-upper-lip-protected\headless-proof.json`
+- Current source/rejected/fixed comparison: `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-pexels-man-v21-upper-lip-protected\visual-review\source-rejected-fixed.png`
 - Male voice report: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\male-jason-v1\nvidia-nim.json`
 - Rejected v8 evidence: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\moving-pexels-man-v8-final`
+- Rejected v16 evidence: `E:\temp\InteractiveNPCs\voice-lipsync-20260903\moving-pexels-man-v16-jason-source-preserving`
 - Local package manifest: `E:\temp\InteractiveNPCs\package-v9-refined\20260903T084130Z-d0670c5a63ea4dff9ff67d3ca1c917f0\package-manifest.json`
 - Installed reconciliation: `E:\temp\InteractiveNPCs\package-v9-refined\20260903T084130Z-d0670c5a63ea4dff9ff67d3ca1c917f0\installed-review-v9-manifest.json`
 
@@ -39,22 +41,25 @@ stock male voice `Magpie-Multilingual.EN-US.Jason` drove the actual
 - 40/40 residual frames
 - 39 changed adjacent output frames; 40 distinct frame digests
 - 32 changed adjacent source frames
-- moving OpenSeeFace 27.066 ms p50 / 29.251 ms p95 at adaptive 10 Hz
-- compositor 1.337 ms p95 at 30 FPS
-- 168,902,656 process private bytes with all source frames held by the proof harness
+- moving OpenSeeFace 27.303 ms p50 / 58.284 ms p95 at adaptive 10 Hz
+- compositor 1.847 ms p95 at 30 FPS
+- 169,140,224 process private bytes with all source frames held by the proof harness
 - 0 GPU VRAM
 - audio RMS 0.045705 / peak 0.373505; zero clipped samples
-- 27 frames above the material motion gate; mouth mean absolute delta 0.012 closed / 2.654 maximum
+- 18 frames above the material motion gate; mouth mean absolute delta 0.018 closed / 1.378 maximum
+- 0.000 maximum protected-upper-lip darkened fraction across all 40 frames
 
-Closed, opening, sustained, and return-to-closed frames were inspected. The
-replacement compositor preserves source lip/beard texture, narrows the blend to
-the measured lip seam, uses a source-derived cavity shadow, and does not paint
-procedural teeth or tongue. The earlier v8 render is **rejected** despite passing
-its numeric gate: visual review found a detached dark slit and flat white anatomy,
-and its fixture used the female Aria voice on a male subject.
+Closed, opening, sustained, and return-to-closed frames were inspected. User
+review rejected v16 because its geometric seam and symmetric cavity cut a dark
+hole through the upper lip. The current compositor finds the contact seam from
+current-frame pixels, keeps the upper lip stationary, opens downward with the
+lower jaw, and does not paint procedural teeth or tongue. The harness now gates
+protected-upper-lip darkening separately so corrupt pixels cannot inflate the
+whole-mouth motion score. The earlier v8 render also remains rejected for its
+detached dark slit, flat white anatomy, and female Aria fixture on a male subject.
 
-Review-app-v10 is a local copy of the reconciled v9 review tree with the new
-warning-as-error-built and PE-audited mouth sidecar plus its matching manifest.
+Review-app-v11 is a local copy of the reconciled v9 review tree with the new
+warning-as-error-built and PE-audited mouth sidecar plus matching nested manifests.
 It has not been launched and is not a newly reconciled installer. The older v9
 package remains useful package evidence but contains the rejected compositor.
 
@@ -76,9 +81,10 @@ package remains useful package evidence but contains the rejected compositor.
 
 ## Truth boundary
 
-The v16 headless visual core is accepted as efficient component evidence. It is a
+The v21 headless visual core is the current efficient component candidate. It is a
 causal energy-driven talking-mouth renderer, not a phoneme recognizer or full
 SadTalker-style head generator. The desktop app/broker presentation path is not
 accepted: the last live attempt did not play/present lip-sync, and no complete
 native visual presentation receipt exists. Do not claim that the review app's
-in-game lip-sync works until a future safe presentation test proves it.
+in-game lip-sync works until a future safe presentation test proves it. Do not
+restore v16 as accepted evidence; it failed the user's upper-lip visual review.
