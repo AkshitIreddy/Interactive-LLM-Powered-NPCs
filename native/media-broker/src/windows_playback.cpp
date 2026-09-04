@@ -35,6 +35,11 @@ using Microsoft::WRL::ComPtr;
 struct VisualAudioEnvelopeStore {
     mutable std::mutex mutex;
     std::optional<VisualAudioEnvelope> value;
+    std::string session_id;
+    std::string turn_id;
+    std::string stream_id;
+    std::uint64_t generation{};
+    std::vector<playback::VisualSpeechCue> visual_speech_cues;
 };
 
 namespace {
@@ -316,6 +321,15 @@ public:
         ring_ = &ring;
         lease_ = &lease;
         envelope_store_ = envelope_store;
+        if (envelope_store_) {
+            std::scoped_lock lock(envelope_store_->mutex);
+            envelope_store_->value.reset();
+            envelope_store_->session_id = lease.session_id;
+            envelope_store_->turn_id = lease.turn_id;
+            envelope_store_->stream_id = lease.stream_id;
+            envelope_store_->generation = lease.generation;
+            envelope_store_->visual_speech_cues.clear();
+        }
         HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_INPROC_SERVER,
                                       IID_PPV_ARGS(&enumerator_));
         if (FAILED(hr)) return fail(error, "Create WASAPI device enumerator", hr);
@@ -383,7 +397,10 @@ public:
         if (envelope_store_) {
             std::scoped_lock lock(envelope_store_->mutex);
             if (envelope_store_->value && lease_ &&
-                envelope_store_->value->stream_id == lease_->stream_id) {
+                envelope_store_->value->session_id == lease_->session_id &&
+                envelope_store_->value->turn_id == lease_->turn_id &&
+                envelope_store_->value->stream_id == lease_->stream_id &&
+                envelope_store_->value->generation == lease_->generation) {
                 envelope_store_->value->active = false;
                 envelope_store_->value->draining = true;
             }
@@ -427,15 +444,31 @@ private:
         enumerator_.Reset();
         if (ready_event_) CloseHandle(std::exchange(ready_event_, nullptr));
         if (shutdown_event_) CloseHandle(std::exchange(shutdown_event_, nullptr));
+        clear_envelope();
         ring_ = nullptr;
         lease_ = nullptr;
-        clear_envelope();
     }
 
 public:
     [[nodiscard]] bool failed() const noexcept { return failed_.load(std::memory_order_acquire); }
     [[nodiscard]] std::uint64_t device_frames() const noexcept {
         return device_frames_.load(std::memory_order_acquire);
+    }
+
+    void update_visual_speech_cues(
+        const std::vector<playback::VisualSpeechCue>& cues) noexcept {
+        if (!envelope_store_ || !lease_ ||
+            cues.size() > playback::maximum_visual_speech_cues) return;
+        std::scoped_lock lock(envelope_store_->mutex);
+        if (envelope_store_->session_id == lease_->session_id &&
+            envelope_store_->turn_id == lease_->turn_id &&
+            envelope_store_->stream_id == lease_->stream_id &&
+            envelope_store_->generation == lease_->generation) {
+            envelope_store_->visual_speech_cues = cues;
+            if (envelope_store_->value) {
+                envelope_store_->value->visual_speech_cues = cues;
+            }
+        }
     }
 
 private:
@@ -532,9 +565,16 @@ private:
     void clear_envelope() noexcept {
         if (!envelope_store_) return;
         std::scoped_lock lock(envelope_store_->mutex);
-        if (envelope_store_->value && lease_ &&
-            envelope_store_->value->stream_id == lease_->stream_id) {
+        if (lease_ && envelope_store_->session_id == lease_->session_id &&
+            envelope_store_->turn_id == lease_->turn_id &&
+            envelope_store_->stream_id == lease_->stream_id &&
+            envelope_store_->generation == lease_->generation) {
             envelope_store_->value.reset();
+            envelope_store_->session_id.clear();
+            envelope_store_->turn_id.clear();
+            envelope_store_->stream_id.clear();
+            envelope_store_->generation = 0;
+            envelope_store_->visual_speech_cues.clear();
         }
     }
 
@@ -593,6 +633,11 @@ private:
     void publish_envelope(std::optional<VisualAudioEnvelope> envelope) noexcept {
         if (!envelope_store_ || !envelope) return;
         std::scoped_lock lock(envelope_store_->mutex);
+        if (envelope_store_->session_id != envelope->session_id ||
+            envelope_store_->turn_id != envelope->turn_id ||
+            envelope_store_->stream_id != envelope->stream_id ||
+            envelope_store_->generation != envelope->generation) return;
+        envelope->visual_speech_cues = envelope_store_->visual_speech_cues;
         envelope_store_->value = std::move(*envelope);
     }
 };
@@ -702,6 +747,9 @@ struct PlaybackEndpoint::Impl {
                     response.status = playback::ProducerStatus::device_unavailable;
                     response.receipt = session.receipt();
                 }
+            } else if (command == playback::ProducerCommand::visual_cue &&
+                       response.status == playback::ProducerStatus::ok) {
+                device.update_visual_speech_cues(session.visual_speech_cues());
             } else if (command == playback::ProducerCommand::finish &&
                        response.status == playback::ProducerStatus::ok) {
                 device.finish_source();

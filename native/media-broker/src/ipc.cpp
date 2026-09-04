@@ -2864,14 +2864,30 @@ std::optional<std::vector<std::byte>> encode_visual_audio_envelope(
     const auto valid = [](const std::string& text) {
         return !text.empty() && text.size() <= 128 && text.find('\0') == std::string::npos;
     };
+    const auto valid_cues = [](const std::vector<playback::VisualSpeechCue>& cues) {
+        if (cues.size() > playback::maximum_visual_speech_cues) return false;
+        std::uint64_t previous_end{};
+        bool first = true;
+        for (const auto& cue : cues) {
+            if (!playback::valid_visual_speech_cue(
+                    cue, std::numeric_limits<std::uint64_t>::max()) ||
+                (!first && cue.start_sample < previous_end)) return false;
+            previous_end = cue.start_sample + cue.duration_samples;
+            first = false;
+        }
+        return true;
+    };
+    const bool source_range_valid =
+        envelope.source_sample_start <=
+            std::numeric_limits<std::uint64_t>::max() - envelope.source_sample_count &&
+        envelope.source_frames >= envelope.source_sample_start + envelope.source_sample_count;
     if (envelope.schema_version != 1 || !valid(envelope.session_id) ||
         !valid(envelope.turn_id) || envelope.generation == 0 ||
         !valid(envelope.stream_id) || !valid(envelope.segment_id) ||
         envelope.source_sample_count == 0 || envelope.sample_rate < 8'000 ||
         envelope.sample_rate > 192'000 || envelope.channels == 0 || envelope.channels > 2 ||
-        envelope.device_write_qpc == 0 || envelope.qpc_frequency == 0 ||
-        envelope.source_frames < envelope.source_sample_start + envelope.source_sample_count ||
-        envelope.device_frames == 0 || envelope.cancelled ||
+        envelope.device_write_qpc == 0 || envelope.qpc_frequency == 0 || !source_range_valid ||
+        envelope.device_frames == 0 || envelope.cancelled || !valid_cues(envelope.visual_speech_cues) ||
         (envelope.active == envelope.draining)) return std::nullopt;
     Writer writer;
     writer.varint_field(1, envelope.schema_version);
@@ -2893,6 +2909,14 @@ std::optional<std::vector<std::byte>> encode_visual_audio_envelope(
     writer.varint_field(17, envelope.active ? 1U : 0U);
     writer.varint_field(18, envelope.draining ? 1U : 0U);
     writer.varint_field(19, envelope.cancelled ? 1U : 0U);
+    for (const auto& cue : envelope.visual_speech_cues) {
+        Writer nested;
+        nested.varint_field(1, cue.start_sample);
+        nested.varint_field(2, cue.duration_samples);
+        nested.varint_field(3, cue.canonical_viseme);
+        nested.varint_field(4, cue.strength_q15);
+        writer.bytes_field(20, std::move(nested).finish());
+    }
     auto result = std::move(writer).finish();
     return result.size() <= maximum_frame_bytes ? std::optional{std::move(result)}
                                                  : std::nullopt;
@@ -2938,6 +2962,64 @@ std::optional<VisualAudioEnvelope> decode_visual_audio_envelope(
         case 17: active_seen = read_varint_as(reader, *field, result.active); break;
         case 18: draining_seen = read_varint_as(reader, *field, result.draining); break;
         case 19: cancelled_seen = read_varint_as(reader, *field, result.cancelled); break;
+        case 20: {
+            if (result.visual_speech_cues.size() >= playback::maximum_visual_speech_cues) {
+                return std::nullopt;
+            }
+            const auto nested_bytes = reader.read_bytes(*field);
+            if (!nested_bytes) return std::nullopt;
+            Reader nested(*nested_bytes);
+            playback::VisualSpeechCue cue;
+            std::uint32_t viseme{};
+            std::uint32_t strength{};
+            bool cue_start_seen{}, cue_duration_seen{}, cue_viseme_seen{}, cue_strength_seen{};
+            while (const auto cue_field = nested.next()) {
+                switch (cue_field->number) {
+                case 1:
+                    if (cue_start_seen || !read_varint_as(nested, *cue_field, cue.start_sample)) {
+                        return std::nullopt;
+                    }
+                    cue_start_seen = true;
+                    break;
+                case 2:
+                    if (cue_duration_seen ||
+                        !read_varint_as(nested, *cue_field, cue.duration_samples)) {
+                        return std::nullopt;
+                    }
+                    cue_duration_seen = true;
+                    break;
+                case 3:
+                    if (cue_viseme_seen || !read_varint_as(nested, *cue_field, viseme)) {
+                        return std::nullopt;
+                    }
+                    cue_viseme_seen = true;
+                    break;
+                case 4:
+                    if (cue_strength_seen || !read_varint_as(nested, *cue_field, strength)) {
+                        return std::nullopt;
+                    }
+                    cue_strength_seen = true;
+                    break;
+                default:
+                    if (!nested.skip(*cue_field)) return std::nullopt;
+                    break;
+                }
+            }
+            if (!nested.good() || !cue_start_seen || !cue_duration_seen || !cue_viseme_seen ||
+                !cue_strength_seen || viseme > 10 || strength > 32'767) return std::nullopt;
+            cue.canonical_viseme = static_cast<std::uint8_t>(viseme);
+            cue.strength_q15 = static_cast<std::uint16_t>(strength);
+            if (!playback::valid_visual_speech_cue(
+                    cue, std::numeric_limits<std::uint64_t>::max())) return std::nullopt;
+            if (!result.visual_speech_cues.empty()) {
+                const auto& previous = result.visual_speech_cues.back();
+                if (cue.start_sample < previous.start_sample + previous.duration_samples) {
+                    return std::nullopt;
+                }
+            }
+            result.visual_speech_cues.push_back(cue);
+            break;
+        }
         default: if (!reader.skip(*field)) return std::nullopt;
         }
     }

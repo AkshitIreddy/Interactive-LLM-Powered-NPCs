@@ -239,6 +239,8 @@ pub struct AlignmentEvent {
     pub text_offset: usize,
     pub text_length: usize,
     pub audio_offset: Duration,
+    #[serde(default)]
+    pub audio_duration: Option<Duration>,
     pub viseme: Option<String>,
 }
 
@@ -495,6 +497,21 @@ impl TurnEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn alignment_event_accepts_legacy_payload_without_audio_duration() {
+        let event: AlignmentEvent = serde_json::from_value(serde_json::json!({
+            "text_offset": 4,
+            "text_length": 7,
+            "audio_offset": { "secs": 0, "nanos": 8_000_000 },
+            "viseme": "PP"
+        }))
+        .expect("legacy alignment event remains compatible");
+
+        assert_eq!(event.audio_offset, Duration::from_millis(8));
+        assert_eq!(event.audio_duration, None);
+        assert_eq!(event.viseme.as_deref(), Some("PP"));
+    }
 
     #[test]
     fn effects_reject_invalid_numeric_proposals_and_filter_actions() {

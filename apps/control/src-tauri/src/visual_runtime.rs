@@ -3281,6 +3281,33 @@ fn drive_from_visual_audio_envelope(
     .min(bin_count.saturating_sub(1));
     let rms = f64::from(envelope.mono_rms_q15[bin_index]) / 32_767.0;
     let peak = f64::from(envelope.mono_peak_q15[bin_index]) / 32_767.0;
+    let source_sample_offset = u64::try_from(
+        i128::from(elapsed_ns)
+            .saturating_mul(i128::from(envelope.sample_rate))
+            .checked_div(1_000_000_000)
+            .unwrap_or_default(),
+    )
+    .unwrap_or_default()
+    .min(u64::from(envelope.source_sample_count).saturating_sub(1));
+    let playback_source_sample = envelope
+        .source_sample_start
+        .saturating_add(source_sample_offset);
+    if let Some((cue, strength)) = select_visual_speech_cue(
+        &envelope.visual_speech_cues,
+        playback_source_sample,
+        envelope.sample_rate,
+    ) {
+        return Ok(MouthDrive::TimedViseme {
+            stream_generation: envelope.generation,
+            segment_id: stable_nonzero_id(&envelope.stream_id),
+            first_sample_index: playback_source_sample,
+            sample_rate: envelope.sample_rate,
+            channels: envelope.channels,
+            playback_at_ns: render_at_ns,
+            viseme: cue.canonical_viseme,
+            strength,
+        });
+    }
     // This is intentionally an amplitude-only procedural drive. The broker's
     // eight bins are temporal energy evidence, not phoneme classes; mapping
     // them to invented visemes would overclaim the signal.
@@ -3309,6 +3336,78 @@ fn drive_from_visual_audio_envelope(
         playback_at_ns: render_at_ns,
         coefficients,
     })
+}
+
+fn select_visual_speech_cue(
+    cues: &[crate::media_broker::VisualSpeechCue],
+    playback_source_sample: u64,
+    sample_rate: u32,
+) -> Option<(&crate::media_broker::VisualSpeechCue, f64)> {
+    if cues.is_empty() || !(8_000..=192_000).contains(&sample_rate) {
+        return None;
+    }
+
+    let next_index = cues.partition_point(|cue| cue.start_sample <= playback_source_sample);
+    if let Some(active) = next_index
+        .checked_sub(1)
+        .and_then(|index| cues.get(index))
+        .filter(|cue| {
+            playback_source_sample < cue.start_sample.saturating_add(cue.duration_samples)
+        })
+    {
+        return Some((active, f64::from(active.strength_q15) / 32_767.0));
+    }
+
+    const ANTICIPATION_MS: u64 = 50;
+    const RELEASE_MS: u64 = 80;
+    let anticipation_samples = u64::from(sample_rate).saturating_mul(ANTICIPATION_MS) / 1_000;
+    let release_samples = u64::from(sample_rate).saturating_mul(RELEASE_MS) / 1_000;
+
+    let anticipated = cues.get(next_index).and_then(|cue| {
+        let distance = cue.start_sample.saturating_sub(playback_source_sample);
+        (distance <= anticipation_samples && anticipation_samples > 0).then(|| {
+            let proximity = 1.0 - distance as f64 / anticipation_samples as f64;
+            (cue, (f64::from(cue.strength_q15) / 32_767.0) * proximity)
+        })
+    });
+    let released = next_index
+        .checked_sub(1)
+        .and_then(|index| cues.get(index))
+        .and_then(|cue| {
+            let end = cue.start_sample.saturating_add(cue.duration_samples);
+            let distance = playback_source_sample.saturating_sub(end);
+            (distance <= release_samples && release_samples > 0).then(|| {
+                let proximity = 1.0 - distance as f64 / release_samples as f64;
+                (cue, (f64::from(cue.strength_q15) / 32_767.0) * proximity)
+            })
+        });
+
+    match (released, anticipated) {
+        (Some(release), Some(anticipation)) => {
+            // A strong /p/, /b/, or /m/ seal must not be weakened by a nearby
+            // vowel transition. Active cues were returned above; in a gap we
+            // also retain a perceptible closure while its release is strong.
+            if release.0.canonical_viseme == 1
+                && release.0.strength_q15 >= 24_575
+                && release.1 >= 0.25
+            {
+                Some(release)
+            } else if anticipation.0.canonical_viseme == 1
+                && anticipation.0.strength_q15 >= 24_575
+                && anticipation.1 >= 0.25
+            {
+                Some(anticipation)
+            } else if anticipation.1 > release.1 {
+                Some(anticipation)
+            } else {
+                Some(release)
+            }
+        }
+        (Some(release), None) => Some(release),
+        (None, Some(anticipation)) => Some(anticipation),
+        (None, None) => None,
+    }
+    .filter(|(_, strength)| *strength > 0.0)
 }
 
 fn qpc_value_to_ns(value: u64, frequency: u64) -> Result<i64, VisualRuntimeError> {
@@ -4210,6 +4309,7 @@ mod tests {
             active: true,
             draining: false,
             cancelled: false,
+            visual_speech_cues: Vec::new(),
         };
         let drive = drive_from_visual_audio_envelope(&envelope, 1_500_000).expect("causal drive");
         match drive {
@@ -4257,6 +4357,164 @@ mod tests {
             drive_from_visual_audio_envelope(&envelope, 1_500_000),
             Err(VisualRuntimeError::AudioAuthority)
         ));
+    }
+
+    #[test]
+    fn command29_selects_the_exact_active_sample_clock_cue() {
+        let mut envelope = visual_speech_test_envelope();
+        envelope.visual_speech_cues = vec![crate::media_broker::VisualSpeechCue {
+            start_sample: 1_440,
+            duration_samples: 480,
+            canonical_viseme: 9,
+            strength_q15: 30_000,
+        }];
+
+        let drive = drive_from_visual_audio_envelope(&envelope, 11_000_000)
+            .expect("active cue must be authoritative");
+        match drive {
+            MouthDrive::TimedViseme {
+                stream_generation,
+                segment_id,
+                first_sample_index,
+                sample_rate,
+                channels,
+                playback_at_ns,
+                viseme,
+                strength,
+            } => {
+                assert_eq!(stream_generation, 7);
+                assert_eq!(segment_id, stable_nonzero_id("pcm-001"));
+                assert_eq!(first_sample_index, 1_440);
+                assert_eq!(sample_rate, 48_000);
+                assert_eq!(channels, 1);
+                assert_eq!(playback_at_ns, 11_000_000);
+                assert_eq!(viseme, 9);
+                assert!((strength - 30_000.0 / 32_767.0).abs() < f64::EPSILON);
+            }
+            other => panic!("active sample-clock cue became {other:?}"),
+        }
+    }
+
+    #[test]
+    fn command29_coarticulates_only_inside_bounded_anticipation_and_release_windows() {
+        let mut envelope = visual_speech_test_envelope();
+
+        envelope.visual_speech_cues = vec![crate::media_broker::VisualSpeechCue {
+            start_sample: 3_840,
+            duration_samples: 480,
+            canonical_viseme: 10,
+            strength_q15: 32_767,
+        }];
+        let anticipated = drive_from_visual_audio_envelope(&envelope, 31_000_000)
+            .expect("cue 30ms ahead is inside anticipation");
+        assert_timed_viseme(anticipated, 2_400, 10, 0.40);
+
+        envelope.visual_speech_cues = vec![crate::media_broker::VisualSpeechCue {
+            start_sample: 960,
+            duration_samples: 480,
+            canonical_viseme: 9,
+            strength_q15: 32_767,
+        }];
+        let released = drive_from_visual_audio_envelope(&envelope, 41_000_000)
+            .expect("cue 30ms behind is inside release");
+        assert_timed_viseme(released, 2_880, 9, 0.625);
+
+        // Even when a following vowel has the larger transition weight, a
+        // strong /p/, /b/, or /m/ closure remains visible during its release.
+        envelope.visual_speech_cues = vec![
+            crate::media_broker::VisualSpeechCue {
+                start_sample: 960,
+                duration_samples: 480,
+                canonical_viseme: 1,
+                strength_q15: 32_767,
+            },
+            crate::media_broker::VisualSpeechCue {
+                start_sample: 4_608,
+                duration_samples: 480,
+                canonical_viseme: 9,
+                strength_q15: 32_767,
+            },
+        ];
+        let closure = drive_from_visual_audio_envelope(&envelope, 67_000_000)
+            .expect("strong bilabial release remains decisive");
+        assert_timed_viseme(closure, 4_128, 1, 0.30);
+
+        envelope.visual_speech_cues = vec![crate::media_broker::VisualSpeechCue {
+            start_sample: 4_800,
+            duration_samples: 480,
+            canonical_viseme: 10,
+            strength_q15: 32_767,
+        }];
+        assert!(matches!(
+            drive_from_visual_audio_envelope(&envelope, 31_000_000),
+            Ok(MouthDrive::CausalEnvelopeCoefficients { .. })
+        ));
+    }
+
+    #[test]
+    fn command29_suppresses_cues_from_stale_or_inactive_envelopes() {
+        let mut envelope = visual_speech_test_envelope();
+        envelope.visual_speech_cues = vec![crate::media_broker::VisualSpeechCue {
+            start_sample: 10_559,
+            duration_samples: 480,
+            canonical_viseme: 9,
+            strength_q15: 32_767,
+        }];
+        assert!(matches!(
+            drive_from_visual_audio_envelope(&envelope, 451_000_001),
+            Err(VisualRuntimeError::AudioAuthority)
+        ));
+        envelope.active = false;
+        assert!(matches!(
+            drive_from_visual_audio_envelope(&envelope, 11_000_000),
+            Err(VisualRuntimeError::AudioAuthority)
+        ));
+    }
+
+    fn visual_speech_test_envelope() -> VisualAudioEnvelope {
+        VisualAudioEnvelope {
+            schema_version: 1,
+            session_id: "session-1".into(),
+            turn_id: "turn-1".into(),
+            generation: 7,
+            stream_id: "pcm-001".into(),
+            segment_id: "pcm-001".into(),
+            source_sample_start: 960,
+            source_sample_count: 9_600,
+            sample_rate: 48_000,
+            channels: 1,
+            device_write_qpc: 10_000,
+            qpc_frequency: 10_000_000,
+            source_frames: 10_560,
+            device_frames: 10_560,
+            mono_rms_q15: [4_096; 8],
+            mono_peak_q15: [8_192; 8],
+            active: true,
+            draining: false,
+            cancelled: false,
+            visual_speech_cues: Vec::new(),
+        }
+    }
+
+    fn assert_timed_viseme(
+        drive: MouthDrive,
+        expected_sample: u64,
+        expected_viseme: u8,
+        expected_strength: f64,
+    ) {
+        match drive {
+            MouthDrive::TimedViseme {
+                first_sample_index,
+                viseme,
+                strength,
+                ..
+            } => {
+                assert_eq!(first_sample_index, expected_sample);
+                assert_eq!(viseme, expected_viseme);
+                assert!((strength - expected_strength).abs() < 0.000_001);
+            }
+            other => panic!("expected timed viseme, received {other:?}"),
+        }
     }
 
     #[test]

@@ -14,6 +14,7 @@
 #include <iostream>
 #include <span>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -79,6 +80,26 @@ std::vector<std::byte> quiet_sine(const std::uint32_t frames,
     return bytes;
 }
 
+template <typename T>
+void append_little(std::vector<std::byte>& output, const T value) {
+    static_assert(std::is_unsigned_v<T>);
+    for (unsigned shift = 0; shift < sizeof(T) * 8; shift += 8) {
+        output.push_back(static_cast<std::byte>((value >> shift) & 0xffU));
+    }
+}
+
+std::vector<std::byte> visual_cue_payload(const playback::VisualSpeechCue& cue) {
+    std::vector<std::byte> payload;
+    payload.reserve(playback::visual_speech_cue_payload_bytes);
+    append_little(payload, playback::visual_speech_cue_schema_version);
+    append_little(payload, cue.start_sample);
+    append_little(payload, cue.duration_samples);
+    payload.push_back(static_cast<std::byte>(cue.canonical_viseme));
+    payload.push_back(std::byte{});
+    append_little(payload, cue.strength_q15);
+    return payload;
+}
+
 } // namespace
 
 int main() {
@@ -140,8 +161,16 @@ int main() {
         std::cerr << '\n';
         return 1;
     }
-    const auto chunk = transact(pipe, request(*lease, playback::ProducerCommand::chunk, 2,
-                                              quiet_sine(frames, sample_rate)));
+    const playback::VisualSpeechCue expected_cue{240, 720, 7, 28'000};
+    const auto cue = transact(pipe, request(*lease, playback::ProducerCommand::visual_cue, 2,
+                                            visual_cue_payload(expected_cue)));
+    if (!cue || cue->status != playback::ProducerStatus::ok ||
+        cue->accepted_source_frames != 0) {
+        std::cerr << "Visual cue failed\n";
+        return 1;
+    }
+    const auto chunk = transact(pipe, request(*lease, playback::ProducerCommand::chunk, 3,
+                                               quiet_sine(frames, sample_rate)));
     if (!chunk || chunk->status != playback::ProducerStatus::ok ||
         chunk->accepted_source_frames != frames) {
         std::cerr << "Chunk failed\n";
@@ -164,7 +193,9 @@ int main() {
         live_envelope->device_frames == 0 ||
         std::none_of(live_envelope->mono_peak_q15.begin(),
                      live_envelope->mono_peak_q15.end(),
-                     [](const auto value) { return value > 0; })) {
+                     [](const auto value) { return value > 0; }) ||
+        live_envelope->visual_speech_cues !=
+            std::vector<playback::VisualSpeechCue>{expected_cue}) {
         std::cerr << "post-ReleaseBuffer visual envelope was unavailable or malformed\n";
         return 1;
     }
@@ -174,7 +205,7 @@ int main() {
         std::cerr << "visual envelope accepted a mismatched stream identity\n";
         return 1;
     }
-    const auto finish = transact(pipe, request(*lease, playback::ProducerCommand::finish, 3));
+    const auto finish = transact(pipe, request(*lease, playback::ProducerCommand::finish, 4));
     CloseHandle(pipe);
     if (!finish || finish->status != playback::ProducerStatus::ok || !finish->receipt) {
         std::cerr << "Finish failed\n";

@@ -26,6 +26,9 @@ inline constexpr std::uint32_t minimum_sample_rate = 8'000;
 inline constexpr std::uint32_t maximum_sample_rate = 192'000;
 inline constexpr std::uint16_t maximum_channels = 2;
 inline constexpr std::size_t authentication_token_bytes = 32;
+inline constexpr std::uint32_t visual_speech_cue_schema_version = 1;
+inline constexpr std::size_t visual_speech_cue_payload_bytes = 24;
+inline constexpr std::size_t maximum_visual_speech_cues = 128;
 
 using AuthenticationToken = std::array<std::byte, authentication_token_bytes>;
 
@@ -39,6 +42,7 @@ enum class ProducerCommand : std::uint16_t {
     chunk = 2,
     finish = 3,
     cancel = 4,
+    visual_cue = 5,
 };
 
 enum class ProducerStatus : std::uint16_t {
@@ -109,6 +113,15 @@ struct ProducerEnvelope {
     std::vector<std::byte> payload;
 };
 
+struct VisualSpeechCue {
+    std::uint64_t start_sample{};
+    std::uint64_t duration_samples{};
+    std::uint8_t canonical_viseme{};
+    std::uint16_t strength_q15{};
+
+    bool operator==(const VisualSpeechCue&) const = default;
+};
+
 struct PlaybackReceipt {
     std::uint32_t schema_version{playback::schema_version};
     std::string receipt_id;
@@ -145,6 +158,10 @@ struct ValidationPolicy {
                                        const AuthenticationToken& right) noexcept;
 void clear_authentication_token(AuthenticationToken& token) noexcept;
 [[nodiscard]] std::string_view to_string(ProducerStatus status) noexcept;
+[[nodiscard]] bool valid_visual_speech_cue(const VisualSpeechCue& cue,
+                                           std::uint64_t maximum_frames) noexcept;
+[[nodiscard]] std::optional<VisualSpeechCue> decode_visual_speech_cue_payload(
+    std::span<const std::byte> payload, std::uint64_t maximum_frames) noexcept;
 
 // Binary producer wire contract. Each encoded body is prefixed by a little-endian
 // u32 body length. The decoder rejects unknown commands and any frame larger than
@@ -183,6 +200,9 @@ public:
     [[nodiscard]] PlaybackReceipt receipt() const;
     [[nodiscard]] std::uint64_t source_frames() const noexcept { return source_frames_; }
     [[nodiscard]] std::uint64_t device_frames() const noexcept { return device_frames_; }
+    [[nodiscard]] const std::vector<VisualSpeechCue>& visual_speech_cues() const noexcept {
+        return visual_speech_cues_;
+    }
 
 private:
     [[nodiscard]] ProducerStatus authenticate(const ProducerEnvelope& envelope,
@@ -200,6 +220,7 @@ private:
     std::uint64_t last_sequence_{};
     std::uint64_t source_frames_{};
     std::uint64_t device_frames_{};
+    std::vector<VisualSpeechCue> visual_speech_cues_;
     bool token_consumed_{};
     bool source_submission_complete_{};
     bool endpoint_drain_complete_{};

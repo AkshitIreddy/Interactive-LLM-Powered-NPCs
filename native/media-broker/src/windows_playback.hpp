@@ -62,6 +62,7 @@ struct VisualAudioEnvelope {
     std::uint64_t device_frames{};
     std::array<std::uint16_t, 8> mono_rms_q15{};
     std::array<std::uint16_t, 8> mono_peak_q15{};
+    std::vector<playback::VisualSpeechCue> visual_speech_cues;
     bool active{};
     bool draining{};
     bool cancelled{};

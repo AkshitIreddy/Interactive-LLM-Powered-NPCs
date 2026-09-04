@@ -172,6 +172,13 @@ message QueryVisualAudioEnvelope {
 
 // Read-only, causal post-WASAPI-ReleaseBuffer evidence. No PCM or shared-memory
 // capability is exposed. The latest value is unavailable after drain/cancel/device loss.
+message VisualSpeechCue {
+  uint64 start_sample = 1;
+  uint64 duration_samples = 2;
+  uint32 canonical_viseme = 3; // canonical runtime viseme, 0..10
+  uint32 strength_q15 = 4;     // 0..32767
+}
+
 message VisualAudioEnvelope {
   uint32 schema_version = 1;
   string session_id = 2;
@@ -192,6 +199,7 @@ message VisualAudioEnvelope {
   bool active = 17;
   bool draining = 18;
   bool cancelled = 19;
+  repeated VisualSpeechCue visual_speech_cues = 20; // ordered, non-overlapping, max 128
 }
 
 message QueryPttActivationState {}

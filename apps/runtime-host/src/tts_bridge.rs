@@ -309,12 +309,13 @@ pub struct RuntimeTtsBridgeConfig {
 impl RuntimeTtsBridgeConfig {
     #[must_use]
     pub fn dev_elevenlabs_stock(descriptor: ProviderDescriptor) -> Self {
+        let request_visemes = descriptor_supports_visemes(&descriptor);
         Self {
             descriptor,
             voice_intent_id: "dev.elevenlabs.stock".to_owned(),
             output: AudioFormat::default(),
             request_alignment: true,
-            request_visemes: false,
+            request_visemes,
             clause_policy: SemanticClausePolicy::default(),
         }
     }
@@ -325,12 +326,13 @@ impl RuntimeTtsBridgeConfig {
         voice_intent_id: impl Into<String>,
         output: AudioFormat,
     ) -> Self {
+        let request_visemes = descriptor_supports_visemes(&descriptor);
         Self {
             descriptor,
             voice_intent_id: voice_intent_id.into(),
             output,
             request_alignment: true,
-            request_visemes: false,
+            request_visemes,
             clause_policy: SemanticClausePolicy::default(),
         }
     }
@@ -370,6 +372,13 @@ impl RuntimeTtsBridgeConfig {
     }
 }
 
+fn descriptor_supports_visemes(descriptor: &ProviderDescriptor) -> bool {
+    descriptor
+        .capabilities
+        .get("visemes_or_phonemes")
+        .is_some_and(|value| value.eq_ignore_ascii_case("true"))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum BridgeConfigError {
     #[error("provider descriptor id does not match the upstream TTS provider")]
@@ -404,6 +413,7 @@ impl RuntimeTtsBridge {
     ) -> Result<Self, BridgeConfigError> {
         config.validate(upstream.id())?;
         config.descriptor = canonical_descriptor(upstream.as_ref());
+        config.request_visemes = descriptor_supports_visemes(&config.descriptor);
         Ok(Self { upstream, config })
     }
 }
@@ -674,6 +684,7 @@ fn validated_stream(
                             text_offset: word.source_text_start.unwrap_or(0),
                             text_length: word.source_text_length.unwrap_or(word.word.len()),
                             audio_offset: Duration::from_millis(word.start_ms),
+                            audio_duration: None,
                             viseme: None,
                         })
                     }));
@@ -684,6 +695,7 @@ fn validated_stream(
                             text_offset: 0,
                             text_length: 0,
                             audio_offset: Duration::from_millis(viseme.start_ms),
+                            audio_duration: Some(Duration::from_millis(viseme.duration_ms)),
                             viseme: Some(viseme.symbol),
                         })
                     }));
@@ -880,7 +892,8 @@ mod tests {
     use futures_util::{StreamExt, TryStreamExt};
     use interactive_npcs_credential_vault::{SecretValue, VaultError};
     use npc_providers_tts::{
-        NvidiaVoiceOrigin, ProviderCapabilities, PushOutcome, SessionState, TtsEvent, WordAlignment,
+        NvidiaVoiceOrigin, ProviderCapabilities, PushOutcome, SessionState, TtsEvent, VisemeEvent,
+        WordAlignment,
     };
 
     #[derive(Clone)]
@@ -1127,6 +1140,8 @@ mod tests {
         assert!(requests.iter().all(|request| {
             request.voice_intent_id == "dev.elevenlabs.stock"
                 && request.output == AudioFormat::default()
+                && request.request_alignment
+                && request.request_visemes
                 && request.identity
                     == SessionIdentity {
                         session_id: "session-7".to_owned(),
@@ -1134,6 +1149,40 @@ mod tests {
                         cancellation_generation: 3,
                     }
         }));
+    }
+
+    #[tokio::test]
+    async fn preserves_provider_viseme_duration_in_runtime_alignment_event() {
+        let plan = FakeSessionPlan::events([
+            pcm(0, &[7, -7]),
+            TtsEvent::Viseme(vec![VisemeEvent {
+                symbol: "PP".to_owned(),
+                start_ms: 125,
+                duration_ms: 42,
+            }]),
+            TtsEvent::Completed,
+        ]);
+        let (bridge, state) = fake_bridge([plan]);
+        let mut session = core_session(&bridge).await;
+        let output = session
+            .synthesize(speech(1), CancellationToken::new())
+            .await
+            .expect("sentence synthesis starts")
+            .try_collect::<Vec<_>>()
+            .await
+            .expect("valid stream");
+
+        let SpeechStreamItem::Alignment(event) = &output[0] else {
+            panic!("provider viseme should remain an alignment event");
+        };
+        assert_eq!(event.audio_offset, Duration::from_millis(125));
+        assert_eq!(event.audio_duration, Some(Duration::from_millis(42)));
+        assert_eq!(event.viseme.as_deref(), Some("PP"));
+
+        let requests = state.requests.lock().expect("request mutex poisoned");
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].request_alignment);
+        assert!(requests[0].request_visemes);
     }
 
     #[tokio::test]

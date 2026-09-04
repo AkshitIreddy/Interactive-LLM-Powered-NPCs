@@ -31,6 +31,7 @@ const MAX_FAILURES: usize = 3;
 const AUDIO_OUTPUT_SELECTION_FILE_NAME: &str = "audio-output-selection-v1.json";
 const AUDIO_INPUT_SELECTION_FILE_NAME: &str = "audio-input-selection-v1.json";
 pub const MAX_PLAYBACK_LEASES_PER_TURN: usize = 16;
+const MAX_VISUAL_SPEECH_CUES: usize = 128;
 pub const MIN_INPUT_REHEARSAL_DURATION_MS: u32 = 250;
 pub const MAX_INPUT_REHEARSAL_DURATION_MS: u32 = 10_000;
 #[cfg(debug_assertions)]
@@ -258,6 +259,18 @@ struct QueryVisualAudioEnvelopePayload {
 }
 
 #[derive(Clone, PartialEq, Message)]
+struct VisualSpeechCuePayload {
+    #[prost(uint64, tag = "1")]
+    start_sample: u64,
+    #[prost(uint64, tag = "2")]
+    duration_samples: u64,
+    #[prost(uint32, tag = "3")]
+    canonical_viseme: u32,
+    #[prost(uint32, tag = "4")]
+    strength_q15: u32,
+}
+
+#[derive(Clone, PartialEq, Message)]
 struct VisualAudioEnvelopePayload {
     #[prost(uint32, tag = "1")]
     schema_version: u32,
@@ -297,6 +310,8 @@ struct VisualAudioEnvelopePayload {
     draining: bool,
     #[prost(bool, tag = "19")]
     cancelled: bool,
+    #[prost(message, repeated, tag = "20")]
+    visual_speech_cues: Vec<VisualSpeechCuePayload>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Enumeration)]
@@ -1224,6 +1239,15 @@ pub(crate) struct VisualAudioEnvelopeQuery {
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct VisualSpeechCue {
+    pub start_sample: u64,
+    pub duration_samples: u64,
+    pub canonical_viseme: u8,
+    pub strength_q15: u16,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct VisualAudioEnvelope {
     pub schema_version: u32,
     pub session_id: String,
@@ -1244,6 +1268,7 @@ pub(crate) struct VisualAudioEnvelope {
     pub active: bool,
     pub draining: bool,
     pub cancelled: bool,
+    pub visual_speech_cues: Vec<VisualSpeechCue>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -5357,6 +5382,35 @@ fn decode_visual_audio_envelope(
         .collect::<Result<_, _>>()?;
     let mono_rms_q15: [u16; 8] = rms.try_into().map_err(|_| MediaBrokerError::Malformed)?;
     let mono_peak_q15: [u16; 8] = peak.try_into().map_err(|_| MediaBrokerError::Malformed)?;
+    if payload.visual_speech_cues.len() > MAX_VISUAL_SPEECH_CUES {
+        return Err(MediaBrokerError::Malformed);
+    }
+    let mut visual_speech_cues = Vec::with_capacity(payload.visual_speech_cues.len());
+    let mut previous_end = None;
+    for cue in payload.visual_speech_cues {
+        let end_sample = cue
+            .start_sample
+            .checked_add(cue.duration_samples)
+            .ok_or(MediaBrokerError::Malformed)?;
+        let canonical_viseme =
+            u8::try_from(cue.canonical_viseme).map_err(|_| MediaBrokerError::Malformed)?;
+        let strength_q15 =
+            u16::try_from(cue.strength_q15).map_err(|_| MediaBrokerError::Malformed)?;
+        if cue.duration_samples == 0
+            || canonical_viseme > 10
+            || strength_q15 > 32_767
+            || previous_end.is_some_and(|end| cue.start_sample < end)
+        {
+            return Err(MediaBrokerError::Malformed);
+        }
+        visual_speech_cues.push(VisualSpeechCue {
+            start_sample: cue.start_sample,
+            duration_samples: cue.duration_samples,
+            canonical_viseme,
+            strength_q15,
+        });
+        previous_end = Some(end_sample);
+    }
     let envelope = VisualAudioEnvelope {
         schema_version: payload.schema_version,
         session_id: payload.session_id,
@@ -5377,6 +5431,7 @@ fn decode_visual_audio_envelope(
         active: payload.active,
         draining: payload.draining,
         cancelled: payload.cancelled,
+        visual_speech_cues,
     };
     let sample_end = envelope
         .source_sample_start
@@ -6208,6 +6263,7 @@ mod tests {
             active: true,
             draining: false,
             cancelled: false,
+            visual_speech_cues: Vec::new(),
         };
         let decoded =
             decode_visual_audio_envelope(payload.clone(), &query).expect("exact causal envelope");
@@ -6222,6 +6278,117 @@ mod tests {
         let mut wrong_bins = payload;
         wrong_bins.mono_peak_q15.pop();
         assert!(decode_visual_audio_envelope(wrong_bins, &query).is_err());
+    }
+
+    #[test]
+    fn visual_audio_envelope_decodes_only_bounded_ordered_non_overlapping_cues() {
+        let query = VisualAudioEnvelopeQuery {
+            session_id: "session-001".into(),
+            turn_id: "turn-001".into(),
+            generation: 7,
+            stream_id: "pcm-001".into(),
+            segment_id: "pcm-001".into(),
+        };
+        let valid_cue = VisualSpeechCuePayload {
+            start_sample: 480,
+            duration_samples: 240,
+            canonical_viseme: 9,
+            strength_q15: 30_000,
+        };
+        let payload_with = |cues: Vec<VisualSpeechCuePayload>| VisualAudioEnvelopePayload {
+            schema_version: 1,
+            session_id: query.session_id.clone(),
+            turn_id: query.turn_id.clone(),
+            generation: query.generation,
+            stream_id: query.stream_id.clone(),
+            segment_id: query.segment_id.clone(),
+            source_sample_start: 240,
+            source_sample_count: 240,
+            sample_rate: 24_000,
+            channels: 1,
+            device_write_qpc: 500,
+            qpc_frequency: 10_000_000,
+            source_frames: 480,
+            device_frames: 480,
+            mono_rms_q15: vec![1; 8],
+            mono_peak_q15: vec![2; 8],
+            active: true,
+            draining: false,
+            cancelled: false,
+            visual_speech_cues: cues,
+        };
+
+        let encoded = payload_with(vec![
+            valid_cue.clone(),
+            VisualSpeechCuePayload {
+                start_sample: 720,
+                duration_samples: 120,
+                canonical_viseme: 1,
+                strength_q15: 32_767,
+            },
+        ])
+        .encode_to_vec();
+        let decoded_payload = VisualAudioEnvelopePayload::decode(encoded.as_slice())
+            .expect("prost tag 20 nested cue payload");
+        let decoded =
+            decode_visual_audio_envelope(decoded_payload, &query).expect("valid bounded cues");
+        assert_eq!(
+            decoded.visual_speech_cues,
+            vec![
+                VisualSpeechCue {
+                    start_sample: 480,
+                    duration_samples: 240,
+                    canonical_viseme: 9,
+                    strength_q15: 30_000,
+                },
+                VisualSpeechCue {
+                    start_sample: 720,
+                    duration_samples: 120,
+                    canonical_viseme: 1,
+                    strength_q15: 32_767,
+                },
+            ]
+        );
+
+        let invalid_cues = [
+            VisualSpeechCuePayload {
+                duration_samples: 0,
+                ..valid_cue.clone()
+            },
+            VisualSpeechCuePayload {
+                start_sample: u64::MAX,
+                duration_samples: 1,
+                ..valid_cue.clone()
+            },
+            VisualSpeechCuePayload {
+                canonical_viseme: 11,
+                ..valid_cue.clone()
+            },
+            VisualSpeechCuePayload {
+                strength_q15: 32_768,
+                ..valid_cue.clone()
+            },
+        ];
+        for cue in invalid_cues {
+            assert!(decode_visual_audio_envelope(payload_with(vec![cue]), &query).is_err());
+        }
+        assert!(decode_visual_audio_envelope(
+            payload_with(vec![
+                valid_cue.clone(),
+                VisualSpeechCuePayload {
+                    start_sample: 719,
+                    duration_samples: 1,
+                    ..valid_cue.clone()
+                },
+            ]),
+            &query,
+        )
+        .is_err());
+        assert!(decode_visual_audio_envelope(
+            payload_with(vec![valid_cue; MAX_VISUAL_SPEECH_CUES + 1]),
+            &query,
+        )
+        .is_err());
     }
 
     #[test]

@@ -6,7 +6,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <span>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -32,6 +34,59 @@ ProducerEnvelope envelope(const ProducerCommand command, const std::uint64_t seq
                           std::vector<std::byte> payload = {}) {
     return {schema_version, command, sequence, 11'000, 7, "stream-001", "session-001",
             "turn-001", token(), std::move(payload)};
+}
+
+template <typename T>
+void append_little(std::vector<std::byte>& output, const T value) {
+    static_assert(std::is_unsigned_v<T>);
+    for (unsigned shift = 0; shift < sizeof(T) * 8; shift += 8) {
+        output.push_back(static_cast<std::byte>((value >> shift) & 0xffU));
+    }
+}
+
+std::vector<std::byte> visual_cue_payload(
+    const std::uint64_t start_sample = 240,
+    const std::uint64_t duration_samples = 120,
+    const std::uint8_t canonical_viseme = 3,
+    const std::uint16_t strength_q15 = 24'000,
+    const std::uint32_t schema = visual_speech_cue_schema_version,
+    const std::uint8_t reserved = 0) {
+    std::vector<std::byte> payload;
+    payload.reserve(visual_speech_cue_payload_bytes);
+    append_little(payload, schema);
+    append_little(payload, start_sample);
+    append_little(payload, duration_samples);
+    payload.push_back(static_cast<std::byte>(canonical_viseme));
+    payload.push_back(static_cast<std::byte>(reserved));
+    append_little(payload, strength_q15);
+    return payload;
+}
+
+void append_varint(std::vector<std::byte>& output, std::uint64_t value) {
+    while (value >= 0x80U) {
+        output.push_back(static_cast<std::byte>((value & 0x7fU) | 0x80U));
+        value >>= 7U;
+    }
+    output.push_back(static_cast<std::byte>(value));
+}
+
+void append_nested_visual_cue(std::vector<std::byte>& output,
+                              const std::uint64_t start,
+                              const std::uint64_t duration,
+                              const std::uint32_t viseme,
+                              const std::uint32_t strength) {
+    std::vector<std::byte> nested;
+    append_varint(nested, 1U << 3U);
+    append_varint(nested, start);
+    append_varint(nested, 2U << 3U);
+    append_varint(nested, duration);
+    append_varint(nested, 3U << 3U);
+    append_varint(nested, viseme);
+    append_varint(nested, 4U << 3U);
+    append_varint(nested, strength);
+    append_varint(output, (20U << 3U) | 2U);
+    append_varint(output, nested.size());
+    output.insert(output.end(), nested.begin(), nested.end());
 }
 
 void allocation_policy_is_bounded() {
@@ -63,6 +118,74 @@ void wire_round_trip_and_size_rejection() {
     assert(!encode_envelope(value));
     prefix.fill(std::byte{0xff});
     assert(!decode_frame_size(prefix));
+}
+
+void visual_cue_wire_and_session_contract_is_strict_and_zero_frame() {
+    static_assert(static_cast<std::uint16_t>(ProducerCommand::visual_cue) == 5);
+    static_assert(visual_speech_cue_payload_bytes == 24);
+    auto cue = envelope(ProducerCommand::visual_cue, 2, visual_cue_payload());
+    const auto encoded = encode_envelope(cue);
+    assert(encoded);
+    const auto decoded = decode_envelope(std::span{*encoded}.subspan(4));
+    assert(decoded && decoded->command == ProducerCommand::visual_cue &&
+           decoded->payload == cue.payload);
+    const auto decoded_cue = decode_visual_speech_cue_payload(cue.payload, 48'000);
+    assert(decoded_cue && decoded_cue->start_sample == 240 &&
+           decoded_cue->duration_samples == 120);
+    auto malformed_wire = *encoded;
+    malformed_wire[malformed_wire.size() - visual_speech_cue_payload_bytes] = std::byte{2};
+    assert(!decode_envelope(std::span{malformed_wire}.subspan(4)));
+
+    PlaybackSession before_begin(lease(), 42, 24'000, {1'000, 5'000});
+    assert(before_begin.process(cue, 42, 10'000).status == ProducerStatus::invalid_state);
+
+    PlaybackSession session(lease(), 42, 24'000, {1'000, 5'000});
+    assert(session.process(envelope(ProducerCommand::begin, 1), 42, 10'000).status ==
+           ProducerStatus::ok);
+    const auto accepted = session.process(cue, 42, 10'000);
+    assert(accepted.status == ProducerStatus::ok && accepted.accepted_source_frames == 0);
+    assert(session.source_frames() == 0 && session.visual_speech_cues().size() == 1);
+    assert(session.visual_speech_cues()[0].start_sample == 240 &&
+           session.visual_speech_cues()[0].duration_samples == 120 &&
+           session.visual_speech_cues()[0].canonical_viseme == 3 &&
+           session.visual_speech_cues()[0].strength_q15 == 24'000);
+
+    std::uint64_t sequence = 3;
+    auto rejected = [&](std::vector<std::byte> payload) {
+        const auto response = session.process(
+            envelope(ProducerCommand::visual_cue, sequence++, std::move(payload)), 42, 10'000);
+        assert(response.status == ProducerStatus::invalid_frame);
+    };
+    rejected(std::vector<std::byte>(visual_speech_cue_payload_bytes - 1, std::byte{}));
+    rejected(visual_cue_payload(360, 120, 3, 24'000, 2));
+    rejected(visual_cue_payload(360, 120, 3, 24'000, 1, 1));
+    rejected(visual_cue_payload(360, 0));
+    rejected(visual_cue_payload(360, 120, 11));
+    rejected(visual_cue_payload(360, 120, 3, 32'768));
+    rejected(visual_cue_payload(47'950, 51));
+    rejected(visual_cue_payload(std::numeric_limits<std::uint64_t>::max(), 2));
+    rejected(visual_cue_payload(300, 120)); // overlaps the accepted [240, 360) cue
+    const auto cancelled = session.process(
+        envelope(ProducerCommand::cancel, sequence++), 42, 10'000);
+    assert(cancelled.status == ProducerStatus::cancelled &&
+           session.visual_speech_cues().empty());
+
+    PlaybackSession bounded(lease(), 42, 24'000, {1'000, 5'000});
+    assert(bounded.process(envelope(ProducerCommand::begin, 1), 42, 10'000).status ==
+           ProducerStatus::ok);
+    for (std::size_t index = 0; index < maximum_visual_speech_cues; ++index) {
+        const auto start = static_cast<std::uint64_t>(index) * 10U;
+        const auto response = bounded.process(
+            envelope(ProducerCommand::visual_cue, index + 2,
+                     visual_cue_payload(start, 10, static_cast<std::uint8_t>(index % 11U))),
+            42, 10'000);
+        assert(response.status == ProducerStatus::ok);
+    }
+    assert(bounded.visual_speech_cues().size() == maximum_visual_speech_cues);
+    assert(bounded.process(
+               envelope(ProducerCommand::visual_cue, maximum_visual_speech_cues + 2,
+                        visual_cue_payload(maximum_visual_speech_cues * 10U, 10)),
+               42, 10'000).status == ProducerStatus::invalid_frame);
 }
 
 void authentication_order_budget_cancel_and_drain() {
@@ -256,6 +379,10 @@ void visual_audio_envelope_codec_is_exact_bounded_and_causal() {
     envelope.device_frames = 480;
     envelope.mono_rms_q15 = {1, 2, 3, 4, 5, 6, 7, 8};
     envelope.mono_peak_q15 = {8, 7, 6, 5, 4, 3, 2, 1};
+    envelope.visual_speech_cues = {
+        {0, 120, 1, 20'000},
+        {120, 240, 7, 32'767},
+    };
     envelope.active = true;
     const auto wire = npc::media::ipc::encode_visual_audio_envelope(envelope);
     assert(wire && wire->size() < 1024);
@@ -263,7 +390,37 @@ void visual_audio_envelope_codec_is_exact_bounded_and_causal() {
     assert(decoded && decoded->stream_id == envelope.stream_id &&
            decoded->source_sample_start == envelope.source_sample_start &&
            decoded->mono_rms_q15 == envelope.mono_rms_q15 && decoded->active &&
-           !decoded->draining && !decoded->cancelled);
+           !decoded->draining && !decoded->cancelled &&
+           decoded->visual_speech_cues == envelope.visual_speech_cues);
+
+    auto legacy = envelope;
+    legacy.visual_speech_cues.clear();
+    const auto legacy_wire = npc::media::ipc::encode_visual_audio_envelope(legacy);
+    const auto legacy_round_trip = legacy_wire
+        ? npc::media::ipc::decode_visual_audio_envelope(*legacy_wire) : std::nullopt;
+    assert(legacy_round_trip && legacy_round_trip->visual_speech_cues.empty());
+
+    auto invalid = envelope;
+    invalid.visual_speech_cues[1].start_sample = 119;
+    assert(!npc::media::ipc::encode_visual_audio_envelope(invalid));
+    invalid = envelope;
+    invalid.visual_speech_cues[0].duration_samples = 0;
+    assert(!npc::media::ipc::encode_visual_audio_envelope(invalid));
+    invalid = envelope;
+    invalid.visual_speech_cues[0].canonical_viseme = 11;
+    assert(!npc::media::ipc::encode_visual_audio_envelope(invalid));
+    invalid = envelope;
+    invalid.visual_speech_cues.resize(maximum_visual_speech_cues + 1,
+                                      {1'000, 1, 1, 1});
+    assert(!npc::media::ipc::encode_visual_audio_envelope(invalid));
+
+    auto malformed_nested = *legacy_wire;
+    append_nested_visual_cue(malformed_nested, 1, 0, 1, 1);
+    assert(!npc::media::ipc::decode_visual_audio_envelope(malformed_nested));
+    auto out_of_order_nested = *legacy_wire;
+    append_nested_visual_cue(out_of_order_nested, 100, 20, 1, 1);
+    append_nested_visual_cue(out_of_order_nested, 99, 1, 2, 2);
+    assert(!npc::media::ipc::decode_visual_audio_envelope(out_of_order_nested));
 
     envelope.cancelled = true;
     assert(!npc::media::ipc::encode_visual_audio_envelope(envelope));
@@ -274,6 +431,7 @@ void visual_audio_envelope_codec_is_exact_bounded_and_causal() {
 int main() {
     allocation_policy_is_bounded();
     wire_round_trip_and_size_rejection();
+    visual_cue_wire_and_session_contract_is_strict_and_zero_frame();
     authentication_order_budget_cancel_and_drain();
     rejects_deadlines_backpressure_and_budget_overrun();
     allocation_expiry_only_gates_begin_but_connected_stream_has_total_deadline();

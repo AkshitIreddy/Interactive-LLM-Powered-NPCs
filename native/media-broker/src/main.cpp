@@ -669,6 +669,7 @@ void append_ring(std::vector<std::byte>& output, const SharedPcmRing* ring) {
             wire.device_frames = value->device_frames;
             wire.mono_rms_q15 = value->mono_rms_q15;
             wire.mono_peak_q15 = value->mono_peak_q15;
+            wire.visual_speech_cues = value->visual_speech_cues;
             wire.active = value->active;
             wire.draining = value->draining;
             wire.cancelled = value->cancelled;

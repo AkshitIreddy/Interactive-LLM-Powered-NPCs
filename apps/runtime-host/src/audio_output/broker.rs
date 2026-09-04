@@ -37,6 +37,11 @@ const BACKPRESSURE_RETRY: Duration = Duration::from_millis(5);
 const BACKPRESSURE_TIMEOUT: Duration = Duration::from_secs(5);
 const PIPE_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(20);
+const VISUAL_CUE_SCHEMA_VERSION: u32 = 1;
+const VISUAL_CUE_PAYLOAD_BYTES: usize = 24;
+const MAX_VISUAL_CUES_PER_STREAM: usize = 128;
+const DEFAULT_VISUAL_CUE_DURATION: Duration = Duration::from_millis(80);
+const VISUAL_CUE_FULL_STRENGTH_Q15: u16 = 32_767;
 
 #[derive(PartialEq, Eq)]
 pub struct PlaybackToken([u8; TOKEN_BYTES]);
@@ -527,6 +532,121 @@ enum ProducerCommand {
     Chunk = 2,
     Finish = 3,
     Cancel = 4,
+    VisualCue = 5,
+}
+
+fn canonical_viseme(symbol: &str) -> Option<u8> {
+    let symbol = symbol.trim();
+    if symbol.is_empty() {
+        return None;
+    }
+
+    if symbol.bytes().all(|byte| byte.is_ascii_digit()) {
+        return azure_viseme(symbol.parse().ok()?);
+    }
+
+    let canonical = symbol.to_lowercase().replace(['-', ' '], "_");
+    match canonical.as_str() {
+        "silence" | "silent" | "rest" | "pause" => return Some(0),
+        "bilabial" => return Some(1),
+        "labiodental" | "labio_dental" => return Some(2),
+        "dental" => return Some(3),
+        "alveolar" => return Some(4),
+        "postalveolar" | "post_alveolar" => return Some(5),
+        "palatal" => return Some(6),
+        "velar" => return Some(7),
+        "rounded" | "rounded_vowel" => return Some(8),
+        "open" | "open_vowel" => return Some(9),
+        "spread" | "spread_vowel" => return Some(10),
+        _ => {}
+    }
+
+    match symbol {
+        "θ" | "ð" => return Some(3),
+        "ʃ" | "ʒ" | "tʃ" | "dʒ" => return Some(5),
+        "j" | "ç" => return Some(6),
+        "ŋ" | "x" | "ɣ" => return Some(7),
+        "ɹ" | "ɻ" => return Some(6),
+        "ʊ" | "ɔ" | "ø" | "œ" | "y" => return Some(8),
+        "ɑ" | "ɐ" | "ʌ" | "ə" | "ɜ" | "ɞ" => return Some(9),
+        "ɪ" | "ɛ" | "æ" => return Some(10),
+        _ => {}
+    }
+
+    let phoneme = symbol
+        .trim_end_matches(|character: char| character.is_ascii_digit())
+        .to_ascii_uppercase();
+    match phoneme.as_str() {
+        "SIL" | "SP" | "PAU" | "_" => Some(0),
+        "PP" | "P" | "B" | "M" => Some(1),
+        "FF" | "F" | "V" => Some(2),
+        "TH" | "DH" => Some(3),
+        "DD" | "SS" | "NN" | "T" | "D" | "S" | "Z" | "N" | "L" => Some(4),
+        "CH" | "SH" | "ZH" | "JH" => Some(5),
+        "RR" | "R" | "Y" => Some(6),
+        "KK" | "K" | "G" | "NG" => Some(7),
+        "OH" | "OU" | "W" | "UW" | "UH" | "OW" | "OY" | "AO" | "U" | "O" => Some(8),
+        "AA" | "A" | "AH" | "AW" | "AY" | "ER" => Some(9),
+        "E" | "IH" | "IY" | "EH" | "EY" | "I" | "AE" => Some(10),
+        _ => None,
+    }
+}
+
+fn azure_viseme(id: u8) -> Option<u8> {
+    Some(match id {
+        0 => 0,
+        21 => 1,
+        18 => 2,
+        17 => 3,
+        14 | 15 | 19 => 4,
+        16 => 5,
+        13 => 6,
+        20 => 7,
+        3 | 7 | 8 | 10 => 8,
+        1 | 2 | 5 | 9 | 11 | 12 => 9,
+        4 | 6 => 10,
+        _ => return None,
+    })
+}
+
+fn duration_to_samples(duration: Duration, sample_rate: u32) -> Option<u64> {
+    let samples = duration.as_nanos().checked_mul(u128::from(sample_rate))? / 1_000_000_000_u128;
+    u64::try_from(samples).ok()
+}
+
+fn encode_visual_cue(
+    alignment: &npc_runtime_core::AlignmentEvent,
+    lease: &BrokerAudioPlaybackLease,
+) -> Option<[u8; VISUAL_CUE_PAYLOAD_BYTES]> {
+    let viseme = canonical_viseme(alignment.viseme.as_deref()?)?;
+    let start_sample = duration_to_samples(alignment.audio_offset, lease.sample_rate)?;
+    if start_sample >= lease.max_frames {
+        return None;
+    }
+
+    let duration = alignment
+        .audio_duration
+        .unwrap_or(DEFAULT_VISUAL_CUE_DURATION);
+    if duration.is_zero() {
+        return None;
+    }
+    let requested_duration = duration_to_samples(duration, lease.sample_rate)?;
+    if requested_duration == 0 {
+        return None;
+    }
+    let duration_samples = requested_duration.min(lease.max_frames.saturating_sub(start_sample));
+    if duration_samples == 0 {
+        return None;
+    }
+
+    let mut payload = [0_u8; VISUAL_CUE_PAYLOAD_BYTES];
+    payload[0..4].copy_from_slice(&VISUAL_CUE_SCHEMA_VERSION.to_le_bytes());
+    payload[4..12].copy_from_slice(&start_sample.to_le_bytes());
+    payload[12..20].copy_from_slice(&duration_samples.to_le_bytes());
+    payload[20] = viseme;
+    payload[21] = 0;
+    payload[22..24].copy_from_slice(&VISUAL_CUE_FULL_STRENGTH_Q15.to_le_bytes());
+    Some(payload)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -642,6 +762,8 @@ async fn run_producer_session<C: ProducerConnection>(
     let mut peak = 0_f32;
     let mut square_sum = 0_f64;
     let mut sample_count = 0_u64;
+    let mut visual_cue_count = 0_usize;
+    let mut previous_visual_cue_end = 0_u64;
 
     while let Some(item) = tokio::select! {
         _ = cancellation.cancelled() => {
@@ -658,8 +780,50 @@ async fn run_producer_session<C: ProducerConnection>(
                 return Err(BrokerTransportError::Provider);
             }
         };
-        let SpeechStreamItem::Audio(chunk) = item else {
-            continue;
+        let chunk = match item {
+            SpeechStreamItem::Alignment(alignment) => {
+                let Some(payload) = encode_visual_cue(&alignment, lease) else {
+                    continue;
+                };
+                let start_sample = u64::from_le_bytes(
+                    payload[4..12]
+                        .try_into()
+                        .map_err(|_| BrokerTransportError::Malformed)?,
+                );
+                let duration_samples = u64::from_le_bytes(
+                    payload[12..20]
+                        .try_into()
+                        .map_err(|_| BrokerTransportError::Malformed)?,
+                );
+                let cue_end = start_sample
+                    .checked_add(duration_samples)
+                    .ok_or(BrokerTransportError::Malformed)?;
+                // Provider timelines are advisory visual metadata. Keep them
+                // bounded and monotonic before they reach the native session;
+                // malformed or overlapping cues must never cancel valid audio.
+                if visual_cue_count >= MAX_VISUAL_CUES_PER_STREAM
+                    || start_sample < previous_visual_cue_end
+                {
+                    continue;
+                }
+                sequence = sequence.saturating_add(1);
+                if let Err(error) = send_expect_ok(
+                    connection,
+                    lease,
+                    ProducerCommand::VisualCue,
+                    sequence,
+                    &payload,
+                )
+                .await
+                {
+                    cancel_best_effort(connection, lease, &mut sequence).await;
+                    return Err(error);
+                }
+                visual_cue_count += 1;
+                previous_visual_cue_end = cue_end;
+                continue;
+            }
+            SpeechStreamItem::Audio(chunk) => chunk,
         };
         if chunk.sequence == 0
             || saw_end_of_stream
@@ -866,7 +1030,13 @@ fn encode_request(
     if sequence == 0
         || deadline_qpc == 0
         || payload.len() > MAX_PCM_CHUNK_BYTES as usize
-        || (command != ProducerCommand::Chunk && !payload.is_empty())
+        || match command {
+            ProducerCommand::Chunk => false,
+            ProducerCommand::VisualCue => payload.len() != VISUAL_CUE_PAYLOAD_BYTES,
+            ProducerCommand::Begin | ProducerCommand::Finish | ProducerCommand::Cancel => {
+                !payload.is_empty()
+            }
+        }
     {
         return Err(BrokerTransportError::Malformed);
     }
@@ -1248,7 +1418,7 @@ fn qpc_now_and_frequency() -> Result<(u64, u64), BrokerTransportError> {
 mod tests {
     use super::*;
     use futures_util::stream;
-    use npc_runtime_core::{AudioChunk, ProviderError, SpeechStreamItem};
+    use npc_runtime_core::{AlignmentEvent, AudioChunk, ProviderError, SpeechStreamItem};
     use std::{collections::VecDeque, sync::Arc};
 
     fn lease(index: usize) -> BrokerAudioPlaybackLease {
@@ -1357,6 +1527,7 @@ mod tests {
                 2 => ProducerCommand::Chunk,
                 3 => ProducerCommand::Finish,
                 4 => ProducerCommand::Cancel,
+                5 => ProducerCommand::VisualCue,
                 _ => return Err(BrokerTransportError::Malformed),
             };
             let sequence = u64::from_le_bytes(
@@ -1395,6 +1566,150 @@ mod tests {
                 payload,
             })
         }
+    }
+
+    #[test]
+    fn maps_canonical_meta_arpabet_ipa_and_azure_visemes() {
+        let fixtures = [
+            ("silence", 0),
+            ("bilabial", 1),
+            ("PP", 1),
+            ("FF", 2),
+            ("θ", 3),
+            ("DD", 4),
+            ("SH", 5),
+            ("RR", 6),
+            ("NG", 7),
+            ("ou", 8),
+            ("AA1", 9),
+            ("ih", 10),
+            ("21", 1),
+            ("16", 5),
+            ("6", 10),
+        ];
+        for (symbol, expected) in fixtures {
+            assert_eq!(canonical_viseme(symbol), Some(expected), "{symbol}");
+        }
+        assert_eq!(canonical_viseme("not-a-phoneme"), None);
+        assert_eq!(canonical_viseme("22"), None);
+    }
+
+    #[test]
+    fn visual_cue_payload_is_exact_little_endian_and_clamped_to_lease() {
+        let lease = lease(12);
+        let event = AlignmentEvent {
+            text_offset: 0,
+            text_length: 0,
+            audio_offset: Duration::from_millis(950),
+            audio_duration: Some(Duration::from_millis(200)),
+            viseme: Some("PP".to_owned()),
+        };
+        let payload = encode_visual_cue(&event, &lease).expect("valid visual cue");
+
+        assert_eq!(payload.len(), 24);
+        assert_eq!(u32::from_le_bytes(payload[0..4].try_into().unwrap()), 1);
+        assert_eq!(
+            u64::from_le_bytes(payload[4..12].try_into().unwrap()),
+            22_800
+        );
+        assert_eq!(
+            u64::from_le_bytes(payload[12..20].try_into().unwrap()),
+            1_200
+        );
+        assert_eq!(payload[20], 1);
+        assert_eq!(payload[21], 0);
+        assert_eq!(
+            u16::from_le_bytes(payload[22..24].try_into().unwrap()),
+            32_767
+        );
+
+        let missing_duration = AlignmentEvent {
+            audio_offset: Duration::from_millis(10),
+            audio_duration: None,
+            viseme: Some("rounded".to_owned()),
+            ..event.clone()
+        };
+        let payload = encode_visual_cue(&missing_duration, &lease).expect("default duration");
+        assert_eq!(
+            u64::from_le_bytes(payload[12..20].try_into().unwrap()),
+            1_920
+        );
+
+        let out_of_range = AlignmentEvent {
+            audio_offset: Duration::from_secs(1),
+            ..event
+        };
+        assert_eq!(encode_visual_cue(&out_of_range, &lease), None);
+        assert_eq!(
+            encode_request(&lease, ProducerCommand::VisualCue, 2, 9_000, &[0; 23]),
+            Err(BrokerTransportError::Malformed)
+        );
+    }
+
+    #[tokio::test]
+    async fn producer_submits_visual_cue_without_changing_source_frame_accounting() {
+        let lease = lease(13);
+        let pcm = [8_192_i16, -8_192, 8_192, -8_192]
+            .into_iter()
+            .flat_map(i16::to_le_bytes)
+            .collect::<Vec<_>>();
+        let stream: SpeechStream = Box::pin(stream::iter(vec![
+            Ok::<_, ProviderError>(SpeechStreamItem::Alignment(AlignmentEvent {
+                text_offset: 0,
+                text_length: 0,
+                audio_offset: Duration::from_millis(125),
+                audio_duration: Some(Duration::from_millis(40)),
+                viseme: Some("FF".to_owned()),
+            })),
+            Ok(SpeechStreamItem::Alignment(AlignmentEvent {
+                text_offset: 0,
+                text_length: 0,
+                audio_offset: Duration::from_millis(150),
+                audio_duration: Some(Duration::from_millis(40)),
+                viseme: Some("unknown-provider-symbol".to_owned()),
+            })),
+            Ok(SpeechStreamItem::Alignment(AlignmentEvent {
+                text_offset: 0,
+                text_length: 0,
+                audio_offset: Duration::from_millis(140),
+                audio_duration: Some(Duration::from_millis(40)),
+                viseme: Some("open_vowel".to_owned()),
+            })),
+            Ok(SpeechStreamItem::Audio(AudioChunk {
+                sequence: 1,
+                sample_rate_hz: 24_000,
+                channels: 1,
+                pcm_s16le: pcm,
+                end_of_stream: true,
+            })),
+        ]));
+        let mut connection = ScriptedConnection {
+            statuses: VecDeque::new(),
+            accepted_frames: 0,
+            device_frames_override: None,
+            lease: lease.clone(),
+            commands: Vec::new(),
+        };
+
+        let receipt =
+            run_producer_session(&mut connection, &lease, stream, CancellationToken::new())
+                .await
+                .expect("cue-bearing stream completes");
+
+        assert_eq!(receipt.source_frames, 4);
+        let visual_cues = connection
+            .commands
+            .iter()
+            .filter(|(command, _, _)| *command == ProducerCommand::VisualCue)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            visual_cues.len(),
+            1,
+            "unknown and overlapping visual cues are ignored without affecting audio"
+        );
+        assert_eq!(visual_cues[0].2.len(), 24);
+        assert_eq!(visual_cues[0].2[20], 2);
+        assert_eq!(connection.accepted_frames, 4);
     }
 
     fn encode_test_response(

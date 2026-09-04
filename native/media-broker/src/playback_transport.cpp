@@ -150,6 +150,31 @@ void clear_authentication_token(AuthenticationToken& token) noexcept {
     for (std::size_t index = 0; index < token.size(); ++index) output[index] = std::byte{};
 }
 
+bool valid_visual_speech_cue(const VisualSpeechCue& cue,
+                             const std::uint64_t maximum_frames) noexcept {
+    return cue.duration_samples != 0 && cue.canonical_viseme <= 10 &&
+           cue.strength_q15 <= 32'767 && cue.start_sample <= maximum_frames &&
+           cue.duration_samples <= maximum_frames - cue.start_sample;
+}
+
+std::optional<VisualSpeechCue> decode_visual_speech_cue_payload(
+    const std::span<const std::byte> payload,
+    const std::uint64_t maximum_frames) noexcept {
+    if (payload.size() != visual_speech_cue_payload_bytes) return std::nullopt;
+    std::size_t position{};
+    const auto version = read_little<std::uint32_t>(payload, position);
+    const auto start = read_little<std::uint64_t>(payload, position);
+    const auto duration = read_little<std::uint64_t>(payload, position);
+    if (!version || *version != visual_speech_cue_schema_version || !start || !duration ||
+        position + 4 != payload.size()) return std::nullopt;
+    const auto viseme = std::to_integer<std::uint8_t>(payload[position++]);
+    const auto reserved = std::to_integer<std::uint8_t>(payload[position++]);
+    const auto strength = read_little<std::uint16_t>(payload, position);
+    if (reserved != 0 || !strength || position != payload.size()) return std::nullopt;
+    const VisualSpeechCue cue{*start, *duration, viseme, *strength};
+    return valid_visual_speech_cue(cue, maximum_frames) ? std::optional{cue} : std::nullopt;
+}
+
 std::string_view to_string(const ProducerStatus status) noexcept {
     switch (status) {
     case ProducerStatus::ok: return "ok";
@@ -172,11 +197,25 @@ std::string_view to_string(const ProducerStatus status) noexcept {
 }
 
 std::optional<std::vector<std::byte>> encode_envelope(const ProducerEnvelope& envelope) {
+    const bool payload_valid = [&] {
+        switch (envelope.command) {
+        case ProducerCommand::chunk:
+            return envelope.payload.size() <= maximum_chunk_bytes;
+        case ProducerCommand::visual_cue:
+            return decode_visual_speech_cue_payload(
+                       envelope.payload, maximum_source_frames).has_value();
+        case ProducerCommand::begin:
+        case ProducerCommand::finish:
+        case ProducerCommand::cancel:
+            return envelope.payload.empty();
+        }
+        return false;
+    }();
     if (envelope.schema_version != schema_version || envelope.sequence == 0 ||
         envelope.deadline_qpc == 0 || envelope.generation == 0 ||
         !valid_identifier(envelope.stream_id) || !valid_identifier(envelope.session_id) ||
         !valid_identifier(envelope.turn_id) || envelope.payload.size() > maximum_chunk_bytes ||
-        (envelope.command != ProducerCommand::chunk && !envelope.payload.empty())) return std::nullopt;
+        !payload_valid) return std::nullopt;
     std::vector<std::byte> body;
     body.reserve(128 + envelope.payload.size());
     body.insert(body.end(), envelope_magic.begin(), envelope_magic.end());
@@ -222,15 +261,21 @@ std::optional<ProducerEnvelope> decode_envelope(const std::span<const std::byte>
     case 2: command = ProducerCommand::chunk; break;
     case 3: command = ProducerCommand::finish; break;
     case 4: command = ProducerCommand::cancel; break;
+    case 5: command = ProducerCommand::visual_cue; break;
     default: return std::nullopt;
     }
     AuthenticationToken token{};
     std::copy_n(body.begin() + static_cast<std::ptrdiff_t>(position), token.size(), token.begin());
     position += token.size();
     const auto payload_size = read_little<std::uint32_t>(body, position);
-    if (!payload_size || *payload_size > maximum_chunk_bytes || body.size() - position != *payload_size ||
-        (command != ProducerCommand::chunk && *payload_size != 0)) return std::nullopt;
+    if (!payload_size || *payload_size > maximum_chunk_bytes ||
+        body.size() - position != *payload_size) return std::nullopt;
     std::vector<std::byte> payload(body.begin() + static_cast<std::ptrdiff_t>(position), body.end());
+    if (command == ProducerCommand::visual_cue) {
+        if (!decode_visual_speech_cue_payload(payload, maximum_source_frames)) return std::nullopt;
+    } else if (command != ProducerCommand::chunk && !payload.empty()) {
+        return std::nullopt;
+    }
     return ProducerEnvelope{*version, command, *sequence, *deadline, *generation,
                             std::move(*stream), std::move(*session), std::move(*turn),
                             token, std::move(payload)};
@@ -376,6 +421,24 @@ ProducerResponse PlaybackSession::process(const ProducerEnvelope& envelope,
         source_frames_ += frames;
         return respond(envelope.sequence, ProducerStatus::ok, frames);
     }
+    case ProducerCommand::visual_cue: {
+        if (state_ != SessionState::streaming || !token_consumed_) {
+            return respond(envelope.sequence, ProducerStatus::invalid_state);
+        }
+        const auto cue = decode_visual_speech_cue_payload(envelope.payload, lease_.max_frames);
+        if (!cue || visual_speech_cues_.size() >= maximum_visual_speech_cues) {
+            return respond(envelope.sequence, ProducerStatus::invalid_frame);
+        }
+        if (!visual_speech_cues_.empty()) {
+            const auto& previous = visual_speech_cues_.back();
+            const auto previous_end = previous.start_sample + previous.duration_samples;
+            if (cue->start_sample < previous_end) {
+                return respond(envelope.sequence, ProducerStatus::invalid_frame);
+            }
+        }
+        visual_speech_cues_.push_back(*cue);
+        return respond(envelope.sequence, ProducerStatus::ok);
+    }
     case ProducerCommand::finish:
         if (state_ != SessionState::streaming || !token_consumed_) return respond(envelope.sequence, ProducerStatus::invalid_state);
         source_submission_complete_ = true;
@@ -404,12 +467,14 @@ void PlaybackSession::mark_device_drained() noexcept {
 
 void PlaybackSession::mark_device_lost() noexcept {
     ring_.clear();
+    visual_speech_cues_.clear();
     endpoint_drain_complete_ = false;
     state_ = SessionState::failed;
 }
 
 void PlaybackSession::cancel() noexcept {
     ring_.clear();
+    visual_speech_cues_.clear();
     endpoint_drain_complete_ = false;
     state_ = SessionState::cancelled;
 }
