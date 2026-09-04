@@ -1,5 +1,10 @@
 # Full-contour, spectrally driven headless lip-sync proof
 
+> **Rejected after visual review.** The numeric gates below did not detect the
+> rigid synthetic cavity/teeth artifact. The source-preserving replacement and
+> stricter artifact gate are documented in
+> [v5](headless-realistic-lipsync-proof-2026-09-04-v5.md).
+
 Date: 2026-09-04
 Status: accepted isolated CPU component candidate; desktop and live-game gates remain open
 

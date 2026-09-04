@@ -6,24 +6,25 @@ arbitrary externally captured moving faces, and a CPU-safe default lip renderer.
 
 ## Decision
 
-The default path remains the deterministic current-frame mouth compositor, but
-its drive is upgraded from loudness-only motion to a provider-neutral,
-playback-clocked visual speech timeline:
+The default path is now the identity-bound observed mouth atlas. The earlier
+procedural cavity renderer failed visual review and remains only a conservative
+compatibility fallback. The active architecture combines a provider-neutral,
+playback-clocked visual speech timeline with real per-character mouth pixels:
 
 1. Use exact TTS phoneme/viseme events when the selected provider supplies them.
 2. Use a small local causal spectral classifier when only PCM is available.
 3. Keep RMS/peak amplitude as the final fail-safe, never as the preferred mouth
    shape selector.
-4. Preserve the complete OpenSeeFace 18-point mouth contour and the exact source
-   upper-lip surface. Open primarily through the lower jaw.
+4. Select and interpolate real identity-observed or enrollment-teacher states,
+   then warp the curved residual with the current frame's mouth geometry.
 5. Keep neural video editing as an explicit optional pack. It must never consume
    game VRAM silently or block audio/subtitles.
 
 This split solves two different problems. The visual timeline decides *which*
 mouth pose is needed and when. The compositor decides how much of that pose can
 be rendered safely from the current face. A closed source image cannot reveal
-real unseen teeth or tongue; a lightweight source-preserving renderer must stay
-conservative rather than pretending it has generative information.
+real unseen teeth or tongue. The atlas solves that information gap during
+enrollment and the runtime never invents those surfaces.
 
 ## Product architecture
 
@@ -34,7 +35,7 @@ Local PCM spectrum ──┤                                  │
 Amplitude fail-safe ─┘                                  ▼
                                              coarticulated mouth coefficients
                                                           │
-current frame + actor lock + full lip contour ────────────┤
+identity atlas + current frame + actor lock ──────────────┤
                                                           ▼
                                       bounded premultiplied mouth residual
 ```
@@ -51,7 +52,8 @@ ignored and falls back to PCM energy; it cannot authorize a residual by itself.
 
 ## Why this is the low-latency default
 
-- It adds no model download and no GPU residency.
+- Runtime adds no model residency and consumes no GPU VRAM. A user may choose
+  an optional enrollment teacher to create the per-character atlas.
 - The local classifier is seven fixed Goertzel bands over a bounded PCM window,
   not ASR. It distinguishes broad rounded/open/spread/fricative shapes without a
   vocabulary, beam search, transcript, or network call.
@@ -59,7 +61,8 @@ ignored and falls back to PCM energy; it cannot authorize a residual by itself.
 - The renderer is deterministic between frames, so it does not introduce the
   stochastic shimmer common to per-frame generative methods.
 - The current face, pose, lighting, beard, and idle motion remain the source of
-  truth outside a tightly bounded mouth region.
+  truth outside a tightly bounded mouth region, while teeth and lip texture are
+  real enrolled pixels from the same identity.
 
 ## Neural candidates and hard trade-offs
 
@@ -118,16 +121,18 @@ device-loss behavior, and explicit user selection. Model Manager must account fo
 the game budget before activation; no pack may claim VRAM merely because it fits
 on an idle GPU.
 
-## Longer-term quality path
+## Implemented quality path
 
-The strongest non-generative extension is a track-local multi-reference mouth
-atlas. Retain sharp, pose-compatible mouth crops observed from the same authorized
-character; index them by canonical viseme, aperture, width, yaw, and lighting;
-then piecewise-warp the two nearest compatible source textures into the current
-18-point lip mesh. This can reveal real teeth that were previously observed
-without inventing a new identity. It still requires character enrollment and
-strict actor/profile/provenance binding, so it is not a substitute for the generic
-current-frame fallback.
+The strongest non-generative extension is now implemented in the native worker:
+a track-local multi-reference mouth atlas. Retain sharp, pose-compatible mouth
+crops observed from the same authorized character; index them by canonical
+viseme, aperture, width, yaw, and lighting; then warp the nearest compatible
+source textures into the current mouth geometry. This reveals real previously
+observed teeth without inventing a new identity. The worker enforces
+actor/generation binding, bounded state count and dimensions, premultiplied
+pixels, pose-aware selection, current-frame validation, and synchronous
+cancellation. The moving-frame evidence and remaining product boundary are
+recorded in the [v5 proof](headless-realistic-lipsync-proof-2026-09-04-v5.md).
 
 ## Sources
 
