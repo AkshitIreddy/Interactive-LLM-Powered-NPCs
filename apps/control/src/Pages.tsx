@@ -1244,6 +1244,10 @@ function PerformancePage({
             detail="Verified without a GPU lease"
           />
           <AdmissionState
+            value="Headless-qualified"
+            detail="Render path passed; live presentation remains open"
+          />
+          <AdmissionState
             value="Conflicts"
             detail="Would consume protected headroom"
           />
@@ -1408,7 +1412,7 @@ function AdmissionState({
   const tone =
     value === "Fits"
       ? "ok"
-      : value === "CPU-only"
+      : value === "CPU-only" || value === "Headless-qualified"
         ? "teal"
         : value === "Conflicts"
           ? "danger"

@@ -382,11 +382,11 @@ export const ROUTE_OPTIONS: Record<ProviderRole, RouteProviderOption[]> = {
       privacy: "Captured face frames and delivered audio stay on this PC",
       egress: "None",
       cost: "GPU/VRAM and game frame-time",
-      note: "Research paths remain unavailable until a signed, qualified pack exists and the live resource-admission gate passes.",
+      note: "The CPU atlas worker and moving-frame artifact gate are headless-qualified. General selection stays locked until a per-character atlas is enrolled and installed live-game presentation passes.",
       models: [
         {
           id: "character-mouth-atlas",
-          name: "Character mouth atlas · 287 KB static proof; live route pending",
+          name: "Character mouth atlas · moving-frame headless route qualified; enrollment required",
           selectable: false,
         },
         {

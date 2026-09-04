@@ -352,19 +352,20 @@ export const MODEL_PACKS: ModelPack[] = [
     name: "Character mouth atlas",
     lane: "Performance",
     purpose: "Presence",
-    size: "Prototype 287 KB compressed",
+    size: "943 KB raw / 287 KB compressed per-character proof",
     fit: "No resident visual AI model",
-    admission: "Unverified",
+    admission: "Headless-qualified",
     state: "candidate",
     license: "Project artifact · teacher provenance required",
     availability: "experimental",
     access:
       "Generated per confirmed character during enrollment; no downloadable runtime model",
     latency:
-      "Native atlas warp measured 1.168 ms mean / 1.388 ms p95; portable Python audio lookup plus blend measured 2.464 ms mean / 2.984 ms p95; live game presentation is unmeasured",
+      "Four native 1080p actor-bound atlas select + compose runs measured 4.549-4.724 ms mean / 5.101-6.692 ms p95 with 0 GPU VRAM; the separate moving-video artifact gate passed",
     decision:
-      "Preferred architecture. Add current-frame landmark warp, lighting adaptation, unseen-utterance sync, game coexistence, and installed-app evidence before enabling it.",
-    output: "8-state enrolled atlas → bounded current-frame mouth residual",
+      "Preferred runtime architecture. Real observed or enrollment-teacher mouth states are warped into the exact current game frame; production still requires per-character enrollment and installed live-game qualification before general enablement.",
+    output:
+      "Identity-bound mouth atlas → authenticated bounded current-frame residual",
   },
   {
     id: "a2f3d-regression",

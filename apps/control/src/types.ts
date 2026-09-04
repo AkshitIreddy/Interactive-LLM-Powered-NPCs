@@ -61,7 +61,12 @@ export interface ModelPack {
   purpose: "Speech in" | "Thinking" | "Voice out" | "Memory" | "Presence";
   size: string;
   fit: string;
-  admission: "Fits" | "CPU-only" | "Conflicts" | "Unverified";
+  admission:
+    | "Fits"
+    | "CPU-only"
+    | "Headless-qualified"
+    | "Conflicts"
+    | "Unverified";
   state: "candidate";
   license: string;
   availability:
