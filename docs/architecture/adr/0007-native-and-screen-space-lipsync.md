@@ -1,8 +1,8 @@
 # ADR-0007: Use only generic external screen-space lip-sync
 
-Status: Accepted architecture; no local lip-sync implementation or pack is qualified
+Status: Accepted architecture; CPU headless component candidate implemented, no app route or neural pack qualified
 Date: 2026-08-28
-Updated: 2026-08-29
+Updated: 2026-09-04
 
 ## Context
 
@@ -14,7 +14,14 @@ Conversation remains API-first: the current product has no local LLM, STT, TTS o
 
 The product supports no native-rig, mod, hook, DLL-injection or per-game facial adapter path. Lip-sync, when enabled, is a game-agnostic **screen-space** capability over externally captured frames.
 
-The first low-latency research baseline is **Audio2Face-3D regression v2.3 as an audio-to-animation control source**, followed by a project-owned strict 2D mouth residual. Audio2Face-3D produces facial geometry or blend-shape animation rather than a modified game image; this design maps only approved mouth/jaw controls onto a tracked 2D mouth mesh. It does not connect to a game rig, write game state or receive game memory. This is an architecture candidate, not a qualified runtime, pack or availability promise.
+The default low-latency control source is a **provider-neutral, playback-clocked
+canonical viseme timeline**. Exact TTS phoneme/viseme events are preferred when
+available; a bounded local spectral classifier handles PCM-only providers and
+amplitude is the final fail-safe. Audio2Face-3D remains an optional future
+audio-to-animation control source. It produces facial geometry or blend-shape
+animation rather than a modified game image; only approved mouth/jaw controls
+could be mapped onto the tracked 2D mouth mesh. It does not connect to a game
+rig, write game state or receive game memory.
 
 **NVIDIA Maxine AR SDK LipSync** is a separate, experimental direct-video candidate. Its documented contract consumes synchronized video frames and audio and returns modified video frames. Evaluation requires access to the NGC-distributed feature, exact license and redistribution review, supported Windows/GPU qualification, startup/pre-roll measurement, and reproduction of latency, quality, VRAM and game-impact results. Vendor measurements select a spike; they are not product benchmarks. A normal hosted NIM model key is not evidence that this separate SDK feature is entitled or usable.
 
@@ -26,7 +33,14 @@ The first low-latency research baseline is **Audio2Face-3D regression v2.3 as an
 
 Each captured source frame is immutable. A visual worker may return only a bounded mouth-region residual associated with the exact actor ID, capture-frame ID, QPC timestamp and cancellation generation that produced it. The compositor applies an accepted residual to a presentation copy of the newest compatible frame; it never mutates or recursively feeds a generated frame back into tracking or inference.
 
-Tracking, pose, dynamic mask, optical flow, occlusion, identity confidence, color/lighting, frame age and resource budget gate composition. Provider-neutral TTS alignment/visemes may supply timing when available; audio-derived features are the explicit fallback. A late, stale, low-confidence, wrong-identity, out-of-mask or over-budget result is discarded. The untouched current game frame is presented within one display refresh, while conversation continues through audio/subtitles.
+Tracking, pose, dynamic mask, optical flow, occlusion, identity confidence,
+color/lighting, frame age and resource budget gate composition. Provider-neutral
+TTS alignment/visemes use bounded start and duration samples on the exact
+playback stream generation. The native broker rejects malformed, unordered,
+overlapping, excess or lease-escaping cues; audio-derived features are the
+explicit fallback. A late, stale, low-confidence, wrong-identity, out-of-mask or
+over-budget result is discarded. The untouched current game frame is presented
+within one display refresh, while conversation continues through audio/subtitles.
 
 Never freeze the full game frame, paste a rectangular face or display a generated full-frame replacement.
 

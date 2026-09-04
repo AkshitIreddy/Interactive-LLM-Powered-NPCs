@@ -33,6 +33,17 @@ Notable 2.0 changes are recorded here. No 2.0 version has been published; versio
   now refines the contact seam from current-frame pixels, keeps the upper lip
   stationary, opens downward through the lower jaw, and gates protected-upper-
   lip darkening independently from whole-mouth motion.
+- Upgraded the mouth signal and geometry path to preserve the complete ordered
+  OpenSeeFace 18-point contour. The compositor now produces distinct curved
+  open, rounded, spread, and closure shapes, locks the exact source upper-lip
+  surface, and uses only conservative source-colour oral depth plus gated
+  tongue/enamel hints when full contour evidence is present.
+- Preserved provider TTS viseme durations end to end. The authenticated playback
+  producer and native broker carry at most 128 ordered canonical cues without
+  changing audio frame accounting; command 29 binds them to the WASAPI sample
+  clock and applies bounded anticipation/release with decisive bilabial closure.
+  Providers without cues retain a new pre-emphasized seven-band PCM classifier,
+  with amplitude-only motion as the final fail-safe.
 - Added explicit NVIDIA Magpie stock-voice selection to the provider smoke
   runner. It rejects ZeroShot/cloning identifiers and defaults deterministically
   to Jason, Leo, then Ray instead of preferring Aria/Sofia.
@@ -50,10 +61,12 @@ Notable 2.0 changes are recorded here. No 2.0 version has been published; versio
 - Rejected both the first isolated mouth proof, which had a detached dark slit,
   flat synthetic teeth, and a female Aria fixture, and the later v16 proof,
   whose cavity crossed the upper lip despite passing its numeric motion gate.
-  The current 960x720 candidate uses stock male Jason audio, source-derived
-  contact-seam placement, stationary upper-lip pixels, and lower-jaw-only
-  opening. It measured 58.284 ms p95 moving tracking at 10 Hz, 1.847 ms p95
-  compositing at 30 FPS, 0 GPU VRAM, and zero protected-upper-lip darkening.
+  The current 960x720 candidate uses stock male Jason audio, full-contour
+  geometry, source-derived contact-seam placement, a locked upper-lip surface,
+  and curved lower-jaw opening. It measured 27.212 ms p95 moving tracking at
+  10 Hz, 2.634 ms p95 compositing at 30 FPS, 0 GPU VRAM, 28 visibly changed
+  frames, a 19.2% maximum articulated aperture relative to mouth width, and
+  zero protected-upper-lip darkening.
 
 ### Remaining integration gates
 

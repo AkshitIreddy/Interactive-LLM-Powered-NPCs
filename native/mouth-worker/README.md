@@ -10,14 +10,15 @@ product route yet.
 ## What is real
 
 - A deterministic TTS-viseme-to-eight-coefficient mapping.
-- A causal PCM energy/zero-crossing fallback that drives mouth motion without
-  pretending to perform phoneme recognition.
+- A causal, allocation-free seven-band PCM spectral fallback that separates
+  broad rounded/open/spread/fricative shapes while amplitude controls strength.
+  It remains a lightweight classifier, not speech recognition.
 - Exact cancellation generation, actor ID, track ID, track epoch, frame
   sequence, device generation, geometry epoch, capture timestamp, audio clock,
   ROI, and deadline binding.
-- A model-independent landmark adapter: qualified packs map native indices to
-  left/right mouth corners and upper/lower lip centers. No pack/model is
-  downloaded, embedded, or assumed by the compositor.
+- A model-independent landmark adapter: qualified packs preserve the complete
+  ordered 18-point mouth contour as well as semantic corners and aperture
+  centers. No pack/model is downloaded, embedded, or assumed by the compositor.
 - An optional admitted OpenSeeFace MNV3/LM1 producer that rehashes the exact
   Model Manager-authorized models, ONNX Runtime DLLs, licenses, notices,
   version, and revision immediately before loading. It uses the pinned ONNX
@@ -27,8 +28,9 @@ product route yet.
   audio/video skew, actor or frame mismatch, occlusion, pose, confidence, ROI
   containment, and residual size.
 - A CPU reference compositor that samples only the exact current source frame,
-  performs a bounded geometric mouth warp, and emits a feathered premultiplied
-  BGRA8 residual. Source pixels are immutable and bypass means no residual.
+  locks the upper-lip source surface, performs a curved lower-jaw-biased mouth
+  warp, and emits a feathered premultiplied BGRA8 residual. Source pixels are
+  immutable and bypass means no residual.
 - A deterministic atlas compositor primitive that validates premultiplied
   enrollment patches, interpolates two states, rotates them to the current
   semantic mouth-corner axis, binds the result to the exact source frame and
@@ -104,11 +106,13 @@ The media broker should remain the sole GPU-resource and presentation authority:
 4. Any mismatch hides the overlay and leaves the live game untouched.
 
 The Windows media broker implements that authority through additive visual
-commands 14/15 while preserving playback commands 12/13. Command 29 supplies
-only a read-only, post-WASAPI-release eight-bin RMS/peak timing envelope; no raw
-PCM or fabricated viseme crosses into the product coordinator. The Tauri native
-control plane owns the worker supervisor and never exposes handles, installed
-pack paths, or launch credentials to the WebView. The native product smoke
-proves exact source import, admitted-provider configuration, residual
-presentation, handle-value reuse safety, and that an optional worker crash
-during live PCM neither sends global cancel nor prevents endpoint drain.
+commands 14/15 while preserving playback commands 12/13. The authenticated
+producer can add at most 128 ordered, lease-bounded canonical visual speech cues
+without consuming audio frames. Command 29 supplies those cues on the playback
+sample clock plus a read-only, post-WASAPI-release eight-bin RMS/peak fallback;
+no raw PCM crosses into the product coordinator. The Tauri native control plane
+owns the worker supervisor and never exposes handles, installed pack paths, or
+launch credentials to the WebView. The native product smoke proves exact source
+import, admitted-provider configuration, residual presentation, handle-value
+reuse safety, and that an optional worker crash during live PCM neither sends
+global cancel nor prevents endpoint drain.
