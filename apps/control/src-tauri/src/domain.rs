@@ -303,6 +303,10 @@ pub struct StartSimulationRequest {
     pub execution_mode: ExecutionMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dev_live_tts: Option<DevLiveTtsRequest>,
+    /// Trusted native-only authored profile snapshot. Serde skips this field so
+    /// the WebView cannot supply or observe the runtime profile authority.
+    #[serde(skip)]
+    pub effective_game_profile: Option<npc_game_profile::GameProfileV2>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -323,6 +327,7 @@ impl Default for StartSimulationRequest {
             enabled_spoiler_tiers: Vec::new(),
             execution_mode: ExecutionMode::Hybrid,
             dev_live_tts: None,
+            effective_game_profile: None,
         }
     }
 }

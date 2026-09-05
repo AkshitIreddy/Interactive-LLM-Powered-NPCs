@@ -197,6 +197,11 @@ pub struct NativeSimulationRequest {
     pub turn_id: String,
     pub game_id: String,
     pub character_id: Option<String>,
+    /// Effective data-only profile selected and validated by native Tauri.
+    /// The authenticated runtime revalidates it against its bundled immutable
+    /// game, detection, safety, and capability contract before use.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_game_profile: Option<npc_game_profile::GameProfileV2>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub native_identity_decision: Option<npc_identity_engine::IdentityDecisionV1>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1721,6 +1726,7 @@ mod tests {
             turn_id: "turn-1".into(),
             game_id: "eclipse-harbor".into(),
             character_id: Some("mara-venn".into()),
+            effective_game_profile: None,
             native_identity_decision: None,
             enabled_spoiler_tiers: vec!["main_story".into()],
             generic_selection: None,
@@ -1854,6 +1860,7 @@ mod tests {
             turn_id: "turn-1".into(),
             game_id: "generic-game".into(),
             character_id: None,
+            effective_game_profile: None,
             native_identity_decision: None,
             enabled_spoiler_tiers: Vec::new(),
             generic_selection: None,
@@ -1945,6 +1952,7 @@ mod tests {
             turn_id: "turn-1".into(),
             game_id: "cyberpunk-2077".into(),
             character_id: None,
+            effective_game_profile: None,
             native_identity_decision: None,
             enabled_spoiler_tiers: Vec::new(),
             generic_selection: None,

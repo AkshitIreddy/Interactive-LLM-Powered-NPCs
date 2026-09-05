@@ -1136,6 +1136,7 @@ fn native_request_for(
             } else {
                 NativeTurnInputMode::Typed
             },
+        effective_game_profile: request.effective_game_profile.clone(),
             push_to_talk_state: if selected_stt.is_some() {
                 NativePushToTalkCaptureState::TranscriptReady
             } else {
