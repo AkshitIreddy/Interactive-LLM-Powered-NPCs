@@ -12,7 +12,9 @@
 | Runtime | sherpa-onnx 1.13.6 C API |
 | Runtime Git commit | 1cb484af5e69d3c7803c1eb0b3b5ab8041e0e911 |
 | ONNX Runtime | 1.27.1 |
-| ABI | npc-local-tts-sherpa-c-api-v1 |
+| Native provider | `npc-local-tts-native::KokoroLocalProvider` |
+| Native worker | `npc-local-tts-native-worker.exe` |
+| Model ABI | sherpa-onnx 1.13.6 C API, isolated inside the worker |
 | Placement | cpu_resident only |
 | Audio | 24000 Hz, mono, pcm_s16le |
 | Voices | 28 fixed en-US and en-GB stock voices |
@@ -55,66 +57,64 @@ Install root layout:
 
 ## Supervisor launch
 
-Launch the reviewed/frozen worker without a visible console. On Windows use a
-GUI-subsystem wrapper or CREATE_NO_WINDOW, a restricted token, deny-egress
-policy, and a kill-on-close job object. Create three current-user-only,
-reject-remote-client named pipes before launch.
+The checked-in Python worker remains a qualification harness and protocol
+reference. It is not a normal-startup dependency. The optional native route
+uses the Rust `npc-local-tts-native` provider and launches
+`npc-local-tts-native-worker.exe` with `CREATE_NO_WINDOW` and kill-on-drop
+containment. A release supervisor should additionally apply a restricted token,
+deny-egress policy, and kill-on-close job object.
 
-Required arguments:
+The native worker accepts only the exact installed revision root and a CPU
+thread count between 1 and 8:
 
-    --manifest <trusted manifest path>
     --pack-root <exact installed revision directory>
-    --expected-manifest-sha256 <canonical catalog digest>
-    --launch-nonce <random per-launch secret>
-    --worker-instance-id <opaque per-launch ID>
-    --input-pipe <supervisor control-input pipe>
-    --output-pipe <supervisor control-output pipe>
-    --pcm-output-pipe <supervisor PCM pipe>
+    --cpu-threads 2
 
-The worker checks the manifest digest, exact root identity, installation
-inventory, runtime version, runtime Git SHA, ONNX Runtime version, 24 kHz sample
-rate, and at least 53 embedded speakers. Its public discovery remains limited
-to speaker IDs 0 through 27.
-
-Perform handshake first with generation zero and the launch nonce. Then issue
-load with exactly:
-
-    {
-      "pack_id": "local.tts.kokoro-v1.0-int8.sherpa-onnx-cpu.windows-x64",
-      "revision": "2026.08.30-r1",
-      "lease_id": "<opaque model-manager lease>",
-      "num_threads": 2
-    }
+The trusted host constructs the provider only after Model Manager verifies the
+signed catalog, installation, selected stock voice, current-device envelope,
+and whole-loadout lease. The worker independently hashes the six critical model
+files, checks the exact root identity, loads only the C API DLL at the absolute
+pack path, restricts dependent-DLL search to that directory and safe system
+directories, and verifies sherpa version, Git SHA, ONNX Runtime version, 24 kHz
+sample rate, and at least 53 embedded speakers. The public provider still
+accepts only speaker IDs 0 through 27.
 
 ## Audio transport and scheduling
 
-Control framing is four-byte unsigned big-endian length followed by bounded
-UTF-8 JSON for npc.local-tts-worker/v1.
+The private native stdio protocol uses a bounded four-byte big-endian JSON
+command length. Each output frame uses a four-byte big-endian JSON-header length,
+a four-byte big-endian PCM length, the closed JSON event, and optional PCM s16le.
+Request IDs, provider-local cancellation generations, PCM sequence, sample rate,
+channels, and the terminal flag are checked by the safe Rust provider. Treat
+the terminal event, not the cancel acknowledgement, as the stream drain barrier.
 
-PCM framing is:
+The provider sets separate bounded load and response deadlines. A bad frame,
+hung response, or internally rejected request retires the process; a later
+synthesis starts and handshakes a new child. Cancellation applies while queued
+for the single-synthesis gate; dropping the stream also cancels and drains the
+active generation. PCM received after cancellation is discarded.
+The provider holds back one real PCM frame so the core-facing final chunk is
+both non-empty and marked end-of-stream.
 
-    NPCTTS01
-    uint32be header_bytes
-    uint32be pcm_bytes
-    canonical UTF-8 JSON header
-    pcm_s16le payload
+The worker permits one in-flight synthesis. Kokoro 1.13.6 emits its callback
+only after a complete input fragment. The native worker splits one runtime
+sentence at natural boundaries into fragments of at most 36 characters, emits
+each finished fragment as PCM, and checks cancellation between fragments. A
+higher cancellation generation invalidates older synthesis and ends the PCM
+stream as cancelled. This is clause-incremental synthesis, not continuous
+neural streaming. Process termination remains a hung-child containment fallback.
 
-Preserve stream ID, request ID, generation, chunk sequence, sample_start,
-frame_count, sample rate, and payload SHA-256. Refuse a reused stream ID. Treat
-the end record, not the cancel response, as the authoritative stream drain
-barrier. Only then release the audio buffer or issue unload.
+The process-boundary regression suite uses a fake executable rather than a
+descriptor mock:
 
-The worker permits one in-flight synthesis. A higher cancellation generation
-invalidates older synthesis, returns zero from the native callback, and ends
-the PCM stream as cancelled. Resource pressure should cancel and drain speech
-before unload. Never terminate the process as a routine cancellation mechanism;
-reserve job-object termination for a hung or compromised sidecar.
+    cargo test -p npc-local-tts-native --features process-boundary-tests --test worker_boundaries
 
 ## Timing and lip-sync
 
-Trust only sample_start and frame_count as exact timing. first_pcm_ms,
-total_synthesis_ms, callback receipt time, and realtime factor are process
-measurements. The sherpa callback fraction is progress, not a phoneme clock.
+Trust only ordered PCM frames and their 24 kHz sample count as exact audio
+timing. first_pcm_ms, total_synthesis_ms, callback receipt time, and realtime
+factor are process measurements. The sherpa callback fraction is progress, not
+a phoneme clock.
 
 word_alignment, phoneme_alignment, and viseme_metadata are deliberately false.
 Route the PCM stream to the separately qualified lip-sync worker. Do not invent
@@ -152,7 +152,10 @@ must grant this lane only after every prior model lane has restored the lock.
 
 ## Remaining gated qualification
 
-Real acceptance remains pending all of the following:
+Real acceptance remains pending all of the following. A 2026-09-05 native run
+proved executable PCM and bounded cancellation, but the earlier 20-sample suite
+failed its long pre-callback cancellation deadline and minted no accepted
+report or envelope:
 
 1. The parent task explicitly queues this lane after Qwen and grants use under
    the repository lock protocol.

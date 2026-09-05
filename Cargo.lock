@@ -1604,6 +1604,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "npc-local-tts-native"
+version = "2.0.0-alpha.1"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "libloading",
+ "npc-runtime-core",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-util",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "npc-memory"
 version = "2.0.0-alpha.1"
 dependencies = [

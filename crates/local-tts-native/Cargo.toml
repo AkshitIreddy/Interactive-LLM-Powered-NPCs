@@ -1,0 +1,43 @@
+[package]
+name = "npc-local-tts-native"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Supervised native Kokoro/sherpa-onnx CPU TTS provider"
+publish = false
+
+[features]
+process-boundary-tests = []
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = "0.1"
+futures-util = "0.3"
+libloading = "0.8"
+npc-runtime-core = { path = "../runtime-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["io-util", "process", "rt-multi-thread", "sync"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+
+[dev-dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
+
+[[bin]]
+name = "npc-local-tts-native-worker"
+path = "src/bin/worker.rs"
+
+[[bin]]
+name = "npc-local-tts-fake-worker"
+path = "tests/support/fake_worker.rs"
+required-features = ["process-boundary-tests"]
+
+[[test]]
+name = "worker_boundaries"
+path = "tests/worker_boundaries.rs"
+required-features = ["process-boundary-tests"]

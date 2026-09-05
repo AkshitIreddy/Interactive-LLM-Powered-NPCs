@@ -6,10 +6,12 @@ The candidate is Kokoro-82M v1.0 INT8 through the sherpa-onnx 1.13.6 C API on
 Windows x64 CPU. It streams 24 kHz mono signed 16-bit PCM and exposes 28 audited
 American and British English stock voices.
 
-No model or runtime payload was downloaded or executed while this lane was
-built. The checked-in manifest is an integration candidate, not a trusted
-catalog entry, and activation remains blocked until a current-device benchmark
-has been reviewed, bound to the exact manifest, and signed by Model Manager.
+The pinned model/runtime payload was downloaded to `E:\temp` and executed on
+Windows on 2026-09-05. Archive and critical-file verification passed, and the
+new Rust `npc-local-tts-native` provider emitted real PCM through its supervised
+native worker. The checked-in manifest remains an integration candidate, and
+activation stays blocked because the 20-sample qualification failed its
+pre-callback cancellation deadline and no signed resource envelope exists.
 
 ## Exact identity
 
@@ -52,23 +54,26 @@ in this revision.
 
 ## Worker boundary
 
-worker.py is a supervised offline sidecar. Production has no fixture switch,
-downloader, HTTP server, arbitrary model path, reference-audio input, or
-voice-embedding input. It re-verifies the installed pack before loading, then
-installs a deny-network audit hook. The supervisor must still enforce a
-restricted token, deny-egress policy, current-user-only named pipes, and a
-kill-on-close job object.
+`worker.py` remains the qualification harness and protocol reference. The
+optional native candidate uses `npc-local-tts-native::KokoroLocalProvider`, which launches
+`npc-local-tts-native-worker.exe` hidden and keeps the verified CPU model warm
+across turn sessions. The native worker has no downloader, HTTP client,
+arbitrary model path, reference-audio input, or voice-embedding input.
 
-The control plane uses bounded length-prefixed JSON with monotonically
-increasing sequence numbers and cancellation generations. PCM travels only on
-a separate supervisor-created endpoint using NPCTTS01 binary records. Each PCM
-chunk carries an exact output sample clock, SHA-256, stream ID, generation, and
-clipping count. The terminal PCM record is the authoritative drain barrier.
+The native route uses bounded length-prefixed JSON commands and bounded framed
+JSON-plus-PCM responses over private stdio. It validates request IDs, sequences,
+format, and terminal state. It holds back one real PCM frame so the final
+core-facing audio chunk is non-empty. Pipe writes and response inactivity are
+deadline-bounded; malformed, hung, or internally rejected children are retired
+and replaced on the next synthesis. Cancellation applies while waiting for the
+single-synthesis gate; dropping the stream also cancels and drains the active
+generation. PCM arriving after cancellation is discarded.
 
-Supported operations are handshake, capabilities, discover_voices, health,
-load, synthesize, self_test, cancel, unload, and shutdown. Only one synthesis
-is active at once. Cancellation advances the generation and stops the native
-callback; unload is refused until the PCM stream drains.
+Only one native synthesis is active at once. The sherpa Kokoro callback arrives
+after a full input fragment, so the native worker generates bounded natural
+clauses and emits PCM after each clause. Cancellation advances a provider-local
+generation and drains after the current clause. This is honest clause-level
+incremental delivery, not continuous neural streaming.
 
 The pinned API does not expose trustworthy word, phoneme, or viseme timestamps.
 The worker therefore reports those features as unavailable. Downstream lip-sync
@@ -99,10 +104,22 @@ unsigned and non-admissible for Model Manager review.
 
 ## Fixture verification
 
-These tests synthesize only a deterministic in-memory sine fixture and use tiny
-local tar archives. They never fetch or execute the real candidate:
+The ordinary Python tests synthesize only a deterministic in-memory sine
+fixture and use tiny local tar archives:
 
     python -m unittest discover -s workers/local-tts/tests -v
+
+The ignored Rust integration test requires the separately installed verified
+pack and exercises the real native provider, PCM framing, persistent warm
+worker, voice pin, signal checks, and cancellation:
+
+    cargo test --release -p npc-local-tts-native --test real_kokoro -- --ignored --nocapture
+
+The fake-worker process suite tests cancellation, non-empty terminal PCM,
+malformed frames, hung reads, child retirement, and transparent restart without
+requiring model assets:
+
+    cargo test -p npc-local-tts-native --features process-boundary-tests --test worker_boundaries
 
 See docs/INTEGRATION_HANDOFF.md for the product wiring contract and
 docs/RESEARCH_LEDGER.md for the source/license decision record.
