@@ -6,17 +6,20 @@ arbitrary externally captured moving faces, and a CPU-safe default lip renderer.
 
 ## Decision
 
-The default path is now the identity-bound observed mouth atlas. The earlier
-procedural cavity renderer failed visual review and remains only a conservative
-compatibility fallback. The active architecture combines a provider-neutral,
-playback-clocked visual speech timeline with real per-character mouth pixels:
+The target low-latency architecture is an identity-bound, source-preserving
+mouth atlas. It is not currently an enabled product path. The earlier procedural
+cavity renderer and broad-atlas v37 renderer failed visual review and are
+rejected rather than retained as compatibility fallbacks. The candidate
+architecture combines a provider-neutral, playback-clocked visual speech
+timeline with per-character mouth pixels:
 
 1. Use exact TTS phoneme/viseme events when the selected provider supplies them.
 2. Use a small local causal spectral classifier when only PCM is available.
 3. Keep RMS/peak amplitude as the final fail-safe, never as the preferred mouth
    shape selector.
-4. Select and interpolate real identity-observed or enrollment-teacher states,
-   then warp the curved residual with the current frame's mouth geometry.
+4. Preserve the current frame's exterior lips and face, then use an observed or
+   enrollment-teacher reference only for oral surfaces hidden in a closed source
+   frame.
 5. Keep neural video editing as an explicit optional pack. It must never consume
    game VRAM silently or block audio/subtitles.
 
@@ -40,7 +43,7 @@ identity atlas + current frame + actor lock ────────────
                                       bounded premultiplied mouth residual
 ```
 
-The canonical classes are silence, bilabial, labiodental, dental, alveolar,
+The planned canonical classes are silence, bilabial, labiodental, dental, alveolar,
 postalveolar, palatal, velar, rounded, open vowel, and spread vowel. Provider
 symbols are mapped once at the runtime boundary. Visual workers never parse
 provider-specific strings.
@@ -60,9 +63,9 @@ ignored and falls back to PCM energy; it cannot authorize a residual by itself.
 - Exact provider events cost almost nothing and avoid guessing when available.
 - The renderer is deterministic between frames, so it does not introduce the
   stochastic shimmer common to per-frame generative methods.
-- The current face, pose, lighting, beard, and idle motion remain the source of
-  truth outside a tightly bounded mouth region, while teeth and lip texture are
-  real enrolled pixels from the same identity.
+- The current face, pose, lighting, beard, idle motion, mouth corners, and outer
+  lips remain the source of truth. Enrollment pixels are limited to oral
+  surfaces that the current closed frame cannot reveal.
 
 ## Neural candidates and hard trade-offs
 
@@ -121,18 +124,43 @@ device-loss behavior, and explicit user selection. Model Manager must account fo
 the game budget before activation; no pack may claim VRAM merely because it fits
 on an idle GPU.
 
-## Implemented quality path
+## Current implementation and proof boundary
 
-The strongest non-generative extension is now implemented in the native worker:
-a track-local multi-reference mouth atlas. Retain sharp, pose-compatible mouth
-crops observed from the same authorized character; index them by canonical
-viseme, aperture, width, yaw, and lighting; then warp the nearest compatible
-source textures into the current mouth geometry. This reveals real previously
-observed teeth without inventing a new identity. The worker enforces
-actor/generation binding, bounded state count and dimensions, premultiplied
-pixels, pose-aware selection, current-frame validation, and synchronous
-cancellation. The moving-frame evidence and remaining product boundary are
-recorded in the [v5 proof](headless-realistic-lipsync-proof-2026-09-04-v5.md).
+The native worker now enforces the source-preserving contract for a track-local
+mouth atlas: actor/generation binding, bounded state count and dimensions,
+premultiplied pixels, pose-aware selection, current-frame validation, bounded
+oral-interior admission, and synchronous cancellation. All six native CTest
+suites passed. The latest 1920×1080, 250-iteration CPU run measured `6.402 ms`
+geometric mean, `6.323 ms` direct-atlas mean, and `4.612 ms` mean / `4.682 ms`
+p50 / `7.004 ms` p95 / `7.264 ms` p99 for atlas worker select-and-compose, with
+zero GPU VRAM.
+
+The strongest current visual experiment is v53. It uses moving Mara source
+frames plus a one-time generated open-mouth enrollment reference, preserves the
+current exterior lips and face, and passed the stricter geometry/containment
+audit. Its Python inspection renderer measured `54.907 ms` mean / `73.153 ms`
+p95 and is not the production path. More importantly, its Jason fixture uses an
+RMS aperture curve without provider visemes, so it is not phoneme-accuracy
+evidence. The generated-reference format and exact v53 deformation/composite
+behavior have not yet been ported and visually compared through the native
+worker; native performance and v53 visual quality are separate evidence sets.
+
+Heavy neural or image-generation teachers are enrollment-only. They may produce
+a small reviewed identity-bound pack and then exit; they do not run per frame,
+remain resident during gameplay, or consume the 5–8 second dialogue-response
+budget. No pack is bundled or activated automatically.
+
+The detailed rejection history, measurements, artifact paths, and remaining
+product gates are recorded in the [v6 proof](headless-realistic-lipsync-proof-2026-09-04-v6.md).
+The general local visual route remains disabled and fails open to the untouched
+frame plus audio/subtitles until native parity, desktop presentation, live-game,
+and installer qualification are complete.
+
+The later v66 native port does not establish that parity. It passes component
+tests but its realistic render remains a dark, toothless hole and exceeds the
+upper-lip damage gate. A successor should judge the entire atlas/source-warp
+approach against newer alternatives rather than assuming more tuning will make
+it the winning architecture.
 
 ## Sources
 

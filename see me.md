@@ -532,3 +532,373 @@ Preserved deliberately: tracked source and `.git`, `tree-v3`, the last
 successful strict package, `artifacts/actual-ui-demo`, installed HandsOnTest
 app, offline dependency directories, real-weight evidence, uncommitted wire
 fix, and this handoff. After cleanup, `C:` reported 332.76 GiB free.
+# Successor-agent brief: Interactive LLM Powered NPCs 2.0
+
+Updated: 2026-09-05 IST
+
+Read this file before changing the repository. It is a transfer prompt and a
+truth boundary, not an instruction to preserve the current design. The user
+has moved this project to a more capable agent specifically so that agent can
+re-audit my work, challenge my conclusions, replace weak methods, and finish a
+substantially better product. Treat every current subsystem as a hypothesis
+supported by evidence of varying quality. Do not continue an approach merely
+because it already contains a lot of code.
+
+## Mission
+
+Turn the old GitHub prototype into a polished Windows desktop application that
+lets ordinary PC gamers speak with game NPCs using cloud, local, or hybrid AI.
+The expected experience is install, onboard, select/detect a game, configure a
+provider or local models, press Start, and play. The game keeps priority over
+CPU, GPU, VRAM, RAM, and latency. A useful audio/subtitle conversation must
+survive the failure or absence of vision, emotion, memory enhancement, or
+lip-sync.
+
+The user expects a major 2.0 product overhaul, not a cleanup of the notebook.
+They especially want:
+
+- a much better, distinctive, consumer-grade UI and onboarding flow;
+- a provider-agnostic API/local-model architecture with configurable profiles;
+- a genuinely measured 5–8 second conversational-response envelope;
+- natural, efficient lip-sync on arbitrary moving game characters;
+- intelligent local-model VRAM admission while accounting for the game;
+- automatic game discovery and useful first-class game profiles;
+- character identity, lore, voice, and memory that retain the clever ideas in
+  v1 without retaining its unsafe implementation;
+- single-monitor reliability and a non-injecting external capture/overlay path;
+- deterministic setup, tests, diagnostics, packaging, and a reviewable local
+  application plus test game; and
+- current research and primary-source evidence before committing to runtimes,
+  models, libraries, or licenses.
+
+Do not push, publish, tag, create a release, or enable public update/model
+endpoints. Prepare and test locally, then give the user the application and
+test-game paths for review. Public release requires explicit later approval.
+
+## Repository and Git truth
+
+- Checkout: `C:\Users\akshi\Desktop\Code Palace\interactive llm\Interactive-LLM-Powered-NPCs`
+- GitHub remote: `https://github.com/AkshitIreddy/Interactive-LLM-Powered-NPCs.git`
+- Working branch: `feat/2.0-overhaul`
+- Original v1 branch/revision: `main` at `503ef3b64a921b6a11efa9e3e0432a0c3de3b619`
+- Original v1 tag: `v1.0.0` at `9996575e69cf40d719e326adfea108476d80467b`
+- First 2.0 commit after v1: `adc12a7 chore(legacy): remove unsafe prototype assets`
+- Response-latency assessment checkpoint: `467d451`
+- Current observed-mouth prototype checkpoint: `5f396da`
+
+Inspect `git status`, `git log`, and the current diff before acting. Preserve
+user-owned changes. Do not reset or rewrite history. If you need a browsable v1
+tree, make a separate worktree below `E:\temp`; otherwise use `git show main:...`
+and `git ls-tree`. Do not switch the active checkout away from the 2.0 branch.
+
+The original full brief is represented by
+`docs/product-rework/original-brief-acceptance.md`,
+`docs/product-rework/original-brief-gap-map.json`, and the requirements and
+traceability documents under `docs/requirements`. Re-check them against the
+implementation; checked boxes and prose are not proof.
+
+## Inspect the old version directly
+
+Do not limit the audit to the legacy summaries. Inspect the actual code and
+notebooks on `main`/`v1.0.0`, including `main.ipynb`, `functions/`, the two
+Cyberpunk data trees, single-monitor experiments, face-identification data,
+memory stores, per-character voices, and the SadTalker integration.
+
+Useful durable analyses are:
+
+- `docs/legacy/repository-audit.md`
+- `docs/legacy/v1-pipeline.md`
+- `docs/legacy/feature-disposition.md`
+- `docs/legacy/single-monitor-root-cause.md`
+- `docs/product-rework/v1-behavior-comparison.md`
+
+Important v1 ideas worth reconsidering on their merits include face recognition
+against prebuilt character references, distinct known/background NPC handling,
+per-character lore and speaking examples, public versus character-specific RAG,
+stable important-character voices, generated background identities, push to
+talk, and an audio-only fallback. The old repository used Facenet512 reference
+caches and character databases in advance; do not overlook that product idea
+merely because its pickle/file-loop implementation was unsafe.
+
+Do not revive plaintext API files inside the product, untrusted pickle/Chroma
+indexes, generated `temp.py` execution, blocking notebooks, duplicated game
+trees, demographic inference, automatic webcam capture, complete-response
+serialization, vendored SadTalker, an opaque OpenCV game mirror, or frozen
+rectangular face replacement. Preserve the intent where valuable and redesign
+the mechanism.
+
+## Current 2.0 architecture: audit, do not inherit blindly
+
+The current tree is a large Windows-first replacement:
+
+- `apps/control`: Tauri 2 + React control application;
+- `apps/runtime-host`: Rust turn supervisor, provider routes, streaming,
+  cancellation, timing evidence, memory/identity integration, and diagnostics;
+- `native/media-broker`: native capture, audio, and presentation boundary;
+- `native/mouth-worker`: tracked mouth residual and atlas experiments;
+- `native/subtitle-renderer`: native subtitle presentation;
+- `crates/`: credential vault, diagnostics, game discovery/profile, model
+  manager, memory, providers, schemas, and supporting contracts;
+- `catalog/` and `profiles/`: provider/model metadata and 20 game profiles;
+- `demo/` and simulation fixtures: deterministic test target and replays; and
+- `packaging/`: Windows package/install/reconciliation scripts.
+
+Start with `docs/architecture/overview.md`, `docs/architecture/data-flow.md`,
+`docs/architecture/process-model.md`, all ADRs, `IMPLEMENTATION_STATUS.md`, and
+`HANDOFF.md`. Then verify those claims in source and tests. The present design
+uses a Tauri control plane, a custom Rust runtime, authenticated local IPC,
+native Windows media processes, Windows credential storage, SQLite/FTS-derived
+memory, capability-driven providers, a signed-pack model manager design, WGC
+capture with documented fallback, and a DirectComposition residual concept.
+These choices may be sound, partially implemented, overengineered, or stale.
+Judge them independently.
+
+## UI overhaul mandate
+
+The existing Response Console has broad functional coverage and prior headless
+screenshots/tests, but the user now explicitly wants a major visual and UX
+overhaul. Do not merely reskin individual cards. Audit the information
+architecture and redesign the end-to-end journey: first run, game discovery,
+provider setup, API/local/hybrid profiles, character and voice configuration,
+lip-sync enrollment, performance budgeting, diagnostics, active-session state,
+errors, repair, and help.
+
+Build a coherent original design system with excellent typography, hierarchy,
+spacing, motion, empty/loading/error states, contextual explanations, and
+progressive disclosure. It should feel like a premium Windows gaming utility,
+not a generic admin dashboard or AI-generated component library. Keep beginner
+defaults frictionless while making advanced per-game/per-character controls
+discoverable. Render and inspect the real application at wide and narrow sizes,
+high contrast, scaled text, keyboard focus, loading, empty, degraded, and error
+states. Use headless browser/screenshots while the display-safety restriction
+below remains active. Do not claim visual quality from DOM tests alone.
+
+## Provider, runtime, and model decisions to revisit
+
+Research the current 2026 options again, using official documentation, papers,
+model cards, repositories, licenses, and real benchmark evidence. Reassess every
+hosted and local LLM, STT, TTS, embeddings, retrieval, vision, identity,
+emotion, and lip-sync runtime. In particular, check whether Windows/NVIDIA
+runtimes such as TensorRT-LLM, llama.cpp backends, ONNX Runtime, DirectML,
+CUDA/TensorRT, or other newer stacks beat the current choices for startup,
+streaming latency, memory residency, unload behavior, packaging, and game
+coexistence. LM Studio's runtime list was a user reference, not a mandated
+backend.
+
+NVIDIA NIM is already a provider option and local smoke evidence exists for
+chat, embeddings, ASR experiments, and Magpie TTS. Re-check current NIM terms,
+quotas, model availability, stock voices, latency, and whether one key can
+realistically simplify onboarding. Never describe it as unlimited from a UI
+message alone. Determine whether NVIDIA currently offers an appropriate
+lip-sync/face-animation service or SDK; do not assume NIM itself does.
+
+The resource scheduler must evaluate combinations, not isolated models. If a
+user chooses local LLM + STT + TTS + embeddings + visual models, model admission
+must include the game's reserved VRAM/RAM/compute, persistent and peak memory,
+KV cache, model overlap during streaming, load/unload cost, warm pools, CPU
+fallback, and device-loss behavior. Explore clever preload, eviction, pinned
+host memory, quantization, sequential residency, and process lifetime policies,
+but measure them under representative game pressure. Never consume all free
+VRAM simply because the models fit on an idle desktop.
+
+## Latency truth
+
+Commit `467d451` adds a redacted latency assessment with a 5,000 ms target and
+8,000 ms ceiling. Its honest scope is finalized STT transcript to first decoded
+PCM. It includes LLM time to first token, first-token-to-TTS-request delay, and
+TTS time to first decoded audio. It does not yet include microphone/VAD/STT,
+speaker callback, visual presentation, or a live provider/game-load benchmark,
+and the 8-second status is telemetry rather than a cancellation policy.
+
+The user means an NPC should begin responding within roughly 5–8 seconds after
+the question, not that the mouth compositor may take 5–8 seconds. The visual
+hot path should remain frame-rate capable while conversation work streams and
+pipelines. Measure microphone to audible/visible response end to end and expose
+both reference results and “This PC” benchmarks without conflating fixture,
+component, desktop, game-load, or release evidence.
+
+## Lip-sync truth and current red experiment
+
+Lip-sync is still the largest unresolved product problem. The target is not a
+static talking-head video. It must alter only the appropriate mouth/face region
+of an arbitrary already-moving game character while preserving breathing,
+blinks, pose, camera motion, lighting, hair, occlusion, and the fresh game
+frame. It must be plausible on consumer hardware while the game is running.
+
+The strongest retained visual direction is the Python v53 headless prototype:
+
+- moving source: `E:\temp\InteractiveNPCs\sources\mara-game-idle-source-v1`
+- male Jason API-audio fixture:
+  `E:\temp\InteractiveNPCs\voice-lipsync-20260903\male-jason-v1\nvidia-magpie-fixture.wav`
+- video:
+  `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-mara-v53-imagegen-natural-aperture\mara-jason-imagegen-natural-aperture-v53.mp4`
+- source/output board:
+  `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-mara-v53-imagegen-natural-aperture\source-output-mouth-board.png`
+- audit:
+  `E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-mara-v53-imagegen-natural-aperture\mouth-quality-audit-v2.json`
+
+V53 keeps the moving source exterior and transfers a one-time same-identity
+observed oral interior. Its stricter audit passed containment/geometry checks,
+including 0.996700 openness/aperture Spearman correlation and 0.095730 maximum
+changed share outside the expanded contour. It still uses RMS aperture rather
+than provider visemes, proves one open reference rather than a natural full
+viseme inventory, runs as a 54.907 ms mean / 73.153 ms p95 Python inspection
+renderer, and is explicitly `rendered-not-qualified`.
+
+Commit `5f396da` ports parts of the idea into C++, adds a stricter visual audit,
+single-state atlas selection, an enrollment script, and a native realistic
+proof. It also corrects the OpenSeeFace 66-point topology: points 48–57 are the
+five upper and five lower outer-lip samples without dedicated corners; points
+58 and 62 are shared left/right corners; points 59–61 and 63–65 describe the
+inner opening. Upstream OpenSeeFace notes that its 66 points differ from normal
+iBUG-68, so ordinary dlib indexing is unsafe.
+
+The latest v66 native render is rejected despite compiling and passing all six
+native CTest suites:
+
+- output:
+  `E:\temp\InteractiveNPCs\voice-lipsync-20260905\moving-mara-v66-corrected-openseeface-topology`
+- close-up board:
+  `E:\temp\InteractiveNPCs\voice-lipsync-20260905\moving-mara-v66-corrected-openseeface-topology\mouth-board.png`
+- report:
+  `E:\temp\InteractiveNPCs\voice-lipsync-20260905\moving-mara-v66-corrected-openseeface-topology\headless-proof.json`
+- measured failure: `0.532468` maximum upper-lip darkening and `0.4`
+  articulated rows/mouth width;
+- visual failure: a cleaner but still artificial dark oval/hole, missing teeth,
+  distorted lip surfaces, and poor identity-preserving anatomy.
+
+The oral-normalized enrollment atlas used by v66 is:
+`E:\temp\InteractiveNPCs\review-mouth-atlas-v6-oral-normalized`. Its preview
+contains intentional rectangular normalization artifacts outside the runtime
+oral mask and is not itself an acceptable pasted-mouth texture.
+
+The latest 1920x1080/250-iteration native performance run measured 6.402 ms
+geometric mean, 6.323 ms direct-atlas mean, and 4.612 ms mean / 4.682 ms p50 /
+7.004 ms p95 / 7.264 ms p99 for worker selection plus composition. The v66
+realistic proof measured 1.756 ms compositor p95 and approximately 26.5 ms
+moving OpenSeeFace inference p95 at 15 Hz. These are component timings, not
+quality acceptance or end-to-end game evidence.
+
+Study these files before deciding whether any current method survives:
+
+- `docs/research/realtime-lipsync-overhaul-2026-09-04.md`
+- `docs/research/headless-realistic-lipsync-proof-2026-09-04-v6.md`
+- `scripts/benchmarks/render-dense-observed-lip-proof.py`
+- `scripts/benchmarks/prepare-generated-mouth-atlas.py`
+- `native/mouth-worker/src/compositor.cpp`
+- `native/mouth-worker/src/signal_adapter.cpp`
+- `native/mouth-worker/tools/audit_headless_mouth_quality.py`
+
+Do not optimize or polish v66 blindly. Re-evaluate whether source-pixel warping,
+observed-state oral transfer, denser landmarks, segmentation, optical flow,
+3D-aware reconstruction, neural residuals, NVIDIA Maxine, a newer causal model,
+or a different architecture gives the best quality/resource trade-off. Test the
+strongest candidates on a clearly visible moving/blinking/breathing person or
+character. Inspect enlarged mouth sequences and source/output comparisons;
+numeric motion gates have previously passed visibly terrible holes, detached
+slits, flat teeth, double contours, and pasted mouths.
+
+A heavy model may be valuable as an optional one-time enrollment teacher if it
+produces a tiny reviewed identity-bound pack and fully unloads before gameplay.
+That was my promising idea, not a requirement. A stronger direct runtime should
+replace it if measurements justify the trade. The default architecture should
+remain API-first for LLM/STT/TTS and efficient/local for lip-sync only if that is
+still the best researched product decision.
+
+## Evidence and release boundaries
+
+`IMPLEMENTATION_STATUS.md` contains many completed component checks, but major
+gates remain open: live ASR qualification, natural lip-sync, generated-reference
+native parity, provider-cue synchronization across real utterances, broad
+face/pose/occlusion coverage, cross-process D3D transport, HDR, representative
+game-load testing, selectable model packs, clean Windows VM install/repair/
+upgrade/uninstall, signing, and real-game certification.
+
+The current review executables predate v53/v66 and must not be presented as the
+current lip-sync implementation:
+
+- app: `E:\temp\InteractiveNPCs\review-app-v13-stronger-mouth\interactive-npcs-control.exe`
+- test game: `E:\temp\InteractiveNPCs\review-test-game-v13\interactive-npcs-synthetic-target.exe`
+
+Package a fresh, source-identified review build only after the source settles.
+Keep package/build/model artifacts below `E:\temp`. Do not run a GUI installer
+smoke or visible desktop test while the display-safety restriction remains in
+force. A future fresh review layout may use:
+
+- package root: `E:\temp\InteractiveNPCs\package-v15`
+- installed/review app: `E:\temp\InteractiveNPCs\review-app-v15`
+- test game: `E:\temp\InteractiveNPCs\review-v15\local-app-data\test-game`
+
+Verify exact packaging commands against `docs/development/packaging.md` and the
+scripts; do not treat these proposed directories as already created evidence.
+
+## Machine, secrets, GPU, and display rules
+
+- Codex is Windows-native. Keep commands and development tests hidden and
+  noninteractive. Do not open, pin, focus, or move terminal/app/player windows.
+- Visible white/blue flashing, beeps, and flicker caused a serious epilepsy
+  concern. Desktop capture and GUI-driving are paused. Prefer headless renders,
+  files, screenshots, contact sheets, logs, and process checks.
+- The user's Transparency App is normally active and dims the screen; it can
+  invalidate desktop-capture appearance. Repository:
+  `https://github.com/AkshitIreddy/Transparency-App`.
+- `C:` is space-constrained. Put model weights, extracted runtimes, build caches,
+  package staging, video frames, benchmark artifacts, and other large data in
+  `E:\temp`, preferably below `E:\temp\InteractiveNPCs`.
+- User-supplied API keys are in
+  `C:\Users\akshi\Desktop\Code Palace\Commonly used Keys.txt`. The user permits
+  reading and bounded testing, but never print, copy into source/docs, log,
+  commit, or include secret values in diagnostics.
+- For AI-model GPU work, coordinate through
+  `C:\Users\akshi\Desktop\Code Palace\gpu use.txt`: if it says `yes`, do other
+  work or wait; if it says `no`, set it to `yes`, use the GPU, and restore `no`
+  immediately afterward, including failure cleanup. Non-AI rendering/testing
+  may use the GPU without taking this model lock.
+- Keep public release and GitHub push disabled until the user explicitly
+  approves them. The current branch is local work.
+
+## Verification completed at this transfer
+
+- `cargo test -p npc-runtime-host --lib`: 96 passed, 2 intentionally ignored.
+- `cargo fmt --all -- --check`: passed.
+- Native Release CMake build: passed.
+- Native CTest: 6/6 passed.
+- Python compilation for the visual audit, dense proof, and enrollment scripts:
+  passed using the isolated OpenCV runtime under `E:\temp`.
+- Latest realistic v66 native render: ran headlessly and failed the quality gate;
+  it is preserved as rejected evidence.
+
+Do not infer that the complete workspace, UI, installer, providers, game
+profiles, desktop presentation, or live games were requalified on 2026-09-05.
+Earlier broad verification is recorded in `IMPLEMENTATION_STATUS.md`; rerun the
+relevant gates after material changes.
+
+## Recommended successor workflow
+
+1. Read the original brief, requirements traceability, architecture, current
+   implementation status, and this transfer. Inspect both current source and
+   old v1 source directly.
+2. Produce an independent red-team assessment: what to keep, simplify, replace,
+   delete, or prove. Distinguish implemented code from product acceptance.
+3. Research current providers, Windows/NVIDIA runtimes, model/resource
+   scheduling, character-identification methods, and moving-face lip-sync with
+   primary evidence. Check licenses and deployability, not only demos/FPS.
+4. Rework the architecture wherever evidence supports it. Preserve typed
+   failure isolation, security, privacy, cancellation, and graceful degradation.
+5. Overhaul the UI and actual user journey. Build and inspect rendered states;
+   make it original, premium, approachable, and responsive.
+6. Prototype competing lip-sync approaches headlessly on the same moving source
+   and additional representative footage. Compare enlarged sequences, temporal
+   stability, identity preservation, latency, CPU/GPU/VRAM, load/unload time,
+   game-pressure behavior, license, and packaging complexity.
+7. Integrate only the winning qualified path. Keep audio/subtitles available and
+   visuals fail-open while confidence or support is inadequate.
+8. Run proportionate unit, integration, simulation, visual, performance,
+   security, privacy, packaging, and clean-environment checks. Record evidence
+   with exact source/artifact identity and reject misleading claims.
+9. Build a fresh local review app and realistic synthetic test game under
+   `E:\temp`, review the result yourself headlessly first, then give the user
+   exact paths and an honest list of any remaining gates.
+
+Completion means the product is genuinely coherent and reviewable, not merely
+that the existing TODO list was edited or every current method was preserved.

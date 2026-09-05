@@ -171,6 +171,57 @@ The visual-label preview measures atlas quantization of the same teacher clip.
 The audio-label preview trains and evaluates on that same short clip and is
 therefore a mechanics proof, never cross-utterance accuracy evidence.
 
+## Source-preserving moving-frame visual prototype
+
+`render-dense-observed-lip-proof.py` is a headless inspection renderer for the
+v53 source-preserving experiment. It keeps the moving source frame's face and
+outer lips, continuously deforms the current mouth geometry, and admits a
+one-time enrollment reference only inside the oral opening. It refuses inputs or
+outputs outside `E:\temp`, downloads nothing, and does not launch the app.
+
+The retained v53 artifact was produced with an explicit `oral-interior` mode:
+
+```powershell
+E:\temp\InteractiveNPCs\runtimes\mediapipe-landmarks-py\Scripts\python.exe `
+  .\scripts\benchmarks\render-dense-observed-lip-proof.py `
+  --source-frames E:\temp\InteractiveNPCs\sources\mara-game-idle-source-v1 `
+  --source-landmarks E:\temp\InteractiveNPCs\sources\mara-game-idle-source-v1-mediapipe.json `
+  --atlas-frames E:\temp\InteractiveNPCs\sources\mara-musetalk-teacher-frames-v1 `
+  --atlas-landmarks E:\temp\InteractiveNPCs\sources\mara-musetalk-teacher-frames-v1-mediapipe.json `
+  --single-open-image E:\temp\InteractiveNPCs\generated-enrollment\mara-imagegen-mouth-v1\mara-ah-open.png `
+  --single-open-landmarks E:\temp\InteractiveNPCs\generated-enrollment\mara-imagegen-mouth-v1\mara-ah-open-mediapipe.json `
+  --audio E:\temp\InteractiveNPCs\voice-lipsync-20260903\male-jason-v1\nvidia-magpie-fixture.wav `
+  --output E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-mara-v53-imagegen-natural-aperture-NEW `
+  --source-first 1 `
+  --source-count 40 `
+  --fps 30 `
+  --transfer-mode oral-interior `
+  --video-name mara-jason-imagegen-natural-aperture-v53-NEW.mp4
+```
+
+The script writes PPM frames, an H.264/AAC review video, mouth contact sheets,
+and `dense-observed-lip-proof.json`. The retained v53 manifest says
+`rendered-not-qualified` and `rms-aperture-only`: its male Jason fixture has no
+provider viseme events, so the result is an aperture, containment, and source-
+preservation experiment rather than phoneme-accurate lip-sync evidence.
+
+The v2 mouth-quality audit can additionally consume source/output landmarks and
+the proof manifest. It checks residual shape, changed pixels outside the
+expanded lip contour, requested/rendered aperture correlation, corner-width
+drift, roll drift, output-landmark coverage, and—when applicable—discrete-state
+shape popping. The retained report is:
+
+`E:\temp\InteractiveNPCs\voice-lipsync-20260904\moving-mara-v53-imagegen-natural-aperture\mouth-quality-audit-v2.json`
+
+That audit passed, but it is not a perceptual metric and does not qualify an app
+route. The Python renderer measured `54.907 ms` mean / `73.153 ms` p95 and is not
+the native hot path. Separately, the latest native 1920×1080, 250-iteration CPU
+run measured `6.402 ms` geometric mean, `6.323 ms` direct-atlas mean, and
+`4.612 ms` mean / `4.682 ms` p50 / `7.004 ms` p95 / `7.264 ms` p99 for atlas
+worker select-and-compose, with zero GPU VRAM; six native CTest suites passed.
+Native generated-reference parity, desktop/live-game presentation, and installer
+qualification remain open. See the [v6 proof report](../../docs/research/headless-realistic-lipsync-proof-2026-09-04-v6.md).
+
 ## Deterministic self-tests
 
 ```powershell
