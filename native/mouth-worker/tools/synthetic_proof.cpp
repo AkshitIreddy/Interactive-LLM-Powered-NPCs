@@ -114,6 +114,7 @@ int main(int argc, char** argv) {
         item.drive.kind = DriveKind::timed_viseme;
         item.drive.clock.stream_generation = item.track.cancellation_generation;
         item.drive.clock.segment_id = 44U;
+        item.drive.clock.sample_count = 1'600U;
         item.drive.clock.sample_rate = 48'000U;
         item.drive.clock.channels = 1U;
         item.drive.clock.playback_at_ns = item.source.identity.captured_at_ns;

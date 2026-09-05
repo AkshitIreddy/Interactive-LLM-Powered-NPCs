@@ -19,6 +19,9 @@ struct MouthAtlasState {
 // actor and cancellation generation; scene/track/frame authority remains in
 // the ordinary WorkItem and presentation gates.
 struct CharacterMouthAtlas {
+    // Schema 1: complete lip observation. Schema 2: normalized oral interior
+    // with source-derived exterior lips. Each state must match the schema.
+    // The wire layout stays fixed; old workers reject schema 2 at admission.
     std::uint32_t schema_version{1};
     std::uint64_t cancellation_generation{};
     std::uint64_t actor_id{};

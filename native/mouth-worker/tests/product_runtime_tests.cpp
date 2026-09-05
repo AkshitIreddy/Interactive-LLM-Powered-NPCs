@@ -93,7 +93,8 @@ ProductFrameRequest make_request(const std::uint64_t request_id,
 
     request.resources = {1U, VisualPressure::nominal, 15U, true};
     request.drive.kind = DriveKind::timed_viseme;
-    request.drive.clock = {generation, request_id, 0U, 24'000U, 1U, captured_at_ns};
+    request.drive.clock = {generation, request_id, 0U, 800U, 0U,
+                           24'000U, 1U, captured_at_ns};
     request.drive.viseme = Viseme::open_vowel;
     request.drive.viseme_strength = 0.75;
     request.deadline_ns = captured_at_ns + 70'000'000;
@@ -201,6 +202,47 @@ void test_padded_mask_may_cross_detector_edge_but_lip_contour_may_not() {
            "a raw lip landmark outside the detector box still fails closed");
 }
 
+void test_closed_mouth_landmark_jitter_is_canonicalized() {
+    auto closed = make_request(92U, 92U, 8'200'000'000);
+    closed.landmarks.detector_confidence = 0.864673;
+    closed.landmarks.landmark_confidence = 0.894691;
+    // A held-out real-person frame from the pinned OpenSeeFace pack produced
+    // inner-lip means only 0.001053 frame-height apart in the wrong order.
+    // This is sub-pixel closed-mouth jitter at the 420x540 proof resolution,
+    // while the full contour and both corners remain finite and face-bound.
+    for (std::size_t index = 59U; index <= 61U; ++index) {
+        closed.landmarks.landmarks[index].y = 0.434731;
+    }
+    for (std::size_t index = 63U; index <= 65U; ++index) {
+        closed.landmarks.landmarks[index].y = 0.433678;
+    }
+
+    OpenSeeFaceSignalAdapter closed_adapter;
+    const auto accepted = closed_adapter.adapt(
+        closed.landmarks, closed.appearance, closed.resources,
+        closed.source.identity, 8'205'000'000);
+    expect(accepted.accepted(),
+           "sub-pixel closed-mouth landmark inversion is canonicalized safely");
+    expect(accepted.accepted() &&
+               accepted.tracking->mouth_landmarks.upper_lip_center.y <
+                   accepted.tracking->mouth_landmarks.lower_lip_center.y,
+           "canonical closed-mouth semantics preserve an ordered near-zero aperture");
+
+    auto crossed = make_request(93U, 93U, 8'300'000'000);
+    for (std::size_t index = 59U; index <= 61U; ++index) {
+        crossed.landmarks.landmarks[index].y = 0.65;
+    }
+    for (std::size_t index = 63U; index <= 65U; ++index) {
+        crossed.landmarks.landmarks[index].y = 0.58;
+    }
+    OpenSeeFaceSignalAdapter crossed_adapter;
+    const auto rejected = crossed_adapter.adapt(
+        crossed.landmarks, crossed.appearance, crossed.resources,
+        crossed.source.identity, 8'305'000'000);
+    expect(rejected.disposition == SignalDisposition::bypass_unsafe_roi,
+           "materially crossed inner-lip geometry still fails closed");
+}
+
 void test_appearance_occlusion_latch_and_recovery() {
     OpenSeeFaceSignalAdapter adapter;
     auto first = make_request(1U, 1U, 2'000'000'000);
@@ -270,8 +312,10 @@ void test_product_queue_receipts_and_exact_current_frame() {
     const auto rendered = successful.process_latest(frame, 4'010'000'000);
     expect(rendered.proposed_residual(), "product receipt carries a mouth-only residual proposal");
     expect(rendered.residual->track.actor_id == 41U &&
-               rendered.residual->source_frame == frame,
-           "residual receipt preserves exact actor and source-frame identity");
+               rendered.residual->source_frame == frame &&
+               rendered.residual->audio_clock.segment_id == 3U &&
+               rendered.residual->audio_clock.sample_count == 800U,
+           "residual receipt preserves exact actor, source-frame, and audio interval identity");
     expect(rendered.residual->normalized_bounds.width <= 0.45 &&
                rendered.residual->normalized_bounds.height <= 0.35,
            "product residual remains inside hard presentation ceilings");
@@ -317,6 +361,7 @@ int main() {
     test_typed_openseeface_mapping_and_rate_policy();
     test_qualified_detector_confidence_floor();
     test_padded_mask_may_cross_detector_edge_but_lip_contour_may_not();
+    test_closed_mouth_landmark_jitter_is_canonicalized();
     test_appearance_occlusion_latch_and_recovery();
     test_product_queue_receipts_and_exact_current_frame();
     test_cancel_pressure_and_invalid_identity_receipts();

@@ -354,6 +354,84 @@ struct PixelRect {
     return output;
 }
 
+struct DetectorInput {
+    std::vector<float> tensor;
+    double pixels_to_model{};
+    double model_padding_x{};
+    double model_padding_y{};
+};
+
+[[nodiscard]] DetectorInput detector_tensor_for(const CpuFrame& frame,
+                                                const PixelRect& crop) {
+    constexpr std::array<float, 3U> mean{-0.485F / 0.229F,
+                                         -0.456F / 0.224F,
+                                         -0.406F / 0.225F};
+    constexpr std::array<float, 3U> scale{1.0F / (0.229F * 255.0F),
+                                          1.0F / (0.224F * 255.0F),
+                                          1.0F / (0.225F * 255.0F)};
+    const double model_size = static_cast<double>(detector_input_size);
+    DetectorInput result{};
+    result.pixels_to_model = std::min(model_size / crop.width(),
+                                      model_size / crop.height());
+    const double content_width = crop.width() * result.pixels_to_model;
+    const double content_height = crop.height() * result.pixels_to_model;
+    result.model_padding_x = (model_size - content_width) * 0.5;
+    result.model_padding_y = (model_size - content_height) * 0.5;
+
+    const std::size_t plane = detector_input_size * detector_input_size;
+    // Zero after channel normalization is a neutral mean-color letterbox. It
+    // retains every pixel in the caller-authorized seed without stretching or
+    // searching outside it.
+    result.tensor.assign(plane * 3U, 0.0F);
+    const auto width = static_cast<std::size_t>(frame.lease.width);
+    const auto height = static_cast<std::size_t>(frame.lease.height);
+    const auto stride = static_cast<std::size_t>(frame.lease.stride_bytes);
+    for (std::size_t y = 0U; y < detector_input_size; ++y) {
+        const double model_y = static_cast<double>(y) + 0.5;
+        if (model_y < result.model_padding_y ||
+            model_y >= result.model_padding_y + content_height) {
+            continue;
+        }
+        const double source_y = crop.top +
+            (model_y - result.model_padding_y) / result.pixels_to_model - 0.5;
+        const auto y0 = static_cast<std::size_t>(std::clamp(
+            std::floor(source_y), 0.0, static_cast<double>(height - 1U)));
+        const auto y1 = std::min(y0 + 1U, height - 1U);
+        const float fy = static_cast<float>(std::clamp(
+            source_y - std::floor(source_y), 0.0, 1.0));
+        for (std::size_t x = 0U; x < detector_input_size; ++x) {
+            const double model_x = static_cast<double>(x) + 0.5;
+            if (model_x < result.model_padding_x ||
+                model_x >= result.model_padding_x + content_width) {
+                continue;
+            }
+            const double source_x = crop.left +
+                (model_x - result.model_padding_x) / result.pixels_to_model - 0.5;
+            const auto x0 = static_cast<std::size_t>(std::clamp(
+                std::floor(source_x), 0.0, static_cast<double>(width - 1U)));
+            const auto x1 = std::min(x0 + 1U, width - 1U);
+            const float fx = static_cast<float>(std::clamp(
+                source_x - std::floor(source_x), 0.0, 1.0));
+            const auto sample = [&](const std::size_t sx, const std::size_t sy,
+                                    const std::size_t channel) {
+                return static_cast<float>(frame.bgra[sy * stride + sx * 4U + channel]);
+            };
+            const std::size_t destination = y * detector_input_size + x;
+            for (std::size_t rgb = 0U; rgb < 3U; ++rgb) {
+                const std::size_t bgra_channel = 2U - rgb;
+                const float top = sample(x0, y0, bgra_channel) * (1.0F - fx) +
+                                  sample(x1, y0, bgra_channel) * fx;
+                const float bottom = sample(x0, y1, bgra_channel) * (1.0F - fx) +
+                                     sample(x1, y1, bgra_channel) * fx;
+                const float value = top * (1.0F - fy) + bottom * fy;
+                result.tensor[rgb * plane + destination] =
+                    value * scale[rgb] + mean[rgb];
+            }
+        }
+    }
+    return result;
+}
+
 [[nodiscard]] double clamped_probability(const float value) noexcept {
     return std::clamp(static_cast<double>(value), 0.0, 1.0);
 }
@@ -661,11 +739,12 @@ private:
         const CpuFrame& frame,
         const PixelRect& seed,
         std::string& failure) const {
-        auto input_data = tensor_for(frame, seed);
+        auto prepared = detector_tensor_for(frame, seed);
         const std::array<std::int64_t, 4U> input_shape{1, 3, 224, 224};
         OrtValue* input{};
         if (!call(api_function<CreateTensorWithDataFn>(api_, ApiSlot::create_tensor_with_data)(
-                      memory_info_, input_data.data(), input_data.size() * sizeof(float),
+                      memory_info_, prepared.tensor.data(),
+                      prepared.tensor.size() * sizeof(float),
                       input_shape.data(), input_shape.size(), onnx_tensor_float, &input), failure,
                   "provider_detector_input_failed") || !input) {
             return std::nullopt;
@@ -710,12 +789,20 @@ private:
             if (best >= detector_threshold && std::isfinite(radius) && radius >= 2.0F) {
                 const double grid_x = static_cast<double>(best_index % detector_grid_size) * 4.0;
                 const double grid_y = static_cast<double>(best_index / detector_grid_size) * 4.0;
-                PixelRect box{
-                    seed.left + (grid_x - radius) * seed.width() / 224.0,
-                    seed.top + (grid_y - radius) * seed.height() / 224.0,
-                    seed.left + (grid_x + radius) * seed.width() / 224.0,
-                    seed.top + (grid_y + radius) * seed.height() / 224.0,
+                const auto to_source_x = [&](const double model_x) {
+                    return seed.left +
+                        (model_x - prepared.model_padding_x) /
+                            prepared.pixels_to_model;
                 };
+                const auto to_source_y = [&](const double model_y) {
+                    return seed.top +
+                        (model_y - prepared.model_padding_y) /
+                            prepared.pixels_to_model;
+                };
+                PixelRect box{to_source_x(grid_x - radius),
+                              to_source_y(grid_y - radius),
+                              to_source_x(grid_x + radius),
+                              to_source_y(grid_y + radius)};
                 box.left = std::clamp(box.left, seed.left, seed.right);
                 box.top = std::clamp(box.top, seed.top, seed.bottom);
                 box.right = std::clamp(box.right, seed.left, seed.right);

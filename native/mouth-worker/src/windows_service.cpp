@@ -553,7 +553,7 @@ void render_resolved_current_frame(MouthProductRuntime& runtime,
         return;
     }
     ResidualProposalV1 proposal{};
-    proposal.schema_version = 2U;
+    proposal.schema_version = 3U;
     proposal.request = identity;
     proposal.track = track;
     proposal.source_frame = frame;
@@ -566,6 +566,7 @@ void render_resolved_current_frame(MouthProductRuntime& runtime,
     proposal.visibility_ratio = visibility_ratio;
     proposal.mouth_occluded = mouth_occluded;
     proposal.landmarks_measured_at_ns = landmarks_measured_at_ns;
+    proposal.audio_clock = response.receipt.residual->audio_clock;
     proposal.produced_at_ns = response.receipt.completed_at_ns;
     response.residual = std::move(proposal);
     response.receipt.residual.reset();

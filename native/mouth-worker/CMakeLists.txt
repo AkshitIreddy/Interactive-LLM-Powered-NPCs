@@ -66,6 +66,16 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING AND NPC_MOUTH_WORKER_BUILD_TESTS)
+    add_executable(npc_mouth_compositor_render_tests tests/compositor_render_tests.cpp)
+    target_compile_features(npc_mouth_compositor_render_tests PRIVATE cxx_std_20)
+    target_link_libraries(npc_mouth_compositor_render_tests PRIVATE npc_mouth_worker)
+    add_test(NAME npc_mouth_compositor_render_tests COMMAND npc_mouth_compositor_render_tests)
+
+    add_executable(npc_mouth_review_cues_tests tests/review_cues_tests.cpp)
+    target_compile_features(npc_mouth_review_cues_tests PRIVATE cxx_std_20)
+    target_link_libraries(npc_mouth_review_cues_tests PRIVATE npc_mouth_worker)
+    add_test(NAME npc_mouth_review_cues_tests COMMAND npc_mouth_review_cues_tests)
+
     add_executable(npc_mouth_worker_tests tests/mouth_worker_tests.cpp)
     target_compile_features(npc_mouth_worker_tests PRIVATE cxx_std_20)
     target_link_libraries(npc_mouth_worker_tests PRIVATE npc_mouth_worker)

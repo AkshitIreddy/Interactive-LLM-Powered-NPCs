@@ -256,6 +256,8 @@ void write_drive(Writer& writer, const MouthDrive& value) {
     writer.scalar(value.clock.stream_generation);
     writer.scalar(value.clock.segment_id);
     writer.scalar(value.clock.first_sample_index);
+    writer.scalar(value.clock.sample_count);
+    writer.scalar(value.clock.playback_sample_index);
     writer.scalar(value.clock.sample_rate);
     writer.scalar(value.clock.channels);
     writer.scalar(value.clock.playback_at_ns);
@@ -273,6 +275,8 @@ void write_drive(Writer& writer, const MouthDrive& value) {
     if (!reader.scalar(value.kind) || !reader.scalar(value.clock.stream_generation) ||
         !reader.scalar(value.clock.segment_id) ||
         !reader.scalar(value.clock.first_sample_index) ||
+        !reader.scalar(value.clock.sample_count) ||
+        !reader.scalar(value.clock.playback_sample_index) ||
         !reader.scalar(value.clock.sample_rate) || !reader.scalar(value.clock.channels) ||
         !reader.scalar(value.clock.playback_at_ns) ||
         !read_coefficients(reader, value.coefficients) || !reader.scalar(value.viseme) ||
@@ -469,6 +473,7 @@ std::optional<std::vector<std::byte>> encode_response(const WorkerResponseV1& re
     writer.boolean(response.residual.has_value());
     if (response.residual) {
         const auto& value = *response.residual;
+        if (value.schema_version == 0U || value.schema_version > 3U) return std::nullopt;
         writer.scalar(value.schema_version);
         write_request_identity(writer, value.request);
         write_track(writer, value.track);
@@ -483,6 +488,16 @@ std::optional<std::vector<std::byte>> encode_response(const WorkerResponseV1& re
             writer.floating(value.visibility_ratio);
             writer.boolean(value.mouth_occluded);
             writer.scalar(value.landmarks_measured_at_ns);
+        }
+        if (value.schema_version >= 3U) {
+            writer.scalar(value.audio_clock.stream_generation);
+            writer.scalar(value.audio_clock.segment_id);
+            writer.scalar(value.audio_clock.first_sample_index);
+            writer.scalar(value.audio_clock.sample_count);
+            writer.scalar(value.audio_clock.playback_sample_index);
+            writer.scalar(value.audio_clock.sample_rate);
+            writer.scalar(value.audio_clock.channels);
+            writer.scalar(value.audio_clock.playback_at_ns);
         }
         writer.scalar(value.produced_at_ns);
     }
@@ -507,6 +522,7 @@ std::optional<WorkerResponseV1> decode_response(const std::span<const std::byte>
     if (has_residual) {
         ResidualProposalV1 residual{};
         if (!reader.scalar(residual.schema_version) ||
+            residual.schema_version == 0U || residual.schema_version > 3U ||
             !read_request_identity(reader, residual.request) || !read_track(reader, residual.track) ||
             !read_frame(reader, residual.source_frame) ||
             !reader.scalar(residual.source_frame_qpc) ||
@@ -520,6 +536,17 @@ std::optional<WorkerResponseV1> decode_response(const std::span<const std::byte>
              !reader.floating(residual.visibility_ratio) ||
              !reader.boolean(residual.mouth_occluded) ||
              !reader.scalar(residual.landmarks_measured_at_ns))) {
+            return std::nullopt;
+        }
+        if (residual.schema_version >= 3U &&
+            (!reader.scalar(residual.audio_clock.stream_generation) ||
+             !reader.scalar(residual.audio_clock.segment_id) ||
+             !reader.scalar(residual.audio_clock.first_sample_index) ||
+             !reader.scalar(residual.audio_clock.sample_count) ||
+             !reader.scalar(residual.audio_clock.playback_sample_index) ||
+             !reader.scalar(residual.audio_clock.sample_rate) ||
+             !reader.scalar(residual.audio_clock.channels) ||
+             !reader.scalar(residual.audio_clock.playback_at_ns))) {
             return std::nullopt;
         }
         if (!reader.scalar(residual.produced_at_ns)) return std::nullopt;
@@ -719,6 +746,7 @@ std::optional<ConfigureAdmittedLandmarkProviderCommandV1> decode_provider_config
 std::optional<std::vector<std::byte>> encode_character_mouth_atlas(
     const InstallCharacterMouthAtlasCommandV1& command) {
     const auto& atlas = command.atlas;
+    if (atlas.schema_version != 1U && atlas.schema_version != 2U) return std::nullopt;
     if (atlas.states.size() < 4U || atlas.states.size() > 16U) return std::nullopt;
     std::uint64_t total_pixels{};
     Writer writer;
@@ -729,6 +757,10 @@ std::optional<std::vector<std::byte>> encode_character_mouth_atlas(
     writer.scalar(static_cast<std::uint32_t>(atlas.states.size()));
     for (const auto& state : atlas.states) {
         const auto& appearance = state.appearance;
+        const auto expected_representation = atlas.schema_version == 2U
+            ? MouthPatchRepresentation::normalized_oral_interior_v1
+            : MouthPatchRepresentation::full_lip_observation_v1;
+        if (appearance.representation != expected_representation) return std::nullopt;
         if (appearance.premultiplied_bgra.size() > maximum_atlas_bytes) return std::nullopt;
         total_pixels += appearance.premultiplied_bgra.size();
         if (total_pixels > maximum_atlas_bytes) return std::nullopt;
@@ -753,6 +785,7 @@ std::optional<InstallCharacterMouthAtlasCommandV1> decode_character_mouth_atlas(
     InstallCharacterMouthAtlasCommandV1 value{};
     std::uint32_t state_count{};
     if (!reader.scalar(value.atlas.schema_version) ||
+        (value.atlas.schema_version != 1U && value.atlas.schema_version != 2U) ||
         !reader.scalar(value.atlas.cancellation_generation) ||
         !reader.scalar(value.atlas.actor_id) ||
         !reader.scalar(value.atlas.identity_revision) ||
@@ -763,6 +796,9 @@ std::optional<InstallCharacterMouthAtlasCommandV1> decode_character_mouth_atlas(
     std::uint64_t total_pixels{};
     for (std::uint32_t index = 0U; index < state_count; ++index) {
         MouthAtlasState state{};
+        state.appearance.representation = value.atlas.schema_version == 2U
+            ? MouthPatchRepresentation::normalized_oral_interior_v1
+            : MouthPatchRepresentation::full_lip_observation_v1;
         std::vector<std::byte> pixels;
         if (!read_coefficients(reader, state.coefficients) ||
             !reader.scalar(state.appearance.width) ||

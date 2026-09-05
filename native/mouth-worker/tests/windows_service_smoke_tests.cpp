@@ -577,7 +577,7 @@ int wmain(const int argc, wchar_t** argv) {
                          0.94, 0.91, 0.01, true, true, false};
     render.resources = {1U, VisualPressure::nominal, 15U, true};
     render.drive.kind = DriveKind::timed_viseme;
-    render.drive.clock = {1U, 90U, 0U, 24'000U, 1U, captured};
+    render.drive.clock = {1U, 90U, 0U, 800U, 0U, 24'000U, 1U, captured};
     render.drive.viseme = Viseme::open_vowel;
     render.drive.viseme_strength = 0.8;
     render.deadline_ns = captured + 500'000'000;
@@ -639,6 +639,12 @@ int wmain(const int argc, wchar_t** argv) {
                   << '\n';
     }
     if (rendered && rendered->residual) {
+        expect(rendered->residual->schema_version == 3U &&
+                   rendered->residual->audio_clock.segment_id == 90U &&
+                   rendered->residual->audio_clock.sample_count == 800U &&
+                   rendered->residual->audio_clock.playback_at_ns ==
+                       render.frame.captured_at_ns,
+               "service proposal binds the residual to the exact admitted audio interval");
         HANDLE local_residual_handle{};
         expect(DuplicateHandle(process.get(),
                                reinterpret_cast<HANDLE>(

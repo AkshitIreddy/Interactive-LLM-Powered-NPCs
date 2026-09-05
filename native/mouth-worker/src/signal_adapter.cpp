@@ -24,6 +24,11 @@ constexpr double hard_minimum_temporal_iou = 0.42;
 constexpr double hard_maximum_blocker_coverage = 0.35;
 constexpr double hard_maximum_center_motion_face_fraction = 0.12;
 constexpr double hard_maximum_area_delta_fraction = 0.60;
+// Heatmap maxima can swap the two inner-lip rows by less than a pixel when the
+// mouth is fully closed. Treat only that small, contour-relative inversion as
+// a zero aperture; a materially crossed mouth still fails closed.
+constexpr double hard_maximum_closed_mouth_inversion_over_contour_height = 0.10;
+constexpr double closed_mouth_semantic_gap_over_contour_height = 0.005;
 
 [[nodiscard]] bool finite_probability(const double value) noexcept {
     return std::isfinite(value) && value >= 0.0 && value <= 1.0;
@@ -160,6 +165,34 @@ constexpr double hard_maximum_area_delta_fraction = 0.60;
     return result;
 }
 
+[[nodiscard]] bool canonicalize_closed_mouth_semantics(
+    MouthLandmarks& semantic,
+    const NormalizedRect& contour) noexcept {
+    if (semantic.upper_lip_center.y < semantic.lower_lip_center.y) {
+        return true;
+    }
+    if (!valid_rect(contour)) {
+        return false;
+    }
+    const double inversion = semantic.upper_lip_center.y - semantic.lower_lip_center.y;
+    if (inversion >
+        contour.height * hard_maximum_closed_mouth_inversion_over_contour_height) {
+        return false;
+    }
+
+    const double measured_center =
+        (semantic.upper_lip_center.y + semantic.lower_lip_center.y) * 0.5;
+    const double gap = std::max(
+        contour.height * closed_mouth_semantic_gap_over_contour_height,
+        std::numeric_limits<double>::epsilon() * 16.0);
+    const double center = std::clamp(
+        measured_center, contour.y + gap * 0.5, contour.bottom() - gap * 0.5);
+    semantic.upper_lip_center.y = center - gap * 0.5;
+    semantic.lower_lip_center.y = center + gap * 0.5;
+    return semantic.upper_lip_center.y >= contour.y &&
+           semantic.lower_lip_center.y <= contour.bottom();
+}
+
 [[nodiscard]] std::uint32_t admitted_rate(const VisualResourceStateV1& resources) noexcept {
     if (resources.schema_version != 1U || !resources.local_visuals_admitted ||
         resources.pressure == VisualPressure::critical ||
@@ -287,10 +320,12 @@ SignalDecision OpenSeeFaceSignalAdapter::adapt(const OpenSeeFaceLandmarkPacketV1
     // even though every model-produced lip point is still inside the detected
     // face. Bind safety to the unpadded contour and keep the padded mask
     // clamped to the exact source frame.
+    const bool canonical_mouth =
+        canonicalize_closed_mouth_semantics(semantic, mouth_contour_bounds);
     if (!valid_rect(mouth_contour_bounds) || !valid_rect(mouth_bounds) ||
         !contains(packet.face_bounds, mouth_contour_bounds) ||
         semantic.left_corner.x >= semantic.right_corner.x ||
-        semantic.upper_lip_center.y >= semantic.lower_lip_center.y) {
+        !canonical_mouth) {
         reset_track();
         return bypass(SignalDisposition::bypass_unsafe_roi, rate);
     }

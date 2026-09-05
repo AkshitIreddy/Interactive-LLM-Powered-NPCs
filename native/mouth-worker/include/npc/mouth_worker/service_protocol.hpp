@@ -14,8 +14,11 @@
 
 namespace npc::mouth::service {
 
-inline constexpr std::uint32_t protocol_magic = 0x3152574dU; // MWR1, little endian
-inline constexpr std::uint16_t protocol_version = 1U;
+inline constexpr std::uint32_t protocol_magic = 0x3152574dU; // MWR framing magic, little endian
+// Version 2 adds an exact bounded audio sample interval to every render drive.
+// Keeping a distinct version makes old clients fail closed instead of
+// misreading the extended clock fields as sample-rate/channel data.
+inline constexpr std::uint16_t protocol_version = 2U;
 inline constexpr std::size_t session_nonce_bytes = 32U;
 inline constexpr std::uint32_t maximum_atlas_bytes = 16U * 1024U * 1024U;
 inline constexpr std::uint32_t maximum_message_bytes = maximum_atlas_bytes + 512U * 1024U;
@@ -137,6 +140,10 @@ struct ResidualProposalV1 {
     double visibility_ratio{};
     bool mouth_occluded{};
     Nanoseconds landmarks_measured_at_ns{};
+    // Schema 3 proves which bounded audio interval drove this exact source
+    // frame. A presentation broker can reject a late/replayed residual without
+    // trusting the worker's visual output.
+    AudioClockBinding audio_clock;
     Nanoseconds produced_at_ns{};
 };
 

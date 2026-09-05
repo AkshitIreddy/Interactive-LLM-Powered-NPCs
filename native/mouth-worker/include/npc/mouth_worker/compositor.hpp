@@ -6,6 +6,11 @@
 
 namespace npc::mouth {
 
+enum class MouthPatchRepresentation : std::uint8_t {
+    full_lip_observation_v1 = 0,
+    normalized_oral_interior_v1 = 1,
+};
+
 // One enrollment-generated mouth appearance in canonical mouth coordinates.
 // Pixels are BGRA8 premultiplied alpha so interpolation and presentation remain
 // deterministic. The active character/identity revision owns the collection;
@@ -16,6 +21,7 @@ struct CanonicalMouthPatch {
     std::uint32_t stride_bytes{};
     HeadPoseDegrees enrolled_pose;
     std::vector<std::uint8_t> premultiplied_bgra;
+    MouthPatchRepresentation representation{MouthPatchRepresentation::full_lip_observation_v1};
 };
 
 [[nodiscard]] MouthCoefficients coefficients_for_viseme(Viseme viseme,

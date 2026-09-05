@@ -149,6 +149,8 @@ struct AudioClockBinding {
     std::uint64_t stream_generation{};
     std::uint64_t segment_id{};
     std::uint64_t first_sample_index{};
+    std::uint64_t sample_count{};
+    std::uint64_t playback_sample_index{};
     std::uint32_t sample_rate{};
     std::uint16_t channels{};
     Nanoseconds playback_at_ns{};
@@ -180,6 +182,7 @@ struct WorkItem {
 struct ResidualPatch {
     TrackBinding track;
     FrameIdentity source_frame;
+    AudioClockBinding audio_clock;
     NormalizedRect normalized_bounds;
     TextureLeaseDescriptor source_lease;
     TextureLeaseDescriptor residual_lease;

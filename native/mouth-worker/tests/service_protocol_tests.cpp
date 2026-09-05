@@ -80,7 +80,7 @@ RenderCurrentFrameCommandV1 render_command() {
                         0.93, 0.87, 0.04, true, true, false};
     value.resources = {1U, VisualPressure::elevated_cpu, 10U, true};
     value.drive.kind = DriveKind::pcm_window;
-    value.drive.clock = {7U, 301U, 200U, 24'000U, 1U, 1'000'000'000};
+    value.drive.clock = {7U, 301U, 200U, 4U, 202U, 24'000U, 1U, 1'000'000'000};
     value.drive.interleaved_pcm = {0.1F, -0.2F, 0.3F, -0.4F};
     value.deadline_ns = 1'070'000'000;
     return value;
@@ -160,6 +160,7 @@ void test_render_and_response_round_trip() {
     response.receipt.drive_kind = DriveKind::pcm_window;
     response.receipt.completed_at_ns = 1'010'000'000;
     ResidualProposalV1 proposal{};
+    proposal.schema_version = 3U;
     proposal.request = source.request;
     proposal.track = source.track;
     proposal.source_frame = source.frame;
@@ -169,16 +170,24 @@ void test_render_and_response_round_trip() {
     proposal.residual.owner_process_id = 60U;
     proposal.residual.intended_consumer_process_id = 50U;
     proposal.confidence = 0.95;
+    proposal.audio_clock = source.drive.clock;
     proposal.produced_at_ns = 1'010'000'000;
     response.residual = proposal;
     response.detail = "residual proposed; broker presentation remains authoritative";
     const auto encoded_response = encode_response(response);
     const auto decoded_response = decode_response(*encoded_response);
     expect(decoded_response && decoded_response->residual &&
-               decoded_response->residual->source_frame == source.frame,
-           "receipt and residual proposal round-trip");
+               decoded_response->residual->source_frame == source.frame &&
+               decoded_response->residual->audio_clock.playback_sample_index == 202U &&
+               decoded_response->residual->audio_clock.sample_count == 4U,
+           "receipt and exact audio-bound residual proposal round-trip");
     expect(decoded_response->detail == response.detail,
            "honest presentation detail round-trips");
+
+    auto unknown_response_schema = response;
+    unknown_response_schema.residual->schema_version = 4U;
+    expect(!encode_response(unknown_response_schema),
+           "unknown residual proposal schema fails closed before transport");
 }
 
 void test_authenticated_envelope_and_framing() {
@@ -303,6 +312,28 @@ void test_character_mouth_atlas_round_trip() {
     too_few_states.atlas.states.resize(3U);
     expect(!encode_character_mouth_atlas(too_few_states),
            "underspecified identity atlas is rejected before transport");
+
+    auto oral = source;
+    oral.atlas.schema_version = 2U;
+    expect(!encode_character_mouth_atlas(oral),
+           "schema two cannot silently reinterpret legacy full-lip pixels");
+    for (auto& state : oral.atlas.states) {
+        state.appearance.representation = MouthPatchRepresentation::normalized_oral_interior_v1;
+    }
+    const auto oral_encoded = encode_character_mouth_atlas(oral);
+    const auto oral_decoded = oral_encoded ? decode_character_mouth_atlas(*oral_encoded) : std::nullopt;
+    expect(oral_decoded && oral_decoded->atlas.schema_version == 2U &&
+               oral_decoded->atlas.states[0].appearance.representation ==
+                   MouthPatchRepresentation::normalized_oral_interior_v1 &&
+               oral_decoded->atlas.states[0].appearance.premultiplied_bgra ==
+                   oral.atlas.states[0].appearance.premultiplied_bgra,
+           "explicit oral representation round-trips without changing pixels");
+    oral.atlas.schema_version = 1U;
+    expect(!encode_character_mouth_atlas(oral),
+           "oral data cannot be serialized as a legacy full-lip atlas");
+    auto unknown_schema = *encoded;
+    unknown_schema[0] = std::byte{99};
+    expect(!decode_character_mouth_atlas(unknown_schema), "unknown atlas representation fails closed");
 }
 
 void test_malformed_and_bounded_payloads() {

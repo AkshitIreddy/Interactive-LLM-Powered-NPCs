@@ -132,7 +132,15 @@ constexpr std::uint32_t maximum_atlas_dimension = 512U;
 [[nodiscard]] bool valid_drive(const MouthDrive& drive) noexcept {
     if (drive.clock.segment_id == 0U || drive.clock.sample_rate < 8'000U ||
         drive.clock.sample_rate > 192'000U || drive.clock.channels == 0U ||
-        drive.clock.channels > 8U) {
+        drive.clock.channels > 8U || drive.clock.sample_count == 0U ||
+        drive.clock.first_sample_index >
+            std::numeric_limits<std::uint64_t>::max() - drive.clock.sample_count) {
+        return false;
+    }
+    const auto end_sample_index =
+        drive.clock.first_sample_index + drive.clock.sample_count;
+    if (drive.clock.playback_sample_index < drive.clock.first_sample_index ||
+        drive.clock.playback_sample_index >= end_sample_index) {
         return false;
     }
     switch (drive.kind) {
@@ -147,7 +155,8 @@ constexpr std::uint32_t maximum_atlas_dimension = 512U;
         const auto maximum_frames = static_cast<std::size_t>(drive.clock.sample_rate / 5U);
         return !drive.interleaved_pcm.empty() &&
                drive.interleaved_pcm.size() % channels == 0U &&
-               drive.interleaved_pcm.size() / channels <= maximum_frames;
+               drive.interleaved_pcm.size() / channels <= maximum_frames &&
+               drive.interleaved_pcm.size() / channels == drive.clock.sample_count;
     }
     }
     return false;
@@ -204,7 +213,23 @@ constexpr std::uint32_t maximum_atlas_dimension = 512U;
            1.0 * squared(first.lower_lip_depress - second.lower_lip_depress);
 }
 
-[[nodiscard]] const MouthAtlasState* select_atlas_state(
+struct AtlasSelection final {
+    std::size_t index{};
+    double distance{std::numeric_limits<double>::infinity()};
+};
+
+[[nodiscard]] double atlas_state_distance(const MouthAtlasState& state,
+                                          const MouthCoefficients& target,
+                                          const HeadPoseDegrees& target_pose) noexcept {
+    const double yaw_delta = (state.appearance.enrolled_pose.yaw - target_pose.yaw) / 35.0;
+    const double pitch_delta = (state.appearance.enrolled_pose.pitch - target_pose.pitch) / 25.0;
+    const double roll_delta = (state.appearance.enrolled_pose.roll - target_pose.roll) / 45.0;
+    return coefficient_distance(state.coefficients, target) +
+           0.45 * yaw_delta * yaw_delta + 0.30 * pitch_delta * pitch_delta +
+           0.10 * roll_delta * roll_delta;
+}
+
+[[nodiscard]] AtlasSelection select_atlas_state(
     const CharacterMouthAtlas& atlas,
     const MouthCoefficients& target,
     const HeadPoseDegrees& target_pose) noexcept {
@@ -212,23 +237,16 @@ constexpr std::uint32_t maximum_atlas_dimension = 512U;
     double primary_distance = std::numeric_limits<double>::infinity();
     for (std::size_t index = 0U; index < atlas.states.size(); ++index) {
         const auto& state = atlas.states[index];
-        const double yaw_delta = (state.appearance.enrolled_pose.yaw - target_pose.yaw) / 35.0;
-        const double pitch_delta =
-            (state.appearance.enrolled_pose.pitch - target_pose.pitch) / 25.0;
-        const double roll_delta = (state.appearance.enrolled_pose.roll - target_pose.roll) / 45.0;
-        const double distance = coefficient_distance(state.coefficients, target) +
-                                0.45 * yaw_delta * yaw_delta +
-                                0.30 * pitch_delta * pitch_delta +
-                                0.10 * roll_delta * roll_delta;
+        const double distance = atlas_state_distance(state, target, target_pose);
         if (distance < primary_distance) {
             primary_distance = distance;
             primary_index = index;
         }
     }
     if (!std::isfinite(primary_distance)) {
-        return nullptr;
+        return {};
     }
-    return &atlas.states[primary_index];
+    return {primary_index, primary_distance};
 }
 
 } // namespace
@@ -261,11 +279,12 @@ bool ReferenceMouthWorker::cancel_to(const std::uint64_t new_generation) noexcep
     }
     atlas_.reset();
     reset_pcm_smoothing();
+    reset_atlas_selection();
     return true;
 }
 
 bool ReferenceMouthWorker::install_atlas(CharacterMouthAtlas atlas) {
-    if (atlas.schema_version != 1U ||
+    if ((atlas.schema_version != 1U && atlas.schema_version != 2U) ||
         atlas.cancellation_generation != active_generation_ ||
         atlas.actor_id == 0U || atlas.identity_revision == 0U ||
         atlas.states.size() < minimum_atlas_states ||
@@ -275,10 +294,14 @@ bool ReferenceMouthWorker::install_atlas(CharacterMouthAtlas atlas) {
     const auto width = atlas.states.front().appearance.width;
     const auto height = atlas.states.front().appearance.height;
     const auto stride = atlas.states.front().appearance.stride_bytes;
+    const auto expected_representation = atlas.schema_version == 2U
+        ? MouthPatchRepresentation::normalized_oral_interior_v1
+        : MouthPatchRepresentation::full_lip_observation_v1;
     const bool all_valid = std::all_of(
         atlas.states.begin(), atlas.states.end(),
-        [width, height, stride](const MouthAtlasState& state) {
-            return valid_coefficients(state.coefficients) &&
+        [width, height, stride, expected_representation](const MouthAtlasState& state) {
+            return state.appearance.representation == expected_representation &&
+                   valid_coefficients(state.coefficients) &&
                    valid_atlas_patch_for_install(state.appearance) &&
                    state.appearance.width == width &&
                    state.appearance.height == height &&
@@ -289,11 +312,13 @@ bool ReferenceMouthWorker::install_atlas(CharacterMouthAtlas atlas) {
     }
     atlas_ = std::move(atlas);
     reset_pcm_smoothing();
+    reset_atlas_selection();
     return true;
 }
 
 void ReferenceMouthWorker::clear_atlas() noexcept {
     atlas_.reset();
+    reset_atlas_selection();
 }
 
 ProcessResult ReferenceMouthWorker::process_latest(const FrameIdentity& current_frame,
@@ -330,10 +355,38 @@ ProcessResult ReferenceMouthWorker::process_latest(const FrameIdentity& current_
     if (atlas_.has_value() &&
         atlas_->cancellation_generation == item.track.cancellation_generation &&
         atlas_->actor_id == item.track.actor_id) {
-        const auto* selection = select_atlas_state(*atlas_, coefficients, item.tracking.pose);
-        if (selection != nullptr) {
+        auto selection = select_atlas_state(*atlas_, coefficients, item.tracking.pose);
+        const bool continuous_selection = selected_atlas_state_.has_value() &&
+            selected_atlas_track_.has_value() && *selected_atlas_track_ == item.track &&
+            selected_atlas_segment_id_ == item.drive.clock.segment_id &&
+            item.source.identity.captured_at_ns > selected_atlas_at_ns_ &&
+            item.source.identity.captured_at_ns - selected_atlas_at_ns_ <=
+                smoothing_continuity_limit_ns &&
+            *selected_atlas_state_ < atlas_->states.size();
+        if (continuous_selection && item.drive.kind != DriveKind::timed_viseme &&
+            selection.index != *selected_atlas_state_) {
+            const double previous_distance = atlas_state_distance(
+                atlas_->states[*selected_atlas_state_], coefficients, item.tracking.pose);
+            // A photographed atlas is intentionally discrete. Hold a selected
+            // texture for two admitted frames for estimated continuous drives.
+            // Exact timed cues must bypass this dwell: an entire short phonetic
+            // gesture can otherwise be replaced by the preceding vowel image.
+            if (selected_atlas_age_ < 2U || selection.distance + 0.25 >= previous_distance) {
+                selection.index = *selected_atlas_state_;
+                selection.distance = previous_distance;
+            }
+        }
+        if (std::isfinite(selection.distance) && selection.index < atlas_->states.size()) {
+            selected_atlas_age_ = continuous_selection &&
+                    selected_atlas_state_ == selection.index
+                ? std::min<std::uint32_t>(selected_atlas_age_ + 1U, 1'000'000U)
+                : 1U;
+            selected_atlas_state_ = selection.index;
+            selected_atlas_track_ = item.track;
+            selected_atlas_segment_id_ = item.drive.clock.segment_id;
+            selected_atlas_at_ns_ = item.source.identity.captured_at_ns;
             residual = compose_atlas_residual(item.source, item.track, item.tracking,
-                                              selection->appearance,
+                                              atlas_->states[selection.index].appearance,
                                               coefficients, now_ns);
         }
     } else {
@@ -343,6 +396,7 @@ ProcessResult ReferenceMouthWorker::process_latest(const FrameIdentity& current_
     if (residual.premultiplied_bgra.empty()) {
         return bypass(Disposition::bypass_unsafe_bounds);
     }
+    residual.audio_clock = item.drive.clock;
     ++stats_.residuals;
     return {Disposition::residual_ready, std::move(residual)};
 }
@@ -385,6 +439,14 @@ void ReferenceMouthWorker::reset_pcm_smoothing() noexcept {
     smoothed_pcm_track_.reset();
     smoothed_pcm_segment_id_ = 0U;
     smoothed_pcm_at_ns_ = 0;
+}
+
+void ReferenceMouthWorker::reset_atlas_selection() noexcept {
+    selected_atlas_state_.reset();
+    selected_atlas_track_.reset();
+    selected_atlas_segment_id_ = 0U;
+    selected_atlas_at_ns_ = 0;
+    selected_atlas_age_ = 0U;
 }
 
 std::uint64_t ReferenceMouthWorker::active_generation() const noexcept {
@@ -441,7 +503,7 @@ Disposition ReferenceMouthWorker::validate(const WorkItem& item,
             std::min(policy_.maximum_tracking_age_ns, hard_maximum_tracking_age_ns)) {
         return Disposition::bypass_invalid_tracking;
     }
-    if (!valid_drive(item.drive) ||
+    if (!valid_drive(item.drive) || item.drive.clock.playback_at_ns > now_ns ||
         item.drive.clock.stream_generation != item.track.cancellation_generation ||
         absolute_delta(item.drive.clock.playback_at_ns, item.source.identity.captured_at_ns) >
             static_cast<std::uint64_t>(std::max<Nanoseconds>(

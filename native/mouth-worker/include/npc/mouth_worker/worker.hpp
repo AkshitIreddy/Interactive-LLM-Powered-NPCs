@@ -40,6 +40,7 @@ private:
         const MouthCoefficients& target,
         const WorkItem& item) noexcept;
     void reset_pcm_smoothing() noexcept;
+    void reset_atlas_selection() noexcept;
 
     std::uint64_t active_generation_{};
     WorkerPolicy policy_;
@@ -49,6 +50,11 @@ private:
     std::optional<TrackBinding> smoothed_pcm_track_;
     std::uint64_t smoothed_pcm_segment_id_{};
     Nanoseconds smoothed_pcm_at_ns_{};
+    std::optional<std::size_t> selected_atlas_state_;
+    std::optional<TrackBinding> selected_atlas_track_;
+    std::uint64_t selected_atlas_segment_id_{};
+    Nanoseconds selected_atlas_at_ns_{};
+    std::uint32_t selected_atlas_age_{};
     WorkerStats stats_;
 };
 

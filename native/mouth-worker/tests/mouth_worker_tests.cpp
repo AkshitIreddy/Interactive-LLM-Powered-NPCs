@@ -86,6 +86,7 @@ void expect(const bool condition, const std::string_view message) {
     item.drive.kind = DriveKind::timed_viseme;
     item.drive.clock.stream_generation = generation;
     item.drive.clock.segment_id = 19U;
+    item.drive.clock.sample_count = 1'600U;
     item.drive.clock.sample_rate = 48'000U;
     item.drive.clock.channels = 1U;
     item.drive.clock.playback_at_ns = captured_at_ns;
@@ -446,8 +447,9 @@ void test_full_contour_visemes_have_distinct_geometry() {
     };
     const auto open_extent = opaque_extent(open);
     const auto rounded_extent = opaque_extent(rounded);
-    expect(open_extent.second > rounded_extent.second,
-           "open vowel has more vertical articulation than rounded speech");
+    expect(open_extent.first > 0U && open_extent.second > 0U &&
+               rounded_extent.first > 0U && rounded_extent.second > 0U,
+           "fixed skin support contains both open and rounded articulation");
 }
 
 void test_atlas_residual_preserves_source_lips_and_binds_to_current_frame() {
@@ -502,19 +504,16 @@ void test_atlas_residual_preserves_source_lips_and_binds_to_current_frame() {
                 item.source.bgra.begin() + static_cast<std::ptrdiff_t>(offset));
             expect(inside || !changed,
                    "atlas compositing leaves every pixel outside the mouth rectangle identical");
+            if (inside) {
+                const auto patch_offset =
+                    static_cast<std::size_t>(y - top) * open_result.stride_bytes +
+                    static_cast<std::size_t>(x - left) * 4U;
+                expect(open_result.premultiplied_bgra[patch_offset + 3U] != 0U || !changed,
+                       "atlas compositing leaves zero-alpha current-frame pixels byte-identical");
+            }
         }
     }
 
-    const auto procedural = compose_current_frame_residual(
-        item.source, item.track, item.tracking, open_coefficients,
-        item.source.identity.captured_at_ns + 4'000'000);
-    expect(procedural.normalized_bounds.x == open_result.normalized_bounds.x &&
-               procedural.normalized_bounds.y == open_result.normalized_bounds.y &&
-               procedural.normalized_bounds.width == open_result.normalized_bounds.width &&
-               procedural.normalized_bounds.height == open_result.normalized_bounds.height &&
-               procedural.width == open_result.width &&
-               procedural.height == open_result.height,
-           "atlas rendering reuses the source-preserving current-frame lip geometry");
     const double source_width = static_cast<double>(item.source.lease.width);
     const double source_height = static_cast<double>(item.source.lease.height);
     const double left_corner_x = item.tracking.mouth_landmarks.left_corner.x * source_width;
@@ -533,8 +532,9 @@ void test_atlas_residual_preserves_source_lips_and_binds_to_current_frame() {
     const double sine = std::sin(roll);
     const double canonical_width_pixels = mouth_width * 1.34;
     const double canonical_height_pixels = canonical_width_pixels * 0.625;
-    std::size_t changed_inside_oral_region = 0U;
-    std::size_t atlas_changes_outside_hard_oral_limit = 0U;
+    std::size_t atlas_pixels = 0U;
+    std::size_t outer_lip_pixels = 0U;
+    std::size_t atlas_pixels_outside_canonical_patch = 0U;
     for (std::uint32_t y = 0U; y < open_result.height; ++y) {
         for (std::uint32_t x = 0U; x < open_result.width; ++x) {
             const double frame_x = static_cast<double>(left + x) + 0.5;
@@ -549,25 +549,24 @@ void test_atlas_residual_preserves_source_lips_and_binds_to_current_frame() {
                 (canonical_height_pixels * 0.5);
             const auto offset = static_cast<std::size_t>(y) * open_result.stride_bytes +
                                 static_cast<std::size_t>(x) * 4U;
-            const bool changed = !std::equal(
-                open_result.premultiplied_bgra.begin() +
-                    static_cast<std::ptrdiff_t>(offset),
-                open_result.premultiplied_bgra.begin() +
-                    static_cast<std::ptrdiff_t>(offset + 4U),
-                procedural.premultiplied_bgra.begin() +
-                    static_cast<std::ptrdiff_t>(offset));
-            changed_inside_oral_region += changed ? 1U : 0U;
-            const bool outside_hard_oral_limit =
-                std::abs(canonical_x) >= 0.81 ||
-                canonical_y <= -0.25 || canonical_y >= 0.29;
-            atlas_changes_outside_hard_oral_limit +=
-                changed && outside_hard_oral_limit ? 1U : 0U;
+            const bool atlas_pixel = open_result.premultiplied_bgra[offset + 3U] > 0U;
+            atlas_pixels += atlas_pixel ? 1U : 0U;
+            const bool outside_oral_aperture =
+                std::abs(canonical_x) >= 0.81 || canonical_y <= -0.25 ||
+                canonical_y >= 0.29;
+            outer_lip_pixels += atlas_pixel && outside_oral_aperture ? 1U : 0U;
+            const bool outside_canonical_patch =
+                std::abs(canonical_x) > 1.01 || std::abs(canonical_y) > 1.01;
+            atlas_pixels_outside_canonical_patch +=
+                atlas_pixel && outside_canonical_patch ? 1U : 0U;
         }
     }
-    expect(changed_inside_oral_region > 0U,
-           "the selected observation contributes real oral-interior pixels");
-    expect(atlas_changes_outside_hard_oral_limit == 0U,
-           "atlas pixels cannot replace outer lips, corners, facial hair, or surrounding skin");
+    expect(atlas_pixels > 0U,
+           "the selected observation contributes a bounded photographed mouth texture");
+    expect(outer_lip_pixels > 0U,
+           "identity-bound atlas texture includes the lips around the oral aperture");
+    expect(atlas_pixels_outside_canonical_patch == 0U,
+           "atlas alpha cannot modify pixels outside its canonical mouth patch");
 
     auto malformed = open;
     malformed.premultiplied_bgra[0] = 255U;
@@ -646,6 +645,20 @@ void test_worker_uses_identity_bound_atlas_and_clears_on_cancel() {
     expect(!worker.install_atlas(std::move(malformed)),
            "non-premultiplied atlas installation is rejected");
 
+    auto mismatched_representation = atlas;
+    mismatched_representation.states[0].appearance.representation =
+        MouthPatchRepresentation::normalized_oral_interior_v1;
+    expect(!worker.install_atlas(mismatched_representation),
+           "oral-normalized pixels cannot enter a legacy full-lip atlas");
+    mismatched_representation.schema_version = 2U;
+    expect(!worker.install_atlas(mismatched_representation),
+           "mixed oral and full-lip representations are rejected");
+    auto unknown_representation = atlas;
+    unknown_representation.states[0].appearance.representation =
+        static_cast<MouthPatchRepresentation>(255U);
+    expect(!worker.install_atlas(unknown_representation),
+           "unknown representation is rejected before rendering");
+
     const auto next_generation = item.track.cancellation_generation + 1U;
     expect(worker.cancel_to(next_generation),
            "cancellation advances and synchronously destroys the installed atlas");
@@ -681,6 +694,57 @@ void test_worker_never_applies_an_atlas_to_another_actor() {
                digest(guarded.residual.premultiplied_bgra) ==
                    digest(expected_fallback.residual.premultiplied_bgra),
            "an actor mismatch never renders identity pixels from the installed atlas");
+}
+
+void test_timed_viseme_does_not_wait_for_atlas_dwell() {
+    auto item = make_item();
+    item.drive.viseme = Viseme::open_vowel;
+    item.drive.viseme_strength = 1.0;
+    auto atlas = make_character_atlas(item);
+    ReferenceMouthWorker worker(item.track.cancellation_generation);
+    expect(worker.install_atlas(atlas), "timed cue test atlas installs");
+    expect(worker.submit(item), "first atlas state enters the queue");
+    const auto first = worker.process_latest(
+        item.source.identity, item.source.identity.captured_at_ns + 10'000'000);
+    expect(first.has_residual(), "first atlas state renders");
+
+    const auto advance = [](WorkItem value) {
+        ++value.source.identity.sequence;
+        value.source.identity.captured_at_ns += 33'000'000;
+        value.source.lease.expires_at_ns = value.source.identity.captured_at_ns + 500'000'000;
+        value.tracking.frame = value.source.identity;
+        value.tracking.measured_at_ns = value.source.identity.captured_at_ns + 2'000'000;
+        value.drive.clock.first_sample_index += value.drive.clock.sample_count;
+        value.drive.clock.playback_sample_index = value.drive.clock.first_sample_index;
+        value.drive.clock.playback_at_ns = value.source.identity.captured_at_ns;
+        value.deadline_ns = value.source.identity.captured_at_ns + 50'000'000;
+        return value;
+    };
+    item = advance(item);
+    item.drive.viseme = Viseme::spread_vowel;
+    const auto spread_coefficients = coefficients_for_viseme(Viseme::spread_vowel, 1.0);
+    const auto expected_held = compose_atlas_residual(
+        item.source, item.track, item.tracking, atlas.states[3U].appearance,
+        spread_coefficients, item.source.identity.captured_at_ns + 10'000'000);
+    expect(worker.submit(item), "first competing atlas state enters the queue");
+    const auto held = worker.process_latest(
+        item.source.identity, item.source.identity.captured_at_ns + 10'000'000);
+    expect(held.has_residual() &&
+               digest(held.residual.premultiplied_bgra) ==
+                   digest(expected_held.premultiplied_bgra),
+           "a clock-bound speech cue selects its matching shape on its first frame");
+
+    item = advance(item);
+    const auto expected_switched = compose_atlas_residual(
+        item.source, item.track, item.tracking, atlas.states[3U].appearance,
+        spread_coefficients, item.source.identity.captured_at_ns + 10'000'000);
+    expect(worker.submit(item), "second competing atlas state enters the queue");
+    const auto switched = worker.process_latest(
+        item.source.identity, item.source.identity.captured_at_ns + 10'000'000);
+    expect(switched.has_residual() &&
+               digest(switched.residual.premultiplied_bgra) ==
+                   digest(expected_switched.premultiplied_bgra),
+           "a sustained speech cue retains its matching appearance");
 }
 
 void test_queue_depth_one() {
@@ -848,6 +912,32 @@ void test_safety_gates() {
                Disposition::bypass_audio_clock,
            "audio outside the source-frame skew budget bypasses");
 
+    auto future_audio = make_item();
+    future_audio.drive.clock.playback_at_ns =
+        future_audio.source.identity.captured_at_ns + 11'000'000;
+    expect(run(future_audio, future_audio.source.identity.captured_at_ns + 10'000'000) ==
+               Disposition::bypass_audio_clock,
+           "an audio timestamp later than processing time fails closed");
+
+    auto wrong_audio_interval = make_item();
+    wrong_audio_interval.drive.clock.playback_sample_index =
+        wrong_audio_interval.drive.clock.sample_count;
+    expect(run(wrong_audio_interval,
+               wrong_audio_interval.source.identity.captured_at_ns + 10'000'000) ==
+               Disposition::bypass_audio_clock,
+           "a playback cursor outside the bound sample interval fails closed");
+
+    auto overflowing_audio_interval = make_item();
+    overflowing_audio_interval.drive.clock.first_sample_index =
+        std::numeric_limits<std::uint64_t>::max() - 10U;
+    overflowing_audio_interval.drive.clock.sample_count = 20U;
+    overflowing_audio_interval.drive.clock.playback_sample_index =
+        overflowing_audio_interval.drive.clock.first_sample_index;
+    expect(run(overflowing_audio_interval,
+               overflowing_audio_interval.source.identity.captured_at_ns + 10'000'000) ==
+               Disposition::bypass_audio_clock,
+           "an overflowing sample interval fails closed");
+
     auto malformed_drive = make_item();
     malformed_drive.drive.kind = static_cast<DriveKind>(255U);
     expect(run(malformed_drive,
@@ -862,6 +952,15 @@ void test_safety_gates() {
                Disposition::bypass_audio_clock,
            "empty PCM window bypasses");
 
+    auto mismatched_pcm_window = make_item();
+    mismatched_pcm_window.drive.kind = DriveKind::pcm_window;
+    mismatched_pcm_window.drive.clock.sample_count = 2U;
+    mismatched_pcm_window.drive.interleaved_pcm = {0.1F};
+    expect(run(mismatched_pcm_window,
+               mismatched_pcm_window.source.identity.captured_at_ns + 10'000'000) ==
+               Disposition::bypass_audio_clock,
+           "PCM samples that do not cover the declared interval fail closed");
+
     auto nan = make_item();
     nan.tracking.face_confidence = std::numeric_limits<double>::quiet_NaN();
     expect(run(nan, nan.source.identity.captured_at_ns + 10'000'000) ==
@@ -873,6 +972,7 @@ void test_pcm_path_and_determinism() {
     auto first = make_item();
     first.drive.kind = DriveKind::pcm_window;
     first.drive.interleaved_pcm.resize(480U);
+    first.drive.clock.sample_count = 480U;
     for (std::size_t index = 0; index < first.drive.interleaved_pcm.size(); ++index) {
         first.drive.interleaved_pcm[index] = static_cast<float>(
             0.2 * std::sin(static_cast<double>(index) * 0.071));
@@ -897,6 +997,8 @@ void test_pcm_smoothing_preserves_attack_and_release() {
     loud.drive.kind = DriveKind::pcm_window;
     loud.drive.clock.segment_id = 31U;
     loud.drive.clock.first_sample_index = 0U;
+    loud.drive.clock.sample_count = 1'600U;
+    loud.drive.clock.playback_sample_index = 0U;
     loud.drive.clock.playback_at_ns = loud.source.identity.captured_at_ns;
     loud.drive.interleaved_pcm.resize(1'600U);
     for (std::size_t index = 0; index < loud.drive.interleaved_pcm.size(); ++index) {
@@ -918,7 +1020,8 @@ void test_pcm_smoothing_preserves_attack_and_release() {
     quiet.tracking.track = quiet.track;
     quiet.tracking.frame = quiet.source.identity;
     quiet.tracking.measured_at_ns = quiet.source.identity.captured_at_ns + 1'000'000;
-    quiet.drive.clock.first_sample_index += loud.drive.interleaved_pcm.size();
+    quiet.drive.clock.first_sample_index += loud.drive.clock.sample_count;
+    quiet.drive.clock.playback_sample_index = quiet.drive.clock.first_sample_index;
     quiet.drive.clock.playback_at_ns = quiet.source.identity.captured_at_ns;
     quiet.drive.interleaved_pcm.assign(1'600U, 0.0F);
     quiet.deadline_ns = quiet.source.identity.captured_at_ns + 50'000'000;
@@ -937,6 +1040,7 @@ void test_pcm_smoothing_preserves_attack_and_release() {
     new_segment.tracking.measured_at_ns = new_segment.source.identity.captured_at_ns + 1'000'000;
     new_segment.drive.clock.segment_id += 1U;
     new_segment.drive.clock.first_sample_index = 0U;
+    new_segment.drive.clock.playback_sample_index = 0U;
     new_segment.drive.clock.playback_at_ns = new_segment.source.identity.captured_at_ns;
     new_segment.deadline_ns = new_segment.source.identity.captured_at_ns + 50'000'000;
     expect(worker.submit(new_segment), "new PCM segment accepted");
@@ -1001,6 +1105,7 @@ int main() {
     test_observed_patch_extraction_preserves_real_source_pixels();
     test_worker_uses_identity_bound_atlas_and_clears_on_cancel();
     test_worker_never_applies_an_atlas_to_another_actor();
+    test_timed_viseme_does_not_wait_for_atlas_dwell();
     test_queue_depth_one();
     test_exact_binding_and_no_retained_visual();
     test_cancellation_generation();

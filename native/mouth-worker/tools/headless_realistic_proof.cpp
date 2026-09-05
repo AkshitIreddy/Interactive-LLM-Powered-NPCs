@@ -2,11 +2,13 @@
 #include "npc/mouth_worker/landmark_provider.hpp"
 #include "npc/mouth_worker/signal_adapter.hpp"
 #include "npc/mouth_worker/worker.hpp"
+#include "npc/mouth_worker/review_cues.hpp"
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
 #include <psapi.h>
+#include <bcrypt.h>
 
 #include <algorithm>
 #include <array>
@@ -21,6 +23,7 @@
 #include <limits>
 #include <numeric>
 #include <optional>
+#include <regex>
 #include <span>
 #include <sstream>
 #include <stdexcept>
@@ -78,37 +81,127 @@ struct WavPcm {
     return bytes;
 }
 
+[[nodiscard]] std::string read_text(const std::filesystem::path& path) {
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) throw std::runtime_error("could not open " + path.string());
+    return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+}
+
+[[nodiscard]] std::string sha256_bytes(const std::vector<std::byte>& bytes) {
+    if (bytes.size() > std::numeric_limits<ULONG>::max()) {
+        throw std::runtime_error("review input too large to hash");
+    }
+    std::array<unsigned char, 32> hash{};
+    if (BCryptHash(BCRYPT_SHA256_ALG_HANDLE, nullptr, 0,
+            reinterpret_cast<PUCHAR>(const_cast<std::byte*>(bytes.data())),
+            static_cast<ULONG>(bytes.size()), hash.data(),
+            static_cast<ULONG>(hash.size())) < 0) {
+        throw std::runtime_error("could not hash review input");
+    }
+    std::ostringstream digest;
+    for (const auto byte : hash) {
+        digest << std::hex << std::setfill('0') << std::setw(2)
+               << static_cast<unsigned int>(byte);
+    }
+    return digest.str();
+}
+
+[[nodiscard]] std::uint32_t manifest_u32(const std::string& manifest,
+                                         const std::string_view name) {
+    const std::regex pattern("\\\"" + std::string(name) +
+                             "\\\"\\s*:\\s*([0-9]+)");
+    std::smatch match;
+    if (!std::regex_search(manifest, match, pattern)) {
+        throw std::runtime_error("review atlas manifest is missing " + std::string(name));
+    }
+    const auto value = std::stoull(match[1].str());
+    if (value > std::numeric_limits<std::uint32_t>::max()) {
+        throw std::runtime_error("review atlas manifest integer is out of range");
+    }
+    return static_cast<std::uint32_t>(value);
+}
+
+[[nodiscard]] std::vector<MouthCoefficients> manifest_coefficients(
+    const std::string& manifest) {
+    const std::regex block("\\\"coefficients\\\"\\s*:\\s*\\[([^\\]]+)\\]");
+    const std::regex number("[-+]?(?:[0-9]+\\.?[0-9]*|\\.[0-9]+)(?:[eE][-+]?[0-9]+)?");
+    std::vector<MouthCoefficients> result;
+    for (auto state = std::sregex_iterator(manifest.begin(), manifest.end(), block);
+         state != std::sregex_iterator(); ++state) {
+        std::array<double, 8U> values{};
+        std::size_t index{};
+        const auto body = (*state)[1].str();
+        for (auto value = std::sregex_iterator(body.begin(), body.end(), number);
+             value != std::sregex_iterator(); ++value) {
+            if (index >= values.size()) {
+                throw std::runtime_error("review atlas coefficient vector is oversized");
+            }
+            values[index++] = std::stod((*value).str());
+        }
+        if (index != values.size()) {
+            throw std::runtime_error("review atlas coefficient vector is incomplete");
+        }
+        result.push_back({values[0], values[1], values[2], values[3],
+                          values[4], values[5], values[6], values[7]});
+    }
+    return result;
+}
+
 [[nodiscard]] CharacterMouthAtlas read_review_atlas(
     const std::filesystem::path& root,
     const std::uint64_t generation,
     const TrackBinding& track) {
-    constexpr std::uint32_t width = 206U;
-    constexpr std::uint32_t height = 143U;
-    constexpr std::uint32_t stride = width * 4U;
-    constexpr std::size_t state_bytes = static_cast<std::size_t>(stride) * height;
-    constexpr std::array visemes{
-        Viseme::silence,
-        Viseme::labiodental,
-        Viseme::rounded,
-        Viseme::dental,
-        Viseme::open_vowel,
-        Viseme::alveolar,
-        Viseme::spread_vowel,
-        Viseme::postalveolar,
-    };
+    const auto manifest = read_text(root / "atlas.json");
+    const auto schema = manifest_u32(manifest, "schemaVersion");
+    std::smatch representation_match;
+    const bool has_representation = std::regex_search(manifest, representation_match,
+        std::regex("\"representation\"\\s*:\\s*\"([^\"]+)\""));
+    const bool normalized_oral = has_representation &&
+        representation_match[1].str() == "normalized-oral-interior-v1";
+    if ((schema != 1U && schema != 2U) || (schema == 2U) != normalized_oral ||
+        (schema == 1U && has_representation &&
+         representation_match[1].str() != "full-lip-observation-v1")) {
+        throw std::runtime_error("review atlas representation/schema mismatch");
+    }
+    const auto width = manifest_u32(manifest, "width");
+    const auto height = manifest_u32(manifest, "height");
+    const auto stride = manifest_u32(manifest, "strideBytes");
+    const auto state_count = manifest_u32(manifest, "stateCount");
+    const auto coefficients = manifest_coefficients(manifest);
+    const auto state_bytes = static_cast<std::size_t>(stride) * height;
+    if (width < 16U || height < 16U || width > 512U || height > 512U ||
+        stride != width * 4U || state_count < 4U || state_count > 16U ||
+        coefficients.size() != state_count) {
+        throw std::runtime_error("review atlas manifest has an unsupported layout");
+    }
     const auto texture_path = root / "atlas-bgra8-premultiplied.bin";
     const auto bytes = read_binary(texture_path);
-    if (bytes.size() != state_bytes * visemes.size()) {
+    std::smatch texture_hash;
+    if (!std::regex_search(manifest, texture_hash,
+            std::regex("\"sha256\"\\s*:\\s*\"([0-9a-f]{64})\"")) ||
+        texture_hash[1].str() != sha256_bytes(bytes)) {
+        throw std::runtime_error("review atlas texture hash mismatch");
+    }
+    if (bytes.size() != state_bytes * state_count) {
         throw std::runtime_error("review atlas has an unexpected state layout");
     }
     CharacterMouthAtlas atlas{};
+    atlas.schema_version = schema;
     atlas.cancellation_generation = generation;
     atlas.actor_id = track.actor_id;
-    atlas.identity_revision = 1U;
-    atlas.states.reserve(visemes.size());
-    for (std::size_t index = 0U; index < visemes.size(); ++index) {
+    std::smatch identity;
+    if (!std::regex_search(manifest, identity,
+            std::regex("\"identityRevision\"\\s*:\\s*([0-9]+)"))) {
+        throw std::runtime_error("review atlas has no identity revision");
+    }
+    atlas.identity_revision = std::stoull(identity[1].str());
+    atlas.states.reserve(state_count);
+    for (std::size_t index = 0U; index < state_count; ++index) {
         MouthAtlasState state{};
-        state.coefficients = coefficients_for_viseme(visemes[index]);
+        state.appearance.representation = normalized_oral
+            ? MouthPatchRepresentation::normalized_oral_interior_v1
+            : MouthPatchRepresentation::full_lip_observation_v1;
+        state.coefficients = coefficients[index];
         state.appearance.width = width;
         state.appearance.height = height;
         state.appearance.stride_bytes = stride;
@@ -344,9 +437,9 @@ void write_ppm(const std::filesystem::path& path, const std::vector<std::uint8_t
 
 int main(int argc, char** argv) {
     try {
-        if (argc < 5 || argc > 7) {
+        if (argc < 5 || argc > 8) {
             throw std::runtime_error(
-                "usage: npc_mouth_worker_headless_realistic_proof <pack-root> <portrait.ppm|source-frames-dir> <audio.wav> <output-dir> [tracking-hz:10|15] [review-mouth-atlas-root]");
+                "usage: npc_mouth_worker_headless_realistic_proof <pack-root> <portrait.ppm|source-frames-dir> <audio.wav> <output-dir> [tracking-hz:10|15] [review-mouth-atlas-root] [offline-sample-cues.tsv]");
         }
         const auto pack_root = std::filesystem::path(argv[1]);
         const auto source_path = std::filesystem::path(argv[2]);
@@ -362,7 +455,7 @@ int main(int argc, char** argv) {
                 throw std::runtime_error("tracking-hz must be 10 or 15");
             }
         }
-        const std::optional<std::filesystem::path> atlas_root = argc == 7
+        const std::optional<std::filesystem::path> atlas_root = argc >= 7
             ? std::optional<std::filesystem::path>(std::filesystem::path(argv[6]))
             : std::nullopt;
         const auto frames_dir = output / "frames";
@@ -372,6 +465,13 @@ int main(int argc, char** argv) {
         const bool moving_source = source_frames.size() > 1U;
         const auto& source_template = source_frames.front();
         const auto audio = read_wav_pcm16(audio_path);
+        std::vector<ReviewMouthCue> review_cues;
+        if (argc == 8) {
+            const auto audio_bytes = read_binary(audio_path);
+            std::ifstream cue_input(argv[7]);
+            review_cues = read_review_cues(cue_input, audio.sample_rate,
+                audio.samples.size() / audio.channels, sha256_bytes(audio_bytes));
+        }
         constexpr std::uint64_t generation = 1U;
         const TrackBinding track{generation, 0x4d415241U, 0x56454e4eU, 1U};
         auto provider = make_windows_ort_landmark_provider_v1();
@@ -454,9 +554,13 @@ int main(int argc, char** argv) {
         const Nanoseconds frame_ns = 1'000'000'000LL / video_fps;
         const auto timeline = monotonic_ns();
         ReferenceMouthWorker worker(generation);
-        if (atlas_root.has_value() &&
-            !worker.install_atlas(read_review_atlas(*atlas_root, generation, track))) {
-            throw std::runtime_error("review mouth atlas failed native admission");
+        bool normalized_oral_atlas = false;
+        if (atlas_root.has_value()) {
+            auto atlas = read_review_atlas(*atlas_root, generation, track);
+            normalized_oral_atlas = atlas.schema_version == 2U;
+            if (!worker.install_atlas(std::move(atlas))) {
+                throw std::runtime_error("review mouth atlas failed native admission");
+            }
         }
         std::vector<double> compositor_ms;
         std::vector<double> moving_inference_ms;
@@ -548,10 +652,16 @@ int main(int argc, char** argv) {
                 (frame_index + 1U) * audio.sample_rate / video_fps);
             MouthDrive drive{};
             drive.kind = DriveKind::pcm_window;
-            drive.clock = {generation, 1U, first, audio.sample_rate, audio.channels, frame_at};
+            drive.clock = {generation, 1U, first, last - first, first,
+                           audio.sample_rate, audio.channels, frame_at};
             drive.interleaved_pcm.assign(
                 audio.samples.begin() + static_cast<std::ptrdiff_t>(first * audio.channels),
                 audio.samples.begin() + static_cast<std::ptrdiff_t>(last * audio.channels));
+            if (!review_cues.empty()) {
+                drive.kind = DriveKind::timed_viseme;
+                drive.viseme = review_viseme_at(review_cues, first);
+                drive.interleaved_pcm.clear();
+            }
             WorkItem item{track, source, tracking, std::move(drive), frame_at + 100'000'000LL};
             if (!worker.submit(std::move(item))) throw std::runtime_error("worker rejected frame");
             const auto started = std::chrono::steady_clock::now();
@@ -748,13 +858,27 @@ int main(int argc, char** argv) {
                  (output_frames + tracking_interval_frames - 1U) /
                      tracking_interval_frames &&
              moving_inference_p95 <= 600.0 / static_cast<double>(tracking_rate_hz));
+        const bool identity_bound_full_lip_atlas = atlas_root.has_value();
+        // The legacy procedural renderer promises to retain the current upper
+        // lip and therefore needs a near-zero darkening guard plus at least one
+        // source-identical silence frame. A full-lip observation atlas
+        // intentionally replaces that lip surface with an identity-bound
+        // photographed state. Its mechanical proof instead bounds total mouth
+        // change and articulation extent; the generated texture still requires
+        // the separately recorded enlarged/display-size visual decision.
+        const bool visual_signal_qualifies = identity_bound_full_lip_atlas
+            ? (*maximum_mouth_delta >= 1.25 && *maximum_mouth_delta <= 32.0 &&
+               visibly_changed_frames >= output_frames / 6U &&
+               maximum_articulated_rows_over_mouth_width >= 0.10 &&
+               maximum_articulated_rows_over_mouth_width <= 0.85)
+            : (*maximum_mouth_delta >= 1.25 && *minimum_mouth_delta <= 0.25 &&
+               visibly_changed_frames >= output_frames / 6U &&
+               maximum_upper_lip_darkened_fraction <= 0.03 &&
+               maximum_articulated_rows_over_mouth_width >= 0.10);
         const bool qualifies = p95_inference <= 220.0 && p95_compositor <= 8.0 &&
                                residual_frames == output_frames && distinct.size() >= 3U &&
                                changed_frames > output_frames / 4U &&
-                               *maximum_mouth_delta >= 1.25 && *minimum_mouth_delta <= 0.25 &&
-                               visibly_changed_frames >= output_frames / 6U &&
-                               maximum_upper_lip_darkened_fraction <= 0.03 &&
-                               maximum_articulated_rows_over_mouth_width >= 0.10 &&
+                               visual_signal_qualifies &&
                                source_motion_qualifies && moving_tracking_qualifies;
 
         std::ofstream report(output / "headless-proof.json");
@@ -766,11 +890,25 @@ int main(int argc, char** argv) {
                << "  \"movingSource\": " << (moving_source ? "true" : "false") << ",\n"
                << "  \"sourceFrameCount\": " << source_frames.size() << ",\n"
                << "  \"audio\": \"" << json_escape(audio_path.string()) << "\",\n"
+               << "  \"mouthDrive\": \""
+               << (review_cues.empty() ? "causal-pcm-window" : "offline-recognized-sample-cues")
+               << "\",\n"
+               << "  \"reviewCueCount\": " << review_cues.size() << ",\n"
+               << "  \"streamingCueRecognitionQualified\": false,\n"
                << "  \"reviewMouthAtlas\": "
                << (atlas_root.has_value()
                        ? "\"" + json_escape(atlas_root->string()) + "\""
                        : "null")
                << ",\n"
+               << "  \"atlasMode\": \""
+               << (normalized_oral_atlas ? "source-lip-warp-normalized-oral-interior" : identity_bound_full_lip_atlas
+                       ? "identity-bound-full-lip-observation"
+                       : "none-procedural-source-pixel")
+               << "\",\n"
+               << "  \"legacyProceduralSourceLipGatesApplied\": "
+               << (identity_bound_full_lip_atlas ? "false" : "true") << ",\n"
+               << "  \"visualTextureReviewRequired\": "
+               << (identity_bound_full_lip_atlas ? "true" : "false") << ",\n"
                << "  \"model\": \"OpenSeeFace MNV3 + LM1 / ONNX Runtime 1.22.1 CPU\",\n"
                << "  \"width\": " << source_template.lease.width << ",\n"
                << "  \"height\": " << source_template.lease.height << ",\n"
