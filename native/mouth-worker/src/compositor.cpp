@@ -251,9 +251,11 @@ struct ContourWarpGeometry {
         return value / static_cast<double>(indices.size());
     };
     constexpr std::array<std::size_t, 3U> upper_inner{11U, 12U, 13U};
-    constexpr std::array<std::size_t, 3U> lower_inner{15U, 16U, 17U};
+    // The lower contour runs from right to left, so reverse it when pairing
+    // opposing samples with the left-to-right upper contour.
+    constexpr std::array<std::size_t, 3U> paired_lower_inner{17U, 16U, 15U};
     const double measured_gap = std::max(
-        0.0, mean_vertical(lower_inner) - mean_vertical(upper_inner));
+        0.0, mean_vertical(paired_lower_inner) - mean_vertical(upper_inner));
     const double opening_strength = unit(
         coefficients.jaw_open * (1.0 - coefficients.lip_close * 0.92) +
         coefficients.lower_lip_depress * 0.16);
@@ -270,21 +272,34 @@ struct ContourWarpGeometry {
         (1.0 - smoother_unit(opening_strength * 4.0));
     const double closed_gap = geometry.mouth_width * 0.006;
     const double open_target = std::max(measured_gap, articulation_gap);
-    const double target_gap = open_target * (1.0 - close_weight) +
-                              closed_gap * close_weight;
-    // Signed correction matters when the captured actor is already speaking:
-    // a bilabial cue must be able to close the current aperture rather than
-    // retaining whatever mouth shape happened to be in the newest frame.
-    geometry.opening_correction = target_gap - measured_gap;
+    const double opening_addition = open_target - measured_gap;
+    std::array<double, upper_inner.size()> pair_corrections{};
+    geometry.opening_correction = 0.0;
+    for (std::size_t pair = 0U; pair < upper_inner.size(); ++pair) {
+        const double pair_gap = projection(
+            geometry.destination[paired_lower_inner[pair]], geometry.mouth_center,
+            geometry.vertical_axis) -
+            projection(geometry.destination[upper_inner[pair]], geometry.mouth_center,
+                       geometry.vertical_axis);
+        // Closing the mean aperture can make the shallower side pairs cross
+        // while the centre stays open. That folds overlapping triangles and
+        // turns dark lipstick into a one-sided slash. Blend every opposing
+        // pair toward the same non-zero contact gap instead. Negative tracker
+        // topology is corrected even when the requested viseme is open.
+        const double open_pair_gap = std::max(0.0, pair_gap) + opening_addition;
+        const double pair_target_gap = open_pair_gap * (1.0 - close_weight) +
+                                       closed_gap * close_weight;
+        pair_corrections[pair] = pair_target_gap - pair_gap;
+        geometry.opening_correction += pair_corrections[pair];
+    }
+    geometry.opening_correction /= static_cast<double>(pair_corrections.size());
     const auto shift_vertical = [&](const std::size_t index, const double amount) noexcept {
         geometry.destination[index].x += geometry.vertical_axis.x * amount;
         geometry.destination[index].y += geometry.vertical_axis.y * amount;
     };
-    for (const auto index : upper_inner) {
-        shift_vertical(index, -geometry.opening_correction * 0.34);
-    }
-    for (const auto index : lower_inner) {
-        shift_vertical(index, geometry.opening_correction * 0.66);
+    for (std::size_t pair = 0U; pair < upper_inner.size(); ++pair) {
+        shift_vertical(upper_inner[pair], -pair_corrections[pair] * 0.34);
+        shift_vertical(paired_lower_inner[pair], pair_corrections[pair] * 0.66);
     }
     for (const auto index : std::array<std::size_t, 5U>{0U, 1U, 2U, 3U, 4U}) {
         shift_vertical(index, -geometry.opening_correction * 0.10);
@@ -938,6 +953,20 @@ ResidualPatch compose_current_frame_residual(const CpuFrame& source,
     patch.coefficients = coefficients;
     initialize_residual_metadata(patch, source, track, output_bounds,
                                  right - left, bottom - top, produced_at_ns);
+    const bool source_passthrough = coefficients.lip_close >= 1.0 - 1.0e-6 &&
+        coefficients.jaw_open <= 1.0e-6 && coefficients.funnel <= 1.0e-6 &&
+        coefficients.pucker <= 1.0e-6 && coefficients.smile_left <= 1.0e-6 &&
+        coefficients.smile_right <= 1.0e-6 &&
+        coefficients.upper_lip_raise <= 1.0e-6 &&
+        coefficients.lower_lip_depress <= 1.0e-6;
+    if (source_passthrough) {
+        // Silence belongs to the newest game frame. OpenSeeFace inner points
+        // describe a control surface, not a guaranteed visible cavity; on dark
+        // lipstick they can enclose the entire lip fill. Warping that region
+        // toward a geometric seal destroys a naturally resting mouth. Active
+        // bilabial cues still request closure through the contour path below.
+        return patch;
+    }
     if (has_full_contour(tracking)) {
         const auto geometry = contour_warp_geometry(
             tracking, coefficients, source_width, source_height);

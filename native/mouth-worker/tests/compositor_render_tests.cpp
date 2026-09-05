@@ -56,6 +56,22 @@ void expect(const bool condition, const std::string_view message) {
     return frame;
 }
 
+[[nodiscard]] CpuFrame make_vertical_ramp_frame() {
+    auto frame = make_speaking_frame();
+    for (std::uint32_t y = 0U; y < frame.lease.height; ++y) {
+        for (std::uint32_t x = 0U; x < frame.lease.width; ++x) {
+            const auto offset = static_cast<std::size_t>(y) * frame.lease.stride_bytes +
+                                static_cast<std::size_t>(x) * 4U;
+            const auto value = static_cast<std::uint8_t>(y * 2U);
+            frame.bgra[offset + 0U] = value;
+            frame.bgra[offset + 1U] = value;
+            frame.bgra[offset + 2U] = value;
+            frame.bgra[offset + 3U] = 255U;
+        }
+    }
+    return frame;
+}
+
 [[nodiscard]] TrackingEvidence make_tracking(const CpuFrame& frame) {
     TrackingEvidence tracking{};
     tracking.track = {1U, 2U, 3U, 4U};
@@ -162,11 +178,11 @@ void test_fixed_skin_ring_replaces_contracted_source_corners() {
     }
 }
 
-void test_closed_cue_deforms_an_already_open_source() {
+void test_bilabial_cue_deforms_an_already_open_source() {
     const auto source = make_speaking_frame();
     const auto tracking = make_tracking(source);
     const auto closed = compose_current_frame_residual(
-        source, tracking.track, tracking, coefficients_for_viseme(Viseme::silence, 1.0),
+        source, tracking.track, tracking, coefficients_for_viseme(Viseme::bilabial, 1.0),
         source.identity.captured_at_ns + 4'000'000);
     const auto rounded = compose_current_frame_residual(
         source, tracking.track, tracking, coefficients_for_viseme(Viseme::rounded, 1.0),
@@ -180,6 +196,56 @@ void test_closed_cue_deforms_an_already_open_source() {
     const auto closed_center = pixel(closed_frame, source, 100U, 61U);
     expect(closed_center != source_center,
            "closure replaces the captured open cavity at the mouth centre");
+}
+
+void test_silence_preserves_the_current_game_frame() {
+    const auto source = make_speaking_frame();
+    const auto tracking = make_tracking(source);
+    const auto silence = compose_current_frame_residual(
+        source, tracking.track, tracking, coefficients_for_viseme(Viseme::silence, 1.0),
+        source.identity.captured_at_ns + 4'000'000);
+    const auto output = composite_over_source(source, silence);
+    expect(!silence.premultiplied_bgra.empty(),
+           "silence returns a valid bounded transparent residual");
+    expect(std::all_of(
+               silence.premultiplied_bgra.begin(), silence.premultiplied_bgra.end(),
+               [](const std::uint8_t value) { return value == 0U; }),
+           "silence cannot paint over the current game mouth");
+    expect(output == source.bgra,
+           "silence leaves every current-frame source pixel byte-identical");
+}
+
+void test_closed_cue_keeps_uneven_inner_lip_warp_non_folding() {
+    const auto source = make_vertical_ramp_frame();
+    auto tracking = make_tracking(source);
+    tracking.mouth_landmarks.contour[11U].y = 0.495;
+    tracking.mouth_landmarks.contour[12U].y = 0.450;
+    tracking.mouth_landmarks.contour[13U].y = 0.495;
+    tracking.mouth_landmarks.contour[15U].y = 0.505;
+    tracking.mouth_landmarks.contour[16U].y = 0.550;
+    tracking.mouth_landmarks.contour[17U].y = 0.505;
+    const auto closed = compose_current_frame_residual(
+        source, tracking.track, tracking, coefficients_for_viseme(Viseme::bilabial, 1.0),
+        source.identity.captured_at_ns + 4'000'000);
+    const auto output = composite_over_source(source, closed);
+    expect(!closed.premultiplied_bgra.empty(),
+           "bilabial closure renders for uneven tracked inner-lip gaps");
+
+    // The fixture's side gaps are smaller than its centre gap. A single
+    // mean-gap correction crosses both side pairs. Encoding source Y in every
+    // channel turns that fold into an abrupt source-row jump in the composed
+    // pixels. A valid per-pair closure stays monotonic without that jump.
+    for (const std::uint32_t x : {80U, 120U}) {
+        int previous = static_cast<int>(pixel(output, source, x, 52U)[0U]);
+        for (std::uint32_t y = 53U; y <= 68U; ++y) {
+            const int current = static_cast<int>(pixel(output, source, x, y)[0U]);
+            expect(current + 2 >= previous,
+                   "bilabial closure must not fold lower-lip source pixels above upper-lip pixels");
+            expect(current <= previous + 4,
+                   "bilabial closure must not stretch folded source rows across the contact seam");
+            previous = current;
+        }
+    }
 }
 
 void test_normalized_oral_texture_cannot_replace_lips_or_skin() {
@@ -253,7 +319,9 @@ void test_legacy_full_lip_representation_keeps_original_sampling_contract() {
 
 int main() {
     test_fixed_skin_ring_replaces_contracted_source_corners();
-    test_closed_cue_deforms_an_already_open_source();
+    test_bilabial_cue_deforms_an_already_open_source();
+    test_silence_preserves_the_current_game_frame();
+    test_closed_cue_keeps_uneven_inner_lip_warp_non_folding();
     test_normalized_oral_texture_cannot_replace_lips_or_skin();
     test_legacy_full_lip_representation_keeps_original_sampling_contract();
     if (failures == 0) {
