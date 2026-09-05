@@ -56,8 +56,10 @@ ReplayPackets read_packets(const std::filesystem::path& path) {
 
 int main(int argc, char** argv) {
     try {
-        if (argc != 7) throw std::runtime_error(
-            "usage: replay_tracked_mouth <frames> <audio.wav> <atlas> <cues.tsv> <landmarks.tsv> <fresh-output>");
+        const bool unsmoothed_geometry = argc == 8 &&
+            std::string_view(argv[7]) == "--unsmoothed-geometry";
+        if (argc != 7 && !unsmoothed_geometry) throw std::runtime_error(
+            "usage: replay_tracked_mouth <frames> <audio.wav> <atlas> <cues.tsv> <landmarks.tsv> <fresh-output> [--unsmoothed-geometry]");
         auto frames = read_source_frames(argv[1]);
         const auto audio = read_wav_pcm16(argv[2]);
         const auto packets = read_packets(argv[5]);
@@ -76,7 +78,9 @@ int main(int argc, char** argv) {
         ReferenceMouthWorker worker(generation);
         if (!worker.install_atlas(read_review_atlas(argv[3], generation, track)))
             throw std::runtime_error("atlas failed native admission");
-        OpenSeeFaceSignalAdapter adapter(generation);
+        OpenSeeFaceAdapterPolicy adapter_policy{};
+        if (unsmoothed_geometry) adapter_policy.smoothing_alpha = 1.0;
+        OpenSeeFaceSignalAdapter adapter(generation, adapter_policy);
         AppearanceGateEvidenceV1 appearance{};
         // The reviewer selects one character in this recorded sequence.
         // These are a manual identity fixture, not face-recognition scores.
@@ -179,6 +183,7 @@ int main(int argc, char** argv) {
                << ",\n  \"adapterBypasses\":" << adapter_bypasses
                << ",\n  \"workerBypasses\":" << worker_bypasses
                << ",\n  \"workerP95Ms\":" << p95
+               << ",\n  \"geometrySmoothingAlpha\":" << adapter_policy.smoothing_alpha
                << ",\n  \"nativeFrameProcessP95Ms\":" << frame_p95
                << ",\n  \"nativeFrameProcessScope\":\"adapter, worker and composition including source copy; excludes model inference, frame IO, capture and presentation\""
                << ",\n  \"landmarkReplaySha256\":\"" << sha256_bytes(read_binary(argv[5]))
