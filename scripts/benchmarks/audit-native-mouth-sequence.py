@@ -153,11 +153,14 @@ def main() -> int:
     dynamic_outside_changes = 0
     bypass_frames = 0
     bypass_changed_pixels = 0
+    changed_frames = []
     for index, path in enumerate(after):
         rendered = read(path)
         source_image = read(source[index % len(source)])
         delta = np.abs(rendered.astype(np.int16) - source_image.astype(np.int16))
         changed = np.any(delta > 0, axis=2)
+        if np.any(changed):
+            changed_frames.append(index)
         outside_count = int(np.count_nonzero(changed & outside))
         changed_outside_pixels += outside_count
         maximum_outside_channel_delta = max(
@@ -189,6 +192,9 @@ def main() -> int:
         "schema": "interactive-npcs-native-mouth-sequence-audit/v1",
         "frameCount": len(after),
         "sourceFrameCount": len(source),
+        "framesWithChangedPixels": changed_frames,
+        "changedFrameCount": len(changed_frames),
+        "sourceIdenticalFrameCount": len(after) - len(changed_frames),
         "mouthRoi": [x, y, width, height],
         "framesByteExactOutsideMouthRoi": frames_exact_outside,
         "changedPixelsOutsideMouthRoi": changed_outside_pixels,
