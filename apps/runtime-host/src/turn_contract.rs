@@ -683,6 +683,42 @@ pub struct RuntimeTurnTimingReceiptV1 {
     pub live_provider_receipts: bool,
 }
 
+pub const RESPONSE_LATENCY_TARGET_MILLIS: u64 = 5_000;
+pub const RESPONSE_LATENCY_CEILING_MILLIS: u64 = 8_000;
+
+/// Honest scope of the interactive response budget. The selected STT route is
+/// measured by a separate native capture lifecycle today, so this assessment
+/// begins only once its final transcript has entered the turn supervisor.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum RuntimeTurnLatencyScopeV1 {
+    FinalizedTranscriptToFirstDecodedPcm,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum RuntimeTurnLatencyStatusV1 {
+    MeetsTarget,
+    WithinCeiling,
+    ExceedsCeiling,
+}
+
+/// Derived only from the strict producer-clock receipt. It contains no prompt,
+/// transcript, audio, credential, endpoint, or machine identifier.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeTurnLatencyAssessmentV1 {
+    pub schema_version: u32,
+    pub scope: RuntimeTurnLatencyScopeV1,
+    pub target_millis: u64,
+    pub ceiling_millis: u64,
+    pub response_to_first_audio_millis: u64,
+    pub llm_time_to_first_token_millis: u64,
+    pub first_token_to_tts_request_millis: u64,
+    pub tts_time_to_first_audio_millis: u64,
+    pub status: RuntimeTurnLatencyStatusV1,
+}
+
 impl RuntimeTurnTimingReceiptV1 {
     pub fn validate(&self) -> Result<(), &'static str> {
         let stamps = [
@@ -756,6 +792,113 @@ impl RuntimeTurnTimingReceiptV1 {
         }
         Ok(())
     }
+
+    pub fn latency_assessment(&self) -> Result<RuntimeTurnLatencyAssessmentV1, &'static str> {
+        self.validate()?;
+        // Round the budget-defining total upward so a sub-millisecond overrun
+        // cannot be reported inside the ceiling. Breakdown fields round down;
+        // their sum therefore remains a conservative subset of the total.
+        let response_to_first_audio_millis =
+            elapsed_millis_ceil(&self.input_finalized, &self.tts_first_decoded_pcm)?;
+        let assessment = RuntimeTurnLatencyAssessmentV1 {
+            schema_version: 1,
+            scope: RuntimeTurnLatencyScopeV1::FinalizedTranscriptToFirstDecodedPcm,
+            target_millis: RESPONSE_LATENCY_TARGET_MILLIS,
+            ceiling_millis: RESPONSE_LATENCY_CEILING_MILLIS,
+            response_to_first_audio_millis,
+            llm_time_to_first_token_millis: elapsed_millis_floor(
+                &self.llm_requested,
+                &self.llm_first_token,
+            )?,
+            first_token_to_tts_request_millis: elapsed_millis_floor(
+                &self.llm_first_token,
+                &self.tts_requested,
+            )?,
+            tts_time_to_first_audio_millis: elapsed_millis_floor(
+                &self.tts_requested,
+                &self.tts_first_decoded_pcm,
+            )?,
+            status: if response_to_first_audio_millis <= RESPONSE_LATENCY_TARGET_MILLIS {
+                RuntimeTurnLatencyStatusV1::MeetsTarget
+            } else if response_to_first_audio_millis <= RESPONSE_LATENCY_CEILING_MILLIS {
+                RuntimeTurnLatencyStatusV1::WithinCeiling
+            } else {
+                RuntimeTurnLatencyStatusV1::ExceedsCeiling
+            },
+        };
+        assessment.validate()?;
+        Ok(assessment)
+    }
+}
+
+impl RuntimeTurnLatencyAssessmentV1 {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        let expected_status =
+            if self.response_to_first_audio_millis <= RESPONSE_LATENCY_TARGET_MILLIS {
+                RuntimeTurnLatencyStatusV1::MeetsTarget
+            } else if self.response_to_first_audio_millis <= RESPONSE_LATENCY_CEILING_MILLIS {
+                RuntimeTurnLatencyStatusV1::WithinCeiling
+            } else {
+                RuntimeTurnLatencyStatusV1::ExceedsCeiling
+            };
+        let measured_pipeline_millis = self
+            .llm_time_to_first_token_millis
+            .checked_add(self.first_token_to_tts_request_millis)
+            .and_then(|value| value.checked_add(self.tts_time_to_first_audio_millis));
+        if self.schema_version != 1
+            || self.scope != RuntimeTurnLatencyScopeV1::FinalizedTranscriptToFirstDecodedPcm
+            || self.target_millis != RESPONSE_LATENCY_TARGET_MILLIS
+            || self.ceiling_millis != RESPONSE_LATENCY_CEILING_MILLIS
+            || self.target_millis >= self.ceiling_millis
+            || self.status != expected_status
+            || self.llm_time_to_first_token_millis > self.response_to_first_audio_millis
+            || self.first_token_to_tts_request_millis > self.response_to_first_audio_millis
+            || self.tts_time_to_first_audio_millis > self.response_to_first_audio_millis
+            || measured_pipeline_millis
+                .is_none_or(|value| value > self.response_to_first_audio_millis)
+        {
+            return Err("invalid_runtime_turn_latency_assessment");
+        }
+        Ok(())
+    }
+}
+
+fn elapsed_millis_floor(
+    start: &RuntimeClockStampV1,
+    end: &RuntimeClockStampV1,
+) -> Result<u64, &'static str> {
+    if start.clock_domain != end.clock_domain
+        || start.qpc_frequency_hz == 0
+        || start.qpc_frequency_hz != end.qpc_frequency_hz
+        || end.qpc_ticks < start.qpc_ticks
+    {
+        return Err("invalid_runtime_turn_latency_clock");
+    }
+    let elapsed_ticks = u128::from(end.qpc_ticks - start.qpc_ticks);
+    let millis = elapsed_ticks
+        .checked_mul(1_000)
+        .ok_or("invalid_runtime_turn_latency_clock")?
+        / u128::from(start.qpc_frequency_hz);
+    u64::try_from(millis).map_err(|_| "invalid_runtime_turn_latency_clock")
+}
+
+fn elapsed_millis_ceil(
+    start: &RuntimeClockStampV1,
+    end: &RuntimeClockStampV1,
+) -> Result<u64, &'static str> {
+    if start.clock_domain != end.clock_domain
+        || start.qpc_frequency_hz == 0
+        || start.qpc_frequency_hz != end.qpc_frequency_hz
+        || end.qpc_ticks < start.qpc_ticks
+    {
+        return Err("invalid_runtime_turn_latency_clock");
+    }
+    let scaled = u128::from(end.qpc_ticks - start.qpc_ticks)
+        .checked_mul(1_000)
+        .ok_or("invalid_runtime_turn_latency_clock")?;
+    let frequency = u128::from(start.qpc_frequency_hz);
+    let millis = scaled / frequency + u128::from(scaled % frequency != 0);
+    u64::try_from(millis).map_err(|_| "invalid_runtime_turn_latency_clock")
 }
 
 impl RuntimeProviderRouteBindingV1 {
@@ -817,6 +960,8 @@ pub struct TurnExecutionEvidence {
     pub success: TurnExecutionSuccessMetadata,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_timing_receipt: Option<RuntimeTurnTimingReceiptV1>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_latency_assessment: Option<RuntimeTurnLatencyAssessmentV1>,
 }
 
 #[cfg(test)]

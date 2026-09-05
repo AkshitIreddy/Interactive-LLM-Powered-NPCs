@@ -432,6 +432,9 @@ impl IdentityResolver for ObservedIdentityResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::turn_contract::{
+        RuntimeTurnLatencyStatusV1, RESPONSE_LATENCY_CEILING_MILLIS, RESPONSE_LATENCY_TARGET_MILLIS,
+    };
     use npc_providers_llm::{FinishReason, TokenUsage};
     use npc_providers_tts::{AudioFormat, PcmChunk};
 
@@ -597,5 +600,64 @@ mod tests {
         assert_eq!(requested.clock_domain, terminal.clock_domain);
         assert_eq!(requested.qpc_frequency_hz, terminal.qpc_frequency_hz);
         assert!(terminal.qpc_ticks >= requested.qpc_ticks);
+    }
+
+    #[test]
+    fn response_latency_budget_uses_exact_clock_deltas_and_boundary_bands() {
+        let mut receipt = complete_receipt();
+        let frequency = receipt.input_finalized.qpc_frequency_hz;
+        receipt.input_finalized.qpc_ticks = frequency;
+        receipt.identity_started.qpc_ticks = frequency;
+        receipt.identity_completed.qpc_ticks = frequency + 1_000_000;
+        receipt.llm_requested.qpc_ticks = frequency + 1_000_000;
+        receipt.llm_first_token.qpc_ticks = frequency + 11_000_000;
+        receipt.tts_requested.qpc_ticks = frequency + 41_000_000;
+        receipt.tts_first_decoded_pcm.qpc_ticks = frequency + 50_000_000;
+        receipt.llm_provider_terminal.qpc_ticks = frequency + 42_000_000;
+        receipt.structured_response_validated.qpc_ticks = frequency + 43_000_000;
+        receipt.tts_final_decoded_pcm.qpc_ticks = frequency + 51_000_000;
+
+        let target = receipt.latency_assessment().expect("target assessment");
+        assert_eq!(target.response_to_first_audio_millis, 5_000);
+        assert_eq!(target.llm_time_to_first_token_millis, 1_000);
+        assert_eq!(target.first_token_to_tts_request_millis, 3_000);
+        assert_eq!(target.tts_time_to_first_audio_millis, 900);
+        assert_eq!(target.status, RuntimeTurnLatencyStatusV1::MeetsTarget);
+        let mut impossible_breakdown = target.clone();
+        impossible_breakdown.tts_time_to_first_audio_millis = 2_000;
+        assert_eq!(
+            impossible_breakdown.validate(),
+            Err("invalid_runtime_turn_latency_assessment")
+        );
+
+        receipt.tts_first_decoded_pcm.qpc_ticks = frequency + 80_000_000;
+        receipt.tts_final_decoded_pcm.qpc_ticks = frequency + 81_000_000;
+        let ceiling = receipt.latency_assessment().expect("ceiling assessment");
+        assert_eq!(ceiling.response_to_first_audio_millis, 8_000);
+        assert_eq!(ceiling.status, RuntimeTurnLatencyStatusV1::WithinCeiling);
+
+        receipt.tts_first_decoded_pcm.qpc_ticks = frequency + 80_000_001;
+        receipt.tts_final_decoded_pcm.qpc_ticks = frequency + 81_000_000;
+        let exceeded = receipt.latency_assessment().expect("exceeded assessment");
+        assert_eq!(exceeded.response_to_first_audio_millis, 8_001);
+        assert_eq!(exceeded.status, RuntimeTurnLatencyStatusV1::ExceedsCeiling);
+    }
+
+    #[test]
+    fn latency_assessment_is_redacted_and_rejects_tampered_budget_claims() {
+        let receipt = complete_receipt();
+        let mut assessment = receipt.latency_assessment().expect("assessment");
+        let wire = serde_json::to_value(&assessment).expect("serialize assessment");
+        assert_eq!(wire["scope"], "finalizedTranscriptToFirstDecodedPcm");
+        assert_eq!(wire["targetMillis"], RESPONSE_LATENCY_TARGET_MILLIS);
+        assert_eq!(wire["ceilingMillis"], RESPONSE_LATENCY_CEILING_MILLIS);
+        assert!(wire.get("providerId").is_none());
+        assert!(wire.get("transcript").is_none());
+
+        assessment.status = RuntimeTurnLatencyStatusV1::ExceedsCeiling;
+        assert_eq!(
+            assessment.validate(),
+            Err("invalid_runtime_turn_latency_assessment")
+        );
     }
 }

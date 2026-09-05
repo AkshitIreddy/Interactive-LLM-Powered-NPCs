@@ -1268,6 +1268,10 @@ impl HostState {
                     evidence.runtime_timing_receipt = runtime_timing
                         .as_ref()
                         .and_then(|timing| timing.finalize(live_provider_receipts));
+                    evidence.runtime_latency_assessment = evidence
+                        .runtime_timing_receipt
+                        .as_ref()
+                        .and_then(|receipt| receipt.latency_assessment().ok());
                     Ok(evidence)
                 },
             )
@@ -2270,6 +2274,7 @@ fn build_turn_execution_evidence(
         degradations,
         success,
         runtime_timing_receipt: None,
+        runtime_latency_assessment: None,
     })
 }
 
