@@ -20,8 +20,11 @@ struct MouthAtlasState {
 // the ordinary WorkItem and presentation gates.
 struct CharacterMouthAtlas {
     // Schema 1: complete lip observation. Schema 2: normalized oral interior
-    // with source-derived exterior lips. Each state must match the schema.
-    // The wire layout stays fixed; old workers reject schema 2 at admission.
+    // with source-derived exterior lips. Schema 3: photometrically calibrated
+    // full-lip references in one fixed canonical coordinate frame; state zero
+    // is the mandatory closed neutral reference. Each state must match the
+    // schema. The wire layout stays fixed; older workers reject newer schemas
+    // at admission.
     std::uint32_t schema_version{1};
     std::uint64_t cancellation_generation{};
     std::uint64_t actor_id{};

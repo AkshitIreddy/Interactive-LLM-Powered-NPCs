@@ -144,6 +144,43 @@ void expect(const bool condition, const std::string_view message) {
     return patch;
 }
 
+[[nodiscard]] CanonicalMouthPatch make_photometric_patch(
+    const std::array<std::uint8_t, 3U> base_colour,
+    const bool teeth) {
+    constexpr std::uint32_t width = 64U;
+    constexpr std::uint32_t height = 40U;
+    CanonicalMouthPatch patch{};
+    patch.width = width;
+    patch.height = height;
+    patch.stride_bytes = width * 4U;
+    patch.representation =
+        MouthPatchRepresentation::photometric_full_lip_reference_v1;
+    patch.premultiplied_bgra.assign(
+        static_cast<std::size_t>(patch.stride_bytes) * height, 0U);
+    for (std::uint32_t y = 0U; y < height; ++y) {
+        for (std::uint32_t x = 0U; x < width; ++x) {
+            const double nx = (static_cast<double>(x) + 0.5) / width * 2.0 - 1.0;
+            const double ny = (static_cast<double>(y) + 0.5) / height * 2.0 - 1.0;
+            const double radius = std::sqrt(nx * nx + std::pow(ny / 0.62, 2.0));
+            const double alpha_value = std::clamp((1.0 - radius) / 0.18, 0.0, 1.0);
+            const auto alpha = static_cast<std::uint8_t>(std::lround(alpha_value * 255.0));
+            auto colour = base_colour;
+            if (teeth && std::abs(nx) < 0.52 && ny > -0.18 && ny < 0.10) {
+                colour = {180U, 205U, 225U};
+            }
+            const auto offset = static_cast<std::size_t>(y) * patch.stride_bytes +
+                                static_cast<std::size_t>(x) * 4U;
+            for (std::size_t channel = 0U; channel < colour.size(); ++channel) {
+                patch.premultiplied_bgra[offset + channel] =
+                    static_cast<std::uint8_t>((
+                        static_cast<std::uint32_t>(colour[channel]) * alpha + 127U) / 255U);
+            }
+            patch.premultiplied_bgra[offset + 3U] = alpha;
+        }
+    }
+    return patch;
+}
+
 void test_fixed_skin_ring_replaces_contracted_source_corners() {
     const auto source = make_speaking_frame();
     const auto tracking = make_tracking(source);
@@ -315,6 +352,57 @@ void test_legacy_full_lip_representation_keeps_original_sampling_contract() {
            "legacy full-lip pixels retain their full canonical-patch semantics");
 }
 
+void test_photometric_reference_is_calibrated_and_mouth_bounded() {
+    auto source = make_speaking_frame();
+    for (std::uint32_t y = 0U; y < source.lease.height; ++y) {
+        for (std::uint32_t x = 0U; x < source.lease.width; ++x) {
+            const auto offset = static_cast<std::size_t>(y) * source.lease.stride_bytes +
+                                static_cast<std::size_t>(x) * 4U;
+            source.bgra[offset + 0U] = 72U;
+            source.bgra[offset + 1U] = 102U;
+            source.bgra[offset + 2U] = 132U;
+            source.bgra[offset + 3U] = 255U;
+        }
+    }
+    const auto tracking = make_tracking(source);
+    const auto neutral = make_photometric_patch({42U, 62U, 82U}, false);
+    const auto open = make_photometric_patch({52U, 72U, 92U}, true);
+    const auto residual = compose_photometric_atlas_residual(
+        source, tracking.track, tracking, neutral, open,
+        coefficients_for_viseme(Viseme::open_vowel),
+        source.identity.captured_at_ns + 4'000'000);
+    expect(!residual.premultiplied_bgra.empty(),
+           "schema-three photometric reference produces a residual");
+    const auto output = composite_over_source(source, residual);
+    const auto calibrated_lip = pixel(output, source, 70U, 60U);
+    expect(calibrated_lip[0U] >= 78U && calibrated_lip[0U] <= 86U &&
+               calibrated_lip[1U] >= 108U && calibrated_lip[1U] <= 116U &&
+               calibrated_lip[2U] >= 138U && calibrated_lip[2U] <= 146U,
+           "neutral-to-current calibration applies a bounded channel offset to speech lips");
+    const auto calibrated_teeth = pixel(output, source, 100U, 60U);
+    expect(calibrated_teeth[0U] > 180U && calibrated_teeth[1U] > 205U &&
+               calibrated_teeth[2U] > 225U,
+           "calibration retains distinct bright teeth instead of flattening the reference");
+
+    for (std::uint32_t y = 0U; y < source.lease.height; ++y) {
+        for (std::uint32_t x = 0U; x < source.lease.width; ++x) {
+            if (x >= 40U && x < 160U && y >= 38U && y < 87U) continue;
+            expect(pixel(output, source, x, y) == pixel(source.bgra, source, x, y),
+                   "photometric reference cannot modify pixels outside the tracked mouth bounds");
+        }
+    }
+
+    auto wrong_representation = open;
+    wrong_representation.representation =
+        MouthPatchRepresentation::full_lip_observation_v1;
+    expect(compose_photometric_atlas_residual(
+               source, tracking.track, tracking, neutral, wrong_representation,
+               coefficients_for_viseme(Viseme::open_vowel),
+               source.identity.captured_at_ns + 4'000'000)
+               .premultiplied_bgra.empty(),
+           "photometric compositor rejects a legacy texture passed as schema three");
+}
+
 } // namespace
 
 int main() {
@@ -324,6 +412,7 @@ int main() {
     test_closed_cue_keeps_uneven_inner_lip_warp_non_folding();
     test_normalized_oral_texture_cannot_replace_lips_or_skin();
     test_legacy_full_lip_representation_keeps_original_sampling_contract();
+    test_photometric_reference_is_calibrated_and_mouth_bounded();
     if (failures == 0) {
         std::cout << "compositor render tests passed\n";
         return 0;

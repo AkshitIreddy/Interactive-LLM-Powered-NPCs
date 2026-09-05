@@ -600,6 +600,89 @@ void overlay_patch_sample(ResidualPatch& destination,
         static_cast<std::uint8_t>(std::clamp(std::lround(output_alpha), 0L, 255L));
 }
 
+struct PhotometricPair final {
+    double reference{};
+    double current{};
+};
+
+struct PhotometricTransform final {
+    double gain{1.0};
+    double offset{};
+};
+
+[[nodiscard]] double percentile_in_place(std::vector<double>& values,
+                                         const double fraction) {
+    if (values.empty()) return 0.0;
+    const auto index = static_cast<std::size_t>(std::clamp(
+        std::floor(fraction * static_cast<double>(values.size() - 1U)),
+        0.0, static_cast<double>(values.size() - 1U)));
+    std::nth_element(values.begin(), values.begin() +
+        static_cast<std::ptrdiff_t>(index), values.end());
+    return values[index];
+}
+
+[[nodiscard]] PhotometricTransform fit_photometric_channel(
+    const std::vector<PhotometricPair>& samples) {
+    PhotometricTransform result{};
+    if (samples.size() < 16U) return result;
+
+    std::vector<std::size_t> admitted(samples.size());
+    for (std::size_t index = 0U; index < admitted.size(); ++index) {
+        admitted[index] = index;
+    }
+    for (std::size_t pass = 0U; pass < 2U && admitted.size() >= 16U; ++pass) {
+        double reference_mean{};
+        double current_mean{};
+        for (const auto index : admitted) {
+            reference_mean += samples[index].reference;
+            current_mean += samples[index].current;
+        }
+        reference_mean /= static_cast<double>(admitted.size());
+        current_mean /= static_cast<double>(admitted.size());
+        double covariance{};
+        double variance{};
+        for (const auto index : admitted) {
+            const double reference_delta = samples[index].reference - reference_mean;
+            covariance += reference_delta * (samples[index].current - current_mean);
+            variance += reference_delta * reference_delta;
+        }
+        // A nearly flat neutral patch has only quantization variance after
+        // premultiplication. Treat it as an offset-only fit; dividing by that
+        // tiny variance otherwise drives the gain to a clamp boundary.
+        result.gain = variance / static_cast<double>(admitted.size()) > 4.0
+            ? std::clamp(covariance / variance, 0.35, 1.80)
+            : 1.0;
+        std::vector<double> offsets;
+        offsets.reserve(admitted.size());
+        for (const auto index : admitted) {
+            offsets.push_back(samples[index].current -
+                              samples[index].reference * result.gain);
+        }
+        result.offset = std::clamp(percentile_in_place(offsets, 0.5), -96.0, 96.0);
+        if (pass + 1U == 2U) break;
+
+        std::vector<double> errors;
+        errors.reserve(admitted.size());
+        for (const auto index : admitted) {
+            errors.push_back(std::abs(samples[index].current -
+                (samples[index].reference * result.gain + result.offset)));
+        }
+        const double threshold = percentile_in_place(errors, 0.85);
+        std::vector<std::size_t> trimmed;
+        trimmed.reserve(admitted.size());
+        for (const auto index : admitted) {
+            const double error = std::abs(samples[index].current -
+                (samples[index].reference * result.gain + result.offset));
+            if (error <= threshold + 1.0e-9) trimmed.push_back(index);
+        }
+        if (trimmed.size() >= 16U) admitted = std::move(trimmed);
+    }
+    if (!std::isfinite(result.gain) || !std::isfinite(result.offset)) {
+        return {};
+    }
+    return result;
+}
+
 } // namespace
 
 MouthCoefficients coefficients_for_viseme(const Viseme viseme, const double strength) noexcept {
@@ -1518,6 +1601,165 @@ ResidualPatch compose_atlas_residual(const CpuFrame& source,
             patch.premultiplied_bgra[output + 3U] = static_cast<std::uint8_t>(
                 std::clamp(std::lround(output_alpha), 0L, 255L));
         }
+    }
+    return patch;
+}
+
+ResidualPatch compose_photometric_atlas_residual(
+    const CpuFrame& source,
+    const TrackBinding& track,
+    const TrackingEvidence& tracking,
+    const CanonicalMouthPatch& neutral_reference,
+    const CanonicalMouthPatch& observed_state,
+    const MouthCoefficients& raw_coefficients,
+    const Nanoseconds produced_at_ns) {
+    ResidualPatch patch{};
+    if (!valid_cpu_frame(source) || track != tracking.track ||
+        source.identity != tracking.frame || !normalized_rect(tracking.mouth_bounds) ||
+        !valid_atlas_patch(neutral_reference) || !valid_atlas_patch(observed_state) ||
+        neutral_reference.representation !=
+            MouthPatchRepresentation::photometric_full_lip_reference_v1 ||
+        observed_state.representation !=
+            MouthPatchRepresentation::photometric_full_lip_reference_v1 ||
+        neutral_reference.width != observed_state.width ||
+        neutral_reference.height != observed_state.height ||
+        neutral_reference.stride_bytes != observed_state.stride_bytes ||
+        !std::isfinite(neutral_reference.enrolled_pose.yaw) ||
+        !std::isfinite(neutral_reference.enrolled_pose.pitch) ||
+        !std::isfinite(neutral_reference.enrolled_pose.roll) ||
+        !std::isfinite(observed_state.enrolled_pose.yaw) ||
+        !std::isfinite(observed_state.enrolled_pose.pitch) ||
+        !std::isfinite(observed_state.enrolled_pose.roll)) {
+        return patch;
+    }
+
+    const double source_width = static_cast<double>(source.lease.width);
+    const double source_height = static_cast<double>(source.lease.height);
+    const auto left = static_cast<std::uint32_t>(std::floor(
+        tracking.mouth_bounds.x * source_width));
+    const auto top = static_cast<std::uint32_t>(std::floor(
+        tracking.mouth_bounds.y * source_height));
+    const auto right = static_cast<std::uint32_t>(std::ceil(
+        tracking.mouth_bounds.right() * source_width));
+    const auto bottom = static_cast<std::uint32_t>(std::ceil(
+        tracking.mouth_bounds.bottom() * source_height));
+    if (right <= left || bottom <= top || right > source.lease.width ||
+        bottom > source.lease.height) {
+        return {};
+    }
+
+    const auto& landmarks = tracking.mouth_landmarks;
+    const double left_corner_x = landmarks.left_corner.x * source_width;
+    const double left_corner_y = landmarks.left_corner.y * source_height;
+    const double right_corner_x = landmarks.right_corner.x * source_width;
+    const double right_corner_y = landmarks.right_corner.y * source_height;
+    const double landmark_dx = right_corner_x - left_corner_x;
+    const double landmark_dy = right_corner_y - left_corner_y;
+    const double mouth_width = std::hypot(landmark_dx, landmark_dy);
+    if (!std::isfinite(mouth_width) || mouth_width < 4.0 ||
+        mouth_width > source_width * 0.55) {
+        return {};
+    }
+    const PixelPoint center{
+        (left_corner_x + right_corner_x) * 0.5,
+        (left_corner_y + right_corner_y) * 0.5,
+    };
+    const double roll = std::atan2(landmark_dy, landmark_dx);
+    const PixelPoint horizontal_axis{std::cos(roll), std::sin(roll)};
+    const PixelPoint vertical_axis{-horizontal_axis.y, horizontal_axis.x};
+    const double canonical_width = mouth_width * 1.34;
+    const double canonical_height = canonical_width * 0.625;
+
+    struct MappedSample final {
+        std::uint32_t x{};
+        std::uint32_t y{};
+        std::array<float, 3U> observed_colour{};
+        float observed_alpha{};
+        float shared_alpha{};
+    };
+    std::vector<MappedSample> mapped;
+    const auto roi_pixels = static_cast<std::size_t>(right - left) * (bottom - top);
+    mapped.reserve(std::min<std::size_t>(roi_pixels, 65'536U));
+    std::array<std::vector<PhotometricPair>, 3U> fit_samples;
+    // Calibration needs spatial coverage rather than every pixel. Bound the
+    // robust-fit input so a valid 4K mouth ROI cannot allocate or sort an
+    // unbounded number of samples on the render thread.
+    const auto calibration_stride = std::max<std::size_t>(
+        1U, (roi_pixels + 8'191U) / 8'192U);
+    for (std::uint32_t y = 0U; y < bottom - top; ++y) {
+        for (std::uint32_t x = 0U; x < right - left; ++x) {
+            const PixelPoint point{
+                static_cast<double>(left + x) + 0.5,
+                static_cast<double>(top + y) + 0.5,
+            };
+            const double canonical_x = projection(
+                point, center, horizontal_axis) / (canonical_width * 0.5);
+            const double canonical_y = projection(
+                point, center, vertical_axis) / (canonical_height * 0.5);
+            if (std::abs(canonical_x) > 1.0 || std::abs(canonical_y) > 1.0) continue;
+            const auto neutral = sample_canonical_patch(
+                neutral_reference, canonical_x, canonical_y);
+            const auto observed = sample_canonical_patch(
+                observed_state, canonical_x, canonical_y);
+            const double shared_alpha = std::min(neutral.alpha, observed.alpha);
+            if (shared_alpha <= 1.0e-6) continue;
+            MappedSample sample{};
+            sample.x = x;
+            sample.y = y;
+            sample.observed_alpha = static_cast<float>(observed.alpha);
+            sample.shared_alpha = static_cast<float>(shared_alpha);
+            for (std::size_t channel = 0U; channel < 3U; ++channel) {
+                sample.observed_colour[channel] =
+                    static_cast<float>(observed.colour[channel]);
+                const auto linear_index = static_cast<std::size_t>(y) *
+                                              (right - left) + x;
+                if (shared_alpha >= 0.10 && neutral.alpha >= 0.10 &&
+                    linear_index % calibration_stride == 0U) {
+                    fit_samples[channel].push_back({
+                        neutral.colour[channel] / neutral.alpha,
+                        sample_channel(source, point.x - 0.5,
+                                       point.y - 0.5, channel),
+                    });
+                }
+            }
+            mapped.push_back(std::move(sample));
+        }
+    }
+    if (mapped.empty() || fit_samples[0U].size() < 16U ||
+        fit_samples[1U].size() < 16U || fit_samples[2U].size() < 16U) {
+        return {};
+    }
+    std::array<PhotometricTransform, 3U> transforms{};
+    for (std::size_t channel = 0U; channel < transforms.size(); ++channel) {
+        transforms[channel] = fit_photometric_channel(fit_samples[channel]);
+    }
+
+    const NormalizedRect output_bounds{
+        static_cast<double>(left) / source_width,
+        static_cast<double>(top) / source_height,
+        static_cast<double>(right - left) / source_width,
+        static_cast<double>(bottom - top) / source_height,
+    };
+    patch.coefficients = clamp_coefficients(raw_coefficients);
+    initialize_residual_metadata(patch, source, track, output_bounds,
+                                 right - left, bottom - top, produced_at_ns);
+    for (const auto& sample : mapped) {
+        const double alpha = sample.shared_alpha;
+        if (alpha <= 1.0e-6) continue;
+        const auto output = static_cast<std::size_t>(sample.y) * patch.stride_bytes +
+                            static_cast<std::size_t>(sample.x) * 4U;
+        for (std::size_t channel = 0U; channel < 3U; ++channel) {
+            const double unpremultiplied = sample.observed_colour[channel] /
+                                           std::max<double>(sample.observed_alpha, 1.0e-6);
+            const double corrected = std::clamp(
+                unpremultiplied * transforms[channel].gain +
+                    transforms[channel].offset,
+                0.0, 255.0);
+            patch.premultiplied_bgra[output + channel] =
+                static_cast<std::uint8_t>(std::clamp(
+                    std::lround(corrected * alpha), 0L, 255L));
+        }
+        patch.premultiplied_bgra[output + 3U] = byte_from_unit(alpha);
     }
     return patch;
 }

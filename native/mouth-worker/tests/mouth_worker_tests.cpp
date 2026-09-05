@@ -142,6 +142,16 @@ void expect(const bool condition, const std::string_view message) {
     return atlas;
 }
 
+[[nodiscard]] CharacterMouthAtlas make_photometric_atlas(const WorkItem& item) {
+    auto atlas = make_character_atlas(item);
+    atlas.schema_version = 3U;
+    for (auto& state : atlas.states) {
+        state.appearance.representation =
+            MouthPatchRepresentation::photometric_full_lip_reference_v1;
+    }
+    return atlas;
+}
+
 void test_viseme_and_audio_drives() {
     const auto silence = coefficients_for_viseme(Viseme::silence);
     const auto open = coefficients_for_viseme(Viseme::open_vowel, 1.0);
@@ -672,6 +682,71 @@ void test_worker_uses_identity_bound_atlas_and_clears_on_cancel() {
                digest(fallback.residual.premultiplied_bgra) !=
                    digest(result.residual.premultiplied_bgra),
            "cancelled atlas pixels cannot leak into the new generation");
+}
+
+void test_photometric_atlas_admission_and_contact_rendering() {
+    auto item = make_item(670U);
+    auto atlas = make_photometric_atlas(item);
+    ReferenceMouthWorker worker(item.track.cancellation_generation);
+    expect(worker.install_atlas(atlas),
+           "schema-three atlas with a shared mask and neutral state zero installs");
+
+    auto wrong_representation = atlas;
+    wrong_representation.states[1U].appearance.representation =
+        MouthPatchRepresentation::full_lip_observation_v1;
+    expect(!worker.install_atlas(wrong_representation),
+           "schema-three atlas rejects a legacy full-lip state");
+
+    auto wrong_neutral = atlas;
+    wrong_neutral.states[0U].coefficients =
+        coefficients_for_viseme(Viseme::open_vowel);
+    expect(!worker.install_atlas(wrong_neutral),
+           "schema-three state zero must be the closed neutral reference");
+
+    auto mismatched_alpha = atlas;
+    mismatched_alpha.states[2U].appearance.premultiplied_bgra[3U] = 1U;
+    expect(!worker.install_atlas(mismatched_alpha),
+           "schema-three states must share one exact alpha support");
+
+    auto oversized = atlas;
+    while (oversized.states.size() <= 16U) {
+        oversized.states.push_back(oversized.states.back());
+    }
+    expect(!worker.install_atlas(oversized),
+           "schema-three atlas cannot exceed the sixteen-state disk and wire cap");
+
+    item.drive.viseme = Viseme::bilabial;
+    item.drive.viseme_strength = 1.0;
+    expect(worker.submit(item), "active bilabial frame enters the schema-three worker");
+    const auto bilabial = worker.process_latest(
+        item.source.identity, item.source.identity.captured_at_ns + 10'000'000);
+    const auto squashed = compose_current_frame_residual(
+        item.source, item.track, item.tracking,
+        coefficients_for_viseme(Viseme::bilabial),
+        item.source.identity.captured_at_ns + 10'000'000);
+    expect(bilabial.has_residual(),
+           "active bilabial uses the enrolled contact reference");
+    expect(bilabial.has_residual() &&
+               digest(bilabial.residual.premultiplied_bgra) !=
+                   digest(squashed.premultiplied_bgra),
+           "active bilabial no longer squashes current lipstick geometry");
+
+    auto silence = item;
+    silence.source = make_frame(671U, item.source.identity.captured_at_ns + 33'000'000);
+    silence.tracking.frame = silence.source.identity;
+    silence.tracking.measured_at_ns = silence.source.identity.captured_at_ns + 1'000'000;
+    silence.drive.viseme = Viseme::silence;
+    silence.drive.clock.first_sample_index += silence.drive.clock.sample_count;
+    silence.drive.clock.playback_sample_index = silence.drive.clock.first_sample_index;
+    silence.drive.clock.playback_at_ns = silence.source.identity.captured_at_ns;
+    silence.deadline_ns = silence.source.identity.captured_at_ns + 50'000'000;
+    expect(worker.submit(silence), "silence frame enters the schema-three worker");
+    const auto silent_result = worker.process_latest(
+        silence.source.identity, silence.source.identity.captured_at_ns + 10'000'000);
+    expect(silent_result.has_residual() &&
+               composite_over_source(silence.source, silent_result.residual) ==
+                   silence.source.bgra,
+           "schema-three pure silence preserves the newest game frame byte-exactly");
 }
 
 void test_worker_never_applies_an_atlas_to_another_actor() {
@@ -1281,6 +1356,7 @@ int main() {
     test_atlas_residual_preserves_source_lips_and_binds_to_current_frame();
     test_observed_patch_extraction_preserves_real_source_pixels();
     test_worker_uses_identity_bound_atlas_and_clears_on_cancel();
+    test_photometric_atlas_admission_and_contact_rendering();
     test_worker_never_applies_an_atlas_to_another_actor();
     test_timed_viseme_does_not_wait_for_atlas_dwell();
     test_timed_atlas_transition_is_continuous_on_its_first_frame();

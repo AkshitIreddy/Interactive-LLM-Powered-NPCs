@@ -183,7 +183,15 @@ struct WavPcm {
         std::regex("\"representation\"\\s*:\\s*\"([^\"]+)\""));
     const bool normalized_oral = has_representation &&
         representation_match[1].str() == "normalized-oral-interior-v1";
-    if ((schema != 1U && schema != 2U) || (schema == 2U) != normalized_oral ||
+    const bool photometric_full_lip = has_representation &&
+        representation_match[1].str() == "photometric-full-lip-reference-v1";
+    std::smatch neutral_index;
+    const bool has_neutral_index = std::regex_search(manifest, neutral_index,
+        std::regex("\"neutralStateIndex\"\\s*:\\s*([0-9]+)"));
+    if ((schema != 1U && schema != 2U && schema != 3U) ||
+        (schema == 2U) != normalized_oral ||
+        (schema == 3U) != photometric_full_lip ||
+        (schema == 3U && (!has_neutral_index || neutral_index[1].str() != "0")) ||
         (schema == 1U && has_representation &&
          representation_match[1].str() != "full-lip-observation-v1")) {
         throw std::runtime_error("review atlas representation/schema mismatch");
@@ -225,7 +233,9 @@ struct WavPcm {
         MouthAtlasState state{};
         state.appearance.representation = normalized_oral
             ? MouthPatchRepresentation::normalized_oral_interior_v1
-            : MouthPatchRepresentation::full_lip_observation_v1;
+            : photometric_full_lip
+                ? MouthPatchRepresentation::photometric_full_lip_reference_v1
+                : MouthPatchRepresentation::full_lip_observation_v1;
         state.coefficients = coefficients[index];
         state.appearance.width = width;
         state.appearance.height = height;

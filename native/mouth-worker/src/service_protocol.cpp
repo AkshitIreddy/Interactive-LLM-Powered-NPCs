@@ -746,7 +746,8 @@ std::optional<ConfigureAdmittedLandmarkProviderCommandV1> decode_provider_config
 std::optional<std::vector<std::byte>> encode_character_mouth_atlas(
     const InstallCharacterMouthAtlasCommandV1& command) {
     const auto& atlas = command.atlas;
-    if (atlas.schema_version != 1U && atlas.schema_version != 2U) return std::nullopt;
+    if (atlas.schema_version != 1U && atlas.schema_version != 2U &&
+        atlas.schema_version != 3U) return std::nullopt;
     if (atlas.states.size() < 4U || atlas.states.size() > 16U) return std::nullopt;
     std::uint64_t total_pixels{};
     Writer writer;
@@ -759,7 +760,9 @@ std::optional<std::vector<std::byte>> encode_character_mouth_atlas(
         const auto& appearance = state.appearance;
         const auto expected_representation = atlas.schema_version == 2U
             ? MouthPatchRepresentation::normalized_oral_interior_v1
-            : MouthPatchRepresentation::full_lip_observation_v1;
+            : atlas.schema_version == 3U
+                ? MouthPatchRepresentation::photometric_full_lip_reference_v1
+                : MouthPatchRepresentation::full_lip_observation_v1;
         if (appearance.representation != expected_representation) return std::nullopt;
         if (appearance.premultiplied_bgra.size() > maximum_atlas_bytes) return std::nullopt;
         total_pixels += appearance.premultiplied_bgra.size();
@@ -785,7 +788,8 @@ std::optional<InstallCharacterMouthAtlasCommandV1> decode_character_mouth_atlas(
     InstallCharacterMouthAtlasCommandV1 value{};
     std::uint32_t state_count{};
     if (!reader.scalar(value.atlas.schema_version) ||
-        (value.atlas.schema_version != 1U && value.atlas.schema_version != 2U) ||
+        (value.atlas.schema_version != 1U && value.atlas.schema_version != 2U &&
+         value.atlas.schema_version != 3U) ||
         !reader.scalar(value.atlas.cancellation_generation) ||
         !reader.scalar(value.atlas.actor_id) ||
         !reader.scalar(value.atlas.identity_revision) ||
@@ -798,7 +802,9 @@ std::optional<InstallCharacterMouthAtlasCommandV1> decode_character_mouth_atlas(
         MouthAtlasState state{};
         state.appearance.representation = value.atlas.schema_version == 2U
             ? MouthPatchRepresentation::normalized_oral_interior_v1
-            : MouthPatchRepresentation::full_lip_observation_v1;
+            : value.atlas.schema_version == 3U
+                ? MouthPatchRepresentation::photometric_full_lip_reference_v1
+                : MouthPatchRepresentation::full_lip_observation_v1;
         std::vector<std::byte> pixels;
         if (!read_coefficients(reader, state.coefficients) ||
             !reader.scalar(state.appearance.width) ||

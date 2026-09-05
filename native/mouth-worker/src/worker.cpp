@@ -55,6 +55,23 @@ constexpr Nanoseconds estimated_coarticulation_tau_ns = 62'000'000;
     return value.lip_close >= 0.88 && value.jaw_open <= 0.04;
 }
 
+[[nodiscard]] bool neutral_reference_coefficients(
+    const MouthCoefficients& value) noexcept {
+    return value.jaw_open <= 0.05 && value.lip_close >= 0.95 &&
+           value.funnel <= 0.05 && value.pucker <= 0.05 &&
+           value.smile_left <= 0.05 && value.smile_right <= 0.05 &&
+           value.upper_lip_raise <= 0.05 && value.lower_lip_depress <= 0.05;
+}
+
+[[nodiscard]] bool exact_silence_coefficients(
+    const MouthCoefficients& value) noexcept {
+    return value.jaw_open <= 1.0e-6 && value.lip_close >= 1.0 - 1.0e-6 &&
+           value.funnel <= 1.0e-6 && value.pucker <= 1.0e-6 &&
+           value.smile_left <= 1.0e-6 && value.smile_right <= 1.0e-6 &&
+           value.upper_lip_raise <= 1.0e-6 &&
+           value.lower_lip_depress <= 1.0e-6;
+}
+
 [[nodiscard]] bool finite_rect(const NormalizedRect& rect) noexcept {
     return std::isfinite(rect.x) && std::isfinite(rect.y) &&
            std::isfinite(rect.width) && std::isfinite(rect.height);
@@ -307,11 +324,13 @@ bool ReferenceMouthWorker::cancel_to(const std::uint64_t new_generation) noexcep
 }
 
 bool ReferenceMouthWorker::install_atlas(CharacterMouthAtlas atlas) {
-    if ((atlas.schema_version != 1U && atlas.schema_version != 2U) ||
+    if ((atlas.schema_version != 1U && atlas.schema_version != 2U &&
+         atlas.schema_version != 3U) ||
         atlas.cancellation_generation != active_generation_ ||
         atlas.actor_id == 0U || atlas.identity_revision == 0U ||
         atlas.states.size() < minimum_atlas_states ||
-        atlas.states.size() > maximum_atlas_states) {
+        atlas.states.size() > maximum_atlas_states ||
+        (atlas.schema_version == 3U && atlas.states.size() > 16U)) {
         return false;
     }
     const auto width = atlas.states.front().appearance.width;
@@ -319,7 +338,9 @@ bool ReferenceMouthWorker::install_atlas(CharacterMouthAtlas atlas) {
     const auto stride = atlas.states.front().appearance.stride_bytes;
     const auto expected_representation = atlas.schema_version == 2U
         ? MouthPatchRepresentation::normalized_oral_interior_v1
-        : MouthPatchRepresentation::full_lip_observation_v1;
+        : atlas.schema_version == 3U
+            ? MouthPatchRepresentation::photometric_full_lip_reference_v1
+            : MouthPatchRepresentation::full_lip_observation_v1;
     const bool all_valid = std::all_of(
         atlas.states.begin(), atlas.states.end(),
         [width, height, stride, expected_representation](const MouthAtlasState& state) {
@@ -332,6 +353,36 @@ bool ReferenceMouthWorker::install_atlas(CharacterMouthAtlas atlas) {
         });
     if (!all_valid) {
         return false;
+    }
+    if (atlas.schema_version == 3U) {
+        const auto& neutral = atlas.states.front();
+        if (!neutral_reference_coefficients(neutral.coefficients)) return false;
+        std::size_t transparent_pixels{};
+        std::size_t opaque_pixels{};
+        const auto& reference_pixels = neutral.appearance.premultiplied_bgra;
+        for (std::uint32_t y = 0U; y < neutral.appearance.height; ++y) {
+            for (std::uint32_t x = 0U; x < neutral.appearance.width; ++x) {
+                const auto offset = static_cast<std::size_t>(y) *
+                                        neutral.appearance.stride_bytes +
+                                    static_cast<std::size_t>(x) * 4U;
+                const auto alpha = reference_pixels[offset + 3U];
+                transparent_pixels += alpha == 0U ? 1U : 0U;
+                opaque_pixels += alpha >= 250U ? 1U : 0U;
+            }
+        }
+        if (transparent_pixels < 16U || opaque_pixels < 16U) return false;
+        const auto& neutral_pose = neutral.appearance.enrolled_pose;
+        for (const auto& state : atlas.states) {
+            if (state.appearance.enrolled_pose.yaw != neutral_pose.yaw ||
+                state.appearance.enrolled_pose.pitch != neutral_pose.pitch ||
+                state.appearance.enrolled_pose.roll != neutral_pose.roll) {
+                return false;
+            }
+            const auto& pixels = state.appearance.premultiplied_bgra;
+            for (std::size_t offset = 3U; offset < pixels.size(); offset += 4U) {
+                if (pixels[offset] != reference_pixels[offset]) return false;
+            }
+        }
     }
     atlas_ = std::move(atlas);
     reset_drive_smoothing();
@@ -379,7 +430,9 @@ ProcessResult ReferenceMouthWorker::process_latest(const FrameIdentity& current_
     if (atlas_.has_value() &&
         atlas_->cancellation_generation == item.track.cancellation_generation &&
         atlas_->actor_id == item.track.actor_id) {
-        if (exact_contact_closure(coefficients)) {
+        const bool pure_silence = exact_silence_coefficients(target_coefficients);
+        if (pure_silence ||
+            (atlas_->schema_version != 3U && exact_contact_closure(coefficients))) {
             // A bilabial/silence cue is a hard anatomical constraint. Use the
             // current-frame compositor to close an already-open source mouth,
             // while excluding photographed teeth and prior atlas textures.
@@ -391,9 +444,16 @@ ProcessResult ReferenceMouthWorker::process_latest(const FrameIdentity& current_
             if (std::isfinite(selection.distance) && selection.index < atlas_->states.size()) {
                 const auto& state = atlas_->states[selection.index];
                 const auto& appearance = smooth_atlas_appearance(state, item);
-                residual = compose_atlas_residual(item.source, item.track, item.tracking,
-                                                  appearance,
-                                                  coefficients, now_ns);
+                if (atlas_->schema_version == 3U) {
+                    residual = compose_photometric_atlas_residual(
+                        item.source, item.track, item.tracking,
+                        atlas_->states.front().appearance, appearance,
+                        coefficients, now_ns);
+                } else {
+                    residual = compose_atlas_residual(item.source, item.track, item.tracking,
+                                                      appearance,
+                                                      coefficients, now_ns);
+                }
             }
         }
     } else {
@@ -497,9 +557,20 @@ const CanonicalMouthPatch& ReferenceMouthWorker::smooth_atlas_appearance(
         smoothed_atlas_appearance_ = target.appearance;
     } else {
         const auto elapsed = playback_at - smoothed_atlas_playback_at_ns_;
-        const auto tau = item.drive.kind == DriveKind::timed_viseme
-            ? timed_coarticulation_tau_ns
-            : estimated_coarticulation_tau_ns;
+        const bool photometric_reference =
+            target.appearance.representation ==
+                MouthPatchRepresentation::photometric_full_lip_reference_v1;
+        // Full-lip reference states carry more high-frequency edge contrast
+        // than oral-only states. A slightly longer within-topology blend keeps
+        // teeth and lipstick from popping while contact/open boundaries remain
+        // immediate and are still never cross-faded.
+        const auto tau = photometric_reference
+            ? (item.drive.kind == DriveKind::timed_viseme
+                   ? 54'000'000LL
+                   : 70'000'000LL)
+            : item.drive.kind == DriveKind::timed_viseme
+                ? timed_coarticulation_tau_ns
+                : estimated_coarticulation_tau_ns;
         const double alpha = exponential_alpha(elapsed, tau);
         auto& pixels = smoothed_atlas_appearance_->premultiplied_bgra;
         const auto& target_pixels = target.appearance.premultiplied_bgra;

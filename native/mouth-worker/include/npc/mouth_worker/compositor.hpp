@@ -9,6 +9,12 @@ namespace npc::mouth {
 enum class MouthPatchRepresentation : std::uint8_t {
     full_lip_observation_v1 = 0,
     normalized_oral_interior_v1 = 1,
+    // A full lip reference sharing one fixed canonical coordinate frame with
+    // state zero. Before it is composited, state zero is fitted to the newest
+    // source mouth with a bounded per-channel affine colour transform. This is
+    // deliberately opt-in: legacy full-lip and oral-interior pixels retain
+    // their existing rendering semantics.
+    photometric_full_lip_reference_v1 = 2,
 };
 
 // One enrollment-generated mouth appearance in canonical mouth coordinates.
@@ -63,6 +69,20 @@ struct CanonicalMouthPatch {
                                                    const CanonicalMouthPatch& observed_state,
                                                    const MouthCoefficients& coefficients,
                                                    Nanoseconds produced_at_ns);
+
+// Render one schema-three full-lip reference after calibrating it against the
+// atlas' closed neutral reference and the exact current source frame. Both
+// references must use the same dimensions, stride, pose coordinate frame, and
+// photometric representation. Pixels remain confined to the tracked mouth ROI
+// and are bound to the caller's exact frame/track/generation authority.
+[[nodiscard]] ResidualPatch compose_photometric_atlas_residual(
+    const CpuFrame& source,
+    const TrackBinding& track,
+    const TrackingEvidence& tracking,
+    const CanonicalMouthPatch& neutral_reference,
+    const CanonicalMouthPatch& observed_state,
+    const MouthCoefficients& coefficients,
+    Nanoseconds produced_at_ns);
 
 // Test/demo helper which composites a validated residual over a copy of its
 // exact source. It never modifies source.bgra.

@@ -331,6 +331,28 @@ void test_character_mouth_atlas_round_trip() {
     oral.atlas.schema_version = 1U;
     expect(!encode_character_mouth_atlas(oral),
            "oral data cannot be serialized as a legacy full-lip atlas");
+
+    auto photometric = source;
+    photometric.atlas.schema_version = 3U;
+    expect(!encode_character_mouth_atlas(photometric),
+           "schema three cannot silently reinterpret legacy full-lip pixels");
+    for (auto& state : photometric.atlas.states) {
+        state.appearance.representation =
+            MouthPatchRepresentation::photometric_full_lip_reference_v1;
+    }
+    const auto photometric_encoded = encode_character_mouth_atlas(photometric);
+    const auto photometric_decoded = photometric_encoded
+        ? decode_character_mouth_atlas(*photometric_encoded)
+        : std::nullopt;
+    expect(photometric_decoded && photometric_decoded->atlas.schema_version == 3U &&
+               photometric_decoded->atlas.states[0U].appearance.representation ==
+                   MouthPatchRepresentation::photometric_full_lip_reference_v1 &&
+               photometric_decoded->atlas.states[3U].appearance.premultiplied_bgra ==
+                   photometric.atlas.states[3U].appearance.premultiplied_bgra,
+           "photometric reference representation round-trips over the unchanged atlas wire");
+    photometric.atlas.schema_version = 2U;
+    expect(!encode_character_mouth_atlas(photometric),
+           "photometric reference pixels cannot be serialized as normalized oral data");
     auto unknown_schema = *encoded;
     unknown_schema[0] = std::byte{99};
     expect(!decode_character_mouth_atlas(unknown_schema), "unknown atlas representation fails closed");

@@ -121,9 +121,11 @@ int main(int argc, char** argv) {
         const auto timeline = monotonic_ns();
         ReferenceMouthWorker worker(generation);
         bool normalized_oral_atlas = false;
+        bool photometric_full_lip_atlas = false;
         if (atlas_root.has_value()) {
             auto atlas = read_review_atlas(*atlas_root, generation, track);
             normalized_oral_atlas = atlas.schema_version == 2U;
+            photometric_full_lip_atlas = atlas.schema_version == 3U;
             if (!worker.install_atlas(std::move(atlas))) {
                 throw std::runtime_error("review mouth atlas failed native admission");
             }
@@ -467,9 +469,13 @@ int main(int argc, char** argv) {
                        : "null")
                << ",\n"
                << "  \"atlasMode\": \""
-               << (normalized_oral_atlas ? "source-lip-warp-normalized-oral-interior" : identity_bound_full_lip_atlas
-                       ? "identity-bound-full-lip-observation"
-                       : "none-procedural-source-pixel")
+               << (photometric_full_lip_atlas
+                       ? "photometric-calibrated-full-lip-reference"
+                       : normalized_oral_atlas
+                           ? "source-lip-warp-normalized-oral-interior"
+                           : identity_bound_full_lip_atlas
+                               ? "identity-bound-full-lip-observation"
+                               : "none-procedural-source-pixel")
                << "\",\n"
                << "  \"legacyProceduralSourceLipGatesApplied\": "
                << (identity_bound_full_lip_atlas ? "false" : "true") << ",\n"
