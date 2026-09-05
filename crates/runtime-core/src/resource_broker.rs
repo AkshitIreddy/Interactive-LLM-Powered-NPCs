@@ -29,6 +29,12 @@ pub enum JobPriority {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ResourceJobKind {
+    /// Conservative lease for a complete interactive turn. The target estimate
+    /// must come from a qualified whole-turn envelope; the broker does not add
+    /// phase estimates or invent overlap assumptions.
+    InteractiveTurn {
+        utterance_id: String,
+    },
     ForegroundLlm {
         utterance_id: String,
     },
@@ -53,13 +59,17 @@ pub enum ResourceJobKind {
 }
 
 impl ResourceJobKind {
-    fn is_foreground_llm(&self) -> bool {
-        matches!(self, Self::ForegroundLlm { .. })
+    fn holds_foreground_turn_slot(&self) -> bool {
+        matches!(
+            self,
+            Self::InteractiveTurn { .. } | Self::ForegroundLlm { .. }
+        )
     }
 
     fn utterance_id(&self) -> Option<&str> {
         match self {
-            Self::ForegroundLlm { utterance_id }
+            Self::InteractiveTurn { utterance_id }
+            | Self::ForegroundLlm { utterance_id }
             | Self::SpeechSynthesis { utterance_id, .. }
             | Self::NativeRigAnimation { utterance_id } => Some(utterance_id),
             _ => None,
@@ -86,7 +96,9 @@ impl ResourceJobKind {
 pub struct ResourceEstimate {
     pub ram_bytes: u64,
     pub vram_resident_bytes: u64,
-    /// Temporary workspace allocated above resident model memory.
+    /// Temporary workspace allocated above resident model memory. Callers must
+    /// include the measured KV-cache contribution here when it is not already
+    /// part of the registered resident model envelope.
     pub vram_transient_bytes: u64,
     pub transient_duration_ms: u64,
     pub gpu_time_ms: u32,
@@ -189,13 +201,45 @@ pub struct ResourceJob {
     pub privacy: BrokerPrivacyContext,
 }
 
+/// Host-supplied, measured envelope for admitting one complete turn. Keeping the
+/// plan separate from [`ResourceJob`] lets [`crate::TurnSupervisor`] own job IDs,
+/// cancellation identity, privacy policy, and foreground semantics.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TurnResourcePlan {
+    pub primary: ComputeTarget,
+    pub fallbacks: Vec<ComputeTarget>,
+    pub deadline_ms: Option<u64>,
+    pub priority: JobPriority,
+    pub drop_policy: DropPolicy,
+}
+
+/// Resolves a qualified turn envelope without performing I/O. The host owns
+/// measurement provenance. A hosted route supplies an explicit zero-local-
+/// resource target instead of bypassing admission.
+pub trait TurnResourcePlanner: Send + Sync {
+    fn plan(
+        &self,
+        request: &crate::types::TurnRequest,
+        identity: &crate::types::TurnIdentity,
+    ) -> Result<TurnResourcePlan, BrokerError>;
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BudgetSnapshot {
     pub monotonic_ms: u64,
     pub system_ram_budget_bytes: u64,
     pub system_ram_used_bytes: u64,
+    /// Configured game RAM headroom that is not already represented in
+    /// `system_ram_used_bytes`. The host computes this from fresh selected-game
+    /// telemetry and the user's reserve floor.
+    #[serde(default)]
+    pub additional_game_ram_reserve_bytes: u64,
     pub gpu_vram_budget_bytes: u64,
     pub gpu_vram_used_bytes: u64,
+    /// Configured game VRAM headroom that is not already represented in
+    /// `gpu_vram_used_bytes`. Supplying only total adapter capacity is unsafe.
+    #[serde(default)]
+    pub additional_game_vram_reserve_bytes: u64,
     pub gpu_utilization: f32,
 }
 
@@ -494,6 +538,10 @@ pub struct ActualDiagnostic {
     pub target_id: String,
     pub estimated: ResourceEstimate,
     pub actual: ActualUsage,
+    /// False when the owner can report lifecycle completion but has no measured
+    /// usage sample. Zero values must not be interpreted as measurements then.
+    #[serde(default)]
+    pub actual_usage_measured: bool,
     pub status: CompletionStatus,
     pub deadline_missed: bool,
     pub cancelled_by_broker: bool,
@@ -570,7 +618,7 @@ struct Reservations {
     vram_transient_bytes: u64,
     gpu_leases: u32,
     exclusive_gpu_job: Option<String>,
-    foreground_llm_job: Option<String>,
+    foreground_turn_job: Option<String>,
 }
 
 #[derive(Clone)]
@@ -930,8 +978,7 @@ impl ResourceBroker {
             .min(snapshot.gpu_vram_budget_bytes);
         let reserved = broker_reserved_gpu_usage(&state);
         let unreported = unreported_gpu_usage(reserved, accounted);
-        let projected = snapshot
-            .gpu_vram_used_bytes
+        let projected = protected_gpu_vram_used(snapshot)
             .saturating_add(unreported.resident_bytes)
             .saturating_add(unreported.transient_bytes)
             .saturating_add(record.spec.envelope.resident_bytes);
@@ -984,8 +1031,7 @@ impl ResourceBroker {
             .config
             .vram_ceiling_bytes
             .min(snapshot.gpu_vram_budget_bytes);
-        if snapshot
-            .gpu_vram_used_bytes
+        if protected_gpu_vram_used(snapshot)
             .saturating_add(unreported.resident_bytes)
             .saturating_add(unreported.transient_bytes)
             > ceiling
@@ -1206,7 +1252,7 @@ impl ResourceBroker {
             },
         );
 
-        if active.output_started || active.job.kind.is_foreground_llm() {
+        if active.output_started || active.job.kind.holds_foreground_turn_slot() {
             return Ok(RecoveryDirective::AbortUtteranceNoModelSwap);
         }
         let fallback = active.job.fallbacks.iter().find(|fallback| {
@@ -1348,8 +1394,7 @@ impl ResourceBroker {
         let Some(estimate) = effective_job_estimate(state, target) else {
             return false;
         };
-        let projected_ram = snapshot
-            .system_ram_used_bytes
+        let projected_ram = protected_system_ram_used(snapshot)
             .saturating_add(state.reservations.ram_bytes)
             .saturating_add(estimate.ram_bytes);
         if projected_ram > snapshot.system_ram_budget_bytes {
@@ -1362,8 +1407,7 @@ impl ResourceBroker {
             .min(snapshot.gpu_vram_budget_bytes);
         let unreported =
             unreported_gpu_usage(broker_reserved_gpu_usage(state), state.telemetry_accounted);
-        let projected_resident = snapshot
-            .gpu_vram_used_bytes
+        let projected_resident = protected_gpu_vram_used(snapshot)
             .saturating_add(unreported.resident_bytes)
             .saturating_add(unreported.transient_bytes)
             .saturating_add(estimate.vram_resident_bytes);
@@ -1439,7 +1483,8 @@ impl ResourceBroker {
         job: &ResourceJob,
         target: &ComputeTarget,
     ) -> bool {
-        if job.kind.is_foreground_llm() && state.reservations.foreground_llm_job.is_some() {
+        if job.kind.holds_foreground_turn_slot() && state.reservations.foreground_turn_job.is_some()
+        {
             return false;
         }
         if let Some(model_id) = target.model_id.as_deref() {
@@ -1561,14 +1606,12 @@ impl ResourceBroker {
             .min(snapshot.gpu_vram_budget_bytes);
         let unreported =
             unreported_gpu_usage(broker_reserved_gpu_usage(state), state.telemetry_accounted);
-        let vram = snapshot
-            .gpu_vram_used_bytes
+        let vram = protected_gpu_vram_used(snapshot)
             .saturating_add(unreported.resident_bytes)
             .saturating_add(unreported.transient_bytes) as f64
             / ceiling as f64;
-        let ram = snapshot
-            .system_ram_used_bytes
-            .saturating_add(state.reservations.ram_bytes) as f64
+        let ram = protected_system_ram_used(snapshot).saturating_add(state.reservations.ram_bytes)
+            as f64
             / snapshot.system_ram_budget_bytes as f64;
         let utilization = vram.max(ram).max(snapshot.gpu_utilization as f64);
         let previous = state.pressure;
@@ -1827,6 +1870,18 @@ fn unreported_gpu_usage(
     }
 }
 
+fn protected_system_ram_used(snapshot: BudgetSnapshot) -> u64 {
+    snapshot
+        .system_ram_used_bytes
+        .saturating_add(snapshot.additional_game_ram_reserve_bytes)
+}
+
+fn protected_gpu_vram_used(snapshot: BudgetSnapshot) -> u64 {
+    snapshot
+        .gpu_vram_used_bytes
+        .saturating_add(snapshot.additional_game_vram_reserve_bytes)
+}
+
 fn reserve(state: &mut BrokerState, job: &ResourceJob, target: &ComputeTarget) {
     let estimate = effective_job_estimate(state, target).unwrap_or(target.estimate);
     let registered_model_id =
@@ -1845,8 +1900,8 @@ fn reserve(state: &mut BrokerState, job: &ResourceJob, target: &ComputeTarget) {
     if target.gpu_residency == GpuResidency::Exclusive {
         reservations.exclusive_gpu_job = Some(job.job_id.clone());
     }
-    if job.kind.is_foreground_llm() {
-        reservations.foreground_llm_job = Some(job.job_id.clone());
+    if job.kind.holds_foreground_turn_slot() {
+        reservations.foreground_turn_job = Some(job.job_id.clone());
     }
     if let Some(model_id) = registered_model_id {
         let record = state
@@ -1890,8 +1945,8 @@ fn release(state: &mut BrokerState, job: &ResourceJob, target: &ComputeTarget) {
     if reservations.exclusive_gpu_job.as_deref() == Some(&job.job_id) {
         reservations.exclusive_gpu_job = None;
     }
-    if reservations.foreground_llm_job.as_deref() == Some(&job.job_id) {
-        reservations.foreground_llm_job = None;
+    if reservations.foreground_turn_job.as_deref() == Some(&job.job_id) {
+        reservations.foreground_turn_job = None;
     }
     if let Some(model_id) = registered_model_id {
         let record = state
@@ -1914,14 +1969,12 @@ fn projection(
     let ceiling = config
         .vram_ceiling_bytes
         .min(snapshot.gpu_vram_budget_bytes);
-    let ram = snapshot
-        .system_ram_used_bytes
+    let ram = protected_system_ram_used(snapshot)
         .saturating_add(state.reservations.ram_bytes)
         .saturating_add(estimate.ram_bytes);
     let unreported =
         unreported_gpu_usage(broker_reserved_gpu_usage(state), state.telemetry_accounted);
-    let vram = snapshot
-        .gpu_vram_used_bytes
+    let vram = protected_gpu_vram_used(snapshot)
         .saturating_add(unreported.resident_bytes)
         .saturating_add(unreported.transient_bytes)
         .saturating_add(estimate.total_vram());
@@ -1997,7 +2050,17 @@ impl ResourceLease {
 
     pub fn complete(mut self, actual: ActualUsage, status: CompletionStatus) {
         if let Some(inner) = self.broker.upgrade() {
-            finish_lease(&inner, &self.job_id, actual, status);
+            finish_lease(&inner, &self.job_id, actual, true, status);
+        }
+        self.completed = true;
+    }
+
+    /// Releases a lease when the owner can report lifecycle status but has no
+    /// trustworthy usage measurement. Diagnostics retain zeroed usage values and
+    /// mark them as unmeasured so they cannot enter benchmark/admission evidence.
+    pub fn complete_unmeasured(mut self, status: CompletionStatus) {
+        if let Some(inner) = self.broker.upgrade() {
+            finish_lease(&inner, &self.job_id, ActualUsage::default(), false, status);
         }
         self.completed = true;
     }
@@ -2011,6 +2074,7 @@ impl Drop for ResourceLease {
                     &inner,
                     &self.job_id,
                     ActualUsage::default(),
+                    false,
                     CompletionStatus::Cancelled,
                 );
             }
@@ -2022,6 +2086,7 @@ fn finish_lease(
     inner: &Arc<ResourceBrokerInner>,
     job_id: &str,
     actual: ActualUsage,
+    actual_usage_measured: bool,
     status: CompletionStatus,
 ) {
     let snapshot = inner.telemetry.snapshot().ok();
@@ -2044,6 +2109,7 @@ fn finish_lease(
         target_id: active.target.target_id,
         estimated: active.target.estimate,
         actual,
+        actual_usage_measured,
         status,
         deadline_missed,
         cancelled_by_broker: active.cancelled_by_broker,
@@ -2065,8 +2131,10 @@ mod tests {
             monotonic_ms: now,
             system_ram_budget_bytes: 16_000 * MIB,
             system_ram_used_bytes: 1_000 * MIB,
+            additional_game_ram_reserve_bytes: 0,
             gpu_vram_budget_bytes: vram_budget,
             gpu_vram_used_bytes: vram_used,
+            additional_game_vram_reserve_bytes: 0,
             gpu_utilization: 0.1,
         }
     }

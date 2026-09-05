@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
 };
 
@@ -14,6 +14,10 @@ use crate::{
     provider::{
         EffectsProvider, LanguageModelProvider, ProviderError, RuntimeDependencies,
         RuntimeDependencyError, TtsProvider, TtsSession,
+    },
+    resource_broker::{
+        AdmissionOutcome, BrokerError, BrokerPrivacyContext, CompletionStatus, ResourceBroker,
+        ResourceJob, ResourceJobKind, ResourceLease, TurnResourcePlanner,
     },
     sentence::{SentenceSegmenterConfig, SentenceSpan},
     structured_response::{
@@ -56,6 +60,13 @@ pub enum StartTurnError {
     InvalidRequest(#[from] crate::types::ValidationError),
     #[error("runtime is shutting down")]
     ShuttingDown,
+    #[error("resource admission failed: {0}")]
+    ResourceBroker(#[from] BrokerError),
+    #[error("turn resource admission was not granted ({outcome:?}): {reason}")]
+    ResourceNotAdmitted {
+        outcome: AdmissionOutcome,
+        reason: String,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -118,12 +129,20 @@ impl SupervisorError {
 struct ActiveTurn {
     identity: TurnIdentity,
     generation: GenerationToken,
+    resource_job_id: Option<String>,
+}
+
+#[derive(Clone)]
+struct TurnResourceAdmissionRuntime {
+    broker: ResourceBroker,
+    planner: Arc<dyn TurnResourcePlanner>,
 }
 
 /// Handle to a single foreground turn. Dropping it does not cancel the turn.
 pub struct TurnHandle {
     pub identity: TurnIdentity,
     generation: GenerationToken,
+    resource_job: Option<(ResourceBroker, String)>,
     events: mpsc::Receiver<TurnEvent>,
     completion: oneshot::Receiver<TurnOutcome>,
 }
@@ -141,6 +160,9 @@ impl TurnHandle {
     /// output returned late by adapters that do not stop immediately.
     pub fn cancel(&self) {
         self.generation.cancel();
+        if let Some((broker, job_id)) = &self.resource_job {
+            broker.cancel(job_id, "turn handle cancelled");
+        }
     }
 }
 
@@ -153,10 +175,35 @@ pub struct TurnSupervisor {
     start_gate: Mutex<()>,
     current: Mutex<Option<ActiveTurn>>,
     shutting_down: std::sync::atomic::AtomicBool,
+    resource_admission: Option<TurnResourceAdmissionRuntime>,
 }
 
 impl TurnSupervisor {
     pub fn new(config: SupervisorConfig, dependencies: RuntimeDependencies) -> Arc<Self> {
+        Self::build(config, dependencies, None)
+    }
+
+    /// Constructs a supervisor whose turns are admitted through a process-wide
+    /// resource broker. The planner must use qualified host measurements; the
+    /// runtime core never supplies synthetic resource values.
+    pub fn new_with_resource_admission(
+        config: SupervisorConfig,
+        dependencies: RuntimeDependencies,
+        broker: ResourceBroker,
+        planner: Arc<dyn TurnResourcePlanner>,
+    ) -> Arc<Self> {
+        Self::build(
+            config,
+            dependencies,
+            Some(TurnResourceAdmissionRuntime { broker, planner }),
+        )
+    }
+
+    fn build(
+        config: SupervisorConfig,
+        dependencies: RuntimeDependencies,
+        resource_admission: Option<TurnResourceAdmissionRuntime>,
+    ) -> Arc<Self> {
         assert!(config.event_channel_capacity > 0);
         assert!(config.sentence_channel_capacity > 0);
         Arc::new(Self {
@@ -167,6 +214,7 @@ impl TurnSupervisor {
             start_gate: Mutex::new(()),
             current: Mutex::new(None),
             shutting_down: std::sync::atomic::AtomicBool::new(false),
+            resource_admission,
         })
     }
 
@@ -192,17 +240,27 @@ impl TurnSupervisor {
             turn_id: request.turn_id.clone(),
             cancellation_generation: generation.generation(),
         };
+        let (resource_lease, resource_job_id) = self.admit_turn_resources(&request, &identity)?;
         let (event_tx, event_rx) = mpsc::channel(self.config.event_channel_capacity);
         let (completion_tx, completion_rx) = oneshot::channel();
         *self.current.lock().await = Some(ActiveTurn {
             identity: identity.clone(),
             generation: generation.clone(),
+            resource_job_id: resource_job_id.clone(),
         });
 
         let supervisor = Arc::clone(self);
         let task_identity = identity.clone();
         let task_generation = generation.clone();
         tokio::spawn(async move {
+            let broker_cancellation_bridge = resource_lease.as_ref().map(|lease| {
+                let cancellation = lease.cancellation_token();
+                let generation = task_generation.clone();
+                tokio::spawn(async move {
+                    cancellation.cancelled().await;
+                    generation.cancel();
+                })
+            });
             let emitter = EventEmitter {
                 identity: task_identity.clone(),
                 generation: task_generation.clone(),
@@ -212,10 +270,21 @@ impl TurnSupervisor {
                 .run_turn(
                     request,
                     task_identity.clone(),
-                    task_generation,
+                    task_generation.clone(),
                     emitter.clone(),
                 )
                 .await;
+            if let Some(bridge) = broker_cancellation_bridge {
+                bridge.abort();
+            }
+            if let Some(lease) = resource_lease {
+                let status = match outcome.lifecycle {
+                    TurnLifecycle::Completed => CompletionStatus::Completed,
+                    TurnLifecycle::Cancelled => CompletionStatus::Cancelled,
+                    _ => CompletionStatus::Failed,
+                };
+                lease.complete_unmeasured(status);
+            }
             emitter.emit_terminal(outcome.clone()).await;
             let _ = completion_tx.send(outcome);
             supervisor.clear_if_current(&task_identity).await;
@@ -224,6 +293,9 @@ impl TurnSupervisor {
         Ok(TurnHandle {
             identity,
             generation,
+            resource_job: self.resource_admission.as_ref().and_then(|admission| {
+                resource_job_id.map(|job_id| (admission.broker.clone(), job_id))
+            }),
             events: event_rx,
             completion: completion_rx,
         })
@@ -255,6 +327,11 @@ impl TurnSupervisor {
         if let Some(active) = active {
             info!(turn = %active.identity, reason, "cancelling foreground turn");
             active.generation.cancel();
+            if let (Some(admission), Some(job_id)) =
+                (&self.resource_admission, active.resource_job_id.as_deref())
+            {
+                admission.broker.cancel(job_id, reason);
+            }
             if let Err(error) = self.dependencies.audio.stop(&active.identity).await {
                 warn!(turn = %active.identity, %error, "audio sink stop failed during barge-in");
             }
@@ -262,6 +339,57 @@ impl TurnSupervisor {
         } else {
             None
         }
+    }
+
+    fn admit_turn_resources(
+        &self,
+        request: &TurnRequest,
+        identity: &TurnIdentity,
+    ) -> Result<(Option<ResourceLease>, Option<String>), StartTurnError> {
+        let Some(admission) = &self.resource_admission else {
+            return Ok((None, None));
+        };
+        let plan = admission.planner.plan(request, identity)?;
+        let job_id = format!(
+            "turn/{}/{}/{}",
+            identity.session_id, identity.turn_id, identity.cancellation_generation
+        );
+        let job = ResourceJob {
+            job_id: job_id.clone(),
+            kind: ResourceJobKind::InteractiveTurn {
+                utterance_id: identity.to_string(),
+            },
+            priority: plan.priority,
+            deadline_ms: plan.deadline_ms,
+            primary: plan.primary,
+            fallbacks: plan.fallbacks,
+            drop_policy: plan.drop_policy,
+            privacy: BrokerPrivacyContext {
+                execution_mode: request.execution_mode,
+                network_policy: request.network_policy,
+                authorized_cloud_providers: request
+                    .authorized_cloud_providers
+                    .iter()
+                    .cloned()
+                    .collect::<HashSet<_>>(),
+                allow_retaining_providers: request.allow_retaining_providers,
+                allow_local_to_cloud_fallback: request.allow_local_to_cloud_fallback,
+            },
+        };
+        let submission = admission.broker.submit(job)?;
+        let diagnostic = submission.diagnostic;
+        if let Some(lease) = submission.lease {
+            return Ok((Some(lease), Some(job_id)));
+        }
+        // `start_turn` cannot own a queued lease returned later by `poll_ready`.
+        // Remove any queued record now rather than leaking invisible work.
+        admission
+            .broker
+            .cancel(&job_id, "turn start requires immediate admission");
+        Err(StartTurnError::ResourceNotAdmitted {
+            outcome: diagnostic.outcome,
+            reason: diagnostic.reason,
+        })
     }
 
     async fn clear_if_current(&self, identity: &TurnIdentity) {
@@ -1320,6 +1448,11 @@ mod tests {
             AudioSink, EffectsProvider, IdentityResolver, LlmStream, MemoryStore, ProviderPool,
             RuntimeDependencies, SpeechStream, TtsProvider, TtsSession,
         },
+        resource_broker::{
+            AdmissionOutcome, BrokerDiagnostic, BudgetSnapshot, ComputeTarget, DropPolicy,
+            GpuResidency, JobPriority, ReportedBudgetTelemetry, ResourceBroker,
+            ResourceBrokerConfig, ResourceEstimate, TurnResourcePlan, TurnResourcePlanner,
+        },
         types::{
             ActionProposal, AudioChunk, DataClass, ExecutionMode, LlmDelta, NetworkPolicy,
             ProviderLocation, SpeechStreamItem,
@@ -1675,6 +1808,243 @@ mod tests {
             ..Default::default()
         };
         (TurnSupervisor::new(config, dependencies), memory, audio)
+    }
+
+    #[derive(Clone)]
+    struct StaticTurnResourcePlanner {
+        plan: TurnResourcePlan,
+    }
+
+    impl TurnResourcePlanner for StaticTurnResourcePlanner {
+        fn plan(
+            &self,
+            _request: &TurnRequest,
+            _identity: &TurnIdentity,
+        ) -> Result<TurnResourcePlan, crate::resource_broker::BrokerError> {
+            Ok(self.plan.clone())
+        }
+    }
+
+    fn resource_broker(used_vram_mib: u64, additional_game_reserve_mib: u64) -> ResourceBroker {
+        const MIB: u64 = 1024 * 1024;
+        let telemetry = Arc::new(
+            ReportedBudgetTelemetry::new(BudgetSnapshot {
+                monotonic_ms: 1,
+                system_ram_budget_bytes: 16_000 * MIB,
+                system_ram_used_bytes: 1_000 * MIB,
+                additional_game_ram_reserve_bytes: 0,
+                gpu_vram_budget_bytes: 1_000 * MIB,
+                gpu_vram_used_bytes: used_vram_mib * MIB,
+                additional_game_vram_reserve_bytes: additional_game_reserve_mib * MIB,
+                gpu_utilization: 0.1,
+            })
+            .unwrap(),
+        );
+        ResourceBroker::new(
+            ResourceBrokerConfig {
+                vram_ceiling_bytes: 1_000 * MIB,
+                ..ResourceBrokerConfig::default()
+            },
+            telemetry,
+        )
+    }
+
+    fn turn_resource_plan(vram_mib: u64) -> TurnResourcePlan {
+        const MIB: u64 = 1024 * 1024;
+        TurnResourcePlan {
+            primary: ComputeTarget {
+                target_id: "gpu-0-turn-envelope".into(),
+                model_id: None,
+                provider: descriptor(
+                    "llm-local",
+                    ProviderModality::LanguageModel,
+                    ProviderLocation::Local,
+                ),
+                estimate: ResourceEstimate {
+                    ram_bytes: 100 * MIB,
+                    vram_resident_bytes: vram_mib * MIB,
+                    vram_transient_bytes: 0,
+                    transient_duration_ms: 0,
+                    gpu_time_ms: 10,
+                },
+                gpu_residency: GpuResidency::Shared,
+            },
+            fallbacks: Vec::new(),
+            deadline_ms: None,
+            priority: JobPriority::Interactive,
+            drop_policy: DropPolicy::DropUnderPressure,
+        }
+    }
+
+    fn supervisor_with_resource_admission(
+        llm: Arc<dyn LanguageModelProvider>,
+        broker: ResourceBroker,
+        plan: TurnResourcePlan,
+    ) -> Arc<TurnSupervisor> {
+        let dependencies = RuntimeDependencies {
+            providers: ProviderPool {
+                language_models: vec![llm],
+                ..Default::default()
+            },
+            identity: Arc::new(FakeIdentity),
+            memory: Arc::new(FakeMemory::default()),
+            audio: Arc::new(FakeAudio::default()),
+        };
+        TurnSupervisor::new_with_resource_admission(
+            SupervisorConfig::default(),
+            dependencies,
+            broker,
+            Arc::new(StaticTurnResourcePlanner { plan }),
+        )
+    }
+
+    #[tokio::test]
+    async fn turn_admission_denies_before_provider_work_when_game_reserve_consumes_headroom() {
+        let broker = resource_broker(850, 75);
+        let supervisor = supervisor_with_resource_admission(
+            Arc::new(FakeLlm {
+                descriptor: descriptor(
+                    "llm-local",
+                    ProviderModality::LanguageModel,
+                    ProviderLocation::Local,
+                ),
+                behavior: LlmBehavior::Text("must not execute".into()),
+            }),
+            broker.clone(),
+            turn_resource_plan(100),
+        );
+
+        let error = match supervisor
+            .start_turn(request("turn-reserve-denied", "Can I speak?"))
+            .await
+        {
+            Ok(_) => panic!("protected game reserve must deny this turn"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            StartTurnError::ResourceNotAdmitted {
+                outcome: AdmissionOutcome::DroppedPressure,
+                ..
+            }
+        ));
+        assert!(broker.diagnostics().iter().any(|diagnostic| matches!(
+            diagnostic,
+            BrokerDiagnostic::Admission(admission)
+                if admission.outcome == AdmissionOutcome::DroppedPressure
+        )));
+    }
+
+    #[tokio::test]
+    async fn cancelling_admitted_turn_releases_runtime_lease_for_next_turn() {
+        let broker = resource_broker(100, 100);
+        let supervisor = supervisor_with_resource_admission(
+            Arc::new(FakeLlm {
+                descriptor: descriptor(
+                    "llm-local",
+                    ProviderModality::LanguageModel,
+                    ProviderLocation::Local,
+                ),
+                behavior: LlmBehavior::Text("The next turn completes.".into()),
+            }),
+            broker.clone(),
+            turn_resource_plan(200),
+        );
+
+        let first = supervisor
+            .start_turn(request("turn-resource-cancelled", "slow"))
+            .await
+            .expect("first turn should be admitted");
+        assert_eq!(
+            broker
+                .residency_ledger_snapshot()
+                .unwrap()
+                .reserved_resident_bytes,
+            200 * 1024 * 1024
+        );
+        first.cancel();
+        let first_outcome = tokio::time::timeout(Duration::from_secs(1), first.outcome())
+            .await
+            .expect("cancelled turn should release promptly")
+            .unwrap();
+        assert_eq!(first_outcome.lifecycle, TurnLifecycle::Cancelled);
+        assert_eq!(
+            broker
+                .residency_ledger_snapshot()
+                .unwrap()
+                .reserved_resident_bytes,
+            0
+        );
+        assert!(broker.diagnostics().iter().any(|diagnostic| matches!(
+            diagnostic,
+            BrokerDiagnostic::Actual(actual)
+                if actual.status == crate::resource_broker::CompletionStatus::Cancelled
+                    && !actual.actual_usage_measured
+        )));
+
+        let second_outcome = supervisor
+            .start_turn(request("turn-resource-next", "continue"))
+            .await
+            .expect("released lease should admit the next turn")
+            .outcome()
+            .await
+            .unwrap();
+        assert_eq!(second_outcome.lifecycle, TurnLifecycle::Completed);
+        assert_eq!(
+            broker
+                .residency_ledger_snapshot()
+                .unwrap()
+                .reserved_resident_bytes,
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn broker_initiated_cancellation_reaches_turn_generation_and_releases_lease() {
+        let broker = resource_broker(100, 100);
+        let supervisor = supervisor_with_resource_admission(
+            Arc::new(FakeLlm {
+                descriptor: descriptor(
+                    "llm-local",
+                    ProviderModality::LanguageModel,
+                    ProviderLocation::Local,
+                ),
+                behavior: LlmBehavior::Text("unused".into()),
+            }),
+            broker.clone(),
+            turn_resource_plan(200),
+        );
+
+        let turn = supervisor
+            .start_turn(request("turn-broker-cancelled", "slow"))
+            .await
+            .expect("turn should be admitted before broker cancellation");
+        let job_id = broker
+            .diagnostics()
+            .into_iter()
+            .find_map(|diagnostic| match diagnostic {
+                BrokerDiagnostic::Admission(admission)
+                    if admission.outcome == AdmissionOutcome::AdmittedPrimary =>
+                {
+                    Some(admission.job_id)
+                }
+                _ => None,
+            })
+            .expect("admission diagnostic should expose the owned job ID");
+        assert!(broker.cancel(&job_id, "simulated live pressure"));
+
+        let outcome = tokio::time::timeout(Duration::from_secs(1), turn.outcome())
+            .await
+            .expect("broker cancellation should settle the turn promptly")
+            .unwrap();
+        assert_eq!(outcome.lifecycle, TurnLifecycle::Cancelled);
+        assert_eq!(
+            broker
+                .residency_ledger_snapshot()
+                .unwrap()
+                .reserved_resident_bytes,
+            0
+        );
     }
 
     #[tokio::test]
