@@ -8,6 +8,7 @@ import hashlib
 import json
 import math
 import platform
+import re
 import statistics
 import time
 from dataclasses import dataclass
@@ -34,11 +35,12 @@ KNOWN_LANDMARK_MODELS = {
     ),
 }
 OPENCV_REPOSITORY_REVISION = "47534e27c9851bb1128ccc0102f1145e27f23f98"
-FRAME_WIDTH = 960
-FRAME_HEIGHT = 540
 FRAME_RATE = 30
-EXPECTED_FRAMES = 282
-MANUAL_PEPE_FACE = (390.0, 138.0, 138.0, 212.0)
+DEFAULT_FRAME_COUNT = 282
+MAX_FRAME_COUNT = 18_000
+DEFAULT_ACTOR_LABEL = "pepe"
+DEFAULT_MANUAL_FACE = (390.0, 138.0, 138.0, 212.0)
+ACTOR_LABEL_PATTERN = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?")
 
 
 @dataclass(frozen=True)
@@ -103,21 +105,22 @@ def intersection_area(first: Face, second: Face) -> float:
     return width * height
 
 
-def expanded(face: Face, margin: float) -> Face:
+def expanded(face: Face, margin: float, frame_width: int, frame_height: int) -> Face:
     return Face(
         max(0.0, face.x - face.width * margin),
         max(0.0, face.y - face.height * margin),
-        min(float(FRAME_WIDTH), face.right + face.width * margin)
+        min(float(frame_width), face.right + face.width * margin)
         - max(0.0, face.x - face.width * margin),
-        min(float(FRAME_HEIGHT), face.bottom + face.height * margin)
+        min(float(frame_height), face.bottom + face.height * margin)
         - max(0.0, face.y - face.height * margin),
         face.confidence,
     )
 
 
-def candidate_matches(candidate: Face, prior: Face, manual: Face) -> bool:
-    prior_region = expanded(prior, 0.75)
-    manual_region = expanded(manual, 1.25)
+def candidate_matches(candidate: Face, prior: Face, manual: Face,
+                      frame_width: int, frame_height: int) -> bool:
+    prior_region = expanded(prior, 0.75, frame_width, frame_height)
+    manual_region = expanded(manual, 1.25, frame_width, frame_height)
     candidate_area = candidate.width * candidate.height
     if candidate_area <= 0.0:
         return False
@@ -135,7 +138,8 @@ def candidate_matches(candidate: Face, prior: Face, manual: Face) -> bool:
 
 
 def select_face(rows: np.ndarray | None, scale_x: float, scale_y: float,
-                prior: Face, manual: Face) -> tuple[Face | None, int]:
+                prior: Face, manual: Face, frame_width: int,
+                frame_height: int) -> tuple[Face | None, int]:
     if rows is None:
         return None, 0
     candidates: list[Face] = []
@@ -147,7 +151,8 @@ def select_face(rows: np.ndarray | None, scale_x: float, scale_y: float,
             float(row[3]) * scale_y,
             float(row[-1]),
         )
-        if face.width >= 4.0 and face.height >= 4.0 and candidate_matches(face, prior, manual):
+        if (face.width >= 4.0 and face.height >= 4.0
+                and candidate_matches(face, prior, manual, frame_width, frame_height)):
             candidates.append(face)
     if not candidates:
         return None, int(len(rows))
@@ -161,7 +166,8 @@ def select_face(rows: np.ndarray | None, scale_x: float, scale_y: float,
     return max(candidates, key=rank), int(len(rows))
 
 
-def detect_frame(state: ResolutionState, frame: np.ndarray, manual: Face) -> Face | None:
+def detect_frame(state: ResolutionState, frame: np.ndarray, manual: Face,
+                 frame_width: int, frame_height: int) -> Face | None:
     target_width = state.resolution
     target_height = int(round(frame.shape[0] * target_width / frame.shape[1]))
     resized = cv2.resize(frame, (target_width, target_height), interpolation=cv2.INTER_LINEAR)
@@ -175,6 +181,8 @@ def detect_frame(state: ResolutionState, frame: np.ndarray, manual: Face) -> Fac
         frame.shape[0] / target_height,
         state.previous or manual,
         manual,
+        frame_width,
+        frame_height,
     )
     state.candidate_counts.append(count)
     state.selected.append(selected)
@@ -288,7 +296,8 @@ def decode_lm(output: np.ndarray, crop: tuple[int, int, int, int],
     }
 
 
-def packet_policy(face: Face, decoded: dict[str, object]) -> tuple[bool, str]:
+def packet_policy(face: Face, decoded: dict[str, object], frame_width: int,
+                  frame_height: int) -> tuple[bool, str]:
     points = decoded["points"]
     assert isinstance(points, list)
     if face.confidence < 0.70:
@@ -299,8 +308,8 @@ def packet_policy(face: Face, decoded: dict[str, object]) -> tuple[bool, str]:
         return False, "visibility_below_0.72"
     if bool(decoded["mouthOccluded"]):
         return False, "mouth_occluded_or_pose"
-    face_normalized = Face(face.x / FRAME_WIDTH, face.y / FRAME_HEIGHT,
-                           face.width / FRAME_WIDTH, face.height / FRAME_HEIGHT,
+    face_normalized = Face(face.x / frame_width, face.y / frame_height,
+                           face.width / frame_width, face.height / frame_height,
                            face.confidence)
     mouth = points[48:66]
     mouth_left = min(point[0] for point in mouth)
@@ -332,20 +341,38 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lm1-model", "--landmark-model", dest="landmark_model",
                         type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--chosen-resolution", choices=("auto", "640", "960"), default="auto")
+    parser.add_argument("--actor-label", default=DEFAULT_ACTOR_LABEL)
+    parser.add_argument("--manual-seed", nargs=4, type=float,
+                        default=DEFAULT_MANUAL_FACE,
+                        metavar=("X", "Y", "WIDTH", "HEIGHT"))
+    parser.add_argument("--frame-count", type=int, default=DEFAULT_FRAME_COUNT)
+    parser.add_argument("--detector-resolution", "--chosen-resolution",
+                        dest="detector_resolution", choices=("auto", "640", "960"),
+                        default="auto")
     parser.add_argument("--max-frames", type=int)
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    if not ACTOR_LABEL_PATTERN.fullmatch(args.actor_label):
+        raise RuntimeError("actor label must be a lowercase alphanumeric slug with optional hyphens")
+    if args.frame_count <= 0 or args.frame_count > MAX_FRAME_COUNT:
+        raise RuntimeError(f"frame count must be between 1 and {MAX_FRAME_COUNT}")
+    if args.max_frames is not None:
+        if args.max_frames <= 0 or args.max_frames > MAX_FRAME_COUNT:
+            raise RuntimeError(f"max frames must be between 1 and {MAX_FRAME_COUNT}")
+        if args.max_frames > args.frame_count:
+            raise RuntimeError("max frames cannot exceed frame count")
+    if not all(math.isfinite(value) for value in args.manual_seed):
+        raise RuntimeError("manual seed values must be finite")
     paths = sorted(args.frames.glob("frame-*.ppm"))
     if args.max_frames is not None:
         paths = paths[: args.max_frames]
     if not paths:
         raise RuntimeError("no frame-*.ppm inputs found")
-    if args.max_frames is None and len(paths) != EXPECTED_FRAMES:
-        raise RuntimeError(f"expected {EXPECTED_FRAMES} frames, found {len(paths)}")
+    if args.max_frames is None and len(paths) != args.frame_count:
+        raise RuntimeError(f"expected {args.frame_count} frames, found {len(paths)}")
     args.output.mkdir(parents=True, exist_ok=True)
 
     yunet_sha = sha256_file(args.yunet_model)
@@ -357,16 +384,25 @@ def main() -> int:
     landmark_label, landmark_filename, openseeface_revision = KNOWN_LANDMARK_MODELS[landmark_sha]
 
     first_frame = cv2.imread(str(paths[0]), cv2.IMREAD_COLOR)
-    if first_frame is None or first_frame.shape[:2] != (FRAME_HEIGHT, FRAME_WIDTH):
-        raise RuntimeError("input frames must decode as 960x540 BGR")
-    manual = Face(*MANUAL_PEPE_FACE, 1.0)
+    if first_frame is None:
+        raise RuntimeError("first input frame did not decode")
+    frame_height, frame_width = first_frame.shape[:2]
+    if frame_width < 4 or frame_height < 4:
+        raise RuntimeError("input frame dimensions are invalid")
+    manual = Face(*args.manual_seed, 1.0)
+    if (manual.x < 0.0 or manual.y < 0.0 or manual.width < 4.0 or manual.height < 4.0
+            or manual.right > frame_width or manual.bottom > frame_height):
+        raise RuntimeError("manual seed must be a valid pixel rectangle inside the input frame")
     states: dict[int, ResolutionState] = {}
     load_timings: dict[int, float] = {}
     warm_timings: dict[int, float] = {}
-    for resolution in (640, 960):
+    detector_resolutions = (640, 960) if args.detector_resolution == "auto" else (
+        int(args.detector_resolution),
+    )
+    for resolution in detector_resolutions:
         started = time.perf_counter_ns()
         detector = cv2.FaceDetectorYN.create(
-            str(args.yunet_model), "", (resolution, FRAME_HEIGHT * resolution // FRAME_WIDTH),
+            str(args.yunet_model), "", (resolution, frame_height * resolution // frame_width),
             0.50, 0.30, 5000,
         )
         load_timings[resolution] = (time.perf_counter_ns() - started) / 1_000_000.0
@@ -377,8 +413,8 @@ def main() -> int:
     frames: list[np.ndarray] = []
     for index, path in enumerate(paths):
         frame = cv2.imread(str(path), cv2.IMREAD_COLOR)
-        if frame is None or frame.shape[:2] != (FRAME_HEIGHT, FRAME_WIDTH):
-            raise RuntimeError(f"frame {path} did not decode as 960x540")
+        if frame is None or frame.shape[:2] != (frame_height, frame_width):
+            raise RuntimeError(f"frame {path} dimensions differ from the first frame")
         frames.append(frame)
         frame_manifest.append({
             "index": index,
@@ -387,9 +423,9 @@ def main() -> int:
             "sha256": sha256_file(path),
         })
         for state in states.values():
-            detect_frame(state, frame, manual)
+            detect_frame(state, frame, manual, frame_width, frame_height)
 
-    if args.chosen_resolution == "auto":
+    if args.detector_resolution == "auto":
         def resolution_rank(resolution: int) -> tuple[int, float, float]:
             state = states[resolution]
             selected = [face for face in state.selected if face is not None]
@@ -398,7 +434,7 @@ def main() -> int:
             return (len(selected), confidence, -timing)
         chosen_resolution = max(states, key=resolution_rank)
     else:
-        chosen_resolution = int(args.chosen_resolution)
+        chosen_resolution = int(args.detector_resolution)
     chosen = states[chosen_resolution]
 
     session_options = ort.SessionOptions()
@@ -417,7 +453,7 @@ def main() -> int:
     lm_timings: list[float] = []
     policy_reasons: dict[str, int] = {}
     replay_lines = [
-        f"npc-landmark-replay-v1 {FRAME_WIDTH} {FRAME_HEIGHT} {len(paths)} {FRAME_RATE}"
+        f"npc-landmark-replay-v1 {frame_width} {frame_height} {len(paths)} {FRAME_RATE}"
     ]
     for index, (frame, face) in enumerate(zip(frames, chosen.selected)):
         if face is None:
@@ -430,8 +466,8 @@ def main() -> int:
         started = time.perf_counter_ns()
         output = session.run(None, {input_name: tensor})[0]
         lm_timings.append((time.perf_counter_ns() - started) / 1_000_000.0)
-        decoded = decode_lm(output, crop, FRAME_WIDTH, FRAME_HEIGHT)
-        accepted, reason = packet_policy(face, decoded)
+        decoded = decode_lm(output, crop, frame_width, frame_height)
+        accepted, reason = packet_policy(face, decoded, frame_width, frame_height)
         policy_reasons[reason] = policy_reasons.get(reason, 0) + 1
         packet = {"face": face, "decoded": decoded, "accepted": accepted, "reason": reason}
         packets.append(packet)
@@ -442,15 +478,15 @@ def main() -> int:
             format_number(float(decoded["yaw"])),
             format_number(float(decoded["pitch"])),
             format_number(float(decoded["roll"])),
-            format_number(face.x / FRAME_WIDTH), format_number(face.y / FRAME_HEIGHT),
-            format_number(face.width / FRAME_WIDTH), format_number(face.height / FRAME_HEIGHT),
+            format_number(face.x / frame_width), format_number(face.y / frame_height),
+            format_number(face.width / frame_width), format_number(face.height / frame_height),
             "1" if decoded["mouthOccluded"] else "0",
         ]
         for point in decoded["points"]:
             values.extend(format_number(float(value)) for value in point)
         replay_lines.append(" ".join(values))
 
-    replay_path = args.output / f"pepe-yunet-{landmark_label}-landmarks.tsv"
+    replay_path = args.output / f"{args.actor_label}-yunet-{landmark_label}-landmarks.tsv"
     replay_path.write_text("\n".join(replay_lines) + "\n", encoding="utf-8", newline="\n")
     manifest_path = args.output / "input-frame-manifest.json"
     aggregate = hashlib.sha256()
@@ -458,8 +494,8 @@ def main() -> int:
         aggregate.update(f"{entry['index']}\t{entry['file']}\t{entry['bytes']}\t{entry['sha256']}\n".encode())
     manifest = {
         "schema": "interactive-npcs-input-frame-manifest/v1",
-        "width": FRAME_WIDTH,
-        "height": FRAME_HEIGHT,
+        "width": frame_width,
+        "height": frame_height,
         "fps": FRAME_RATE,
         "frames": frame_manifest,
         "canonicalEntryDigestSha256": aggregate.hexdigest(),
@@ -489,12 +525,12 @@ def main() -> int:
                           (round(face.right), round(face.bottom)), color, 2)
             for point_index, point in enumerate(points):
                 point_color = (0, 220, 255) if point_index >= 48 else (255, 200, 0)
-                cv2.circle(frame, (round(point[0] * FRAME_WIDTH), round(point[1] * FRAME_HEIGHT)),
+                cv2.circle(frame, (round(point[0] * frame_width), round(point[1] * frame_height)),
                            2 if point_index >= 48 else 1, point_color, -1, cv2.LINE_AA)
-            crop_face = expanded(face, 0.55)
+            crop_face = expanded(face, 0.55, frame_width, frame_height)
             crop = frame[
-                max(0, math.floor(crop_face.y)):min(FRAME_HEIGHT, math.ceil(crop_face.bottom)),
-                max(0, math.floor(crop_face.x)):min(FRAME_WIDTH, math.ceil(crop_face.right)),
+                max(0, math.floor(crop_face.y)):min(frame_height, math.ceil(crop_face.bottom)),
+                max(0, math.floor(crop_face.x)):min(frame_width, math.ceil(crop_face.right)),
             ]
             tile = cv2.resize(crop, (300, 250), interpolation=cv2.INTER_AREA)
             reason = str(packet["reason"])
@@ -512,7 +548,7 @@ def main() -> int:
     sheet_rows = [np.hstack(sheet_tiles[index:index + 4])
                   for index in range(0, len(sheet_tiles), 4)]
     contact_sheet = np.vstack(sheet_rows)
-    contact_sheet_path = args.output / f"pepe-yunet-{landmark_label}-contact-sheet.jpg"
+    contact_sheet_path = args.output / f"{args.actor_label}-yunet-{landmark_label}-contact-sheet.jpg"
     if not cv2.imwrite(str(contact_sheet_path), contact_sheet, [cv2.IMWRITE_JPEG_QUALITY, 94]):
         raise RuntimeError("failed to write landmark contact sheet")
 
@@ -520,7 +556,7 @@ def main() -> int:
     for resolution, state in states.items():
         selected = [face for face in state.selected if face is not None]
         comparisons[str(resolution)] = {
-            "inputSize": [resolution, FRAME_HEIGHT * resolution // FRAME_WIDTH],
+            "inputSize": [resolution, frame_height * resolution // frame_width],
             "modelLoadMs": round(load_timings[resolution], 3),
             "warmupMs": round(warm_timings[resolution], 3),
             "frames": len(paths),
@@ -547,8 +583,10 @@ def main() -> int:
         "createdAt": datetime.now(timezone.utc).isoformat(),
         "status": "experimental-model-packets-not-installed-pack",
         "source": str(args.frames),
+        "actorLabel": args.actor_label,
         "frames": len(paths),
-        "manualPepeSeedPixels": list(MANUAL_PEPE_FACE),
+        "frameDimensions": [frame_width, frame_height],
+        "manualActorSeedPixels": list(args.manual_seed),
         "identitySelection": {
             "method": "manual-seed plus sticky prior overlap and center-distance gate",
             "switchingAllowed": False,
