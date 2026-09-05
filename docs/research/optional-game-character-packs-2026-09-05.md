@@ -1,7 +1,7 @@
 # Optional game and character packs: architecture audit and minimal contract
 
-**Date:** 2026-09-05  
-**Scope:** data-only optional Cyberpunk 2077 content, character identity references, provider voice/model suggestions, and user-precedence rules  
+**Date:** 2026-09-05
+**Scope:** data-only optional Cyberpunk 2077 content, character identity references, provider voice/model suggestions, and user-precedence rules
 **Status:** architecture proposal; no pack installer, provider recommender, or distributable Cyberpunk reference pack is implemented by this document
 
 ## Decision
