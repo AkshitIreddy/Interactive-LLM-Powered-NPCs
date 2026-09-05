@@ -74,6 +74,36 @@ fn request() -> TtsSessionRequest {
     }
 }
 
+fn write_pcm_wav(path: &Path, pcm: &[u8], sample_rate_hz: u32) -> std::io::Result<()> {
+    let data_bytes = u32::try_from(pcm.len()).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, "PCM payload is oversized")
+    })?;
+    let riff_size = data_bytes
+        .checked_add(36)
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "WAV size overflow"))?;
+    let byte_rate = sample_rate_hz.checked_mul(2).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, "WAV byte-rate overflow")
+    })?;
+    let mut wav = Vec::with_capacity(pcm.len().saturating_add(44));
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&riff_size.to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16_u32.to_le_bytes());
+    wav.extend_from_slice(&1_u16.to_le_bytes());
+    wav.extend_from_slice(&1_u16.to_le_bytes());
+    wav.extend_from_slice(&sample_rate_hz.to_le_bytes());
+    wav.extend_from_slice(&byte_rate.to_le_bytes());
+    wav.extend_from_slice(&2_u16.to_le_bytes());
+    wav.extend_from_slice(&16_u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_bytes.to_le_bytes());
+    wav.extend_from_slice(pcm);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, wav)
+}
+
 struct Fixture {
     provider: NvidiaNimMagpie,
     grpc: Arc<MockNvidiaGrpcTransport>,
@@ -416,72 +446,94 @@ async fn live_nvidia_magpie_grpc_stream_is_non_silent_and_bounded() {
     let discovery_ms = discovery_started.elapsed().as_millis();
     assert!(voices.iter().any(|voice| voice.id == aria().id));
 
-    let mut session = provider
-        .start_session(request())
-        .await
-        .expect("live session");
-    let synthesis_started = Instant::now();
-    session
-        .push_text("The north beacon is ready.")
-        .await
-        .expect("start live gRPC stream");
-    let response_headers_ms = synthesis_started.elapsed().as_millis();
-    session.finish().await.expect("finish live text");
-
-    let mut pcm = Vec::new();
-    let mut first_audio_ms = None;
-    for _ in 0..512 {
-        let event = tokio::time::timeout(Duration::from_secs(60), session.next_event())
+    let mut utterances = Vec::new();
+    let mut persisted_pcm = Vec::new();
+    for (index, phase) in ["cold", "warmSecond", "warmThird"].into_iter().enumerate() {
+        let mut live_request = request();
+        live_request.identity.turn_id = format!("turn-live-{index}");
+        let session_started = Instant::now();
+        let mut session = provider
+            .start_session(live_request)
             .await
-            .expect("bounded live frame")
-            .expect("live stream completed event")
-            .expect("live stream event");
-        match event {
-            TtsEvent::Audio(chunk) => {
-                first_audio_ms.get_or_insert_with(|| synthesis_started.elapsed().as_millis());
-                assert!(pcm.len().saturating_add(chunk.data.len()) <= 16 * 1_048_576);
-                pcm.extend_from_slice(&chunk.data);
+            .expect("live session");
+        let session_start_ms = session_started.elapsed().as_millis();
+        let synthesis_started = Instant::now();
+        session
+            .push_text("The north beacon is ready.")
+            .await
+            .expect("start live gRPC stream");
+        let response_headers_ms = synthesis_started.elapsed().as_millis();
+        session.finish().await.expect("finish live text");
+
+        let mut pcm = Vec::new();
+        let mut first_audio_ms = None;
+        for _ in 0..512 {
+            let event = tokio::time::timeout(Duration::from_secs(60), session.next_event())
+                .await
+                .expect("bounded live frame")
+                .expect("live stream completed event")
+                .expect("live stream event");
+            match event {
+                TtsEvent::Audio(chunk) => {
+                    first_audio_ms.get_or_insert_with(|| synthesis_started.elapsed().as_millis());
+                    assert!(pcm.len().saturating_add(chunk.data.len()) <= 16 * 1_048_576);
+                    pcm.extend_from_slice(&chunk.data);
+                }
+                TtsEvent::Completed => break,
+                TtsEvent::Alignment(_) | TtsEvent::Viseme(_) | TtsEvent::Usage(_) => {}
+                TtsEvent::Interrupted { .. } => panic!("live stream was interrupted"),
             }
-            TtsEvent::Completed => break,
-            TtsEvent::Alignment(_) | TtsEvent::Viseme(_) | TtsEvent::Usage(_) => {}
-            TtsEvent::Interrupted { .. } => panic!("live stream was interrupted"),
         }
+        let total_ms = synthesis_started.elapsed().as_millis();
+        assert!(!pcm.is_empty());
+        assert_eq!(pcm.len() % 2, 0);
+        let samples = pcm
+            .chunks_exact(2)
+            .map(|sample| i16::from_le_bytes([sample[0], sample[1]]))
+            .collect::<Vec<_>>();
+        let peak_sample = samples
+            .iter()
+            .map(|sample| i32::from(*sample).abs())
+            .max()
+            .unwrap_or_default();
+        let sum_squares = samples
+            .iter()
+            .map(|sample| f64::from(*sample).powi(2))
+            .sum::<f64>();
+        let rms = (sum_squares / samples.len() as f64).sqrt() / 32_768.0;
+        let clipped_samples = samples
+            .iter()
+            .filter(|sample| sample.unsigned_abs() >= 32_767)
+            .count();
+        assert!(rms >= 0.0001);
+        assert_eq!(clipped_samples, 0);
+        utterances.push(serde_json::json!({
+            "phase": phase,
+            "sessionStartMs": session_start_ms,
+            "responseHeadersMs": response_headers_ms,
+            "firstAudioMs": first_audio_ms.expect("first audio"),
+            "totalSynthesisMs": total_ms,
+            "audioBytes": pcm.len(),
+            "peak": f64::from(peak_sample) / 32_768.0,
+            "rms": rms,
+            "clippedSamples": clipped_samples,
+        }));
+        persisted_pcm = pcm;
     }
-    let total_ms = synthesis_started.elapsed().as_millis();
-    assert!(!pcm.is_empty());
-    assert_eq!(pcm.len() % 2, 0);
-    let samples = pcm
-        .chunks_exact(2)
-        .map(|sample| i16::from_le_bytes([sample[0], sample[1]]))
-        .collect::<Vec<_>>();
-    let peak_sample = samples
-        .iter()
-        .map(|sample| i32::from(*sample).abs())
-        .max()
-        .unwrap_or_default();
-    let sum_squares = samples
-        .iter()
-        .map(|sample| f64::from(*sample).powi(2))
-        .sum::<f64>();
-    let rms = (sum_squares / samples.len() as f64).sqrt() / 32_768.0;
-    let clipped_samples = samples
-        .iter()
-        .filter(|sample| sample.unsigned_abs() >= 32_767)
-        .count();
-    assert!(rms >= 0.0001);
-    assert_eq!(clipped_samples, 0);
+    let audio_persisted = if let Some(path) = env::var_os("NVIDIA_LIVE_AUDIO_PATH") {
+        write_pcm_wav(&PathBuf::from(path), &persisted_pcm, 22_050)
+            .expect("write bounded provider audio fixture");
+        true
+    } else {
+        false
+    };
 
     let metrics = serde_json::json!({
         "grpcConnectMs": grpc_connect_ms,
         "voiceDiscoveryMs": discovery_ms,
         "voiceRecords": voices.len(),
-        "responseHeadersMs": response_headers_ms,
-        "firstAudioMs": first_audio_ms.expect("first audio"),
-        "totalSynthesisMs": total_ms,
-        "audioBytes": pcm.len(),
-        "peak": f64::from(peak_sample) / 32_768.0,
-        "rms": rms,
-        "clippedSamples": clipped_samples,
+        "audioPersisted": audio_persisted,
+        "utterances": utterances,
     });
     fs::write(
         metrics_path,
