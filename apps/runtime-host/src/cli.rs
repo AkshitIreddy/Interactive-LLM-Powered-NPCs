@@ -123,6 +123,7 @@ pub async fn run(cli: Cli) -> Result<(), CliError> {
                     turn_id,
                     game_id: game.clone(),
                     character_id: character,
+                    effective_game_profile: None,
                     native_identity_decision: None,
                     enabled_spoiler_tiers: Vec::new(),
                     generic_selection: match (

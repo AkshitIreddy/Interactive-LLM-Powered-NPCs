@@ -347,6 +347,7 @@ impl ProfileReplayV1 {
             turn_id: format!("{}-{ordinal}", self.simulation.turn_id),
             game_id: self.profile_id.clone(),
             character_id: Some(self.assertions.selection.character_id.clone()),
+            effective_game_profile: None,
             native_identity_decision: None,
             enabled_spoiler_tiers: Vec::new(),
             generic_selection: None,

@@ -42,6 +42,7 @@ fn request(turn_id: &str) -> SimulationRequest {
         turn_id: turn_id.into(),
         game_id: "skyrim-special-edition".into(),
         character_id: None,
+        effective_game_profile: None,
         native_identity_decision: None,
         enabled_spoiler_tiers: Vec::new(),
         generic_selection: None,

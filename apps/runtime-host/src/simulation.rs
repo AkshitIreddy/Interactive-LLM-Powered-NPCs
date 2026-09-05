@@ -81,6 +81,7 @@ use npc_providers_tts::{
 };
 
 const DEEPGRAM_QUALIFIED_STOCK_VOICE_ID: &str = "Arcas";
+const MAX_EFFECTIVE_PROFILE_BYTES: usize = 768 * 1024;
 
 const DEV_LIVE_TTS_PROVIDER_ID: &str = "elevenlabs";
 const DEV_LIVE_TTS_MODEL_ID: &str = "eleven_flash_v2_5";
@@ -93,6 +94,10 @@ pub struct SimulationRequest {
     pub turn_id: String,
     pub game_id: String,
     pub character_id: Option<String>,
+    /// Effective data-only profile supplied by authenticated native Tauri.
+    /// It is revalidated against the runtime's bundled immutable contract.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_game_profile: Option<GameProfileV2>,
     /// Optional conservative decision emitted by the trusted native capture
     /// pipeline. This field belongs only to the authenticated Tauri-to-sidecar
     /// contract and must never be populated from WebView input. Manual
@@ -351,6 +356,17 @@ impl SimulationRequest {
             || self.transcript.trim().is_empty()
             || self.transcript.len() > 64 * 1024
         {
+            return Err(SimulationError::InvalidRequest);
+        }
+        if self.effective_game_profile.as_ref().is_some_and(|profile| {
+            self.game_id == GENERIC_GAME_ID
+                || profile.id != self.game_id
+                || serde_json::to_vec(profile)
+                    .ok()
+                    .filter(|bytes| bytes.len() <= MAX_EFFECTIVE_PROFILE_BYTES)
+                    .and_then(|bytes| npc_game_profile::load_profile(&bytes).ok())
+                    .is_none()
+        }) {
             return Err(SimulationError::InvalidRequest);
         }
         if let Some(route) = &self.dev_live_tts {
@@ -737,10 +753,17 @@ impl HostState {
             if request.generic_selection.is_some() {
                 return Err(SimulationError::InvalidRequest);
             }
-            let profile = self
+            let bundled_profile = self
                 .profiles
                 .profile(&request.game_id)
                 .ok_or(SimulationError::UnknownGame)?;
+            let profile = match request.effective_game_profile.as_ref() {
+                Some(effective) => {
+                    validate_effective_profile(bundled_profile, effective)?;
+                    effective
+                }
+                None => bundled_profile,
+            };
             resolve_authored_character(profile, &request, selected_route.as_deref())?
         };
 
@@ -1522,6 +1545,29 @@ fn resolve_authored_character(
         explicit_selection: resolved.explicit_selection,
         encounter: resolved.encounter,
     })
+}
+
+fn validate_effective_profile(
+    bundled: &GameProfileV2,
+    effective: &GameProfileV2,
+) -> Result<(), SimulationError> {
+    if effective.id != bundled.id
+        || effective.game != bundled.game
+        || effective.detection != bundled.detection
+        || effective.safety != bundled.safety
+        || effective.capabilities != bundled.capabilities
+        || bundled.characters.iter().any(|bundled_character| {
+            !effective
+                .characters
+                .iter()
+                .any(|candidate| candidate.id == bundled_character.id)
+        })
+    {
+        return Err(SimulationError::InvalidRequest);
+    }
+    let bytes = serde_json::to_vec(effective).map_err(|_| SimulationError::InvalidRequest)?;
+    npc_game_profile::load_profile(&bytes).map_err(|_| SimulationError::InvalidRequest)?;
+    Ok(())
 }
 
 fn validate_spoiler_tiers(
@@ -4099,6 +4145,7 @@ mod tests {
             application_namespace: None,
             transcript: "Can you hear me?".into(),
             locale: "en-US".into(),
+            effective_game_profile: None,
             execution_mode: route.as_ref().map(|_| SimulationExecutionMode::Hybrid),
             dev_live_tts: route,
             route_snapshot: None,
@@ -4117,6 +4164,68 @@ mod tests {
             voice_id: DEV_LIVE_TTS_STOCK_VOICE_IDS[0].into(),
             explicit_user_authorization: true,
         }
+    #[test]
+    fn trusted_effective_profile_reaches_normal_turn_prompt_and_cannot_weaken_detection() {
+        let bundled = npc_game_profile::load_profile(include_bytes!(
+            "../../../profiles/games/cyberpunk-2077/profile.json"
+        ))
+        .expect("bundled Cyberpunk profile");
+        let stable_id = bundled.characters.first().expect("character").id.clone();
+        let mut effective = bundled.clone();
+        let target = effective.characters.first_mut().expect("character");
+        target.display_name = "Player Contact".into();
+        target.biography = "Player-authored runtime biography.".into();
+        target
+            .prompt
+            .objectives
+            .push("Player-authored context: Treat V as a returning client.".into());
+
+        let mut request = request_with(None);
+        request.game_id = "cyberpunk-2077".into();
+        request.character_id = Some(stable_id.clone());
+        request.effective_game_profile = Some(effective.clone());
+        assert!(request.validate().is_ok());
+        validate_effective_profile(&bundled, &effective).expect("effective profile admitted");
+        let resolved = resolve_authored_character(&effective, &request, None)
+            .expect("normal authored character resolution");
+        assert_eq!(resolved.display_name, "Player Contact");
+        assert!(resolved
+            .system_prompt
+            .contains("Player-authored context: Treat V as a returning client."));
+
+        let context = build_prompt_context(
+            resolved.database.as_ref().expect("character database"),
+            PromptBuildRequestV1 {
+                schema_version: CHARACTER_DB_SCHEMA_VERSION.into(),
+                scope: AuthorityScope {
+                    user_id: "local-user".into(),
+                    profile_id: "cyberpunk-2077".into(),
+                    game_id: "cyberpunk-2077".into(),
+                    character_id: Some(stable_id),
+                    encounter_id: None,
+                    session_id: Some("ordinary-turn".into()),
+                    save_id: None,
+                },
+                query: "Good to see you again.".into(),
+                enabled_spoiler_tiers: Vec::new(),
+                memory_context: MemoryContextBundle::default(),
+                memory_spoiler_policy: SpoilerPolicy::default(),
+                max_style_examples: 0,
+            },
+        )
+        .expect("authority-separated prompt context");
+        assert!(context
+            .sections
+            .iter()
+            .flat_map(|section| &section.records)
+            .any(|record| record.text == "Player-authored runtime biography."));
+
+        let mut weakened = effective;
+        weakened.detection = bundled.detection.clone();
+        weakened.detection.processes.clear();
+        assert!(validate_effective_profile(&bundled, &weakened).is_err());
+    }
+
     }
 
     #[test]

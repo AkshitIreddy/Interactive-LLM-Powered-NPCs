@@ -128,6 +128,7 @@ async fn selected_mistral_turn_uses_speech_first_schema_without_audio_claims() {
     assert_eq!(result.outcome.lifecycle, TurnLifecycle::Completed);
     assert_eq!(
         result.outcome.selected_llm_provider.as_deref(),
+            effective_game_profile: None,
         Some("mistral")
     );
     assert!(result.outcome.structured_response.is_some());

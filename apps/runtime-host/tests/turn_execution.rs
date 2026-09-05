@@ -119,6 +119,7 @@ fn request(route_snapshot: SelectedRouteSnapshot) -> SimulationRequest {
         turn_id: "selected-route-turn".into(),
         game_id: "skyrim-special-edition".into(),
         character_id: Some("lydia".into()),
+        effective_game_profile: None,
         native_identity_decision: None,
         enabled_spoiler_tiers: Vec::new(),
         generic_selection: None,
