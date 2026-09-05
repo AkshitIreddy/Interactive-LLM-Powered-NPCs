@@ -11,9 +11,10 @@ Historical measurements below describe the rejected experiment only. They do
 not establish lip-sync quality for the intended use case.
 
 Replacement source selection must first verify a continuous, mostly front-facing
-idle interval with no source speech or mouth articulation, while preserving
-natural breathing, blinking, and small head movements. A talking reference clip
-may supply character mouth observations but cannot serve as the idle test input.
+idle interval without existing speech-driven lip animation, while preserving
+natural breathing, blinking, small head movements, and idle facial expressions.
+Prerecorded audio can be removed independently. A lip-synced talking reference
+clip may supply character mouth observations but cannot serve as the idle test input.
 
 The user subsequently clarified that replacing incidental in-game remarks is
 still a desirable secondary capability: an idle NPC may spontaneously speak
@@ -25,6 +26,13 @@ compositor does not isolate or suppress a character's original game audio.
 The user explicitly deferred game-audio overlap handling as an edge case;
 it is not a blocker for the current visual work and no audio-isolation or
 ducking subsystem should be added in this iteration.
+
+The user then supplied their own video, [AI NPCs in Cyberpunk 2077](https://www.youtube.com/watch?v=Uc3OXiFjsSg),
+and corrected the description: it is Cyberpunk-only and has audio input/output
+without lip-sync. Therefore its character shots do not need to be cut before
+the audio replies. Use the user-supplied footage as the primary source, remove
+its original soundtrack, and drive the existing idle animation with test speech.
+The wider third-party footage search is superseded.
 
 ## Result and scope
 
