@@ -128,7 +128,7 @@ describe("canonical provider loadout migration", () => {
       emitted.roles.tts?.mode === "route"
         ? emitted.roles.tts.route.primary.credential
         : null,
-    ).toEqual({ provider_id: "elevenlabs", reference_id: "personal" });
+    ).toEqual({ provider_id: "cartesia", reference_id: "personal" });
     expect(
       emitted.roles.tts?.mode === "route"
         ? emitted.roles.tts.route.primary.voice_id
@@ -161,7 +161,7 @@ describe("canonical provider loadout migration", () => {
         : null;
     expect(route).not.toBeNull();
     expect(route?.disclosure.execution).toBe("local");
-    expect(route?.disclosure.catalog_revision).toBe(7);
+    expect(route?.disclosure.catalog_revision).toBe(9);
     expect(route?.disclosure.egress).toBe("none");
     expect(route?.disclosure.transmitted_data).toEqual([]);
     expect(route?.credential).toBeNull();

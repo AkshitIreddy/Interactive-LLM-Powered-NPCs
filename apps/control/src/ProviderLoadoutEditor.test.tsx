@@ -20,37 +20,180 @@ describe("provider and model loadouts", () => {
       .__TAURI_INTERNALS__;
   });
 
+  it("creates overrides for the selected world instead of a hard-coded fixture", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProviderLoadoutEditor
+        gameProfileId="skyrim-special-edition"
+        gameProfileLabel="Skyrim Special Edition"
+        characterId="aela"
+        characterLabel="Aela the Huntress"
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /GAME OVERRIDE Game/ }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Create game loadout" }),
+    );
+
+    expect(
+      screen.getAllByText("Skyrim Special Edition").length,
+    ).toBeGreaterThan(0);
+    expect(document.body).not.toHaveTextContent("Cyberpunk 2077");
+
+    await user.click(
+      screen.getByRole("button", { name: /CHARACTER OVERRIDE Character/ }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Create character loadout" }),
+    );
+
+    expect(
+      screen.getAllByText("Skyrim Special Edition · Aela the Huntress").length,
+    ).toBeGreaterThan(0);
+    expect(document.body).not.toHaveTextContent("Mara Venn");
+  });
+
+  it("blocks scoped creation until World supplies an exact target", async () => {
+    const user = userEvent.setup();
+    render(<ProviderLoadoutEditor />);
+
+    await user.click(
+      screen.getByRole("button", { name: /GAME OVERRIDE Game/ }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Create game loadout" }),
+    ).toBeDisabled();
+    expect(document.body).toHaveTextContent(
+      /Select a game in World to create its override/i,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /CHARACTER OVERRIDE Character/ }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Create character loadout" }),
+    ).toBeDisabled();
+    expect(document.body).toHaveTextContent(
+      /Select a game and character in World to create an override/i,
+    );
+  });
+
+  it("edits one role at a time and hands hosted account setup to the host", async () => {
+    const user = userEvent.setup();
+    const onManageProvider = vi.fn();
+    render(<ProviderLoadoutEditor onManageProvider={onManageProvider} />);
+
+    expect(screen.getByLabelText("Reply model provider")).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("Speech recognition provider"),
+    ).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Connect or check Groq" }),
+    );
+    expect(onManageProvider).toHaveBeenCalledWith("groq");
+
+    await user.click(
+      screen.getByRole("button", { name: /Speech recognition.*AssemblyAI/i }),
+    );
+    expect(
+      screen.getByLabelText("Speech recognition provider"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Connect or check OpenAI" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("marks catalog-only speech routes unavailable and keeps AssemblyAI selectable", async () => {
+    const user = userEvent.setup();
+    render(<ProviderLoadoutEditor initialRole="stt" />);
+
+    expect(
+      screen.getByRole("option", {
+        name: /OpenAI.*not wired to push-to-talk/i,
+      }),
+    ).toBeDisabled();
+    expect(screen.getByRole("option", { name: "AssemblyAI" })).toBeEnabled();
+    await user.selectOptions(
+      screen.getByLabelText("Speech recognition provider"),
+      "assemblyai",
+    );
+    expect(screen.getByLabelText("Speech recognition provider")).toHaveValue(
+      "assemblyai",
+    );
+  });
+
   it("shows explicit role routes and a next-turn boundary", () => {
     render(<ProviderLoadoutEditor />);
 
     expect(
-      screen.getByRole("heading", { name: /Build a route/ }),
+      screen.getByRole("heading", {
+        name: /Choose the route for the next conversation/,
+      }),
     ).toBeInTheDocument();
     expect(screen.getByText("Swaps begin next turn")).toBeInTheDocument();
-    expect(screen.getByLabelText("Reply model provider")).toHaveValue("openai");
+    expect(screen.getByLabelText("Reply model provider")).toHaveValue("groq");
+  });
+
+  it("keeps every essential route reachable from the role picker", async () => {
+    const user = userEvent.setup();
+    render(<ProviderLoadoutEditor />);
+
+    await user.click(
+      screen.getByRole("button", { name: /Speech recognition.*AssemblyAI/i }),
+    );
     expect(screen.getByLabelText("Speech recognition provider")).toHaveValue(
-      "openai",
+      "assemblyai",
     );
     expect(screen.getByLabelText("Speech recognition model")).toHaveAttribute(
       "title",
-      "GPT-4o mini Transcribe",
+      "Universal-3 Pro Streaming",
+    );
+    await user.click(
+      screen.getByRole("button", { name: /Character voice.*Cartesia/i }),
     );
     expect(screen.getByLabelText("Character voice provider")).toHaveValue(
-      "elevenlabs",
+      "cartesia",
+    );
+    expect(screen.getByLabelText("Character voice stock voice ID")).toHaveValue(
+      "a0e99841-438c-4a64-b679-ae501e7d6091",
+    );
+    await user.click(
+      screen.getByRole("button", { name: /Memory embeddings.*Local keyword/i }),
     );
     expect(screen.getByLabelText("Memory embeddings provider")).toHaveValue(
       "fts-only",
     );
-    expect(screen.getByLabelText("Optional vision provider")).toHaveValue(
-      "disabled",
+    expect(document.body).not.toHaveTextContent("API key value");
+  });
+
+  it("pins the qualified stock voice when a hosted voice provider changes", async () => {
+    const user = userEvent.setup();
+    render(<ProviderLoadoutEditor initialRole="tts" />);
+
+    await user.selectOptions(
+      screen.getByLabelText("Character voice provider"),
+      "deepgram",
+    );
+    expect(screen.getByLabelText("Character voice model")).toHaveValue(
+      "aura-2-arcas-en",
     );
     expect(screen.getByLabelText("Character voice stock voice ID")).toHaveValue(
-      "EXAVITQu4vr4xnSDxMaL",
+      "Arcas",
     );
-    expect(screen.getByLabelText("Optional lip-sync provider")).toHaveValue(
-      "disabled",
+
+    await user.selectOptions(
+      screen.getByLabelText("Character voice provider"),
+      "inworld",
     );
-    expect(document.body).not.toHaveTextContent("API key value");
+    expect(screen.getByLabelText("Character voice model")).toHaveValue(
+      "inworld-tts-2-flash",
+    );
+    expect(screen.getByLabelText("Character voice stock voice ID")).toHaveValue(
+      "Dennis",
+    );
   });
 
   it("offers Cohere's current generation model instead of a rejected alias", async () => {
@@ -68,16 +211,75 @@ describe("provider and model loadouts", () => {
     expect(
       screen.getByRole("option", { name: "Command A+" }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Cohere" })).toBeEnabled();
+  });
+
+  it("offers the exact measured Gemini, Groq, Mistral, and OpenRouter reply routes", async () => {
+    const user = userEvent.setup();
+    render(<ProviderLoadoutEditor onManageProvider={vi.fn()} />);
+
+    await user.selectOptions(
+      screen.getByLabelText("Reply model provider"),
+      "groq",
+    );
+    expect(screen.getByLabelText("Reply model model")).toHaveValue(
+      "openai/gpt-oss-20b",
+    );
+    expect(screen.getByRole("option", { name: "GPT-OSS 20B" })).toBeEnabled();
+    await user.selectOptions(
+      screen.getByLabelText("Reply model model"),
+      "qwen/qwen3.6-27b",
+    );
     expect(
-      screen.getByRole("option", {
-        name: "Cohere · qualification pending",
-      }),
-    ).toBeDisabled();
+      screen.getByText(/exact qualified Groq non-reasoning request profile/i),
+    ).toBeInTheDocument();
+
+    await user.selectOptions(
+      screen.getByLabelText("Reply model provider"),
+      "mistral",
+    );
+    expect(screen.getByLabelText("Reply model model")).toHaveValue(
+      "ministral-8b-2512",
+    );
+    expect(
+      screen.getByRole("option", { name: "Ministral 3B 25.12" }),
+    ).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Connect or check Mistral AI" }),
+    ).toBeEnabled();
+
+    await user.selectOptions(
+      screen.getByLabelText("Reply model provider"),
+      "gemini",
+    );
+    expect(screen.getByLabelText("Reply model model")).toHaveValue(
+      "gemini-3.1-flash-lite",
+    );
+    expect(document.body).not.toHaveTextContent("Gemini 2.5");
+
+    await user.selectOptions(
+      screen.getByLabelText("Reply model provider"),
+      "openrouter",
+    );
+    expect(screen.getByLabelText("Reply model model")).toHaveValue(
+      "liquid/lfm-2.5-2.6b:free",
+    );
+    expect(
+      screen.getByText(/fallback routing is disabled/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Connect or check OpenRouter" }),
+    ).toBeEnabled();
   });
 
   it("creates, renames, clones, and activates an initially inactive scoped loadout", async () => {
     const user = userEvent.setup();
-    render(<ProviderLoadoutEditor />);
+    render(
+      <ProviderLoadoutEditor
+        gameProfileId="cyberpunk-2077"
+        gameProfileLabel="Cyberpunk 2077"
+      />,
+    );
 
     await user.click(
       screen.getByRole("button", { name: /GAME OVERRIDE Game/ }),
@@ -122,11 +324,11 @@ describe("provider and model loadouts", () => {
   });
 
   it("keeps unqualified lip-sync research paths unavailable", () => {
-    render(<ProviderLoadoutEditor />);
+    render(<ProviderLoadoutEditor initialRole="lipSync" />);
 
     expect(
       screen.getByRole("option", {
-        name: /Local visual worker · qualification pending/,
+        name: /Local visual worker · no qualified live route/,
       }),
     ).toBeDisabled();
     expect(screen.getByLabelText("Optional lip-sync provider")).toHaveValue(
@@ -140,13 +342,16 @@ describe("provider and model loadouts", () => {
 
   it("keeps Magpie unavailable until native stock discovery proves exact membership", async () => {
     const user = userEvent.setup();
-    render(<ProviderLoadoutEditor />);
+    render(<ProviderLoadoutEditor initialRole="tts" />);
 
     expect(
       screen.getByRole("option", {
         name: /NVIDIA NIM Magpie · private evaluation only · discover stock voices first/i,
       }),
     ).toBeDisabled();
+    await user.click(
+      screen.getByText("NVIDIA Magpie stock voices", { selector: "strong" }),
+    );
     expect(
       screen.getByRole("button", { name: "Refresh NVIDIA stock voices" }),
     ).toBeDisabled();
@@ -159,11 +364,12 @@ describe("provider and model loadouts", () => {
       /base production namespace cannot select Magpie/i,
     );
     expect(screen.getByLabelText("Character voice provider")).toHaveValue(
-      "elevenlabs",
+      "cartesia",
     );
   });
 
   it("persists the first authenticated discovered Magpie voice atomically", async () => {
+    const onNativeLoadoutsChange = vi.fn();
     const snapshot = {
       document: {
         format: "npc-provider-loadouts" as const,
@@ -283,13 +489,21 @@ describe("provider and model loadouts", () => {
       value: {},
     });
     const user = userEvent.setup();
-    render(<ProviderLoadoutEditor />);
+    render(
+      <ProviderLoadoutEditor
+        initialRole="tts"
+        onNativeLoadoutsChange={onNativeLoadoutsChange}
+      />,
+    );
 
     await waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith("discover_tts_stock_voices", {
         forceRefresh: false,
       }),
     );
+    expect(onNativeLoadoutsChange).toHaveBeenCalledWith([
+      expect.objectContaining({ id: "global-balanced-api", active: true }),
+    ]);
     expect(
       screen.getByRole("option", {
         name: "NVIDIA NIM Magpie · private evaluation only",
@@ -321,7 +535,8 @@ describe("provider and model loadouts", () => {
     );
     expect(
       await screen.findByText("NVIDIA private evaluation only"),
-    ).toBeVisible();
+    ).toBeInTheDocument();
+    await user.click(screen.getByText("NVIDIA private evaluation only"));
     expect(document.body).toHaveTextContent(
       "nvidia-api-trial-terms-2025-09-19-private-evaluation-v1",
     );
@@ -423,7 +638,7 @@ describe("provider and model loadouts", () => {
       value: {},
     });
     const user = userEvent.setup();
-    render(<ProviderLoadoutEditor />);
+    render(<ProviderLoadoutEditor initialRole="tts" />);
 
     await screen.findByDisplayValue("Inactive route");
     await user.click(
@@ -544,7 +759,7 @@ describe("provider and model loadouts", () => {
       value: {},
     });
     const user = userEvent.setup();
-    render(<ProviderLoadoutEditor />);
+    render(<ProviderLoadoutEditor initialRole="tts" />);
 
     await waitFor(() =>
       expect(
@@ -557,6 +772,7 @@ describe("provider and model loadouts", () => {
       screen.getByLabelText("Character voice provider"),
       "nvidia-nim-magpie",
     );
+    await user.click(screen.getByText("NVIDIA private evaluation only"));
     expect(
       await screen.findByText(/ineligible; acknowledgement blocked/i),
     ).toBeVisible();

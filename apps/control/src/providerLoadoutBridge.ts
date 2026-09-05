@@ -176,7 +176,7 @@ export type LoadoutSource =
   | { kind: "native"; snapshot: NativeLoadoutSnapshot };
 
 const hasTauri = () => "__TAURI_INTERNALS__" in window;
-export const BROWSER_CATALOG_REVISION = 7;
+export const BROWSER_CATALOG_REVISION = 9;
 const nativeRole = (role: ProviderRole): NativeRole =>
   role === "lipSync" ? "lipsync" : role;
 
@@ -390,12 +390,12 @@ function inheritedRole(
 }
 
 const safeDefaults: Record<ProviderRole, RouteChoice> = {
-  llm: { providerId: "openai", modelId: "gpt-4.1-mini" },
-  stt: { providerId: "openai", modelId: "gpt-4o-mini-transcribe" },
+  llm: { providerId: "groq", modelId: "qwen/qwen3.6-27b" },
+  stt: { providerId: "assemblyai", modelId: "u3-rt-pro" },
   tts: {
-    providerId: "elevenlabs",
-    modelId: "eleven_flash_v2_5",
-    voiceId: "EXAVITQu4vr4xnSDxMaL",
+    providerId: "cartesia",
+    modelId: "sonic-3.6",
+    voiceId: "a0e99841-438c-4a64-b679-ae501e7d6091",
   },
   embeddings: { providerId: "fts-only", modelId: "sqlite-fts5" },
   vision: { providerId: "disabled", modelId: "disabled" },

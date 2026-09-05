@@ -47,6 +47,45 @@ const FALLBACK_ROLES: ProviderRole[] = [
   "vision",
 ];
 
+const ESSENTIAL_ROLES: ProviderRole[] = ["llm", "stt", "tts", "embeddings"];
+const OPTIONAL_ROLES: ProviderRole[] = ["vision", "lipSync"];
+
+export interface ProviderLoadoutEditorProps {
+  gameProfileId?: string;
+  gameProfileLabel?: string;
+  characterId?: string;
+  characterLabel?: string;
+  initialRole?: ProviderRole;
+  mode?: "full" | "onboarding";
+  onManageProvider?: (providerId: string) => void;
+  onNativeLoadoutsChange?: (loadouts: ProviderLoadout[]) => void;
+}
+
+function routeIsExecutable(role: ProviderRole, providerId: string) {
+  if (role === "stt") return providerId === "assemblyai";
+  if (role === "vision" || role === "lipSync") return providerId === "disabled";
+  return providerFor(role, providerId).selectable !== false;
+}
+
+function accountProviderId(providerId: string) {
+  return providerId.startsWith("nvidia-nim") ? "nvidia-nim" : providerId;
+}
+
+function qualifiedStockVoiceId(providerId: string) {
+  switch (providerId) {
+    case "elevenlabs":
+      return "EXAVITQu4vr4xnSDxMaL";
+    case "cartesia":
+      return "a0e99841-438c-4a64-b679-ae501e7d6091";
+    case "deepgram":
+      return "Arcas";
+    case "inworld":
+      return "Dennis";
+    default:
+      return undefined;
+  }
+}
+
 const scopeCopy: Record<
   LoadoutScope,
   { label: string; eyebrow: string; description: string }
@@ -77,7 +116,8 @@ function defaultFallback(role: ProviderRole, primary: RouteChoice) {
     (candidate) =>
       candidate.id !== primary.providerId &&
       candidate.execution !== "Off" &&
-      candidate.selectable !== false,
+      candidate.selectable !== false &&
+      routeIsExecutable(role, candidate.id),
   );
   const selected = provider ?? ROUTE_OPTIONS[role][0];
   return {
@@ -87,7 +127,16 @@ function defaultFallback(role: ProviderRole, primary: RouteChoice) {
   };
 }
 
-export function ProviderLoadoutEditor() {
+export function ProviderLoadoutEditor({
+  gameProfileId,
+  gameProfileLabel,
+  characterId,
+  characterLabel,
+  initialRole = "llm",
+  mode = "full",
+  onManageProvider,
+  onNativeLoadoutsChange,
+}: ProviderLoadoutEditorProps = {}) {
   const [loadouts, setLoadouts] =
     useState<ProviderLoadout[]>(readBrowserLoadouts);
   const [selectedId, setSelectedId] = useState(loadouts[0].id);
@@ -123,6 +172,7 @@ export function ProviderLoadoutEditor() {
     useState(false);
   const [privateEvaluationArmed, setPrivateEvaluationArmed] = useState(false);
   const [privateEvaluationBusy, setPrivateEvaluationBusy] = useState(false);
+  const [activeRole, setActiveRole] = useState<ProviderRole>(initialRole);
 
   const selected =
     loadouts.find((loadout) => loadout.id === selectedId) ?? loadouts[0];
@@ -135,14 +185,6 @@ export function ProviderLoadoutEditor() {
       ? ["Magpie TTS"]
       : []),
   ];
-  const privateEvaluationPanelRole: ProviderRole | null =
-    selected.routes.llm.providerId === "nvidia-nim"
-      ? "llm"
-      : selected.routes.embeddings.providerId === "nvidia-nim"
-        ? "embeddings"
-        : selected.routes.tts.providerId === "nvidia-nim-magpie"
-          ? "tts"
-          : null;
   const privateEvaluationReady = Boolean(
     privateEvaluationPolicy?.namespaceEligible &&
       privateEvaluationPolicy.catalogRevision === nativeCatalogRevision &&
@@ -156,8 +198,17 @@ export function ProviderLoadoutEditor() {
       privateEvaluationAcknowledgement.applicationNamespace ===
         privateEvaluationPolicy.applicationNamespace,
   );
+  const contextTargetId =
+    scopeFilter === "game"
+      ? gameProfileId
+      : scopeFilter === "character" && gameProfileId && characterId
+        ? `${gameProfileId}/${characterId}`
+        : undefined;
   const currentScopeLoadouts = loadouts.filter(
-    (loadout) => loadout.scope === scopeFilter,
+    (loadout) =>
+      loadout.scope === scopeFilter &&
+      (scopeFilter === "global" ||
+        (Boolean(contextTargetId) && loadout.targetId === contextTargetId)),
   );
   const cloudVendors = useMemo(
     () =>
@@ -182,9 +233,48 @@ export function ProviderLoadoutEditor() {
       (provider) =>
         provider.id !== selected.routes[role].providerId &&
         provider.execution !== "Off" &&
-        provider.selectable !== false,
+        provider.selectable !== false &&
+        routeIsExecutable(role, provider.id),
     ),
   );
+  const targetForScope = (scope: LoadoutScope) => {
+    if (scope === "global") {
+      return { targetId: undefined, targetLabel: "Every game" };
+    }
+    if (!gameProfileId) return null;
+    const resolvedGameLabel = gameProfileLabel ?? gameProfileId;
+    if (scope === "game") {
+      return { targetId: gameProfileId, targetLabel: resolvedGameLabel };
+    }
+    if (!characterId) return null;
+    return {
+      targetId: `${gameProfileId}/${characterId}`,
+      targetLabel: `${resolvedGameLabel} · ${characterLabel ?? characterId}`,
+    };
+  };
+  const targetLabelFor = (loadout: ProviderLoadout) => {
+    if (loadout.scope === "global") return "Every game";
+    if (loadout.scope === "game" && loadout.targetId === gameProfileId) {
+      return gameProfileLabel ?? gameProfileId ?? loadout.targetLabel;
+    }
+    if (
+      loadout.scope === "character" &&
+      loadout.targetId === `${gameProfileId}/${characterId}`
+    ) {
+      return `${gameProfileLabel ?? gameProfileId} · ${characterLabel ?? characterId}`;
+    }
+    return loadout.targetLabel ?? loadout.targetId ?? "Unknown scope";
+  };
+  const chooseScope = (scope: LoadoutScope) => {
+    setScopeFilter(scope);
+    const target = targetForScope(scope);
+    const scoped = loadouts.find(
+      (loadout) =>
+        loadout.scope === scope &&
+        (scope === "global" || loadout.targetId === target?.targetId),
+    );
+    if (scoped) chooseLoadout(scoped);
+  };
 
   const acceptNativeSnapshot = (
     snapshot: NativeLoadoutSnapshot,
@@ -198,6 +288,7 @@ export function ProviderLoadoutEditor() {
     setNativeDocument(snapshot.document);
     setNativeCatalogRevision(snapshot.catalogRevision);
     setLoadouts(nativeLoadouts);
+    onNativeLoadoutsChange?.(nativeLoadouts);
     setSelectedId(preferred.id);
     setScopeFilter(preferred.scope);
     setNotice(
@@ -333,7 +424,19 @@ export function ProviderLoadoutEditor() {
   };
 
   const addLoadout = () => {
-    const created = makeLoadout(scopeFilter, loadouts.length + 1);
+    const target = targetForScope(scopeFilter);
+    if (!target) {
+      setNotice(
+        scopeFilter === "game"
+          ? "Select a game in World before creating a game override."
+          : "Select a game and character in World before creating a character override.",
+      );
+      return;
+    }
+    const created = {
+      ...makeLoadout(scopeFilter, loadouts.length + 1),
+      ...target,
+    };
     commit(
       [...loadouts, created],
       "New loadout created locally. Name it, review every role, then activate it explicitly.",
@@ -527,9 +630,7 @@ export function ProviderLoadoutEditor() {
                     voiceId:
                       value === "nvidia-nim-magpie"
                         ? stockVoices?.voices[0]?.voiceId
-                        : value === "elevenlabs"
-                          ? "EXAVITQu4vr4xnSDxMaL"
-                          : undefined,
+                        : qualifiedStockVoiceId(value),
                   }
                 : {}),
             }
@@ -611,14 +712,21 @@ export function ProviderLoadoutEditor() {
   };
 
   return (
-    <section className="loadout-console" aria-labelledby="loadout-title">
+    <section
+      className={`loadout-console loadout-console--${mode}`}
+      aria-labelledby="loadout-title"
+    >
       <header className="loadout-console__header">
         <div>
-          <span className="eyebrow">PROVIDER & MODEL LOADOUTS</span>
-          <h3 id="loadout-title">Build a route for every kind of turn.</h3>
+          <span className="eyebrow">VOICE & MIND</span>
+          <h3 id="loadout-title">
+            {mode === "onboarding"
+              ? "Choose how this character listens and answers."
+              : "Choose the route for the next conversation."}
+          </h3>
           <p>
-            Keep multiple API/model combinations, switch deliberately, and let
-            game or character overrides inherit the rest.
+            Pick one role at a time. Global choices flow into each game and
+            character until you add an override.
           </p>
         </div>
         <div
@@ -641,7 +749,7 @@ export function ProviderLoadoutEditor() {
             <Button
               key={scope}
               className={`loadout-scope-trace__step ${scopeFilter === scope ? "is-selected" : ""}`}
-              onPress={() => setScopeFilter(scope)}
+              onPress={() => chooseScope(scope)}
               aria-pressed={scopeFilter === scope}
             >
               <span>{scopeCopy[scope].eyebrow}</span>
@@ -666,17 +774,31 @@ export function ProviderLoadoutEditor() {
             <Button
               className="loadout-add"
               onPress={addLoadout}
+              isDisabled={!targetForScope(scopeFilter)}
               aria-label={`Create ${scopeFilter} loadout`}
             >
               +
             </Button>
           </div>
+          {!targetForScope(scopeFilter) && (
+            <p className="loadout-library__context-required" role="note">
+              {scopeFilter === "game"
+                ? "Select a game in World to create its override."
+                : "Select a game and character in World to create an override."}
+            </p>
+          )}
           <div className="loadout-library__list">
             {currentScopeLoadouts.length === 0 ? (
               <div className="loadout-library__empty">
                 <Icon name="models" />
                 <strong>No {scopeFilter} override</strong>
-                <p>Inherited routes remain visible until you create one.</p>
+                <p>
+                  {targetForScope(scopeFilter)
+                    ? "The inherited route stays active until you create one."
+                    : scopeFilter === "game"
+                      ? "Select a game in World to create its override."
+                      : "Select a game and character in World to create an override."}
+                </p>
               </div>
             ) : (
               currentScopeLoadouts.map((loadout) => (
@@ -689,7 +811,7 @@ export function ProviderLoadoutEditor() {
                   <span className="loadout-library__signal" />
                   <span>
                     <strong>{loadout.name}</strong>
-                    <small>{loadout.targetLabel}</small>
+                    <small>{targetLabelFor(loadout)}</small>
                   </span>
                   {loadout.active ? (
                     <StatusPill tone="ok">Active</StatusPill>
@@ -738,7 +860,7 @@ export function ProviderLoadoutEditor() {
             </label>
             <div className="loadout-editor__target">
               <span>APPLIES TO</span>
-              <strong>{selected.targetLabel}</strong>
+              <strong>{targetLabelFor(selected)}</strong>
               <small>
                 {selected.scope === "global"
                   ? "Base route"
@@ -764,51 +886,117 @@ export function ProviderLoadoutEditor() {
             </div>
           </div>
 
-          <div
-            className="loadout-route-summary"
-            aria-label="Selected route summary"
-          >
-            <div>
-              <span>CLOUD EGRESS</span>
-              <strong>
-                {cloudVendors.size} provider{cloudVendors.size === 1 ? "" : "s"}
-              </strong>
-              <small>
-                {cloudVendors.size
-                  ? [...cloudVendors].join(" · ")
-                  : "No selected cloud route"}
-              </small>
+          <details className="loadout-overview-details">
+            <summary>Connections & active route</summary>
+            <div
+              className="loadout-route-summary"
+              aria-label="Selected route summary"
+            >
+              <div>
+                <span>CLOUD EGRESS</span>
+                <strong>
+                  {cloudVendors.size} provider
+                  {cloudVendors.size === 1 ? "" : "s"}
+                </strong>
+                <small>
+                  {cloudVendors.size
+                    ? [...cloudVendors].join(" · ")
+                    : "No selected cloud route"}
+                </small>
+              </div>
+              <div>
+                <span>LOCAL ROLES</span>
+                <strong>{localRoles.length || "None"}</strong>
+                <small>
+                  {localRoles.length
+                    ? localRoles
+                        .map((role) => ROLE_META[role].short)
+                        .join(" · ")
+                    : "Cloud/off selections only"}
+                </small>
+              </div>
+              <div>
+                <span>ACTIVE AT SCOPE</span>
+                <strong>{activeForScope?.name ?? "None"}</strong>
+                <small>
+                  {selected.active
+                    ? "You are editing the active preference"
+                    : "This loadout is not routing"}
+                </small>
+              </div>
+              <div>
+                <span>REVISION</span>
+                <strong>
+                  R{selected.revision.toString().padStart(2, "0")}
+                </strong>
+                <small>Route IDs only · no credential values</small>
+              </div>
             </div>
-            <div>
-              <span>LOCAL ROLES</span>
-              <strong>{localRoles.length || "None"}</strong>
-              <small>
-                {localRoles.length
-                  ? localRoles.map((role) => ROLE_META[role].short).join(" · ")
-                  : "Cloud/off selections only"}
-              </small>
-            </div>
-            <div>
-              <span>ACTIVE AT SCOPE</span>
-              <strong>{activeForScope?.name ?? "None"}</strong>
-              <small>
-                {selected.active
-                  ? "You are editing the active preference"
-                  : "This loadout is not routing"}
-              </small>
-            </div>
-            <div>
-              <span>REVISION</span>
-              <strong>R{selected.revision.toString().padStart(2, "0")}</strong>
-              <small>Route IDs only · no credential values</small>
-            </div>
-          </div>
+          </details>
 
-          <div className="loadout-roles" aria-label="Provider routes by role">
-            {ROLE_ORDER.map((role) => {
+          <nav
+            className="loadout-role-picker"
+            aria-label="Conversation route roles"
+          >
+            {ESSENTIAL_ROLES.map((role) => {
               const route = selected.routes[role];
               const provider = providerFor(role, route.providerId);
               const model = modelFor(role, route);
+              const available = routeIsExecutable(role, provider.id);
+              return (
+                <Button
+                  key={role}
+                  className={`loadout-role-picker__item ${activeRole === role ? "is-selected" : ""} ${available ? "" : "is-unavailable"}`}
+                  onPress={() => setActiveRole(role)}
+                  aria-pressed={activeRole === role}
+                >
+                  <span>{ROLE_META[role].short}</span>
+                  <div>
+                    <strong>{ROLE_META[role].label}</strong>
+                    <small>
+                      {provider.name} · {model.name}
+                    </small>
+                  </div>
+                  <StatusPill tone={available ? "ok" : "warn"}>
+                    {available ? provider.execution : "Unavailable"}
+                  </StatusPill>
+                </Button>
+              );
+            })}
+            <details
+              className="loadout-role-picker__optional"
+              open={OPTIONAL_ROLES.includes(activeRole) || undefined}
+            >
+              <summary>Optional visual routes</summary>
+              <div>
+                {OPTIONAL_ROLES.map((role) => {
+                  const route = selected.routes[role];
+                  const provider = providerFor(role, route.providerId);
+                  return (
+                    <Button
+                      key={role}
+                      className={`loadout-role-picker__item ${activeRole === role ? "is-selected" : ""}`}
+                      onPress={() => setActiveRole(role)}
+                      aria-pressed={activeRole === role}
+                    >
+                      <span>{ROLE_META[role].short}</span>
+                      <div>
+                        <strong>{ROLE_META[role].label}</strong>
+                        <small>{provider.name} · no qualified live route</small>
+                      </div>
+                    </Button>
+                  );
+                })}
+              </div>
+            </details>
+          </nav>
+
+          <div className="loadout-roles" aria-label="Provider routes by role">
+            {[activeRole].map((role) => {
+              const route = selected.routes[role];
+              const provider = providerFor(role, route.providerId);
+              const model = modelFor(role, route);
+              const routeAvailable = routeIsExecutable(role, provider.id);
               return (
                 <article
                   className={`loadout-role loadout-role--${provider.execution.toLowerCase()}`}
@@ -824,14 +1012,16 @@ export function ProviderLoadoutEditor() {
                     </div>
                     <StatusPill
                       tone={
-                        provider.execution === "Cloud"
-                          ? "purple"
-                          : provider.execution === "Local"
-                            ? "teal"
-                            : "neutral"
+                        !routeAvailable
+                          ? "warn"
+                          : provider.execution === "Cloud"
+                            ? "purple"
+                            : provider.execution === "Local"
+                              ? "teal"
+                              : "neutral"
                       }
                     >
-                      {provider.execution}
+                      {routeAvailable ? provider.execution : "Unavailable"}
                     </StatusPill>
                   </header>
                   <div className="loadout-role__selectors">
@@ -845,29 +1035,36 @@ export function ProviderLoadoutEditor() {
                           changeRoute(role, "providerId", event.target.value)
                         }
                       >
-                        {ROUTE_OPTIONS[role].map((option) => (
-                          <option
-                            key={option.id}
-                            value={option.id}
-                            disabled={
-                              option.selectable === false ||
-                              (role === "tts" &&
-                                option.id === "nvidia-nim-magpie" &&
-                                (stockVoices?.status !== "available" ||
-                                  stockVoices.voices.length === 0))
-                            }
-                          >
-                            {option.name}
-                            {option.selectable === false
-                              ? " · qualification pending"
-                              : role === "tts" &&
-                                  option.id === "nvidia-nim-magpie" &&
-                                  (stockVoices?.status !== "available" ||
-                                    stockVoices.voices.length === 0)
-                                ? " · discover stock voices first"
-                                : ""}
-                          </option>
-                        ))}
+                        {ROUTE_OPTIONS[role].map((option) => {
+                          const executable = routeIsExecutable(role, option.id);
+                          const magpieNeedsVoice =
+                            role === "tts" &&
+                            option.id === "nvidia-nim-magpie" &&
+                            (stockVoices?.status !== "available" ||
+                              stockVoices.voices.length === 0);
+                          return (
+                            <option
+                              key={option.id}
+                              value={option.id}
+                              disabled={
+                                !executable ||
+                                option.selectable === false ||
+                                magpieNeedsVoice
+                              }
+                            >
+                              {option.name}
+                              {!executable
+                                ? role === "stt"
+                                  ? " · not wired to push-to-talk"
+                                  : " · no qualified live route"
+                                : option.selectable === false
+                                  ? " · qualification pending"
+                                  : magpieNeedsVoice
+                                    ? " · discover stock voices first"
+                                    : ""}
+                            </option>
+                          );
+                        })}
                       </select>
                     </label>
                     <label>
@@ -876,6 +1073,7 @@ export function ProviderLoadoutEditor() {
                         aria-label={`${ROLE_META[role].label} model`}
                         title={model.name}
                         value={model.id}
+                        disabled={!routeAvailable}
                         onChange={(event) =>
                           changeRoute(role, "modelId", event.target.value)
                         }
@@ -894,6 +1092,9 @@ export function ProviderLoadoutEditor() {
                         ))}
                       </select>
                     </label>
+                    {model.note && (
+                      <p className="loadout-role__note">{model.note}</p>
+                    )}
                     {role === "tts" &&
                       route.providerId !== "nvidia-nim-magpie" && (
                         <label>
@@ -928,6 +1129,11 @@ export function ProviderLoadoutEditor() {
                                 );
                             }}
                           />
+                          <small>
+                            Use a provider-stock voice ID. This route stores the
+                            identifier; it does not discover, preview, or verify
+                            the voice.
+                          </small>
                         </label>
                       )}
                     {role === "tts" &&
@@ -975,260 +1181,312 @@ export function ProviderLoadoutEditor() {
                         </label>
                       )}
                   </div>
-                  {role === "tts" && (
-                    <div className="stock-voice-discovery">
+                  {!routeAvailable && (
+                    <p className="loadout-role__note is-error" role="status">
+                      <Icon name="warning" size={14} />
+                      {role === "stt"
+                        ? "The current push-to-talk path supports AssemblyAI · Universal-3 Pro Streaming. Choose it before testing microphone input."
+                        : role === "vision"
+                          ? "No vision provider is executed by the current turn runtime. Keep this route off."
+                          : role === "lipSync"
+                            ? "No qualified live lip-sync pack is installed. Audio and subtitles remain available."
+                            : "This catalog route is not executable in the current runtime."}
+                    </p>
+                  )}
+                  {provider.execution === "Cloud" &&
+                    routeAvailable &&
+                    onManageProvider && (
                       <ActionButton
                         variant="outline"
-                        icon="refresh"
-                        onPress={refreshStockVoices}
-                        isDisabled={!nativeDocument || stockVoicesBusy}
+                        icon="shield"
+                        onPress={() =>
+                          onManageProvider(accountProviderId(provider.id))
+                        }
                       >
-                        {stockVoicesBusy
-                          ? "Discovering NVIDIA voices…"
-                          : "Refresh NVIDIA stock voices"}
+                        Connect or check {provider.name.split(" · ")[0]}
                       </ActionButton>
-                      <p
-                        className={stockVoicesError ? "is-error" : ""}
-                        role="status"
-                      >
-                        {!nativeDocument
-                          ? "Installed .debug/.review private-evaluation namespace required. Browser preview and the base production namespace cannot select Magpie."
-                          : stockVoicesError
-                            ? `Unavailable: ${stockVoicesError}`
-                            : stockVoices?.status === "available"
-                              ? `${stockVoices.voices.length} authenticated NVIDIA provider-stock voice${stockVoices.voices.length === 1 ? "" : "s"} · ${stockVoices.refresh.cacheHit ? "authenticated cache" : "authenticated refresh"} · expires ${stockVoices.refresh.expiresAtEpochMs ? new Date(stockVoices.refresh.expiresAtEpochMs).toLocaleString() : "not reported"} · private-evaluation namespace only · promotion/publication unsupported`
-                              : "No authenticated NVIDIA stock-voice catalog is loaded. Only an isolated native .debug/.review private-evaluation namespace can discover or select Magpie voices."}
-                      </p>
-                    </div>
+                    )}
+                  {role === "tts" && (
+                    <details
+                      className="stock-voice-discovery"
+                      open={provider.id === "nvidia-nim-magpie" || undefined}
+                    >
+                      <summary>
+                        <strong>NVIDIA Magpie stock voices</strong>
+                        <StatusPill
+                          tone={
+                            stockVoices?.status === "available"
+                              ? "ok"
+                              : "neutral"
+                          }
+                        >
+                          {stockVoices?.status === "available"
+                            ? `${stockVoices.voices.length} discovered`
+                            : nativeDocument
+                              ? "Private evaluation"
+                              : "Native only"}
+                        </StatusPill>
+                      </summary>
+                      <div className="stock-voice-discovery__body">
+                        <ActionButton
+                          variant="outline"
+                          icon="refresh"
+                          onPress={refreshStockVoices}
+                          isDisabled={!nativeDocument || stockVoicesBusy}
+                        >
+                          {stockVoicesBusy
+                            ? "Discovering NVIDIA voices…"
+                            : "Refresh NVIDIA stock voices"}
+                        </ActionButton>
+                        <p
+                          className={stockVoicesError ? "is-error" : ""}
+                          role="status"
+                        >
+                          {!nativeDocument
+                            ? "Installed .debug/.review private-evaluation namespace required. Browser preview and the base production namespace cannot select Magpie."
+                            : stockVoicesError
+                              ? `Unavailable: ${stockVoicesError}`
+                              : stockVoices?.status === "available"
+                                ? `${stockVoices.voices.length} authenticated NVIDIA provider-stock voice${stockVoices.voices.length === 1 ? "" : "s"} · ${stockVoices.refresh.cacheHit ? "authenticated cache" : "authenticated refresh"} · expires ${stockVoices.refresh.expiresAtEpochMs ? new Date(stockVoices.refresh.expiresAtEpochMs).toLocaleString() : "not reported"} · private-evaluation namespace only · promotion/publication unsupported`
+                                : "No authenticated NVIDIA stock-voice catalog is loaded. Only an isolated native .debug/.review private-evaluation namespace can discover or select Magpie voices."}
+                        </p>
+                      </div>
+                    </details>
                   )}
-                  {role === privateEvaluationPanelRole && (
+                  {(provider.id === "nvidia-nim" ||
+                    provider.id === "nvidia-nim-magpie") && (
                     <section
                       className="private-evaluation-acknowledgement"
                       aria-label="NVIDIA provider private evaluation terms"
                     >
-                      <div>
-                        <strong>NVIDIA private evaluation only</strong>
-                        <StatusPill
-                          tone={privateEvaluationReady ? "ok" : "warn"}
-                        >
-                          {privateEvaluationReady
-                            ? "Acknowledged"
-                            : "Acknowledgement required"}
-                        </StatusPill>
-                      </div>
-                      <p>
-                        Review/activation/turn use for the selected NVIDIA
-                        routes requires the exact current terms acknowledgement
-                        and NVIDIA credential. Magpie also requires an unexpired
-                        discovered stock voice. Public production, promotion,
-                        and publication remain blocked.
-                      </p>
-                      <ul className="private-evaluation-egress">
-                        {selected.routes.llm.providerId === "nvidia-nim" && (
-                          <li>
-                            LLM: conversation text and derived game context
-                            leave this PC.
-                          </li>
-                        )}
-                        {selected.routes.embeddings.providerId ===
-                          "nvidia-nim" && (
-                          <li>
-                            Embeddings: selected memory or lore text leaves this
-                            PC.
-                          </li>
-                        )}
-                        {selected.routes.tts.providerId ===
-                          "nvidia-nim-magpie" && (
-                          <li>
-                            Magpie TTS: response text and its audio-generation
-                            request leave this PC; stock voices only, with no
-                            cloning.
-                          </li>
-                        )}
-                      </ul>
-                      {privateEvaluationPolicy ? (
-                        <dl className="private-evaluation-policy">
-                          <div>
-                            <dt>Provider</dt>
-                            <dd>{privateEvaluationPolicy.providerId}</dd>
-                          </div>
-                          <div>
-                            <dt>Restriction</dt>
-                            <dd>{privateEvaluationPolicy.mode}</dd>
-                          </div>
-                          <div>
-                            <dt>Current terms</dt>
-                            <dd>{privateEvaluationPolicy.termsRevision}</dd>
-                          </div>
-                          <div>
-                            <dt>Native namespace</dt>
-                            <dd>
-                              {privateEvaluationPolicy.applicationNamespace} ·{" "}
-                              {privateEvaluationPolicy.namespaceEligible
-                                ? "eligible for private evaluation"
-                                : "ineligible; acknowledgement blocked"}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>Data egress</dt>
-                            <dd>
-                              {selectedNvidiaModalities.join(", ")} → NVIDIA
-                              provider cloud
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>Promotion / publication</dt>
-                            <dd>false / false</dd>
-                          </div>
-                          <div>
-                            <dt>Access scope</dt>
-                            <dd>{privateEvaluationPolicy.accessScope}</dd>
-                          </div>
-                          <div>
-                            <dt>Affected selected modalities</dt>
-                            <dd>{selectedNvidiaModalities.join(", ")}</dd>
-                          </div>
-                          <div>
-                            <dt>Provider limits</dt>
-                            <dd>{privateEvaluationPolicy.rateLimitNote}</dd>
-                          </div>
-                          <div>
-                            <dt>Prohibited data</dt>
-                            <dd>
-                              {privateEvaluationPolicy.prohibitedData.join(
-                                ", ",
-                              )}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>Logging / improvement disclosure</dt>
-                            <dd>
-                              security abuse logging{" "}
-                              {privateEvaluationPolicy.securityAbuseLogging
-                                ? "disclosed"
-                                : "not disclosed"}
-                              {" · product improvement collection "}
-                              {privateEvaluationPolicy.productImprovementCollectionDisclosed
-                                ? "disclosed"
-                                : "not disclosed"}
-                            </dd>
-                          </div>
-                        </dl>
-                      ) : (
-                        <p className="is-error" role="status">
-                          {privateEvaluationPolicyError ??
-                            "Reading the native private-evaluation policy…"}
+                      <details>
+                        <summary>
+                          <strong>NVIDIA private evaluation only</strong>
+                          <StatusPill
+                            tone={privateEvaluationReady ? "ok" : "warn"}
+                          >
+                            {privateEvaluationReady
+                              ? "Acknowledged"
+                              : "Acknowledgement required"}
+                          </StatusPill>
+                        </summary>
+                        <p>
+                          Review/activation/turn use for the selected NVIDIA
+                          routes requires the exact current terms
+                          acknowledgement and NVIDIA credential. Magpie also
+                          requires an unexpired discovered stock voice. Public
+                          production, promotion, and publication remain blocked.
                         </p>
-                      )}
-                      {privateEvaluationPolicy && (
-                        <a
-                          href={privateEvaluationPolicy.termsUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          Open NVIDIA API Trial Terms
-                        </a>
-                      )}
-                      {privateEvaluationAcknowledgement &&
-                        !privateEvaluationReady && (
-                          <small className="is-error">
-                            A prior acknowledgement is stale for the current
-                            terms, catalog, or native namespace. Re-review and
-                            acknowledge the policy below.
-                          </small>
+                        <ul className="private-evaluation-egress">
+                          {selected.routes.llm.providerId === "nvidia-nim" && (
+                            <li>
+                              LLM: conversation text and derived game context
+                              leave this PC.
+                            </li>
+                          )}
+                          {selected.routes.embeddings.providerId ===
+                            "nvidia-nim" && (
+                            <li>
+                              Embeddings: selected memory or lore text leaves
+                              this PC.
+                            </li>
+                          )}
+                          {selected.routes.tts.providerId ===
+                            "nvidia-nim-magpie" && (
+                            <li>
+                              Magpie TTS: response text and its audio-generation
+                              request leave this PC; stock voices only, with no
+                              cloning.
+                            </li>
+                          )}
+                        </ul>
+                        {privateEvaluationPolicy ? (
+                          <dl className="private-evaluation-policy">
+                            <div>
+                              <dt>Provider</dt>
+                              <dd>{privateEvaluationPolicy.providerId}</dd>
+                            </div>
+                            <div>
+                              <dt>Restriction</dt>
+                              <dd>{privateEvaluationPolicy.mode}</dd>
+                            </div>
+                            <div>
+                              <dt>Current terms</dt>
+                              <dd>{privateEvaluationPolicy.termsRevision}</dd>
+                            </div>
+                            <div>
+                              <dt>Native namespace</dt>
+                              <dd>
+                                {privateEvaluationPolicy.applicationNamespace} ·{" "}
+                                {privateEvaluationPolicy.namespaceEligible
+                                  ? "eligible for private evaluation"
+                                  : "ineligible; acknowledgement blocked"}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>Data egress</dt>
+                              <dd>
+                                {selectedNvidiaModalities.join(", ")} → NVIDIA
+                                provider cloud
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>Promotion / publication</dt>
+                              <dd>false / false</dd>
+                            </div>
+                            <div>
+                              <dt>Access scope</dt>
+                              <dd>{privateEvaluationPolicy.accessScope}</dd>
+                            </div>
+                            <div>
+                              <dt>Affected selected modalities</dt>
+                              <dd>{selectedNvidiaModalities.join(", ")}</dd>
+                            </div>
+                            <div>
+                              <dt>Provider limits</dt>
+                              <dd>{privateEvaluationPolicy.rateLimitNote}</dd>
+                            </div>
+                            <div>
+                              <dt>Prohibited data</dt>
+                              <dd>
+                                {privateEvaluationPolicy.prohibitedData.join(
+                                  ", ",
+                                )}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>Logging / improvement disclosure</dt>
+                              <dd>
+                                security abuse logging{" "}
+                                {privateEvaluationPolicy.securityAbuseLogging
+                                  ? "disclosed"
+                                  : "not disclosed"}
+                                {" · product improvement collection "}
+                                {privateEvaluationPolicy.productImprovementCollectionDisclosed
+                                  ? "disclosed"
+                                  : "not disclosed"}
+                              </dd>
+                            </div>
+                          </dl>
+                        ) : (
+                          <p className="is-error" role="status">
+                            {privateEvaluationPolicyError ??
+                              "Reading the native private-evaluation policy…"}
+                          </p>
                         )}
-                      {privateEvaluationReady &&
-                        privateEvaluationAcknowledgement && (
-                          <small>
-                            {privateEvaluationAcknowledgement.termsRevision} ·
-                            catalog{" "}
-                            {privateEvaluationAcknowledgement.catalogRevision}
-                            {" · "}
-                            nonproduction namespace{" "}
-                            {
-                              privateEvaluationAcknowledgement.applicationNamespace
+                        {privateEvaluationPolicy && (
+                          <a
+                            href={privateEvaluationPolicy.termsUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Open NVIDIA API Trial Terms
+                          </a>
+                        )}
+                        {privateEvaluationAcknowledgement &&
+                          !privateEvaluationReady && (
+                            <small className="is-error">
+                              A prior acknowledgement is stale for the current
+                              terms, catalog, or native namespace. Re-review and
+                              acknowledge the policy below.
+                            </small>
+                          )}
+                        {privateEvaluationReady &&
+                          privateEvaluationAcknowledgement && (
+                            <small>
+                              {privateEvaluationAcknowledgement.termsRevision} ·
+                              catalog{" "}
+                              {privateEvaluationAcknowledgement.catalogRevision}
+                              {" · "}
+                              nonproduction namespace{" "}
+                              {
+                                privateEvaluationAcknowledgement.applicationNamespace
+                              }
+                              {" · "}
+                              {new Date(
+                                privateEvaluationAcknowledgement.acknowledgedAtEpochMs,
+                              ).toLocaleString()}
+                            </small>
+                          )}
+                        <label className="private-evaluation-consent">
+                          <input
+                            type="checkbox"
+                            checked={privateEvaluationConsentChecked}
+                            disabled={
+                              !nativeDocument ||
+                              !privateEvaluationPolicy?.namespaceEligible ||
+                              privateEvaluationReady ||
+                              privateEvaluationBusy
                             }
-                            {" · "}
-                            {new Date(
-                              privateEvaluationAcknowledgement.acknowledgedAtEpochMs,
-                            ).toLocaleString()}
-                          </small>
-                        )}
-                      <label className="private-evaluation-consent">
-                        <input
-                          type="checkbox"
-                          checked={privateEvaluationConsentChecked}
-                          disabled={
+                            onChange={(event) => {
+                              setPrivateEvaluationConsentChecked(
+                                event.target.checked,
+                              );
+                              setPrivateEvaluationArmed(false);
+                            }}
+                          />
+                          <span>
+                            I reviewed the exact current NVIDIA trial terms and
+                            accept private-evaluation-only use, provider-cloud
+                            route egress, model-specific limits, reduced
+                            pre-release standards, retention/logging/improvement
+                            disclosures, restricted-data exclusions, and the
+                            production/promotion/publication prohibitions.
+                          </span>
+                        </label>
+                        <ActionButton
+                          variant="outline"
+                          icon="shield"
+                          onPress={acknowledgePrivateEvaluation}
+                          isDisabled={
                             !nativeDocument ||
+                            privateEvaluationBusy ||
                             !privateEvaluationPolicy?.namespaceEligible ||
-                            privateEvaluationReady ||
-                            privateEvaluationBusy
+                            !privateEvaluationConsentChecked ||
+                            privateEvaluationReady
                           }
-                          onChange={(event) => {
-                            setPrivateEvaluationConsentChecked(
-                              event.target.checked,
-                            );
-                            setPrivateEvaluationArmed(false);
-                          }}
-                        />
-                        <span>
-                          I reviewed the exact current NVIDIA trial terms and
-                          accept private-evaluation-only use, provider-cloud
-                          route egress, model-specific limits, reduced
-                          pre-release standards, retention/logging/improvement
-                          disclosures, restricted-data exclusions, and the
-                          production/promotion/publication prohibitions.
-                        </span>
-                      </label>
-                      <ActionButton
-                        variant="outline"
-                        icon="shield"
-                        onPress={acknowledgePrivateEvaluation}
-                        isDisabled={
-                          !nativeDocument ||
-                          privateEvaluationBusy ||
-                          !privateEvaluationPolicy?.namespaceEligible ||
-                          !privateEvaluationConsentChecked ||
-                          privateEvaluationReady
-                        }
-                      >
-                        {privateEvaluationBusy
-                          ? "Persisting acknowledgement…"
-                          : privateEvaluationArmed
-                            ? "Confirm private-evaluation-only terms"
-                            : privateEvaluationReady
-                              ? "Current terms acknowledged"
-                              : "Review and acknowledge terms"}
-                      </ActionButton>
+                        >
+                          {privateEvaluationBusy
+                            ? "Persisting acknowledgement…"
+                            : privateEvaluationArmed
+                              ? "Confirm private-evaluation-only terms"
+                              : privateEvaluationReady
+                                ? "Current terms acknowledged"
+                                : "Review and acknowledge terms"}
+                        </ActionButton>
+                      </details>
                     </section>
                   )}
-                  <dl className="loadout-role__facts">
-                    <div>
-                      <dt>EGRESS</dt>
-                      <dd>{provider.egress}</dd>
-                    </div>
-                    <div>
-                      <dt>COST</dt>
-                      <dd>{provider.cost}</dd>
-                    </div>
-                    <div>
-                      <dt>PRIVACY</dt>
-                      <dd>{provider.privacy}</dd>
-                    </div>
-                  </dl>
-                  {provider.note && (
-                    <p className="loadout-role__note">
-                      <Icon name="help" size={14} />
-                      {provider.note}
-                    </p>
-                  )}
-                  {provider.id === "local-visual-worker" && (
-                    <p className="loadout-role__note">
-                      <Icon name="warning" size={14} />
-                      Choose the desired candidate on Models. No pack is
-                      downloadable yet.
-                    </p>
-                  )}
+                  <details className="loadout-role__disclosure">
+                    <summary>Privacy, cost, and route details</summary>
+                    <dl className="loadout-role__facts">
+                      <div>
+                        <dt>EGRESS</dt>
+                        <dd>{provider.egress}</dd>
+                      </div>
+                      <div>
+                        <dt>COST</dt>
+                        <dd>{provider.cost}</dd>
+                      </div>
+                      <div>
+                        <dt>PRIVACY</dt>
+                        <dd>{provider.privacy}</dd>
+                      </div>
+                    </dl>
+                    {provider.note && (
+                      <p className="loadout-role__note">
+                        <Icon name="help" size={14} />
+                        {provider.note}
+                      </p>
+                    )}
+                    {provider.id === "local-visual-worker" && (
+                      <p className="loadout-role__note">
+                        <Icon name="warning" size={14} />
+                        No qualified pack is installed, downloadable, or
+                        available for activation in this build.
+                      </p>
+                    )}
+                  </details>
                 </article>
               );
             })}
@@ -1238,182 +1496,191 @@ export function ProviderLoadoutEditor() {
             className="manual-fallbacks"
             aria-labelledby="manual-fallbacks-title"
           >
-            <header>
-              <div>
-                <span className="eyebrow">MANUAL RECOVERY ONLY</span>
-                <h4 id="manual-fallbacks-title">
-                  Pre-authorize choices you may retry yourself.
-                </h4>
-              </div>
-              <StatusPill tone="teal">Automatic fallback disabled</StatusPill>
-            </header>
-            <p>
-              Authorization adds a visible retry choice after a failure. It
-              never switches providers on its own, never changes a live turn,
-              and never overrides Offline mode.
-            </p>
-            <div className="manual-fallbacks__grid">
-              {fallbackRoles.map((role) => {
-                const fallback =
-                  selected.fallbacks[role] ??
-                  defaultFallback(role, selected.routes[role]);
-                const eligibleProviders = ROUTE_OPTIONS[role].filter(
-                  (provider) =>
-                    provider.id !== selected.routes[role].providerId &&
-                    provider.execution !== "Off" &&
-                    provider.selectable !== false,
-                );
-                return (
-                  <div
-                    className={fallback.authorized ? "is-authorized" : ""}
-                    key={role}
-                  >
-                    <label className="fallback-authorize">
-                      <input
-                        type="checkbox"
-                        checked={fallback.authorized}
-                        onChange={(event) =>
-                          toggleFallback(role, event.target.checked)
-                        }
-                      />
-                      <span>
-                        <strong>{ROLE_META[role].short} manual retry</strong>
-                        <small>
-                          {fallback.authorized
-                            ? "Authorized · still requires a click"
-                            : "Not authorized"}
-                        </small>
-                      </span>
-                    </label>
-                    <select
-                      aria-label={`${ROLE_META[role].label} manual fallback provider`}
-                      value={fallback.providerId}
-                      onChange={(event) =>
-                        changeFallback(role, event.target.value)
-                      }
-                      disabled={!fallback.authorized}
+            <details>
+              <summary>Manual retry routes · off until authorized</summary>
+              <header>
+                <div>
+                  <span className="eyebrow">MANUAL RECOVERY ONLY</span>
+                  <h4 id="manual-fallbacks-title">
+                    Pre-authorize choices you may retry yourself.
+                  </h4>
+                </div>
+                <StatusPill tone="teal">Automatic fallback disabled</StatusPill>
+              </header>
+              <p>
+                Authorization adds a visible retry choice after a failure. It
+                never switches providers on its own, never changes a live turn,
+                and never overrides Offline mode.
+              </p>
+              <div className="manual-fallbacks__grid">
+                {fallbackRoles.map((role) => {
+                  const fallback =
+                    selected.fallbacks[role] ??
+                    defaultFallback(role, selected.routes[role]);
+                  const eligibleProviders = ROUTE_OPTIONS[role].filter(
+                    (provider) =>
+                      provider.id !== selected.routes[role].providerId &&
+                      provider.execution !== "Off" &&
+                      provider.selectable !== false &&
+                      routeIsExecutable(role, provider.id),
+                  );
+                  return (
+                    <div
+                      className={fallback.authorized ? "is-authorized" : ""}
+                      key={role}
                     >
-                      {eligibleProviders.map((provider) => (
-                        <option value={provider.id} key={provider.id}>
-                          {provider.name} · {provider.models[0].name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                );
-              })}
-            </div>
+                      <label className="fallback-authorize">
+                        <input
+                          type="checkbox"
+                          checked={fallback.authorized}
+                          onChange={(event) =>
+                            toggleFallback(role, event.target.checked)
+                          }
+                        />
+                        <span>
+                          <strong>{ROLE_META[role].short} manual retry</strong>
+                          <small>
+                            {fallback.authorized
+                              ? "Authorized · still requires a click"
+                              : "Not authorized"}
+                          </small>
+                        </span>
+                      </label>
+                      <select
+                        aria-label={`${ROLE_META[role].label} manual fallback provider`}
+                        value={fallback.providerId}
+                        onChange={(event) =>
+                          changeFallback(role, event.target.value)
+                        }
+                        disabled={!fallback.authorized}
+                      >
+                        {eligibleProviders.map((provider) => (
+                          <option value={provider.id} key={provider.id}>
+                            {provider.name} · {provider.models[0].name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
+            </details>
           </section>
 
           <section
             className="loadout-native-review"
             aria-labelledby="loadout-native-review-title"
           >
-            <header>
-              <div>
-                <span className="eyebrow">PROTECTED NATIVE STATE</span>
-                <h4 id="loadout-native-review-title">
-                  Review the active route for this scope.
-                </h4>
-              </div>
-              <StatusPill tone={nativeDocument ? "ok" : "neutral"}>
-                {nativeDocument ? "Installed app" : "Browser preview"}
-              </StatusPill>
-            </header>
-            <p>
-              Review resolves the active global → game → character inheritance
-              chain. It does not validate an inactive draft, contact a provider,
-              or check credentials.
-            </p>
-            {activeForScope && activeForScope.id !== selected.id && (
-              <p className="loadout-native-review__context">
-                This draft is inactive. Review will resolve active loadout “
-                {activeForScope.name}” for {selected.targetLabel}.
+            <details>
+              <summary>
+                Validate active inheritance · no provider contact
+              </summary>
+              <header>
+                <div>
+                  <span className="eyebrow">PROTECTED NATIVE STATE</span>
+                  <h4 id="loadout-native-review-title">
+                    Review the active route for this scope.
+                  </h4>
+                </div>
+                <StatusPill tone={nativeDocument ? "ok" : "neutral"}>
+                  {nativeDocument ? "Installed app" : "Browser preview"}
+                </StatusPill>
+              </header>
+              <p>
+                Review resolves the active global → game → character inheritance
+                chain. It does not validate an inactive draft, contact a
+                provider, or check credentials.
               </p>
-            )}
-            <div className="loadout-native-review__actions">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={reviewOffline}
-                  onChange={(event) => {
-                    setReviewOffline(event.target.checked);
-                    setReview(null);
-                  }}
-                  disabled={!nativeDocument}
-                />
-                <span>
-                  <strong>Review as fully local</strong>
-                  <small>
-                    Hosted routes should fail the native policy check
-                  </small>
-                </span>
-              </label>
-              <ActionButton
-                variant="outline"
-                icon="shield"
-                onPress={reviewActiveRoute}
-                isDisabled={!nativeDocument || reviewBusy}
-              >
-                {reviewBusy ? "Reviewing…" : "Review active route"}
-              </ActionButton>
-              {selected.scope !== "global" && (
-                <ActionButton
-                  variant="danger"
-                  icon="close"
-                  onPress={deactivateScope}
-                  isDisabled={!nativeDocument || !activeForScope}
-                >
-                  Return scope to inherited route
-                </ActionButton>
-              )}
-            </div>
-            {!nativeDocument && (
-              <p className="loadout-native-review__reason">
-                Review and scope deactivation require the installed app. Browser
-                preview changes remain local to this browser.
-              </p>
-            )}
-            {selected.scope !== "global" &&
-              !activeForScope &&
-              nativeDocument && (
-                <p className="loadout-native-review__reason">
-                  This scope already inherits its parent route; there is no
-                  active override to deactivate.
+              {activeForScope && activeForScope.id !== selected.id && (
+                <p className="loadout-native-review__context">
+                  This draft is inactive. Review will resolve active loadout “
+                  {activeForScope.name}” for {targetLabelFor(selected)}.
                 </p>
               )}
-            {review && (
-              <dl className="loadout-native-review__receipt">
-                <div>
-                  <dt>RESOLVED LEAF</dt>
-                  <dd>{review.resolved.leaf_loadout_id}</dd>
-                </div>
-                <div>
-                  <dt>INHERITANCE</dt>
-                  <dd>{review.resolved.inheritance_chain.join(" → ")}</dd>
-                </div>
-                <div>
-                  <dt>CONFIGURED ROLES</dt>
-                  <dd>{Object.keys(review.resolved.roles).length} / 6</dd>
-                </div>
-                <div>
-                  <dt>POLICY</dt>
-                  <dd>{review.offline ? "Fully local" : "Online allowed"}</dd>
-                </div>
-                <div>
-                  <dt>PROVIDER CONTACT</dt>
-                  <dd>
-                    {review.networkRequestPerformed ? "Performed" : "None"}
-                  </dd>
-                </div>
-                <div>
-                  <dt>CREDENTIAL CHECK</dt>
-                  <dd>
-                    {review.credentialsChecked ? "Checked" : "Not checked"}
-                  </dd>
-                </div>
-              </dl>
-            )}
+              <div className="loadout-native-review__actions">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={reviewOffline}
+                    onChange={(event) => {
+                      setReviewOffline(event.target.checked);
+                      setReview(null);
+                    }}
+                    disabled={!nativeDocument}
+                  />
+                  <span>
+                    <strong>Review as fully local</strong>
+                    <small>
+                      Hosted routes should fail the native policy check
+                    </small>
+                  </span>
+                </label>
+                <ActionButton
+                  variant="outline"
+                  icon="shield"
+                  onPress={reviewActiveRoute}
+                  isDisabled={!nativeDocument || reviewBusy}
+                >
+                  {reviewBusy ? "Reviewing…" : "Review active route"}
+                </ActionButton>
+                {selected.scope !== "global" && (
+                  <ActionButton
+                    variant="danger"
+                    icon="close"
+                    onPress={deactivateScope}
+                    isDisabled={!nativeDocument || !activeForScope}
+                  >
+                    Return scope to inherited route
+                  </ActionButton>
+                )}
+              </div>
+              {!nativeDocument && (
+                <p className="loadout-native-review__reason">
+                  Review and scope deactivation require the installed app.
+                  Browser preview changes remain local to this browser.
+                </p>
+              )}
+              {selected.scope !== "global" &&
+                !activeForScope &&
+                nativeDocument && (
+                  <p className="loadout-native-review__reason">
+                    This scope already inherits its parent route; there is no
+                    active override to deactivate.
+                  </p>
+                )}
+              {review && (
+                <dl className="loadout-native-review__receipt">
+                  <div>
+                    <dt>RESOLVED LEAF</dt>
+                    <dd>{review.resolved.leaf_loadout_id}</dd>
+                  </div>
+                  <div>
+                    <dt>INHERITANCE</dt>
+                    <dd>{review.resolved.inheritance_chain.join(" → ")}</dd>
+                  </div>
+                  <div>
+                    <dt>CONFIGURED ROLES</dt>
+                    <dd>{Object.keys(review.resolved.roles).length} / 6</dd>
+                  </div>
+                  <div>
+                    <dt>POLICY</dt>
+                    <dd>{review.offline ? "Fully local" : "Online allowed"}</dd>
+                  </div>
+                  <div>
+                    <dt>PROVIDER CONTACT</dt>
+                    <dd>
+                      {review.networkRequestPerformed ? "Performed" : "None"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>CREDENTIAL CHECK</dt>
+                    <dd>
+                      {review.credentialsChecked ? "Checked" : "Not checked"}
+                    </dd>
+                  </div>
+                </dl>
+              )}
+            </details>
           </section>
 
           <footer className="loadout-editor__footer">
