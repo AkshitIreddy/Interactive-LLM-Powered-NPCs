@@ -1629,7 +1629,10 @@ ResidualPatch compose_photometric_atlas_residual(
         !std::isfinite(neutral_reference.enrolled_pose.roll) ||
         !std::isfinite(observed_state.enrolled_pose.yaw) ||
         !std::isfinite(observed_state.enrolled_pose.pitch) ||
-        !std::isfinite(observed_state.enrolled_pose.roll)) {
+        !std::isfinite(observed_state.enrolled_pose.roll) ||
+        neutral_reference.enrolled_pose.yaw != observed_state.enrolled_pose.yaw ||
+        neutral_reference.enrolled_pose.pitch != observed_state.enrolled_pose.pitch ||
+        neutral_reference.enrolled_pose.roll != observed_state.enrolled_pose.roll) {
         return patch;
     }
 

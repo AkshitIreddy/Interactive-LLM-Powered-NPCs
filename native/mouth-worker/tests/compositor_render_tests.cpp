@@ -401,6 +401,15 @@ void test_photometric_reference_is_calibrated_and_mouth_bounded() {
                source.identity.captured_at_ns + 4'000'000)
                .premultiplied_bgra.empty(),
            "photometric compositor rejects a legacy texture passed as schema three");
+
+    auto mismatched_pose = open;
+    mismatched_pose.enrolled_pose.yaw = 1.0;
+    expect(compose_photometric_atlas_residual(
+               source, tracking.track, tracking, neutral, mismatched_pose,
+               coefficients_for_viseme(Viseme::open_vowel),
+               source.identity.captured_at_ns + 4'000'000)
+               .premultiplied_bgra.empty(),
+           "photometric compositor rejects references from different canonical poses");
 }
 
 } // namespace
