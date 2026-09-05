@@ -28,13 +28,31 @@ constexpr Nanoseconds smoothing_continuity_limit_ns = 180'000'000;
 constexpr std::size_t minimum_atlas_states = 4U;
 constexpr std::size_t maximum_atlas_states = 64U;
 constexpr std::uint32_t maximum_atlas_dimension = 512U;
+constexpr Nanoseconds timed_coarticulation_tau_ns = 42'000'000;
+constexpr Nanoseconds estimated_coarticulation_tau_ns = 62'000'000;
+
+[[nodiscard]] double exponential_alpha(const Nanoseconds elapsed_ns,
+                                       const Nanoseconds tau_ns) noexcept {
+    if (elapsed_ns <= 0 || tau_ns <= 0) {
+        return 1.0;
+    }
+    return 1.0 - std::exp(-static_cast<double>(elapsed_ns) /
+                          static_cast<double>(tau_ns));
+}
 
 [[nodiscard]] double blend_toward(const double current,
                                   const double target,
-                                  const double rising_alpha,
-                                  const double falling_alpha) noexcept {
-    const double alpha = target >= current ? rising_alpha : falling_alpha;
+                                  const double alpha) noexcept {
     return current + (target - current) * alpha;
+}
+
+[[nodiscard]] bool contact_topology(const MouthCoefficients& value) noexcept {
+    return value.lip_close >= 0.62 && value.jaw_open <= 0.32;
+}
+
+[[nodiscard]] bool exact_contact_closure(
+    const MouthCoefficients& value) noexcept {
+    return value.lip_close >= 0.88 && value.jaw_open <= 0.04;
 }
 
 [[nodiscard]] bool finite_rect(const NormalizedRect& rect) noexcept {
@@ -224,7 +242,12 @@ struct AtlasSelection final {
     const double yaw_delta = (state.appearance.enrolled_pose.yaw - target_pose.yaw) / 35.0;
     const double pitch_delta = (state.appearance.enrolled_pose.pitch - target_pose.pitch) / 25.0;
     const double roll_delta = (state.appearance.enrolled_pose.roll - target_pose.roll) / 45.0;
-    return coefficient_distance(state.coefficients, target) +
+    // Teeth-bearing/open textures must not be averaged into contact states.
+    // The finite penalty still permits a sparse atlas to fail softly to its
+    // nearest available observation instead of producing no residual.
+    const double topology_penalty =
+        contact_topology(state.coefficients) == contact_topology(target) ? 0.0 : 20.0;
+    return coefficient_distance(state.coefficients, target) + topology_penalty +
            0.45 * yaw_delta * yaw_delta + 0.30 * pitch_delta * pitch_delta +
            0.10 * roll_delta * roll_delta;
 }
@@ -278,7 +301,7 @@ bool ReferenceMouthWorker::cancel_to(const std::uint64_t new_generation) noexcep
         ++stats_.cancelled;
     }
     atlas_.reset();
-    reset_pcm_smoothing();
+    reset_drive_smoothing();
     reset_atlas_selection();
     return true;
 }
@@ -311,7 +334,7 @@ bool ReferenceMouthWorker::install_atlas(CharacterMouthAtlas atlas) {
         return false;
     }
     atlas_ = std::move(atlas);
-    reset_pcm_smoothing();
+    reset_drive_smoothing();
     reset_atlas_selection();
     return true;
 }
@@ -347,47 +370,31 @@ ProcessResult ReferenceMouthWorker::process_latest(const FrameIdentity& current_
         coefficients = coefficients_from_pcm(item.drive.interleaved_pcm,
                                              item.drive.clock.sample_rate,
                                              item.drive.clock.channels);
-        coefficients = smooth_pcm_coefficients(coefficients, item);
         break;
     }
+    const auto target_coefficients = coefficients;
+    coefficients = smooth_drive_coefficients(coefficients, item);
 
     ResidualPatch residual{};
     if (atlas_.has_value() &&
         atlas_->cancellation_generation == item.track.cancellation_generation &&
         atlas_->actor_id == item.track.actor_id) {
-        auto selection = select_atlas_state(*atlas_, coefficients, item.tracking.pose);
-        const bool continuous_selection = selected_atlas_state_.has_value() &&
-            selected_atlas_track_.has_value() && *selected_atlas_track_ == item.track &&
-            selected_atlas_segment_id_ == item.drive.clock.segment_id &&
-            item.source.identity.captured_at_ns > selected_atlas_at_ns_ &&
-            item.source.identity.captured_at_ns - selected_atlas_at_ns_ <=
-                smoothing_continuity_limit_ns &&
-            *selected_atlas_state_ < atlas_->states.size();
-        if (continuous_selection && item.drive.kind != DriveKind::timed_viseme &&
-            selection.index != *selected_atlas_state_) {
-            const double previous_distance = atlas_state_distance(
-                atlas_->states[*selected_atlas_state_], coefficients, item.tracking.pose);
-            // A photographed atlas is intentionally discrete. Hold a selected
-            // texture for two admitted frames for estimated continuous drives.
-            // Exact timed cues must bypass this dwell: an entire short phonetic
-            // gesture can otherwise be replaced by the preceding vowel image.
-            if (selected_atlas_age_ < 2U || selection.distance + 0.25 >= previous_distance) {
-                selection.index = *selected_atlas_state_;
-                selection.distance = previous_distance;
+        if (exact_contact_closure(coefficients)) {
+            // A bilabial/silence cue is a hard anatomical constraint. Use the
+            // current-frame compositor to close an already-open source mouth,
+            // while excluding photographed teeth and prior atlas textures.
+            residual = compose_current_frame_residual(
+                item.source, item.track, item.tracking, coefficients, now_ns);
+        } else {
+            const auto selection = select_atlas_state(
+                *atlas_, target_coefficients, item.tracking.pose);
+            if (std::isfinite(selection.distance) && selection.index < atlas_->states.size()) {
+                const auto& state = atlas_->states[selection.index];
+                const auto& appearance = smooth_atlas_appearance(state, item);
+                residual = compose_atlas_residual(item.source, item.track, item.tracking,
+                                                  appearance,
+                                                  coefficients, now_ns);
             }
-        }
-        if (std::isfinite(selection.distance) && selection.index < atlas_->states.size()) {
-            selected_atlas_age_ = continuous_selection &&
-                    selected_atlas_state_ == selection.index
-                ? std::min<std::uint32_t>(selected_atlas_age_ + 1U, 1'000'000U)
-                : 1U;
-            selected_atlas_state_ = selection.index;
-            selected_atlas_track_ = item.track;
-            selected_atlas_segment_id_ = item.drive.clock.segment_id;
-            selected_atlas_at_ns_ = item.source.identity.captured_at_ns;
-            residual = compose_atlas_residual(item.source, item.track, item.tracking,
-                                              atlas_->states[selection.index].appearance,
-                                              coefficients, now_ns);
         }
     } else {
         residual = compose_current_frame_residual(item.source, item.track, item.tracking,
@@ -401,52 +408,133 @@ ProcessResult ReferenceMouthWorker::process_latest(const FrameIdentity& current_
     return {Disposition::residual_ready, std::move(residual)};
 }
 
-MouthCoefficients ReferenceMouthWorker::smooth_pcm_coefficients(
+MouthCoefficients ReferenceMouthWorker::smooth_drive_coefficients(
     const MouthCoefficients& target,
     const WorkItem& item) noexcept {
-    const bool continuous = smoothed_pcm_coefficients_.has_value() &&
-                            smoothed_pcm_track_.has_value() &&
-                            *smoothed_pcm_track_ == item.track &&
-                            smoothed_pcm_segment_id_ == item.drive.clock.segment_id &&
-                            item.source.identity.captured_at_ns > smoothed_pcm_at_ns_ &&
-                            item.source.identity.captured_at_ns - smoothed_pcm_at_ns_ <=
+    const auto source_at = item.source.identity.captured_at_ns;
+    const auto playback_at = item.drive.clock.playback_at_ns;
+    const bool continuous = smoothed_drive_coefficients_.has_value() &&
+                            smoothed_drive_track_.has_value() &&
+                            *smoothed_drive_track_ == item.track &&
+                            smoothed_drive_segment_id_ == item.drive.clock.segment_id &&
+                            source_at > smoothed_drive_source_at_ns_ &&
+                            source_at - smoothed_drive_source_at_ns_ <=
+                                smoothing_continuity_limit_ns &&
+                            playback_at > smoothed_drive_playback_at_ns_ &&
+                            playback_at - smoothed_drive_playback_at_ns_ <=
                                 smoothing_continuity_limit_ns;
-    if (!continuous) {
-        smoothed_pcm_coefficients_ = target;
+    if (!continuous || exact_contact_closure(target)) {
+        // Contact closure is a constraint, not a value to ease toward. This
+        // lets the current-frame compositor close the newest source mouth
+        // immediately while ordinary vowel geometry remains time-continuous.
+        smoothed_drive_coefficients_ = target;
     } else {
-        auto& value = *smoothed_pcm_coefficients_;
-        value.jaw_open = blend_toward(value.jaw_open, target.jaw_open, 0.74, 0.48);
-        // Closing should remain decisive enough for bilabials and silence;
-        // opening the lip seal may be quicker without producing chatter.
-        value.lip_close = blend_toward(value.lip_close, target.lip_close, 0.66, 0.78);
-        value.funnel = blend_toward(value.funnel, target.funnel, 0.68, 0.44);
-        value.pucker = blend_toward(value.pucker, target.pucker, 0.68, 0.44);
-        value.smile_left = blend_toward(value.smile_left, target.smile_left, 0.62, 0.42);
-        value.smile_right = blend_toward(value.smile_right, target.smile_right, 0.62, 0.42);
+        auto& value = *smoothed_drive_coefficients_;
+        const auto elapsed = playback_at - smoothed_drive_playback_at_ns_;
+        const auto ordinary_tau = item.drive.kind == DriveKind::timed_viseme
+            ? timed_coarticulation_tau_ns
+            : estimated_coarticulation_tau_ns;
+        const auto opening_tau = item.drive.kind == DriveKind::timed_viseme
+            ? 34'000'000LL
+            : 46'000'000LL;
+        const auto closing_tau = item.drive.kind == DriveKind::timed_viseme
+            ? 22'000'000LL
+            : 32'000'000LL;
+        const double ordinary_alpha = exponential_alpha(elapsed, ordinary_tau);
+        const double jaw_alpha = exponential_alpha(
+            elapsed, target.jaw_open >= value.jaw_open ? opening_tau : ordinary_tau);
+        const double close_alpha = exponential_alpha(
+            elapsed, target.lip_close >= value.lip_close ? closing_tau : opening_tau);
+        value.jaw_open = blend_toward(value.jaw_open, target.jaw_open, jaw_alpha);
+        value.lip_close = blend_toward(value.lip_close, target.lip_close, close_alpha);
+        value.funnel = blend_toward(value.funnel, target.funnel, ordinary_alpha);
+        value.pucker = blend_toward(value.pucker, target.pucker, ordinary_alpha);
+        value.smile_left = blend_toward(value.smile_left, target.smile_left, ordinary_alpha);
+        value.smile_right = blend_toward(value.smile_right, target.smile_right, ordinary_alpha);
         value.upper_lip_raise = blend_toward(
-            value.upper_lip_raise, target.upper_lip_raise, 0.68, 0.46);
+            value.upper_lip_raise, target.upper_lip_raise, ordinary_alpha);
         value.lower_lip_depress = blend_toward(
-            value.lower_lip_depress, target.lower_lip_depress, 0.72, 0.48);
+            value.lower_lip_depress, target.lower_lip_depress, ordinary_alpha);
     }
-    smoothed_pcm_track_ = item.track;
-    smoothed_pcm_segment_id_ = item.drive.clock.segment_id;
-    smoothed_pcm_at_ns_ = item.source.identity.captured_at_ns;
-    return *smoothed_pcm_coefficients_;
+    smoothed_drive_track_ = item.track;
+    smoothed_drive_segment_id_ = item.drive.clock.segment_id;
+    smoothed_drive_source_at_ns_ = source_at;
+    smoothed_drive_playback_at_ns_ = playback_at;
+    return *smoothed_drive_coefficients_;
 }
 
-void ReferenceMouthWorker::reset_pcm_smoothing() noexcept {
-    smoothed_pcm_coefficients_.reset();
-    smoothed_pcm_track_.reset();
-    smoothed_pcm_segment_id_ = 0U;
-    smoothed_pcm_at_ns_ = 0;
+const CanonicalMouthPatch& ReferenceMouthWorker::smooth_atlas_appearance(
+    const MouthAtlasState& target,
+    const WorkItem& item) {
+    const auto source_at = item.source.identity.captured_at_ns;
+    const auto playback_at = item.drive.clock.playback_at_ns;
+    const bool continuous = smoothed_atlas_appearance_.has_value() &&
+                            smoothed_atlas_target_coefficients_.has_value() &&
+                            smoothed_atlas_track_.has_value() &&
+                            *smoothed_atlas_track_ == item.track &&
+                            smoothed_atlas_segment_id_ == item.drive.clock.segment_id &&
+                            source_at > smoothed_atlas_source_at_ns_ &&
+                            source_at - smoothed_atlas_source_at_ns_ <=
+                                smoothing_continuity_limit_ns &&
+                            playback_at > smoothed_atlas_playback_at_ns_ &&
+                            playback_at - smoothed_atlas_playback_at_ns_ <=
+                                smoothing_continuity_limit_ns &&
+                            smoothed_atlas_appearance_->representation ==
+                                target.appearance.representation &&
+                            smoothed_atlas_appearance_->width == target.appearance.width &&
+                            smoothed_atlas_appearance_->height == target.appearance.height &&
+                            smoothed_atlas_appearance_->stride_bytes ==
+                                target.appearance.stride_bytes &&
+                            smoothed_atlas_appearance_->premultiplied_bgra.size() ==
+                                target.appearance.premultiplied_bgra.size();
+    const bool compatible_topology = continuous &&
+        contact_topology(*smoothed_atlas_target_coefficients_) ==
+            contact_topology(target.coefficients);
+    if (!compatible_topology) {
+        // Contact and open/teeth-bearing observations are never cross-faded.
+        // Their boundary is an anatomical event, while all ordinary vowel
+        // changes within a topology use a short causal cross-fade.
+        smoothed_atlas_appearance_ = target.appearance;
+    } else {
+        const auto elapsed = playback_at - smoothed_atlas_playback_at_ns_;
+        const auto tau = item.drive.kind == DriveKind::timed_viseme
+            ? timed_coarticulation_tau_ns
+            : estimated_coarticulation_tau_ns;
+        const double alpha = exponential_alpha(elapsed, tau);
+        auto& pixels = smoothed_atlas_appearance_->premultiplied_bgra;
+        const auto& target_pixels = target.appearance.premultiplied_bgra;
+        for (std::size_t index = 0U; index < pixels.size(); ++index) {
+            pixels[index] = static_cast<std::uint8_t>(std::clamp(
+                std::lround(blend_toward(
+                    static_cast<double>(pixels[index]),
+                    static_cast<double>(target_pixels[index]), alpha)),
+                0L, 255L));
+        }
+        smoothed_atlas_appearance_->enrolled_pose = target.appearance.enrolled_pose;
+    }
+    smoothed_atlas_target_coefficients_ = target.coefficients;
+    smoothed_atlas_track_ = item.track;
+    smoothed_atlas_segment_id_ = item.drive.clock.segment_id;
+    smoothed_atlas_source_at_ns_ = source_at;
+    smoothed_atlas_playback_at_ns_ = playback_at;
+    return *smoothed_atlas_appearance_;
+}
+
+void ReferenceMouthWorker::reset_drive_smoothing() noexcept {
+    smoothed_drive_coefficients_.reset();
+    smoothed_drive_track_.reset();
+    smoothed_drive_segment_id_ = 0U;
+    smoothed_drive_source_at_ns_ = 0;
+    smoothed_drive_playback_at_ns_ = 0;
 }
 
 void ReferenceMouthWorker::reset_atlas_selection() noexcept {
-    selected_atlas_state_.reset();
-    selected_atlas_track_.reset();
-    selected_atlas_segment_id_ = 0U;
-    selected_atlas_at_ns_ = 0;
-    selected_atlas_age_ = 0U;
+    smoothed_atlas_appearance_.reset();
+    smoothed_atlas_target_coefficients_.reset();
+    smoothed_atlas_track_.reset();
+    smoothed_atlas_segment_id_ = 0U;
+    smoothed_atlas_source_at_ns_ = 0;
+    smoothed_atlas_playback_at_ns_ = 0;
 }
 
 std::uint64_t ReferenceMouthWorker::active_generation() const noexcept {

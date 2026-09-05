@@ -36,25 +36,30 @@ private:
     [[nodiscard]] Disposition validate(const WorkItem& item,
                                        const FrameIdentity& current_frame,
                                        Nanoseconds now_ns) const noexcept;
-    [[nodiscard]] MouthCoefficients smooth_pcm_coefficients(
+    [[nodiscard]] MouthCoefficients smooth_drive_coefficients(
         const MouthCoefficients& target,
         const WorkItem& item) noexcept;
-    void reset_pcm_smoothing() noexcept;
+    [[nodiscard]] const CanonicalMouthPatch& smooth_atlas_appearance(
+        const MouthAtlasState& target,
+        const WorkItem& item);
+    void reset_drive_smoothing() noexcept;
     void reset_atlas_selection() noexcept;
 
     std::uint64_t active_generation_{};
     WorkerPolicy policy_;
     std::optional<WorkItem> pending_;
     std::optional<CharacterMouthAtlas> atlas_;
-    std::optional<MouthCoefficients> smoothed_pcm_coefficients_;
-    std::optional<TrackBinding> smoothed_pcm_track_;
-    std::uint64_t smoothed_pcm_segment_id_{};
-    Nanoseconds smoothed_pcm_at_ns_{};
-    std::optional<std::size_t> selected_atlas_state_;
-    std::optional<TrackBinding> selected_atlas_track_;
-    std::uint64_t selected_atlas_segment_id_{};
-    Nanoseconds selected_atlas_at_ns_{};
-    std::uint32_t selected_atlas_age_{};
+    std::optional<MouthCoefficients> smoothed_drive_coefficients_;
+    std::optional<TrackBinding> smoothed_drive_track_;
+    std::uint64_t smoothed_drive_segment_id_{};
+    Nanoseconds smoothed_drive_source_at_ns_{};
+    Nanoseconds smoothed_drive_playback_at_ns_{};
+    std::optional<CanonicalMouthPatch> smoothed_atlas_appearance_;
+    std::optional<MouthCoefficients> smoothed_atlas_target_coefficients_;
+    std::optional<TrackBinding> smoothed_atlas_track_;
+    std::uint64_t smoothed_atlas_segment_id_{};
+    Nanoseconds smoothed_atlas_source_at_ns_{};
+    Nanoseconds smoothed_atlas_playback_at_ns_{};
     WorkerStats stats_;
 };
 

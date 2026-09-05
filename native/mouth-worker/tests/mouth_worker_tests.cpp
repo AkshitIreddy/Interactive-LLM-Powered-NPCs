@@ -723,28 +723,206 @@ void test_timed_viseme_does_not_wait_for_atlas_dwell() {
     item = advance(item);
     item.drive.viseme = Viseme::spread_vowel;
     const auto spread_coefficients = coefficients_for_viseme(Viseme::spread_vowel, 1.0);
-    const auto expected_held = compose_atlas_residual(
-        item.source, item.track, item.tracking, atlas.states[3U].appearance,
-        spread_coefficients, item.source.identity.captured_at_ns + 10'000'000);
     expect(worker.submit(item), "first competing atlas state enters the queue");
     const auto held = worker.process_latest(
         item.source.identity, item.source.identity.captured_at_ns + 10'000'000);
     expect(held.has_residual() &&
-               digest(held.residual.premultiplied_bgra) ==
-                   digest(expected_held.premultiplied_bgra),
-           "a clock-bound speech cue selects its matching shape on its first frame");
+               held.residual.coefficients.smile_left >
+                   first.residual.coefficients.smile_left &&
+               held.residual.coefficients.smile_left < spread_coefficients.smile_left,
+           "a clock-bound speech cue starts moving toward its shape on its first frame");
 
     item = advance(item);
-    const auto expected_switched = compose_atlas_residual(
-        item.source, item.track, item.tracking, atlas.states[3U].appearance,
-        spread_coefficients, item.source.identity.captured_at_ns + 10'000'000);
     expect(worker.submit(item), "second competing atlas state enters the queue");
     const auto switched = worker.process_latest(
         item.source.identity, item.source.identity.captured_at_ns + 10'000'000);
     expect(switched.has_residual() &&
-               digest(switched.residual.premultiplied_bgra) ==
-                   digest(expected_switched.premultiplied_bgra),
-           "a sustained speech cue retains its matching appearance");
+               switched.residual.coefficients.smile_left >
+                   held.residual.coefficients.smile_left &&
+               digest(switched.residual.premultiplied_bgra) !=
+                   digest(held.residual.premultiplied_bgra),
+           "a sustained speech cue continues converging without a frame-count dwell");
+}
+
+void test_timed_atlas_transition_is_continuous_on_its_first_frame() {
+    auto item = make_item(240U, 3'000'000'000);
+    item.drive.viseme = Viseme::open_vowel;
+    item.drive.viseme_strength = 1.0;
+    auto atlas = make_character_atlas(item);
+    ReferenceMouthWorker worker(item.track.cancellation_generation);
+    expect(worker.install_atlas(atlas), "transition test atlas installs");
+    expect(worker.submit(item), "transition origin enters the queue");
+    const auto origin = worker.process_latest(
+        item.source.identity, item.source.identity.captured_at_ns + 10'000'000);
+    expect(origin.has_residual(), "transition origin renders");
+
+    ++item.source.identity.sequence;
+    item.source.identity.captured_at_ns += 33'000'000;
+    item.source.lease.lease_nonce_low = item.source.identity.sequence;
+    item.source.lease.expires_at_ns = item.source.identity.captured_at_ns + 100'000'000;
+    item.tracking.frame = item.source.identity;
+    item.tracking.measured_at_ns = item.source.identity.captured_at_ns + 2'000'000;
+    item.drive.clock.first_sample_index += item.drive.clock.sample_count;
+    item.drive.clock.playback_sample_index = item.drive.clock.first_sample_index;
+    item.drive.clock.playback_at_ns = item.source.identity.captured_at_ns;
+    item.drive.viseme = Viseme::spread_vowel;
+    item.deadline_ns = item.source.identity.captured_at_ns + 50'000'000;
+
+    const auto spread_coefficients = coefficients_for_viseme(Viseme::spread_vowel, 1.0);
+    const auto hard_switched = compose_atlas_residual(
+        item.source, item.track, item.tracking, atlas.states[3U].appearance,
+        spread_coefficients, item.source.identity.captured_at_ns + 10'000'000);
+    const auto held_open = compose_atlas_residual(
+        item.source, item.track, item.tracking, atlas.states[2U].appearance,
+        spread_coefficients, item.source.identity.captured_at_ns + 10'000'000);
+    expect(worker.submit(item), "transition destination enters the queue");
+    const auto transition = worker.process_latest(
+        item.source.identity, item.source.identity.captured_at_ns + 10'000'000);
+    expect(transition.has_residual(), "transition destination renders");
+    expect(digest(transition.residual.premultiplied_bgra) !=
+               digest(hard_switched.premultiplied_bgra),
+           "the first transition frame is not a hard texture switch");
+    expect(digest(transition.residual.premultiplied_bgra) !=
+               digest(held_open.premultiplied_bgra),
+           "the first transition frame advances toward the new articulation");
+}
+
+void test_bilabial_closure_remains_immediate_during_coarticulation() {
+    auto item = make_item(250U, 3'500'000'000);
+    // Model a gameplay frame captured during unrelated source dialogue: the
+    // source mouth is visibly open before the replacement speech reaches M/B/P.
+    for (std::uint32_t y = 111U; y <= 121U; ++y) {
+        for (std::uint32_t x = 147U; x <= 173U; ++x) {
+            const auto offset = static_cast<std::size_t>(y) * item.source.lease.stride_bytes +
+                                static_cast<std::size_t>(x) * 4U;
+            item.source.bgra[offset + 0U] = 7U;
+            item.source.bgra[offset + 1U] = 5U;
+            item.source.bgra[offset + 2U] = 11U;
+            item.source.bgra[offset + 3U] = 255U;
+        }
+    }
+    item.drive.viseme = Viseme::open_vowel;
+    item.drive.viseme_strength = 1.0;
+    auto atlas = make_character_atlas(item);
+    ReferenceMouthWorker worker(item.track.cancellation_generation);
+    expect(worker.install_atlas(atlas), "bilabial transition atlas installs");
+    expect(worker.submit(item), "pre-bilabial vowel enters the queue");
+    const auto vowel = worker.process_latest(
+        item.source.identity, item.source.identity.captured_at_ns + 10'000'000);
+    expect(vowel.has_residual(), "pre-bilabial vowel renders");
+
+    ++item.source.identity.sequence;
+    item.source.identity.captured_at_ns += 33'000'000;
+    item.source.lease.lease_nonce_low = item.source.identity.sequence;
+    item.source.lease.expires_at_ns = item.source.identity.captured_at_ns + 100'000'000;
+    item.tracking.frame = item.source.identity;
+    item.tracking.measured_at_ns = item.source.identity.captured_at_ns + 2'000'000;
+    item.drive.clock.first_sample_index += item.drive.clock.sample_count;
+    item.drive.clock.playback_sample_index = item.drive.clock.first_sample_index;
+    item.drive.clock.playback_at_ns = item.source.identity.captured_at_ns;
+    item.drive.viseme = Viseme::bilabial;
+    item.deadline_ns = item.source.identity.captured_at_ns + 50'000'000;
+    const auto expected_coefficients = coefficients_for_viseme(Viseme::bilabial, 1.0);
+    const auto expected_current_frame_closure = compose_current_frame_residual(
+        item.source, item.track, item.tracking, expected_coefficients,
+        item.source.identity.captured_at_ns + 10'000'000);
+    expect(worker.submit(item), "bilabial closure enters the queue");
+    const auto closure = worker.process_latest(
+        item.source.identity, item.source.identity.captured_at_ns + 10'000'000);
+    expect(closure.has_residual() && closure.residual.coefficients.jaw_open <= 0.04 &&
+               closure.residual.coefficients.lip_close >= 0.88,
+           "bilabial coefficients reach exact contact on their first frame");
+    expect(closure.has_residual() &&
+               digest(closure.residual.premultiplied_bgra) ==
+                   digest(expected_current_frame_closure.premultiplied_bgra),
+           "bilabial contact uses the current-frame closure instead of an atlas texture");
+    expect(closure.has_residual() &&
+               composite_over_source(item.source, closure.residual) != item.source.bgra,
+           "bilabial contact actively closes an already-open source mouth");
+}
+
+void test_atlas_coarticulation_is_time_based_and_segment_bound() {
+    const auto advance = [](WorkItem value, const Nanoseconds elapsed) {
+        ++value.source.identity.sequence;
+        value.source.identity.captured_at_ns += elapsed;
+        value.source.lease.lease_nonce_low = value.source.identity.sequence;
+        value.source.lease.expires_at_ns = value.source.identity.captured_at_ns + 100'000'000;
+        value.tracking.frame = value.source.identity;
+        value.tracking.measured_at_ns = value.source.identity.captured_at_ns + 2'000'000;
+        value.drive.clock.first_sample_index += value.drive.clock.sample_count;
+        value.drive.clock.playback_sample_index = value.drive.clock.first_sample_index;
+        value.drive.clock.playback_at_ns = value.source.identity.captured_at_ns;
+        value.deadline_ns = value.source.identity.captured_at_ns + 50'000'000;
+        return value;
+    };
+    auto origin = make_item(260U, 4'000'000'000);
+    origin.drive.viseme = Viseme::open_vowel;
+    origin.drive.viseme_strength = 1.0;
+    const auto atlas = make_character_atlas(origin);
+
+    ReferenceMouthWorker one_step(origin.track.cancellation_generation);
+    expect(one_step.install_atlas(atlas), "one-step timing atlas installs");
+    expect(one_step.submit(origin), "one-step origin enters the queue");
+    (void)one_step.process_latest(
+        origin.source.identity, origin.source.identity.captured_at_ns + 10'000'000);
+    auto at_32_ms = advance(origin, 32'000'000);
+    at_32_ms.drive.viseme = Viseme::spread_vowel;
+    expect(one_step.submit(at_32_ms), "one-step transition enters the queue");
+    const auto one_step_result = one_step.process_latest(
+        at_32_ms.source.identity, at_32_ms.source.identity.captured_at_ns + 10'000'000);
+
+    ReferenceMouthWorker two_steps(origin.track.cancellation_generation);
+    expect(two_steps.install_atlas(atlas), "two-step timing atlas installs");
+    expect(two_steps.submit(origin), "two-step origin enters the queue");
+    (void)two_steps.process_latest(
+        origin.source.identity, origin.source.identity.captured_at_ns + 10'000'000);
+    auto at_16_ms = advance(origin, 16'000'000);
+    at_16_ms.drive.viseme = Viseme::spread_vowel;
+    expect(two_steps.submit(at_16_ms), "first half-step transition enters the queue");
+    (void)two_steps.process_latest(
+        at_16_ms.source.identity, at_16_ms.source.identity.captured_at_ns + 10'000'000);
+    auto second_16_ms = advance(at_16_ms, 16'000'000);
+    expect(two_steps.submit(second_16_ms), "second half-step transition enters the queue");
+    const auto two_step_result = two_steps.process_latest(
+        second_16_ms.source.identity,
+        second_16_ms.source.identity.captured_at_ns + 10'000'000);
+
+    std::uint8_t maximum_pixel_delta{};
+    if (one_step_result.has_residual() && two_step_result.has_residual() &&
+        one_step_result.residual.premultiplied_bgra.size() ==
+            two_step_result.residual.premultiplied_bgra.size()) {
+        for (std::size_t index = 0U;
+             index < one_step_result.residual.premultiplied_bgra.size(); ++index) {
+            const auto first = one_step_result.residual.premultiplied_bgra[index];
+            const auto second = two_step_result.residual.premultiplied_bgra[index];
+            maximum_pixel_delta = std::max<std::uint8_t>(
+                maximum_pixel_delta,
+                static_cast<std::uint8_t>(first > second ? first - second : second - first));
+        }
+    }
+    expect(one_step_result.has_residual() && two_step_result.has_residual() &&
+               std::abs(one_step_result.residual.coefficients.smile_left -
+                        two_step_result.residual.coefficients.smile_left) < 1e-9 &&
+               maximum_pixel_delta <= 2U,
+           "coarticulation follows elapsed playback time rather than frame count");
+
+    auto new_segment = advance(second_16_ms, 33'000'000);
+    ++new_segment.drive.clock.segment_id;
+    new_segment.drive.clock.first_sample_index = 0U;
+    new_segment.drive.clock.playback_sample_index = 0U;
+    new_segment.drive.viseme = Viseme::rounded;
+    const auto rounded_coefficients = coefficients_for_viseme(Viseme::rounded, 1.0);
+    const auto reset_expected = compose_atlas_residual(
+        new_segment.source, new_segment.track, new_segment.tracking,
+        atlas.states[1U].appearance, rounded_coefficients,
+        new_segment.source.identity.captured_at_ns + 10'000'000);
+    expect(two_steps.submit(new_segment), "new-segment articulation enters the queue");
+    const auto reset = two_steps.process_latest(
+        new_segment.source.identity, new_segment.source.identity.captured_at_ns + 10'000'000);
+    expect(reset.has_residual() &&
+               digest(reset.residual.premultiplied_bgra) ==
+                   digest(reset_expected.premultiplied_bgra),
+           "a new audio segment cannot inherit the preceding texture blend");
 }
 
 void test_queue_depth_one() {
@@ -1029,10 +1207,9 @@ void test_pcm_smoothing_preserves_attack_and_release() {
     const auto quiet_result = worker.process_latest(
         quiet.source.identity, quiet.source.identity.captured_at_ns + 2'000'000);
     expect(quiet_result.has_residual() &&
-               quiet_result.residual.coefficients.jaw_open > 0.05 &&
-               quiet_result.residual.coefficients.jaw_open <
-                   loud_result.residual.coefficients.jaw_open,
-           "release smooths a speech-to-silence edge without freezing the mouth");
+               quiet_result.residual.coefficients.jaw_open < 0.01 &&
+               quiet_result.residual.coefficients.lip_close > 0.99,
+           "exact silence closes immediately instead of smearing a contact boundary");
 
     auto new_segment = quiet;
     new_segment.source = make_frame(203U, quiet.source.identity.captured_at_ns + 33'000'000);
@@ -1106,6 +1283,9 @@ int main() {
     test_worker_uses_identity_bound_atlas_and_clears_on_cancel();
     test_worker_never_applies_an_atlas_to_another_actor();
     test_timed_viseme_does_not_wait_for_atlas_dwell();
+    test_timed_atlas_transition_is_continuous_on_its_first_frame();
+    test_bilabial_closure_remains_immediate_during_coarticulation();
+    test_atlas_coarticulation_is_time_based_and_segment_bound();
     test_queue_depth_one();
     test_exact_binding_and_no_retained_visual();
     test_cancellation_generation();
