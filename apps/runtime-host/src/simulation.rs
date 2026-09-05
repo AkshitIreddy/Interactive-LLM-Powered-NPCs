@@ -69,10 +69,18 @@ use crate::subtitle_bridge::NativeSubtitlePresentationSink;
 use crate::audio_output::{DevSubmittedPlaybackReceipt, DevWasapiAudioSink, DevWasapiConfig};
 use crate::tts_bridge::{RuntimeTtsBridge, RuntimeTtsBridgeConfig, VaultTtsCredentialResolver};
 use npc_providers_tts::{
-    AudioFormat, ElevenLabsConfig, ElevenLabsProvider, ElevenLabsWebSocketTransport,
-    HostedTtsProviderId, NvidiaNimMagpie, ReqwestNvidiaNimHttpTransport, StreamingTtsProvider,
-    TonicNvidiaNimGrpcTransport, VoiceBinding, VoiceBindings, NVIDIA_MAGPIE_MODEL_ID,
+    AudioFormat, CartesiaConfig, CartesiaProvider, CartesiaWebSocketTransport, DeepgramConfig,
+    DeepgramProvider, DeepgramWebSocketTransport, ElevenLabsConfig, ElevenLabsProvider,
+    ElevenLabsWebSocketTransport, HostedTtsProviderId, InworldConfig, InworldProvider,
+    InworldWebSocketTransport, NvidiaNimMagpie, ReqwestNvidiaNimHttpTransport,
+    StreamingTtsProvider, TonicNvidiaNimGrpcTransport, VoiceBinding, VoiceBindings,
+    CARTESIA_QUALIFIED_AUDIO_FORMAT, CARTESIA_QUALIFIED_MODEL_ID,
+    CARTESIA_QUALIFIED_STOCK_VOICE_ID, DEEPGRAM_QUALIFIED_AUDIO_FORMAT,
+    DEEPGRAM_QUALIFIED_AURA2_MODEL_ID, INWORLD_QUALIFIED_AUDIO_FORMAT,
+    INWORLD_QUALIFIED_FLASH_MODEL_ID, INWORLD_QUALIFIED_STOCK_VOICE_ID, NVIDIA_MAGPIE_MODEL_ID,
 };
+
+const DEEPGRAM_QUALIFIED_STOCK_VOICE_ID: &str = "Arcas";
 
 const DEV_LIVE_TTS_PROVIDER_ID: &str = "elevenlabs";
 const DEV_LIVE_TTS_MODEL_ID: &str = "eleven_flash_v2_5";
@@ -893,7 +901,7 @@ impl HostState {
                 Some(route)
                     if matches!(
                         route.provider_id.as_str(),
-                        "elevenlabs" | "nvidia-nim-magpie"
+                        "cartesia" | "deepgram" | "elevenlabs" | "inworld" | "nvidia-nim-magpie"
                     ) =>
                 {
                     if broker_leases.is_empty() {
@@ -2105,7 +2113,10 @@ fn selected_turn_timing_ledger(
             llm.provider_id.as_str(),
             "openai" | "anthropic" | "gemini" | "groq" | "cohere" | "nvidia-nim"
         )
-        || !matches!(tts.provider_id.as_str(), "elevenlabs" | "nvidia-nim-magpie")
+        || !matches!(
+            tts.provider_id.as_str(),
+            "cartesia" | "deepgram" | "elevenlabs" | "inworld" | "nvidia-nim-magpie"
+        )
     {
         return None;
     }
@@ -2464,6 +2475,36 @@ fn selected_nvidia_private_evaluation_modalities(
 
 fn selected_hosted_tts_format(route: &SelectedProviderRoute) -> Option<(u32, u16)> {
     match route.provider_id.as_str() {
+        "cartesia"
+            if route.credential_reference.as_deref() == Some("providers/cartesia")
+                && route.model_id == CARTESIA_QUALIFIED_MODEL_ID
+                && route.voice_id.as_deref() == Some(CARTESIA_QUALIFIED_STOCK_VOICE_ID) =>
+        {
+            Some((
+                CARTESIA_QUALIFIED_AUDIO_FORMAT.sample_rate_hz,
+                CARTESIA_QUALIFIED_AUDIO_FORMAT.channels,
+            ))
+        }
+        "inworld"
+            if route.credential_reference.as_deref() == Some("providers/inworld")
+                && route.model_id == INWORLD_QUALIFIED_FLASH_MODEL_ID
+                && route.voice_id.as_deref() == Some(INWORLD_QUALIFIED_STOCK_VOICE_ID) =>
+        {
+            Some((
+                INWORLD_QUALIFIED_AUDIO_FORMAT.sample_rate_hz,
+                INWORLD_QUALIFIED_AUDIO_FORMAT.channels,
+            ))
+        }
+        "deepgram"
+            if route.credential_reference.as_deref() == Some("providers/deepgram")
+                && route.model_id == DEEPGRAM_QUALIFIED_AURA2_MODEL_ID
+                && route.voice_id.as_deref() == Some(DEEPGRAM_QUALIFIED_STOCK_VOICE_ID) =>
+        {
+            Some((
+                DEEPGRAM_QUALIFIED_AUDIO_FORMAT.sample_rate_hz,
+                DEEPGRAM_QUALIFIED_AUDIO_FORMAT.channels,
+            ))
+        }
         "elevenlabs" if route.credential_reference.as_deref() == Some("providers/elevenlabs") => {
             Some((24_000, 1))
         }
@@ -2538,6 +2579,75 @@ async fn build_selected_live_dependencies(
         .provider_id
         .as_str()
     {
+        "cartesia"
+            if route.credential_reference.as_deref() == Some("providers/cartesia")
+                && route.model_id == CARTESIA_QUALIFIED_MODEL_ID
+                && voice_id == CARTESIA_QUALIFIED_STOCK_VOICE_ID =>
+        {
+            let bindings = VoiceBindings::new([VoiceBinding {
+                intent_id: intent_id.into(),
+                provider_id: HostedTtsProviderId::Cartesia,
+                voice_id: voice_id.clone(),
+                model_id: route.model_id.clone(),
+                provider_options: BTreeMap::new(),
+            }])
+            .map_err(|_| SimulationError::DevLiveTtsUnavailable)?;
+            (
+                Arc::new(CartesiaProvider::new(
+                    Arc::new(CartesiaWebSocketTransport::default()),
+                    credentials,
+                    bindings,
+                    CartesiaConfig::default(),
+                )),
+                CARTESIA_QUALIFIED_AUDIO_FORMAT,
+            )
+        }
+        "inworld"
+            if route.credential_reference.as_deref() == Some("providers/inworld")
+                && route.model_id == INWORLD_QUALIFIED_FLASH_MODEL_ID
+                && voice_id == INWORLD_QUALIFIED_STOCK_VOICE_ID =>
+        {
+            let bindings = VoiceBindings::new([VoiceBinding {
+                intent_id: intent_id.into(),
+                provider_id: HostedTtsProviderId::Inworld,
+                voice_id: voice_id.clone(),
+                model_id: route.model_id.clone(),
+                provider_options: BTreeMap::new(),
+            }])
+            .map_err(|_| SimulationError::DevLiveTtsUnavailable)?;
+            (
+                Arc::new(InworldProvider::new(
+                    Arc::new(InworldWebSocketTransport::default()),
+                    credentials,
+                    bindings,
+                    InworldConfig::default(),
+                )),
+                INWORLD_QUALIFIED_AUDIO_FORMAT,
+            )
+        }
+        "deepgram"
+            if route.credential_reference.as_deref() == Some("providers/deepgram")
+                && route.model_id == DEEPGRAM_QUALIFIED_AURA2_MODEL_ID
+                && voice_id == DEEPGRAM_QUALIFIED_STOCK_VOICE_ID =>
+        {
+            let bindings = VoiceBindings::new([VoiceBinding {
+                intent_id: intent_id.into(),
+                provider_id: HostedTtsProviderId::Deepgram,
+                voice_id: voice_id.clone(),
+                model_id: route.model_id.clone(),
+                provider_options: BTreeMap::new(),
+            }])
+            .map_err(|_| SimulationError::DevLiveTtsUnavailable)?;
+            (
+                Arc::new(DeepgramProvider::new(
+                    Arc::new(DeepgramWebSocketTransport::default()),
+                    credentials,
+                    bindings,
+                    DeepgramConfig::default(),
+                )),
+                DEEPGRAM_QUALIFIED_AUDIO_FORMAT,
+            )
+        }
         "elevenlabs" if route.credential_reference.as_deref() == Some("providers/elevenlabs") => {
             let bindings = VoiceBindings::new([VoiceBinding {
                 intent_id: intent_id.into(),
@@ -2603,7 +2713,12 @@ async fn build_selected_live_dependencies(
     };
     let bridge = RuntimeTtsBridge::new(
         upstream,
-        RuntimeTtsBridgeConfig::selected_stock(descriptor, intent_id, output),
+        RuntimeTtsBridgeConfig::selected_stock(
+            descriptor,
+            intent_id,
+            route.model_id.clone(),
+            output,
+        ),
     )
     .map_err(|_| SimulationError::DevLiveTtsUnavailable)?;
     broker_receipt_checked_dependencies(Arc::new(bridge), leases, receipt_summaries)

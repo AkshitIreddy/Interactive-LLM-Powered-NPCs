@@ -17,8 +17,8 @@ use std::{
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use npc_runtime_core::{
-    AudioSink, PlaybackReceipt, RuntimeDependencyError, SpeechStream, SpeechStreamItem,
-    TurnIdentity,
+    AudioSink, PlaybackReceipt, ProviderErrorKind, RuntimeDependencyError, SpeechStream,
+    SpeechStreamItem, SpeechTimingSymbolKind, TurnIdentity,
 };
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 use tokio_util::sync::CancellationToken;
@@ -304,6 +304,8 @@ pub enum BrokerTransportError {
     Silent,
     #[error("speech provider stream failed before broker submission completed")]
     Provider,
+    #[error("speech provider exceeded the first-audio deadline; retry or choose another provider")]
+    FirstPcmDeadline,
     #[error("playback was cancelled")]
     Cancelled,
 }
@@ -520,6 +522,7 @@ fn map_transport_error(error: BrokerTransportError) -> RuntimeDependencyError {
         BrokerTransportError::LeaseUnavailable
         | BrokerTransportError::Connection
         | BrokerTransportError::Timeout
+        | BrokerTransportError::FirstPcmDeadline
         | BrokerTransportError::Remote(_)
         | BrokerTransportError::Provider => RuntimeDependencyError::Unavailable(error.to_string()),
     }
@@ -592,6 +595,57 @@ fn canonical_viseme(symbol: &str) -> Option<u8> {
     }
 }
 
+fn canonical_timing_symbol(alignment: &npc_runtime_core::AlignmentEvent) -> Option<u8> {
+    let symbol = alignment.viseme.as_deref()?;
+    match alignment.symbol_kind.as_ref() {
+        None => canonical_viseme(symbol),
+        Some(SpeechTimingSymbolKind::Phoneme)
+            if alignment.symbol_provider_id.as_deref() == Some("cartesia")
+                && alignment.symbol_model_id.as_deref() == Some("sonic-3.6") =>
+        {
+            canonical_cartesia_phoneme(symbol)
+        }
+        Some(SpeechTimingSymbolKind::ProviderViseme) => canonical_provider_viseme(symbol),
+        Some(SpeechTimingSymbolKind::Phoneme) => None,
+    }
+}
+
+fn canonical_cartesia_phoneme(symbol: &str) -> Option<u8> {
+    let symbol = symbol.trim().to_lowercase();
+    Some(match symbol.as_str() {
+        "sil" | "sp" | "pau" | "_" => 0,
+        "p" | "b" | "m" => 1,
+        "f" | "v" => 2,
+        "θ" | "ð" => 3,
+        "t" | "d" | "s" | "z" | "n" | "l" => 4,
+        "ʃ" | "ʒ" | "tʃ" | "dʒ" => 5,
+        "j" | "ç" => 6,
+        "k" | "g" | "ŋ" | "x" => 7,
+        "u" | "o" | "ɔ" | "ʊ" | "w" => 8,
+        "a" | "ɑ" | "æ" | "ə" | "ʌ" | "ɛ" | "ɜ" => 9,
+        "i" | "ɪ" | "e" | "ei" | "eɪ" => 10,
+        _ => return None,
+    })
+}
+
+fn canonical_provider_viseme(symbol: &str) -> Option<u8> {
+    let canonical = symbol.trim().to_lowercase().replace(['-', ' '], "_");
+    Some(match canonical.as_str() {
+        "silence" | "silent" | "rest" | "pause" => 0,
+        "bilabial" | "pp" => 1,
+        "labiodental" | "labio_dental" | "ff" => 2,
+        "dental" | "th" => 3,
+        "alveolar" | "dd" | "ss" | "nn" => 4,
+        "postalveolar" | "post_alveolar" | "ch" => 5,
+        "palatal" | "rr" => 6,
+        "velar" | "kk" => 7,
+        "rounded" | "rounded_vowel" | "oh" | "ou" => 8,
+        "open" | "open_vowel" | "aa" => 9,
+        "spread" | "spread_vowel" | "e" | "ih" => 10,
+        _ => return None,
+    })
+}
+
 fn azure_viseme(id: u8) -> Option<u8> {
     Some(match id {
         0 => 0,
@@ -618,7 +672,7 @@ fn encode_visual_cue(
     alignment: &npc_runtime_core::AlignmentEvent,
     lease: &BrokerAudioPlaybackLease,
 ) -> Option<[u8; VISUAL_CUE_PAYLOAD_BYTES]> {
-    let viseme = canonical_viseme(alignment.viseme.as_deref()?)?;
+    let viseme = canonical_timing_symbol(alignment)?;
     let start_sample = duration_to_samples(alignment.audio_offset, lease.sample_rate)?;
     if start_sample >= lease.max_frames {
         return None;
@@ -775,9 +829,17 @@ async fn run_producer_session<C: ProducerConnection>(
     } {
         let item = match item {
             Ok(item) => item,
-            Err(_) => {
+            Err(error) => {
                 cancel_best_effort(connection, lease, &mut sequence).await;
-                return Err(BrokerTransportError::Provider);
+                return Err(
+                    if error.kind == ProviderErrorKind::Timeout
+                        && error.message == "first_pcm_deadline_exceeded"
+                    {
+                        BrokerTransportError::FirstPcmDeadline
+                    } else {
+                        BrokerTransportError::Provider
+                    },
+                );
             }
         };
         let chunk = match item {
@@ -1595,6 +1657,51 @@ mod tests {
     }
 
     #[test]
+    fn cartesia_phonemes_require_exact_typed_provider_and_model_provenance() {
+        let event = |symbol: &str, provider: &str, model: &str| AlignmentEvent {
+            text_offset: 0,
+            text_length: 0,
+            audio_offset: Duration::ZERO,
+            audio_duration: Some(Duration::from_millis(40)),
+            viseme: Some(symbol.to_owned()),
+            symbol_kind: Some(SpeechTimingSymbolKind::Phoneme),
+            symbol_provider_id: Some(provider.to_owned()),
+            symbol_model_id: Some(model.to_owned()),
+        };
+        for (symbol, expected) in [
+            ("p", 1),
+            ("v", 2),
+            ("ð", 3),
+            ("s", 4),
+            ("tʃ", 5),
+            ("j", 6),
+            ("ŋ", 7),
+            ("ɔ", 8),
+            ("ə", 9),
+            ("eɪ", 10),
+        ] {
+            assert_eq!(
+                canonical_timing_symbol(&event(symbol, "cartesia", "sonic-3.6")),
+                Some(expected),
+                "{symbol}"
+            );
+        }
+        assert_eq!(
+            canonical_timing_symbol(&event("ɣ", "cartesia", "sonic-3.6")),
+            None,
+            "an uncovered phone must fall back to the PCM envelope"
+        );
+        assert_eq!(
+            canonical_timing_symbol(&event("p", "cartesia", "another-model")),
+            None
+        );
+        assert_eq!(
+            canonical_timing_symbol(&event("p", "another-provider", "sonic-3.6")),
+            None
+        );
+    }
+
+    #[test]
     fn visual_cue_payload_is_exact_little_endian_and_clamped_to_lease() {
         let lease = lease(12);
         let event = AlignmentEvent {
@@ -1603,23 +1710,29 @@ mod tests {
             audio_offset: Duration::from_millis(950),
             audio_duration: Some(Duration::from_millis(200)),
             viseme: Some("PP".to_owned()),
+            symbol_kind: None,
+            symbol_provider_id: None,
+            symbol_model_id: None,
         };
         let payload = encode_visual_cue(&event, &lease).expect("valid visual cue");
 
         assert_eq!(payload.len(), 24);
-        assert_eq!(u32::from_le_bytes(payload[0..4].try_into().unwrap()), 1);
         assert_eq!(
-            u64::from_le_bytes(payload[4..12].try_into().unwrap()),
+            u32::from_le_bytes(payload[0..4].try_into().expect("schema bytes")),
+            1
+        );
+        assert_eq!(
+            u64::from_le_bytes(payload[4..12].try_into().expect("sample offset bytes")),
             22_800
         );
         assert_eq!(
-            u64::from_le_bytes(payload[12..20].try_into().unwrap()),
+            u64::from_le_bytes(payload[12..20].try_into().expect("sample count bytes")),
             1_200
         );
         assert_eq!(payload[20], 1);
         assert_eq!(payload[21], 0);
         assert_eq!(
-            u16::from_le_bytes(payload[22..24].try_into().unwrap()),
+            u16::from_le_bytes(payload[22..24].try_into().expect("strength bytes")),
             32_767
         );
 
@@ -1631,7 +1744,11 @@ mod tests {
         };
         let payload = encode_visual_cue(&missing_duration, &lease).expect("default duration");
         assert_eq!(
-            u64::from_le_bytes(payload[12..20].try_into().unwrap()),
+            u64::from_le_bytes(
+                payload[12..20]
+                    .try_into()
+                    .expect("default sample count bytes")
+            ),
             1_920
         );
 
@@ -1660,6 +1777,9 @@ mod tests {
                 audio_offset: Duration::from_millis(125),
                 audio_duration: Some(Duration::from_millis(40)),
                 viseme: Some("FF".to_owned()),
+                symbol_kind: None,
+                symbol_provider_id: None,
+                symbol_model_id: None,
             })),
             Ok(SpeechStreamItem::Alignment(AlignmentEvent {
                 text_offset: 0,
@@ -1667,6 +1787,9 @@ mod tests {
                 audio_offset: Duration::from_millis(150),
                 audio_duration: Some(Duration::from_millis(40)),
                 viseme: Some("unknown-provider-symbol".to_owned()),
+                symbol_kind: None,
+                symbol_provider_id: None,
+                symbol_model_id: None,
             })),
             Ok(SpeechStreamItem::Alignment(AlignmentEvent {
                 text_offset: 0,
@@ -1674,6 +1797,9 @@ mod tests {
                 audio_offset: Duration::from_millis(140),
                 audio_duration: Some(Duration::from_millis(40)),
                 viseme: Some("open_vowel".to_owned()),
+                symbol_kind: None,
+                symbol_provider_id: None,
+                symbol_model_id: None,
             })),
             Ok(SpeechStreamItem::Audio(AudioChunk {
                 sequence: 1,
@@ -1709,6 +1835,20 @@ mod tests {
         );
         assert_eq!(visual_cues[0].2.len(), 24);
         assert_eq!(visual_cues[0].2[20], 2);
+        assert_eq!(
+            connection
+                .commands
+                .iter()
+                .map(|(command, sequence, _)| (*command, *sequence))
+                .collect::<Vec<_>>(),
+            vec![
+                (ProducerCommand::Begin, 1),
+                (ProducerCommand::VisualCue, 2),
+                (ProducerCommand::Chunk, 3),
+                (ProducerCommand::Finish, 4),
+            ],
+            "a cue already emitted by the TTS bridge must reach native playback before its first PCM chunk",
+        );
         assert_eq!(connection.accepted_frames, 4);
     }
 
@@ -1905,6 +2045,41 @@ mod tests {
             .commands
             .iter()
             .any(|(command, _, _)| *command == ProducerCommand::Finish));
+    }
+
+    #[tokio::test]
+    async fn first_audio_deadline_preserves_actionable_provider_remediation() {
+        let lease = lease(8);
+        let mut connection = ScriptedConnection {
+            statuses: VecDeque::new(),
+            accepted_frames: 0,
+            device_frames_override: None,
+            lease: lease.clone(),
+            commands: Vec::new(),
+        };
+        let failed_stream: SpeechStream = Box::pin(stream::iter(vec![Err(ProviderError {
+            provider_id: "cartesia".into(),
+            kind: ProviderErrorKind::Timeout,
+            message: "first_pcm_deadline_exceeded".into(),
+            retryable: true,
+            retry_after: None,
+        })]));
+
+        let result = run_producer_session(
+            &mut connection,
+            &lease,
+            failed_stream,
+            CancellationToken::new(),
+        )
+        .await;
+
+        let error = result.expect_err("first PCM deadline must fail the producer session");
+        assert_eq!(error, BrokerTransportError::FirstPcmDeadline);
+        assert!(error.to_string().contains("choose another provider"));
+        assert!(connection
+            .commands
+            .iter()
+            .any(|(command, _, _)| *command == ProducerCommand::Cancel));
     }
 
     #[tokio::test]

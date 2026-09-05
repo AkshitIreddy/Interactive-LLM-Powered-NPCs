@@ -258,10 +258,9 @@ fn hosted_contracts() -> Vec<String> {
         "retrieval:nvidia-nim-embeddings-adapter,nvidia-nim-reranking-contract".to_owned(),
         "stt:deepgram,assemblyai,elevenlabs,nvidia-nim-asr,openai".to_owned(),
         // Only providers with a production credential resolver, hosted
-        // transport, stock-voice policy, and broker-compatible PCM builder may
-        // be advertised at the runtime boundary. The generic command adapters
-        // for Cartesia, Deepgram, and Inworld remain quarantined.
-        "tts:elevenlabs".to_owned(),
+        // transport, exact stock-voice policy, and broker-compatible PCM
+        // builder are advertised at the runtime boundary.
+        "tts:cartesia,deepgram,elevenlabs,inworld".to_owned(),
         "tts-private-evaluation:nvidia-nim-magpie".to_owned(),
     ]
 }
@@ -338,17 +337,17 @@ mod tests {
             .into_iter()
             .find(|contract| contract.starts_with("tts:"))
             .expect("hosted TTS contract");
-        assert_eq!(tts, "tts:elevenlabs");
+        assert_eq!(tts, "tts:cartesia,deepgram,elevenlabs,inworld");
         assert!(hosted_contracts()
             .iter()
             .any(|contract| contract == "tts-private-evaluation:nvidia-nim-magpie"));
-        for quarantined in ["cartesia", "deepgram", "inworld"] {
-            assert!(!tts
+        for executable in ["cartesia", "deepgram", "elevenlabs", "inworld"] {
+            assert!(tts
                 .split_once(':')
                 .expect("typed contract")
                 .1
                 .split(',')
-                .any(|candidate| candidate == quarantined));
+                .any(|candidate| candidate == executable));
         }
     }
 

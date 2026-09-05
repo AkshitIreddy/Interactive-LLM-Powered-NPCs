@@ -347,6 +347,10 @@ impl StreamingTtsProvider for ObservedStreamingTtsProvider {
         &self,
         request: TtsSessionRequest,
     ) -> Result<Box<dyn StreamingTtsSession>, TtsError> {
+        // Session creation includes DNS/TLS/WebSocket setup for transports that
+        // do not have a reusable connection yet. Stamp before construction so
+        // first-audio latency cannot silently exclude connection overhead.
+        self.timing.mark_tts_requested();
         let session = self.inner.start_session(request).await?;
         Ok(Box::new(ObservedStreamingTtsSession {
             inner: session,
@@ -379,9 +383,6 @@ impl StreamingTtsSession for ObservedStreamingTtsSession {
     }
 
     async fn push_text(&mut self, text: &str) -> Result<PushOutcome, TtsError> {
-        if !text.is_empty() {
-            self.timing.mark_tts_requested();
-        }
         self.inner.push_text(text).await
     }
 

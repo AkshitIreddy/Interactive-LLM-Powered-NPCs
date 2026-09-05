@@ -16,23 +16,27 @@ use npc_providers_tts::{
     AudioFormat, CredentialResolveError, HostedTtsProviderId, NvidiaNimMagpie, NvidiaStockVoice,
     PcmChunk, PcmEncoding, ProviderCredentialResolver, ReqwestNvidiaNimHttpTransport,
     SemanticClausePolicy, SensitiveString, SessionIdentity, StreamingTtsProvider,
-    StreamingTtsSession, TonicNvidiaNimGrpcTransport, TtsError, TtsErrorKind, TtsEvent,
-    TtsSessionRequest, VoiceBindings, NVIDIA_MAGPIE_MODEL_ID,
+    StreamingTtsSession, TimingSymbolKind, TonicNvidiaNimGrpcTransport, TtsError, TtsErrorKind,
+    TtsEvent, TtsSessionRequest, VoiceBindings, NVIDIA_MAGPIE_MODEL_ID,
 };
 use npc_runtime_core::{
     AlignmentEvent, AudioChunk, DataClass, ProviderDescriptor, ProviderError, ProviderErrorKind,
-    ProviderLocation, ProviderModality, SpeechRequest, SpeechStream, SpeechStreamItem, TtsProvider,
-    TtsSession, TurnIdentity,
+    ProviderLocation, ProviderModality, SpeechRequest, SpeechStream, SpeechStreamItem,
+    SpeechTimingSymbolKind, TtsProvider, TtsSession, TurnIdentity,
 };
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
 pub const ELEVENLABS_CREDENTIAL_TARGET: &str = "providers/elevenlabs";
 pub const NVIDIA_NIM_CREDENTIAL_TARGET: &str = "providers/nvidia-nim";
+pub const CARTESIA_CREDENTIAL_TARGET: &str = "providers/cartesia";
+pub const INWORLD_CREDENTIAL_TARGET: &str = "providers/inworld";
+pub const DEEPGRAM_CREDENTIAL_TARGET: &str = "providers/deepgram";
 const REQUIRED_CHANNELS: u16 = 1;
 const VOICE_DISCOVERY_SCHEMA_VERSION: u32 = 1;
 const MAX_DISCOVERED_STOCK_VOICES: usize = 1024;
 const RUNTIME_VOICE_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
+const MAX_PENDING_TIMING_EVENTS: usize = 32_768;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -300,10 +304,12 @@ fn discovery_failure(
 pub struct RuntimeTtsBridgeConfig {
     pub descriptor: ProviderDescriptor,
     pub voice_intent_id: String,
+    pub model_id: String,
     pub output: AudioFormat,
     pub request_alignment: bool,
     pub request_visemes: bool,
     pub clause_policy: SemanticClausePolicy,
+    pub first_pcm_timeout: Duration,
 }
 
 impl RuntimeTtsBridgeConfig {
@@ -313,10 +319,12 @@ impl RuntimeTtsBridgeConfig {
         Self {
             descriptor,
             voice_intent_id: "dev.elevenlabs.stock".to_owned(),
+            model_id: "eleven_flash_v2_5".to_owned(),
             output: AudioFormat::default(),
             request_alignment: true,
             request_visemes,
             clause_policy: SemanticClausePolicy::default(),
+            first_pcm_timeout: Duration::from_secs(5),
         }
     }
 
@@ -324,16 +332,19 @@ impl RuntimeTtsBridgeConfig {
     pub fn selected_stock(
         descriptor: ProviderDescriptor,
         voice_intent_id: impl Into<String>,
+        model_id: impl Into<String>,
         output: AudioFormat,
     ) -> Self {
         let request_visemes = descriptor_supports_visemes(&descriptor);
         Self {
             descriptor,
             voice_intent_id: voice_intent_id.into(),
+            model_id: model_id.into(),
             output,
             request_alignment: true,
             request_visemes,
             clause_policy: SemanticClausePolicy::default(),
+            first_pcm_timeout: Duration::from_secs(5),
         }
     }
 
@@ -360,11 +371,19 @@ impl RuntimeTtsBridgeConfig {
         if self.voice_intent_id.trim().is_empty() || self.voice_intent_id.len() > 128 {
             return Err(BridgeConfigError::InvalidVoiceIntent);
         }
+        if self.model_id.trim().is_empty() || self.model_id.len() > 256 {
+            return Err(BridgeConfigError::InvalidVoiceIntent);
+        }
         if self.output.encoding != PcmEncoding::PcmS16Le
             || !(8_000..=96_000).contains(&self.output.sample_rate_hz)
             || self.output.channels != REQUIRED_CHANNELS
         {
             return Err(BridgeConfigError::UnsupportedOutput);
+        }
+        if self.first_pcm_timeout < Duration::from_millis(100)
+            || self.first_pcm_timeout > Duration::from_secs(30)
+        {
+            return Err(BridgeConfigError::InvalidFirstPcmDeadline);
         }
         self.clause_policy
             .validate()
@@ -399,6 +418,8 @@ pub enum BridgeConfigError {
     UnsupportedOutput,
     #[error("semantic clause policy is invalid")]
     InvalidClausePolicy,
+    #[error("first PCM deadline must be between 100 milliseconds and 30 seconds")]
+    InvalidFirstPcmDeadline,
 }
 
 pub struct RuntimeTtsBridge {
@@ -513,6 +534,7 @@ impl TtsSession for RuntimeTtsSession {
         cancellation: CancellationToken,
     ) -> Result<SpeechStream, ProviderError> {
         let provider_id = self.config.descriptor.id.clone();
+        let first_pcm_deadline = tokio::time::Instant::now() + self.config.first_pcm_timeout;
         if cancellation.is_cancelled() {
             return Err(ProviderError::cancelled(provider_id));
         }
@@ -552,6 +574,9 @@ impl TtsSession for RuntimeTtsSession {
         let mut upstream = tokio::select! {
             biased;
             () = cancellation.cancelled() => return Err(ProviderError::cancelled(provider_id)),
+            () = tokio::time::sleep_until(first_pcm_deadline) => {
+                return Err(first_pcm_timeout_error(&provider_id));
+            }
             result = &mut start => result.map_err(|error| map_upstream_error(&provider_id, error))?,
         };
 
@@ -561,12 +586,17 @@ impl TtsSession for RuntimeTtsSession {
             tokio::select! {
                 biased;
                 () = cancellation.cancelled() => None,
+                () = tokio::time::sleep_until(first_pcm_deadline) => None,
                 result = &mut push => Some(result),
             }
         };
         let Some(pushed) = pushed else {
             cancel_authoritatively(upstream.as_mut()).await;
-            return Err(ProviderError::cancelled(provider_id));
+            return Err(if cancellation.is_cancelled() {
+                ProviderError::cancelled(provider_id.clone())
+            } else {
+                first_pcm_timeout_error(&provider_id)
+            });
         };
         let pushed = match pushed {
             Ok(pushed) => pushed,
@@ -591,12 +621,17 @@ impl TtsSession for RuntimeTtsSession {
             tokio::select! {
                 biased;
                 () = cancellation.cancelled() => None,
+                () = tokio::time::sleep_until(first_pcm_deadline) => None,
                 result = &mut finish => Some(result),
             }
         };
         let Some(finished) = finished else {
             cancel_authoritatively(upstream.as_mut()).await;
-            return Err(ProviderError::cancelled(provider_id));
+            return Err(if cancellation.is_cancelled() {
+                ProviderError::cancelled(provider_id.clone())
+            } else {
+                first_pcm_timeout_error(&provider_id)
+            });
         };
         if let Err(error) = finished {
             cancel_authoritatively(upstream.as_mut()).await;
@@ -607,7 +642,9 @@ impl TtsSession for RuntimeTtsSession {
             upstream,
             cancellation,
             provider_id,
+            self.config.model_id.clone(),
             self.config.output,
+            first_pcm_deadline,
         ))
     }
 }
@@ -616,23 +653,53 @@ fn validated_stream(
     mut upstream: Box<dyn StreamingTtsSession>,
     cancellation: CancellationToken,
     provider_id: String,
+    config_model_id: String,
     expected_output: AudioFormat,
+    first_pcm_deadline: tokio::time::Instant,
 ) -> SpeechStream {
     Box::pin(async_stream::stream! {
         let mut expected_sequence = 0_u64;
         let mut pending_audio: Option<PcmChunk> = None;
         let mut pending_metadata = VecDeque::new();
+        let mut next_core_sequence = 1_u64;
+        let mut audio_started = false;
         let mut has_non_silent_sample = false;
 
-        loop {
-            let event = tokio::select! {
-                biased;
-                () = cancellation.cancelled() => {
-                    cancel_authoritatively(upstream.as_mut()).await;
-                    yield Err(ProviderError::cancelled(provider_id.clone()));
-                    break;
+        'events: loop {
+            macro_rules! stop_if_cancelled {
+                () => {
+                    if cancellation.is_cancelled() {
+                        cancel_authoritatively(upstream.as_mut()).await;
+                        yield Err(ProviderError::cancelled(provider_id.clone()));
+                        break 'events;
+                    }
+                };
+            }
+            let event = if audio_started {
+                tokio::select! {
+                    biased;
+                    () = cancellation.cancelled() => {
+                        cancel_authoritatively(upstream.as_mut()).await;
+                        yield Err(ProviderError::cancelled(provider_id.clone()));
+                        break;
+                    }
+                    event = upstream.next_event() => event,
                 }
-                event = upstream.next_event() => event,
+            } else {
+                tokio::select! {
+                    biased;
+                    () = cancellation.cancelled() => {
+                        cancel_authoritatively(upstream.as_mut()).await;
+                        yield Err(ProviderError::cancelled(provider_id.clone()));
+                        break;
+                    }
+                    () = tokio::time::sleep_until(first_pcm_deadline) => {
+                        cancel_authoritatively(upstream.as_mut()).await;
+                        yield Err(first_pcm_timeout_error(&provider_id));
+                        break;
+                    }
+                    event = upstream.next_event() => event,
+                }
             };
 
             let Some(event) = event else {
@@ -654,7 +721,7 @@ fn validated_stream(
             };
 
             match event {
-                TtsEvent::Audio(chunk) => {
+                TtsEvent::Audio(mut chunk) => {
                     if let Err(error) = validate_pcm_chunk(
                         &provider_id,
                         &chunk,
@@ -670,35 +737,147 @@ fn validated_stream(
                         .data
                         .chunks_exact(2)
                         .any(|sample| i16::from_le_bytes([sample[0], sample[1]]) != 0);
+                    stop_if_cancelled!();
 
-                    if let Some(previous) = pending_audio.replace(chunk) {
-                        yield Ok(SpeechStreamItem::Audio(core_audio(previous, false)));
+                    // The core contract marks EOS on a non-empty audio chunk,
+                    // so retain exactly one PCM frame rather than buffering an
+                    // entire provider chunk until `Completed`. This preserves
+                    // every byte and lets the sink begin as soon as decoded PCM
+                    // arrives. A one-frame provider chunk remains pending until
+                    // the next chunk or terminal event because an empty EOS
+                    // marker is not a valid runtime audio frame.
+                    if let Some(previous) = pending_audio.take() {
+                        // Timing metadata that arrived before the first decoded
+                        // PCM is already usable by the broker. Publish it before
+                        // the first audio item so zero-offset cues cannot race
+                        // the native playback thread after PCM is submitted.
+                        if !audio_started {
+                            while let Some(metadata) = pending_metadata.pop_front() {
+                                yield Ok(metadata);
+                                stop_if_cancelled!();
+                            }
+                        }
+                        yield Ok(SpeechStreamItem::Audio(core_audio(
+                            previous,
+                            next_core_sequence,
+                            false,
+                        )));
+                        stop_if_cancelled!();
+                        next_core_sequence = next_core_sequence.saturating_add(1);
+                        audio_started = true;
+                    }
+
+                    let frame_bytes =
+                        usize::from(chunk.format.channels) * std::mem::size_of::<i16>();
+                    if chunk.data.len() > frame_bytes {
+                        let tail_data = chunk.data.split_off(chunk.data.len() - frame_bytes);
+                        let tail = PcmChunk {
+                            sequence: chunk.sequence,
+                            format: chunk.format,
+                            data: tail_data,
+                        };
+                        if !audio_started {
+                            while let Some(metadata) = pending_metadata.pop_front() {
+                                yield Ok(metadata);
+                                stop_if_cancelled!();
+                            }
+                        }
+                        yield Ok(SpeechStreamItem::Audio(core_audio(
+                            chunk,
+                            next_core_sequence,
+                            false,
+                        )));
+                        stop_if_cancelled!();
+                        next_core_sequence = next_core_sequence.saturating_add(1);
+                        audio_started = true;
+                        pending_audio = Some(tail);
+                    } else {
+                        pending_audio = Some(chunk);
+                    }
+
+                    if audio_started {
                         while let Some(metadata) = pending_metadata.pop_front() {
                             yield Ok(metadata);
+                            stop_if_cancelled!();
                         }
                     }
                 }
                 TtsEvent::Alignment(words) => {
-                    pending_metadata.extend(words.into_iter().map(|word| {
+                    let items = words
+                        .into_iter()
+                        .map(|word| {
                         SpeechStreamItem::Alignment(AlignmentEvent {
                             text_offset: word.source_text_start.unwrap_or(0),
                             text_length: word.source_text_length.unwrap_or(word.word.len()),
                             audio_offset: Duration::from_millis(word.start_ms),
                             audio_duration: None,
                             viseme: None,
+                            symbol_kind: None,
+                            symbol_provider_id: None,
+                            symbol_model_id: None,
                         })
-                    }));
+                    }).collect::<Vec<_>>();
+                    if audio_started {
+                        for item in items {
+                            yield Ok(item);
+                            stop_if_cancelled!();
+                        }
+                    } else {
+                        if pending_metadata.len().saturating_add(items.len())
+                            > MAX_PENDING_TIMING_EVENTS
+                        {
+                            cancel_authoritatively(upstream.as_mut()).await;
+                            yield Err(bridge_error(
+                                &provider_id,
+                                ProviderErrorKind::Protocol,
+                                "pending_timing_events_exceeded",
+                                false,
+                            ));
+                            break;
+                        }
+                        pending_metadata.extend(items);
+                    }
                 }
                 TtsEvent::Viseme(visemes) => {
-                    pending_metadata.extend(visemes.into_iter().map(|viseme| {
+                    let items = visemes
+                        .into_iter()
+                        .map(|viseme| {
                         SpeechStreamItem::Alignment(AlignmentEvent {
                             text_offset: 0,
                             text_length: 0,
                             audio_offset: Duration::from_millis(viseme.start_ms),
                             audio_duration: Some(Duration::from_millis(viseme.duration_ms)),
                             viseme: Some(viseme.symbol),
+                            symbol_kind: Some(match viseme.symbol_kind {
+                                TimingSymbolKind::ProviderViseme => {
+                                    SpeechTimingSymbolKind::ProviderViseme
+                                }
+                                TimingSymbolKind::Phoneme => SpeechTimingSymbolKind::Phoneme,
+                            }),
+                            symbol_provider_id: Some(provider_id.clone()),
+                            symbol_model_id: Some(config_model_id.clone()),
                         })
-                    }));
+                    }).collect::<Vec<_>>();
+                    if audio_started {
+                        for item in items {
+                            yield Ok(item);
+                            stop_if_cancelled!();
+                        }
+                    } else {
+                        if pending_metadata.len().saturating_add(items.len())
+                            > MAX_PENDING_TIMING_EVENTS
+                        {
+                            cancel_authoritatively(upstream.as_mut()).await;
+                            yield Err(bridge_error(
+                                &provider_id,
+                                ProviderErrorKind::Protocol,
+                                "pending_timing_events_exceeded",
+                                false,
+                            ));
+                            break;
+                        }
+                        pending_metadata.extend(items);
+                    }
                 }
                 TtsEvent::Usage(_) => {}
                 TtsEvent::Interrupted { .. } => {
@@ -706,6 +885,7 @@ fn validated_stream(
                     break;
                 }
                 TtsEvent::Completed => {
+                    stop_if_cancelled!();
                     let Some(last) = pending_audio.take() else {
                         yield Err(bridge_error(
                             &provider_id,
@@ -726,8 +906,13 @@ fn validated_stream(
                     }
                     while let Some(metadata) = pending_metadata.pop_front() {
                         yield Ok(metadata);
+                        stop_if_cancelled!();
                     }
-                    yield Ok(SpeechStreamItem::Audio(core_audio(last, true)));
+                    yield Ok(SpeechStreamItem::Audio(core_audio(
+                        last,
+                        next_core_sequence,
+                        true,
+                    )));
                     break;
                 }
             }
@@ -768,12 +953,11 @@ fn validate_pcm_chunk(
     Ok(())
 }
 
-fn core_audio(chunk: PcmChunk, end_of_stream: bool) -> AudioChunk {
+fn core_audio(chunk: PcmChunk, sequence: u64, end_of_stream: bool) -> AudioChunk {
     AudioChunk {
-        // Hosted TTS transports use a zero-based sequence internally, while
-        // every runtime audio sink reserves zero as an invalid/uninitialized
-        // wire value. Normalize exactly once at this trust boundary.
-        sequence: chunk.sequence.saturating_add(1),
+        // Provider chunks can be split at this boundary so the runtime needs a
+        // fresh one-based sequence independent of the upstream frame index.
+        sequence,
         sample_rate_hz: chunk.format.sample_rate_hz,
         channels: chunk.format.channels,
         pcm_s16le: chunk.data,
@@ -821,6 +1005,15 @@ fn bridge_error(
     }
 }
 
+fn first_pcm_timeout_error(provider_id: &str) -> ProviderError {
+    bridge_error(
+        provider_id,
+        ProviderErrorKind::Timeout,
+        "first_pcm_deadline_exceeded",
+        true,
+    )
+}
+
 /// Credential adapter for the curated ElevenLabs route. The target is a
 /// compile-time constant; neither the WebView nor runtime configuration can
 /// redirect credential reads to an arbitrary vault entry.
@@ -842,11 +1035,11 @@ impl ProviderCredentialResolver for VaultTtsCredentialResolver {
         provider_id: HostedTtsProviderId,
     ) -> Result<SensitiveString, CredentialResolveError> {
         let target = match provider_id {
+            HostedTtsProviderId::Cartesia => CARTESIA_CREDENTIAL_TARGET,
             HostedTtsProviderId::ElevenLabs => ELEVENLABS_CREDENTIAL_TARGET,
             HostedTtsProviderId::NvidiaNimMagpie => NVIDIA_NIM_CREDENTIAL_TARGET,
-            HostedTtsProviderId::Cartesia
-            | HostedTtsProviderId::Inworld
-            | HostedTtsProviderId::Deepgram => return Err(CredentialResolveError::Missing),
+            HostedTtsProviderId::Inworld => INWORLD_CREDENTIAL_TARGET,
+            HostedTtsProviderId::Deepgram => DEEPGRAM_CREDENTIAL_TARGET,
         };
         let secret = self.vault.get(target).map_err(map_vault_error)?;
         sensitive_utf8_from_vault(secret)
@@ -1127,11 +1320,19 @@ mod tests {
                     SpeechStreamItem::Alignment(_) => None,
                 })
                 .collect();
-            assert_eq!(audio.len(), 2);
-            assert_eq!(audio[0].sequence, 1);
-            assert!(!audio[0].end_of_stream);
-            assert_eq!(audio[1].sequence, 2);
-            assert!(audio[1].end_of_stream);
+            assert_eq!(audio.len(), 4);
+            assert_eq!(
+                audio.iter().map(|chunk| chunk.sequence).collect::<Vec<_>>(),
+                vec![1, 2, 3, 4]
+            );
+            assert!(audio[..3].iter().all(|chunk| !chunk.end_of_stream));
+            assert!(audio[3].end_of_stream);
+            let decoded = audio
+                .iter()
+                .flat_map(|chunk| chunk.pcm_s16le.chunks_exact(2))
+                .map(|sample| i16::from_le_bytes([sample[0], sample[1]]))
+                .collect::<Vec<_>>();
+            assert_eq!(decoded, vec![0, 12, -12, 24, -24]);
         }
 
         assert_eq!(state.starts.load(Ordering::SeqCst), 2);
@@ -1173,17 +1374,71 @@ mod tests {
             .await
             .expect("valid stream");
 
-        let SpeechStreamItem::Alignment(event) = &output[0] else {
+        let SpeechStreamItem::Alignment(event) = &output[1] else {
             panic!("provider viseme should remain an alignment event");
         };
         assert_eq!(event.audio_offset, Duration::from_millis(125));
         assert_eq!(event.audio_duration, Some(Duration::from_millis(42)));
         assert_eq!(event.viseme.as_deref(), Some("PP"));
+        assert_eq!(
+            event.symbol_kind,
+            Some(SpeechTimingSymbolKind::ProviderViseme)
+        );
+        assert_eq!(event.symbol_provider_id.as_deref(), Some("elevenlabs"));
+        assert_eq!(event.symbol_model_id.as_deref(), Some("eleven_flash_v2_5"));
 
         let requests = state.requests.lock().expect("request mutex poisoned");
         assert_eq!(requests.len(), 1);
         assert!(requests[0].request_alignment);
         assert!(requests[0].request_visemes);
+    }
+
+    #[tokio::test]
+    async fn emits_pre_audio_provider_cues_before_first_pcm_submission() {
+        let plan = FakeSessionPlan::events([
+            TtsEvent::Viseme(vec![VisemeEvent {
+                symbol_kind: TimingSymbolKind::Phoneme,
+                symbol: "p".to_owned(),
+                start_ms: 0,
+                duration_ms: 35,
+            }]),
+            pcm(0, &[7, -7]),
+            TtsEvent::Completed,
+        ]);
+        let (bridge, _) = fake_bridge([plan]);
+        let mut session = core_session(&bridge).await;
+        let output = session
+            .synthesize(speech(1), CancellationToken::new())
+            .await
+            .expect("sentence synthesis starts")
+            .try_collect::<Vec<_>>()
+            .await
+            .expect("valid stream");
+
+        assert_eq!(output.len(), 3);
+        let SpeechStreamItem::Alignment(cue) = &output[0] else {
+            panic!("pre-audio provider cue must precede first runtime PCM");
+        };
+        assert_eq!(cue.audio_offset, Duration::ZERO);
+        assert_eq!(cue.audio_duration, Some(Duration::from_millis(35)));
+        assert_eq!(cue.viseme.as_deref(), Some("p"));
+        assert_eq!(cue.symbol_kind, Some(SpeechTimingSymbolKind::Phoneme));
+        assert!(matches!(
+            &output[1],
+            SpeechStreamItem::Audio(AudioChunk {
+                sequence: 1,
+                end_of_stream: false,
+                ..
+            })
+        ));
+        assert!(matches!(
+            &output[2],
+            SpeechStreamItem::Audio(AudioChunk {
+                sequence: 2,
+                end_of_stream: true,
+                ..
+            })
+        ));
     }
 
     #[tokio::test]
@@ -1209,16 +1464,118 @@ mod tests {
             .await
             .expect("valid stream");
 
-        assert_eq!(output.len(), 2);
-        assert!(matches!(output[0], SpeechStreamItem::Alignment(_)));
+        assert_eq!(output.len(), 3);
         assert!(matches!(
-            &output[1],
+            &output[0],
             SpeechStreamItem::Audio(AudioChunk {
                 sequence: 1,
+                end_of_stream: false,
+                ..
+            })
+        ));
+        assert!(matches!(output[1], SpeechStreamItem::Alignment(_)));
+        assert!(matches!(
+            &output[2],
+            SpeechStreamItem::Audio(AudioChunk {
+                sequence: 2,
                 end_of_stream: true,
                 ..
             })
         ));
+    }
+
+    #[tokio::test]
+    async fn forwards_pcm_before_provider_completion_and_discards_only_one_frame_on_cancel() {
+        let plan = FakeSessionPlan {
+            events: VecDeque::from([Ok(pcm(0, &[3, 7, -11]))]),
+            pending_when_exhausted: true,
+        };
+        let (bridge, state) = fake_bridge([plan]);
+        let mut session = core_session(&bridge).await;
+        let cancellation = CancellationToken::new();
+        let mut stream = session
+            .synthesize(speech(1), cancellation.clone())
+            .await
+            .expect("sentence synthesis starts");
+
+        let first = stream
+            .next()
+            .await
+            .expect("first PCM arrives before provider completion")
+            .expect("first PCM is valid");
+        let SpeechStreamItem::Audio(first) = first else {
+            panic!("first bridge emission should be PCM");
+        };
+        assert_eq!(first.sequence, 1);
+        assert!(!first.end_of_stream);
+        assert_eq!(
+            first
+                .pcm_s16le
+                .chunks_exact(2)
+                .map(|sample| i16::from_le_bytes([sample[0], sample[1]]))
+                .collect::<Vec<_>>(),
+            vec![3, 7]
+        );
+
+        cancellation.cancel();
+        let error = stream
+            .next()
+            .await
+            .expect("cancel terminal")
+            .expect_err("cancel must terminate the partial stream");
+        assert_eq!(error.kind, ProviderErrorKind::Cancelled);
+        assert_eq!(state.cancels.load(Ordering::SeqCst), 1);
+        assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn first_pcm_deadline_includes_a_stream_that_never_emits_audio() {
+        let plan = FakeSessionPlan {
+            events: VecDeque::new(),
+            pending_when_exhausted: true,
+        };
+        let (mut bridge, state) = fake_bridge([plan]);
+        bridge.config.first_pcm_timeout = Duration::from_millis(100);
+        let mut session = core_session(&bridge).await;
+        let error = session
+            .synthesize(speech(1), CancellationToken::new())
+            .await
+            .expect("session setup is immediate")
+            .next()
+            .await
+            .expect("deadline terminal")
+            .expect_err("a stream without PCM must time out");
+        assert_eq!(error.kind, ProviderErrorKind::Timeout);
+        assert_eq!(error.message, "first_pcm_deadline_exceeded");
+        assert_eq!(state.cancels.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn bounds_timing_metadata_that_arrives_before_any_audio() {
+        let timing = WordAlignment {
+            word: "a".to_owned(),
+            start_ms: 0,
+            end_ms: 1,
+            source_text_start: Some(0),
+            source_text_length: Some(1),
+        };
+        let plan = FakeSessionPlan::events([
+            TtsEvent::Alignment(vec![timing.clone(); MAX_PENDING_TIMING_EVENTS]),
+            TtsEvent::Alignment(vec![timing]),
+        ]);
+        let (bridge, state) = fake_bridge([plan]);
+        let mut session = core_session(&bridge).await;
+        let error = session
+            .synthesize(speech(1), CancellationToken::new())
+            .await
+            .expect("sentence synthesis starts")
+            .next()
+            .await
+            .expect("bounded protocol terminal")
+            .expect_err("pre-audio timing metadata must stay bounded");
+        assert_eq!(error.kind, ProviderErrorKind::Protocol);
+        assert_eq!(error.message, "pending_timing_events_exceeded");
+        assert_eq!(state.cancels.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
@@ -1368,14 +1725,37 @@ mod tests {
             "fixture-only-token"
         );
         assert_eq!(
-            resolver.resolve(HostedTtsProviderId::Cartesia).await,
-            Err(CredentialResolveError::Missing)
+            resolver
+                .resolve(HostedTtsProviderId::Cartesia)
+                .await
+                .expect("fixture credential")
+                .expose(),
+            "fixture-only-token"
+        );
+        assert_eq!(
+            resolver
+                .resolve(HostedTtsProviderId::Inworld)
+                .await
+                .expect("fixture credential")
+                .expose(),
+            "fixture-only-token"
+        );
+        assert_eq!(
+            resolver
+                .resolve(HostedTtsProviderId::Deepgram)
+                .await
+                .expect("fixture credential")
+                .expose(),
+            "fixture-only-token"
         );
         assert_eq!(
             *vault.reads.lock().expect("vault mutex poisoned"),
             vec![
                 ELEVENLABS_CREDENTIAL_TARGET.to_owned(),
-                NVIDIA_NIM_CREDENTIAL_TARGET.to_owned()
+                NVIDIA_NIM_CREDENTIAL_TARGET.to_owned(),
+                CARTESIA_CREDENTIAL_TARGET.to_owned(),
+                INWORLD_CREDENTIAL_TARGET.to_owned(),
+                DEEPGRAM_CREDENTIAL_TARGET.to_owned()
             ]
         );
     }

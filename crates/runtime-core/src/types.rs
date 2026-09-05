@@ -235,6 +235,13 @@ pub struct AudioChunk {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpeechTimingSymbolKind {
+    ProviderViseme,
+    Phoneme,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AlignmentEvent {
     pub text_offset: usize,
     pub text_length: usize,
@@ -242,6 +249,12 @@ pub struct AlignmentEvent {
     #[serde(default)]
     pub audio_duration: Option<Duration>,
     pub viseme: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbol_kind: Option<SpeechTimingSymbolKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbol_provider_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbol_model_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
