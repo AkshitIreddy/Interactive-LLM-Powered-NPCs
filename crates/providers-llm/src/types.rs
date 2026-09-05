@@ -351,9 +351,9 @@ pub(crate) fn valid_model_id(value: &str) -> bool {
         && value.len() <= 512
         && !value.contains("..")
         && !value.starts_with('/')
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'/'))
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'/' | b':')
+        })
 }
 
 fn valid_tool_name(value: &str) -> bool {

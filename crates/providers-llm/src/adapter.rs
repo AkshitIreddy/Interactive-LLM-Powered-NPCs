@@ -996,7 +996,10 @@ fn gemini_body(request: &LlmRequest) -> Result<Value, ProviderError> {
             "responseMimeType".into(),
             Value::String("application/json".into()),
         );
-        generation.insert("responseJsonSchema".into(), schema.clone());
+        generation.insert(
+            "responseJsonSchema".into(),
+            gemini_portable_json_schema(schema.clone()),
+        );
     }
     let mut body = Map::new();
     body.insert("contents".into(), Value::Array(contents));
@@ -1049,7 +1052,52 @@ fn compatible_body(
     if let Some(schema) = &request.response_json_schema {
         body.insert("response_format".into(), json!({"type":"json_schema","json_schema":{"name":"npc_response","strict":true,"schema":schema}}));
     }
+    apply_qualified_model_parameters(&mut body, options, &request.model);
     Ok(Value::Object(body))
+}
+
+fn apply_qualified_model_parameters(
+    body: &mut Map<String, Value>,
+    options: &CompatibleOptions,
+    model: &str,
+) {
+    // Groq's Qwen 3.6 route otherwise spends a bounded NPC response budget on
+    // reasoning tokens and can finish without any dialogue. These parameters
+    // are deliberately exact-provider/exact-model: other Groq models retain
+    // their documented defaults, and generic compatible endpoints never
+    // inherit provider-specific request fields.
+    if options.provider_id == "groq" && model == "qwen/qwen3.6-27b" {
+        body.insert("reasoning_effort".into(), json!("none"));
+        body.insert("reasoning_format".into(), json!("hidden"));
+    }
+    if options.provider_id == "openrouter" && model == "liquid/lfm-2.5-2.6b:free" {
+        body.insert(
+            "provider".into(),
+            json!({ "allow_fallbacks": false, "require_parameters": true }),
+        );
+    }
+}
+
+fn gemini_portable_json_schema(mut schema: Value) -> Value {
+    match &mut schema {
+        Value::Object(object) => {
+            if let Some(constant) = object.remove("const") {
+                object
+                    .entry("enum".to_owned())
+                    .or_insert_with(|| Value::Array(vec![constant]));
+            }
+            for value in object.values_mut() {
+                *value = gemini_portable_json_schema(value.take());
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                *value = gemini_portable_json_schema(value.take());
+            }
+        }
+        _ => {}
+    }
+    schema
 }
 
 fn cohere_body(request: &LlmRequest) -> Result<Value, ProviderError> {
@@ -1107,6 +1155,9 @@ fn cohere_body(request: &LlmRequest) -> Result<Value, ProviderError> {
             "response_format".into(),
             json!({"type":"json_object","schema":schema}),
         );
+    }
+    if request.model == "command-a-plus-05-2026" {
+        body.insert("thinking".into(), json!({ "type": "disabled" }));
     }
     Ok(Value::Object(body))
 }

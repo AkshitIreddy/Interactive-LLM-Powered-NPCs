@@ -3,9 +3,10 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use futures_util::StreamExt;
 use npc_providers_llm::{
     AdapterConfig, AnthropicMessages, CapabilitySupport, ChatMessage, ChatRole, CohereChat,
-    ErrorKind, GeminiGenerateContent, GroqChatCompletions, HostedLanguageModel, LlmEvent,
-    LlmRequest, MemorySecretProvider, ModelCapabilities, NvidiaNimChat, OpenAiResponses,
-    RuntimeBridge, RuntimeBridgeConfig, SecretBytes, SecretReference, ToolDefinition,
+    CompatibleOptions, ErrorKind, GeminiGenerateContent, GroqChatCompletions, HostedLanguageModel,
+    LlmEvent, LlmRequest, MemorySecretProvider, ModelCapabilities, NvidiaNimChat, OpenAiCompatible,
+    OpenAiResponses, RuntimeBridge, RuntimeBridgeConfig, SecretBytes, SecretReference,
+    ToolDefinition,
 };
 use npc_runtime_core::{
     CharacterIdentity, GenerationRequest, LanguageModelProvider as RuntimeLanguageModelProvider,
@@ -270,8 +271,17 @@ async fn gemini_generate_content_normalizes_function_and_safety_finish() {
     )
     .await;
     let adapter = GeminiGenerateContent::new(config(fixture.base, "/v1beta")).expect("adapter");
+    let mut llm_request = request();
+    llm_request.model = "gemini-3.1-flash-lite".into();
+    llm_request.response_json_schema = Some(json!({
+        "type": "object",
+        "properties": {
+            "schema_version": { "type": "string", "const": "npc_response.v1" },
+            "nested": { "const": 1 }
+        }
+    }));
     let events = adapter
-        .stream(request(), CancellationToken::new())
+        .stream(llm_request, CancellationToken::new())
         .await
         .expect("stream")
         .collect::<Vec<_>>()
@@ -287,12 +297,25 @@ async fn gemini_generate_content_normalizes_function_and_safety_finish() {
         })
     ));
     let received = String::from_utf8(fixture.request.await.expect("request")).expect("UTF-8");
-    assert!(received
-        .starts_with("POST /v1beta/models/fixture-model:streamGenerateContent?alt=sse HTTP/1.1"));
+    assert!(received.starts_with(
+        "POST /v1beta/models/gemini-3.1-flash-lite:streamGenerateContent?alt=sse HTTP/1.1"
+    ));
     assert!(received
         .to_ascii_lowercase()
         .contains(&format!("x-goog-api-key: {CANARY}")));
     assert!(received.contains("\"store\":false"));
+    let body: serde_json::Value =
+        serde_json::from_str(received.split("\r\n\r\n").nth(1).expect("request body"))
+            .expect("JSON request");
+    let schema = &body["generationConfig"]["responseJsonSchema"];
+    assert_eq!(
+        schema["properties"]["schema_version"]["enum"],
+        json!(["npc_response.v1"])
+    );
+    assert_eq!(schema["properties"]["nested"]["enum"], json!([1]));
+    assert!(schema["properties"]["schema_version"]
+        .get("const")
+        .is_none());
 }
 
 #[tokio::test]
@@ -310,8 +333,10 @@ async fn groq_chat_completions_handles_done_and_usage_chunk() {
     )
     .await;
     let adapter = GroqChatCompletions::new(config(fixture.base, "/openai/v1")).expect("adapter");
+    let mut llm_request = request();
+    llm_request.model = "openai/gpt-oss-20b".into();
     let events = adapter
-        .stream(request(), CancellationToken::new())
+        .stream(llm_request, CancellationToken::new())
         .await
         .expect("stream")
         .collect::<Vec<_>>()
@@ -322,6 +347,93 @@ async fn groq_chat_completions_handles_done_and_usage_chunk() {
     assert!(matches!(events.last(), Some(LlmEvent::Finished { .. })));
     let received = String::from_utf8(fixture.request.await.expect("request")).expect("UTF-8");
     assert!(received.starts_with("POST /openai/v1/chat/completions HTTP/1.1"));
+    let body: serde_json::Value =
+        serde_json::from_str(received.split("\r\n\r\n").nth(1).expect("request body"))
+            .expect("JSON request");
+    assert!(body.get("reasoning_effort").is_none());
+    assert!(body.get("reasoning_format").is_none());
+}
+
+#[tokio::test]
+async fn groq_qwen_36_uses_only_its_qualified_non_reasoning_profile() {
+    let sse = concat!(
+        "data: {\"id\":\"chat-qwen\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Ready\"},\"finish_reason\":null}]}\n\n",
+        "data: {\"id\":\"chat-qwen\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let fixture = chunked_server(
+        "200 OK",
+        "text/event-stream",
+        split_bytes(sse, &[3, 11]),
+        Duration::ZERO,
+    )
+    .await;
+    let adapter = GroqChatCompletions::new(config(fixture.base, "/openai/v1")).expect("adapter");
+    let mut llm_request = request();
+    llm_request.model = "qwen/qwen3.6-27b".into();
+    let events = adapter
+        .stream(llm_request, CancellationToken::new())
+        .await
+        .expect("stream")
+        .collect::<Vec<_>>()
+        .await;
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, LlmEvent::TextDelta { text, .. } if text == "Ready")));
+
+    let received = String::from_utf8(fixture.request.await.expect("request")).expect("UTF-8");
+    let body: serde_json::Value =
+        serde_json::from_str(received.split("\r\n\r\n").nth(1).expect("request body"))
+            .expect("JSON request");
+    assert_eq!(body["model"], "qwen/qwen3.6-27b");
+    assert_eq!(body["reasoning_effort"], "none");
+    assert_eq!(body["reasoning_format"], "hidden");
+}
+
+#[tokio::test]
+async fn openrouter_free_route_pins_parameters_and_disables_fallbacks() {
+    let sse = concat!(
+        "data: {\"id\":\"or-free\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Ready\"},\"finish_reason\":null}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let fixture = chunked_server(
+        "200 OK",
+        "text/event-stream",
+        split_bytes(sse, &[3, 11]),
+        Duration::ZERO,
+    )
+    .await;
+    let adapter = OpenAiCompatible::new(
+        config(fixture.base, "/v1"),
+        CompatibleOptions {
+            provider_id: "openrouter".into(),
+            display_name: "OpenRouter".into(),
+            supports_model_listing: true,
+            supports_json_schema: true,
+            send_store_false: false,
+            provider_may_retain_data: true,
+        },
+    )
+    .expect("adapter");
+    let mut llm_request = request();
+    llm_request.model = "liquid/lfm-2.5-2.6b:free".into();
+    let events = adapter
+        .stream(llm_request, CancellationToken::new())
+        .await
+        .expect("stream")
+        .collect::<Vec<_>>()
+        .await;
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, LlmEvent::TextDelta { text, .. } if text == "Ready")));
+
+    let received = String::from_utf8(fixture.request.await.expect("request")).expect("UTF-8");
+    let body: serde_json::Value =
+        serde_json::from_str(received.split("\r\n\r\n").nth(1).expect("request body"))
+            .expect("JSON request");
+    assert_eq!(body["model"], "liquid/lfm-2.5-2.6b:free");
+    assert_eq!(body["provider"]["allow_fallbacks"], false);
+    assert_eq!(body["provider"]["require_parameters"], true);
 }
 
 #[tokio::test]
@@ -349,6 +461,7 @@ async fn cohere_v2_chat_normalizes_split_text_tool_usage_and_finish() {
     assert!(!adapter.capabilities().privacy.request_disables_storage);
     assert!(adapter.capabilities().privacy.provider_may_retain_data);
     let mut llm_request = request();
+    llm_request.model = "command-a-plus-05-2026".into();
     llm_request.tools.push(ToolDefinition {
         name: "lookup".into(),
         description: "Look up an NPC".into(),
@@ -389,6 +502,7 @@ async fn cohere_v2_chat_normalizes_split_text_tool_usage_and_finish() {
     let body = received.split("\r\n\r\n").nth(1).expect("request body");
     assert!(!body.contains("\"store\""));
     assert!(body.contains("\"tools\""));
+    assert!(body.contains("\"thinking\":{\"type\":\"disabled\"}"));
 }
 
 #[tokio::test]
@@ -990,7 +1104,10 @@ async fn runtime_bridge_projects_normalized_text_without_losing_provider_policy(
                 character: CharacterIdentity::default(),
                 memory: MemoryContext::default(),
                 locale: "en-US".into(),
-                metadata: BTreeMap::new(),
+                metadata: BTreeMap::from([(
+                    "npc_response_format".into(),
+                    "structured_speech_first_v1".into(),
+                )]),
             },
             CancellationToken::new(),
         )
@@ -1007,10 +1124,25 @@ async fn runtime_bridge_projects_normalized_text_without_losing_provider_policy(
             .collect::<String>(),
         "First reply."
     );
+    let received = String::from_utf8(fixture.request.await.expect("request")).expect("UTF-8");
+    let body: serde_json::Value =
+        serde_json::from_str(received.split("\r\n\r\n").nth(1).expect("request body"))
+            .expect("JSON request");
+    let schema = &body["text"]["format"]["schema"];
+    assert_eq!(
+        schema["properties"]["schema_version"]["enum"],
+        json!(["npc_response.v1"])
+    );
+    assert!(schema.to_string().find("minLength").is_none());
+    assert!(schema.to_string().find("const").is_none());
 }
 
 #[test]
 fn strict_local_validation_rejects_injection_and_oversized_shapes() {
+    let mut openrouter_free = request();
+    openrouter_free.model = "liquid/lfm-2.5-2.6b:free".into();
+    assert!(openrouter_free.validate("openrouter").is_ok());
+
     let mut invalid = request();
     invalid.model = "../escape".into();
     assert_eq!(

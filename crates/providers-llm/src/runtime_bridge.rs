@@ -112,6 +112,16 @@ impl RuntimeBridge {
     }
 
     fn normalize_request(&self, request: GenerationRequest) -> LlmRequest {
+        let structured_response =
+            request
+                .metadata
+                .get("npc_response_format")
+                .is_some_and(|format| {
+                    matches!(
+                        format.as_str(),
+                        "structured_v1" | "structured_speech_first_v1"
+                    )
+                });
         let mut messages = Vec::with_capacity(2);
         if let Some(system_prompt) = &self.config.system_prompt {
             messages.push(ChatMessage {
@@ -140,9 +150,34 @@ impl RuntimeBridge {
             maximum_output_tokens: self.config.maximum_output_tokens,
             temperature: self.config.temperature,
             tools: Vec::new(),
-            response_json_schema: None,
+            response_json_schema: structured_response.then(portable_npc_response_schema),
         }
     }
+}
+
+/// Small common schema accepted by every qualified hosted route. Optional
+/// effect fields stay outside this contract so providers with narrower JSON
+/// Schema dialects can still guarantee the versioned spoken response.
+fn portable_npc_response_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "schema_version": {
+                "type": "string",
+                "enum": ["npc_response.v1"]
+            },
+            "spoken_response": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "text": { "type": "string" }
+                },
+                "required": ["text"]
+            }
+        },
+        "required": ["schema_version", "spoken_response"]
+    })
 }
 
 #[async_trait]
