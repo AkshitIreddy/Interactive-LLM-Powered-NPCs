@@ -1108,6 +1108,7 @@ fn native_request_for(
         character_id: (!is_generic)
             .then(|| request.character_id.clone())
             .flatten(),
+        effective_game_profile: request.effective_game_profile.clone(),
         // Identity-engine evidence may only come from a future trusted native
         // capture/identity pipeline. WebView turn requests cannot mint it.
         native_identity_decision: None,
@@ -1136,7 +1137,6 @@ fn native_request_for(
             } else {
                 NativeTurnInputMode::Typed
             },
-        effective_game_profile: request.effective_game_profile.clone(),
             push_to_talk_state: if selected_stt.is_some() {
                 NativePushToTalkCaptureState::TranscriptReady
             } else {
