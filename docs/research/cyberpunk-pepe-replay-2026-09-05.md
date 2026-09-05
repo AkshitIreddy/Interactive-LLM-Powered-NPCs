@@ -1,5 +1,20 @@
 # Cyberpunk 2077: Pepe mouth-replacement experiment
 
+## Disqualified by the user
+
+The user rejected this footage because Pepe is already speaking in the game.
+The intended interaction begins with a silent, idle character, normally facing
+the player. The talking, oblique-view clip is disqualified from acceptance and
+must not be retained as a secondary qualifying stress test. The user requested
+removal; `cyberpunk-pepe-mouth-test.mp4` was permanently deleted locally.
+Historical measurements below describe the rejected experiment only. They do
+not establish lip-sync quality for the intended use case.
+
+Replacement source selection must first verify a continuous, mostly front-facing
+idle interval with no source speech or mouth articulation, while preserving
+natural breathing, blinking, and small head movements. A talking reference clip
+may supply character mouth observations but cannot serve as the idle test input.
+
 ## Result and scope
 
 The first private Cyberpunk comparison is complete. The real native mouth worker
@@ -143,8 +158,8 @@ redistribution rights before a future optional GitHub release pack.
 
 Under the artifact root above:
 
-- `cyberpunk-pepe-mouth-test.mp4`: original game versus replacement mouth,
-  with enlarged detail and the replacement test voice.
+- `cyberpunk-pepe-mouth-test.mp4`: deleted at the user's request; disqualified
+  because the character was already talking in the original game.
 - `mara-smoothing-comparison.mp4`: previous versus smoothed control.
 - `pepe-smoothed-lm3/replay-report.json`, `frames.jsonl`, and `frames/`:
   native results and uncompressed evidence.
