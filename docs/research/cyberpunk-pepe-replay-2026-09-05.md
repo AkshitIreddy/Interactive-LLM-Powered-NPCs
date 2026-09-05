@@ -4,9 +4,9 @@
 
 The user rejected this footage because Pepe is already speaking in the game.
 The intended interaction begins with a silent, idle character, normally facing
-the player. The talking, oblique-view clip is disqualified from acceptance and
-must not be retained as a secondary qualifying stress test. The user requested
-removal; `cyberpunk-pepe-mouth-test.mp4` was permanently deleted locally.
+the player. The talking, oblique-view clip is disqualified as the primary
+acceptance test. The user requested removal;
+`cyberpunk-pepe-mouth-test.mp4` was permanently deleted locally.
 Historical measurements below describe the rejected experiment only. They do
 not establish lip-sync quality for the intended use case.
 
@@ -14,6 +14,14 @@ Replacement source selection must first verify a continuous, mostly front-facing
 idle interval with no source speech or mouth articulation, while preserving
 natural breathing, blinking, and small head movements. A talking reference clip
 may supply character mouth observations but cannot serve as the idle test input.
+
+The user subsequently clarified that replacing incidental in-game remarks is
+still a desirable secondary capability: an idle NPC may spontaneously speak
+when watched. This clarification does not restore the deleted video or make its
+side-view dialogue sequence representative of the primary case. A separate
+secondary test should cover idle-to-incidental-speech transitions. Visual mouth
+replacement and audible game-voice overlap must be evaluated separately; this
+compositor does not isolate or suppress a character's original game audio.
 
 ## Result and scope
 
