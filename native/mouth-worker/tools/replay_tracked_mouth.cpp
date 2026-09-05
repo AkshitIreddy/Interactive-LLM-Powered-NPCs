@@ -89,17 +89,21 @@ int main(int argc, char** argv) {
         VisualResourceStateV1 resources{};
         resources.admitted_signal_rate_hz = 15U;
         std::optional<TrackingEvidence> carried;
+        std::string last_sample_reason = "no-prior-sample";
         std::vector<double> render_times;
+        std::vector<double> frame_process_times;
         std::size_t rendered{}, unavailable{}, adapter_bypasses{}, worker_bypasses{};
         std::filesystem::create_directories(output / "frames");
         std::ofstream events(output / "frames.jsonl");
         for (std::size_t index = 0U; index < count; ++index) {
+            const auto frame_started = std::chrono::steady_clock::now();
             auto& frame = frames[index];
             const auto at = 10'000'000'000LL + static_cast<Nanoseconds>(index) * 1'000'000'000LL / 30;
             frame.identity = {index + 1000U, 1U, 1U, at};
             frame.lease.lease_nonce_low = index + 1U;
             frame.lease.expires_at_ns = at + 500'000'000LL;
-            std::string reason = "carried-valid-geometry";
+            std::string reason = carried ? "carried-valid-geometry" :
+                "no-carried-geometry:" + last_sample_reason;
             if (index % 2U == 0U) {
                 carried.reset();
                 if (packets.packets[index]) {
@@ -118,6 +122,7 @@ int main(int argc, char** argv) {
                     ++unavailable;
                     reason = "external-detector-or-landmark-unavailable";
                 }
+                last_sample_reason = reason;
             }
             auto pixels = frame.bgra;
             bool has_residual = false;
@@ -149,6 +154,8 @@ int main(int argc, char** argv) {
                     ++worker_bypasses;
                 }
             }
+            frame_process_times.push_back(std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - frame_started).count());
             std::ostringstream name;
             name << "frame-" << std::setfill('0') << std::setw(5) << index << ".ppm";
             write_ppm(output / "frames" / name.str(), pixels, packets.width, packets.height,
@@ -160,6 +167,10 @@ int main(int argc, char** argv) {
         std::sort(render_times.begin(), render_times.end());
         const auto p95 = render_times.empty() ? 0.0 : render_times[
             std::min(render_times.size() - 1U, static_cast<std::size_t>(std::ceil(render_times.size() * .95)) - 1U)];
+        std::sort(frame_process_times.begin(), frame_process_times.end());
+        const auto frame_p95 = frame_process_times.empty() ? 0.0 : frame_process_times[
+            std::min(frame_process_times.size() - 1U,
+                     static_cast<std::size_t>(std::ceil(frame_process_times.size() * .95)) - 1U)];
         std::ofstream report(output / "replay-report.json");
         report << "{\n  \"scope\":\"external-model-packet replay through native adapter and compositor; not installed-provider or live-game proof\",\n"
                << "  \"identitySource\":\"manual reviewer selection; no recognition claim\",\n"
@@ -168,6 +179,8 @@ int main(int argc, char** argv) {
                << ",\n  \"adapterBypasses\":" << adapter_bypasses
                << ",\n  \"workerBypasses\":" << worker_bypasses
                << ",\n  \"workerP95Ms\":" << p95
+               << ",\n  \"nativeFrameProcessP95Ms\":" << frame_p95
+               << ",\n  \"nativeFrameProcessScope\":\"adapter, worker and composition including source copy; excludes model inference, frame IO, capture and presentation\""
                << ",\n  \"landmarkReplaySha256\":\"" << sha256_bytes(read_binary(argv[5]))
                << "\",\n  \"mouthCueSha256\":\"" << sha256_bytes(read_binary(argv[4])) << "\"\n}\n";
         std::cout << "frames=" << count << " residuals=" << rendered << " worker_p95_ms=" << p95 << '\n';
