@@ -44,17 +44,18 @@ struct CanonicalMouthPatch {
                                                            const MouthCoefficients& coefficients,
                                                            Nanoseconds produced_at_ns);
 
-// Warp and interpolate two enrollment-generated atlas states into the current
-// tracked mouth rectangle. The caller must still pass the result through the
-// same worker validation and presentation-time frame/track/cancellation gates
-// as every other residual. This primitive does not perform color adaptation;
-// callers must reject atlas use outside its enrolled illumination envelope.
+// Render source-preserving lip motion and admit pixels from one nearest
+// identity-observed atlas state only inside the tracked oral aperture. The
+// outer lips, corners, moustache/facial hair, and surrounding skin always come
+// from the current source frame. Photographed states are never cross-faded at
+// pixel level: doing so creates ghosted teeth and duplicate lip edges. The
+// caller must still pass the result through the ordinary frame/track/
+// cancellation presentation gates.
 [[nodiscard]] ResidualPatch compose_atlas_residual(const CpuFrame& source,
                                                    const TrackBinding& track,
                                                    const TrackingEvidence& tracking,
-                                                   const CanonicalMouthPatch& primary,
-                                                   const CanonicalMouthPatch& secondary,
-                                                   double secondary_weight,
+                                                   const CanonicalMouthPatch& observed_state,
+                                                   const MouthCoefficients& coefficients,
                                                    Nanoseconds produced_at_ns);
 
 // Test/demo helper which composites a validated residual over a copy of its

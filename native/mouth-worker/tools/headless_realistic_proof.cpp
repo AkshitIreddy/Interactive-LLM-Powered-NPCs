@@ -9,6 +9,7 @@
 #include <psapi.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -75,6 +76,53 @@ struct WavPcm {
     stream.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
     if (!stream) throw std::runtime_error("could not read " + path.string());
     return bytes;
+}
+
+[[nodiscard]] CharacterMouthAtlas read_review_atlas(
+    const std::filesystem::path& root,
+    const std::uint64_t generation,
+    const TrackBinding& track) {
+    constexpr std::uint32_t width = 206U;
+    constexpr std::uint32_t height = 143U;
+    constexpr std::uint32_t stride = width * 4U;
+    constexpr std::size_t state_bytes = static_cast<std::size_t>(stride) * height;
+    constexpr std::array visemes{
+        Viseme::silence,
+        Viseme::labiodental,
+        Viseme::rounded,
+        Viseme::dental,
+        Viseme::open_vowel,
+        Viseme::alveolar,
+        Viseme::spread_vowel,
+        Viseme::postalveolar,
+    };
+    const auto texture_path = root / "atlas-bgra8-premultiplied.bin";
+    const auto bytes = read_binary(texture_path);
+    if (bytes.size() != state_bytes * visemes.size()) {
+        throw std::runtime_error("review atlas has an unexpected state layout");
+    }
+    CharacterMouthAtlas atlas{};
+    atlas.cancellation_generation = generation;
+    atlas.actor_id = track.actor_id;
+    atlas.identity_revision = 1U;
+    atlas.states.reserve(visemes.size());
+    for (std::size_t index = 0U; index < visemes.size(); ++index) {
+        MouthAtlasState state{};
+        state.coefficients = coefficients_for_viseme(visemes[index]);
+        state.appearance.width = width;
+        state.appearance.height = height;
+        state.appearance.stride_bytes = stride;
+        const auto first = bytes.begin() + static_cast<std::ptrdiff_t>(index * state_bytes);
+        const auto last = first + static_cast<std::ptrdiff_t>(state_bytes);
+        state.appearance.premultiplied_bgra.reserve(state_bytes);
+        std::transform(first, last,
+                       std::back_inserter(state.appearance.premultiplied_bgra),
+                       [](const std::byte value) {
+                           return std::to_integer<std::uint8_t>(value);
+                       });
+        atlas.states.push_back(std::move(state));
+    }
+    return atlas;
 }
 
 [[nodiscard]] WavPcm read_wav_pcm16(const std::filesystem::path& path) {
@@ -296,16 +344,16 @@ void write_ppm(const std::filesystem::path& path, const std::vector<std::uint8_t
 
 int main(int argc, char** argv) {
     try {
-        if (argc != 5 && argc != 6) {
+        if (argc < 5 || argc > 7) {
             throw std::runtime_error(
-                "usage: npc_mouth_worker_headless_realistic_proof <pack-root> <portrait.ppm|source-frames-dir> <audio.wav> <output-dir> [tracking-hz:10|15]");
+                "usage: npc_mouth_worker_headless_realistic_proof <pack-root> <portrait.ppm|source-frames-dir> <audio.wav> <output-dir> [tracking-hz:10|15] [review-mouth-atlas-root]");
         }
         const auto pack_root = std::filesystem::path(argv[1]);
         const auto source_path = std::filesystem::path(argv[2]);
         const auto audio_path = std::filesystem::path(argv[3]);
         const auto output = std::filesystem::path(argv[4]);
         std::uint32_t tracking_rate_hz = 15U;
-        if (argc == 6) {
+        if (argc >= 6) {
             const auto text = std::string_view(argv[5]);
             const auto parsed = std::from_chars(
                 text.data(), text.data() + text.size(), tracking_rate_hz);
@@ -314,6 +362,9 @@ int main(int argc, char** argv) {
                 throw std::runtime_error("tracking-hz must be 10 or 15");
             }
         }
+        const std::optional<std::filesystem::path> atlas_root = argc == 7
+            ? std::optional<std::filesystem::path>(std::filesystem::path(argv[6]))
+            : std::nullopt;
         const auto frames_dir = output / "frames";
         std::filesystem::create_directories(frames_dir);
 
@@ -403,6 +454,10 @@ int main(int argc, char** argv) {
         const Nanoseconds frame_ns = 1'000'000'000LL / video_fps;
         const auto timeline = monotonic_ns();
         ReferenceMouthWorker worker(generation);
+        if (atlas_root.has_value() &&
+            !worker.install_atlas(read_review_atlas(*atlas_root, generation, track))) {
+            throw std::runtime_error("review mouth atlas failed native admission");
+        }
         std::vector<double> compositor_ms;
         std::vector<double> moving_inference_ms;
         std::vector<double> mouth_mean_absolute_delta;
@@ -711,6 +766,11 @@ int main(int argc, char** argv) {
                << "  \"movingSource\": " << (moving_source ? "true" : "false") << ",\n"
                << "  \"sourceFrameCount\": " << source_frames.size() << ",\n"
                << "  \"audio\": \"" << json_escape(audio_path.string()) << "\",\n"
+               << "  \"reviewMouthAtlas\": "
+               << (atlas_root.has_value()
+                       ? "\"" + json_escape(atlas_root->string()) + "\""
+                       : "null")
+               << ",\n"
                << "  \"model\": \"OpenSeeFace MNV3 + LM1 / ONNX Runtime 1.22.1 CPU\",\n"
                << "  \"width\": " << source_template.lease.width << ",\n"
                << "  \"height\": " << source_template.lease.height << ",\n"

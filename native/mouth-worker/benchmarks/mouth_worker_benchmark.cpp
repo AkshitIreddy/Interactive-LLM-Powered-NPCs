@@ -152,7 +152,8 @@ int main() {
         const auto start = std::chrono::steady_clock::now();
         const auto residual = compose_atlas_residual(
             prototype.source, prototype.track, prototype.tracking,
-            closed_atlas, open_atlas, static_cast<double>(iteration % 11U) / 10.0,
+            iteration % 2U == 0U ? closed_atlas : open_atlas,
+            coefficients_for_viseme(Viseme::open_vowel, 0.85),
             captured_at_ns + 5'000'000);
         const auto finish = std::chrono::steady_clock::now();
         if (residual.premultiplied_bgra.empty()) {

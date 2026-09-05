@@ -204,19 +204,12 @@ constexpr std::uint32_t maximum_atlas_dimension = 512U;
            1.0 * squared(first.lower_lip_depress - second.lower_lip_depress);
 }
 
-struct AtlasSelection {
-    const MouthAtlasState* primary{};
-    const MouthAtlasState* secondary{};
-    double secondary_weight{};
-};
-
-[[nodiscard]] AtlasSelection select_atlas_states(const CharacterMouthAtlas& atlas,
-                                                 const MouthCoefficients& target,
-                                                 const HeadPoseDegrees& target_pose) noexcept {
+[[nodiscard]] const MouthAtlasState* select_atlas_state(
+    const CharacterMouthAtlas& atlas,
+    const MouthCoefficients& target,
+    const HeadPoseDegrees& target_pose) noexcept {
     std::size_t primary_index{};
-    std::size_t secondary_index{};
     double primary_distance = std::numeric_limits<double>::infinity();
-    double secondary_distance = std::numeric_limits<double>::infinity();
     for (std::size_t index = 0U; index < atlas.states.size(); ++index) {
         const auto& state = atlas.states[index];
         const double yaw_delta = (state.appearance.enrolled_pose.yaw - target_pose.yaw) / 35.0;
@@ -228,32 +221,14 @@ struct AtlasSelection {
                                 0.30 * pitch_delta * pitch_delta +
                                 0.10 * roll_delta * roll_delta;
         if (distance < primary_distance) {
-            secondary_distance = primary_distance;
-            secondary_index = primary_index;
             primary_distance = distance;
             primary_index = index;
-        } else if (distance < secondary_distance) {
-            secondary_distance = distance;
-            secondary_index = index;
         }
     }
     if (!std::isfinite(primary_distance)) {
-        return {};
+        return nullptr;
     }
-    if (!std::isfinite(secondary_distance) || primary_index == secondary_index) {
-        return {&atlas.states[primary_index], &atlas.states[primary_index], 0.0};
-    }
-    if (coefficient_distance(atlas.states[primary_index].coefficients, target) <= 1e-9) {
-        return {&atlas.states[primary_index], &atlas.states[primary_index], 0.0};
-    }
-    const double denominator = primary_distance + secondary_distance;
-    // Blend continuously at the nearest-state boundary. The secondary state
-    // never outweighs the nearest observation, while the 0.5 endpoint avoids
-    // a visible texture jump when the two distances cross.
-    const double weight = denominator <= 1e-9
-        ? 0.0
-        : std::clamp(primary_distance / denominator, 0.0, 0.50);
-    return {&atlas.states[primary_index], &atlas.states[secondary_index], weight};
+    return &atlas.states[primary_index];
 }
 
 } // namespace
@@ -355,13 +330,11 @@ ProcessResult ReferenceMouthWorker::process_latest(const FrameIdentity& current_
     if (atlas_.has_value() &&
         atlas_->cancellation_generation == item.track.cancellation_generation &&
         atlas_->actor_id == item.track.actor_id) {
-        const auto selection = select_atlas_states(*atlas_, coefficients, item.tracking.pose);
-        if (selection.primary != nullptr && selection.secondary != nullptr) {
+        const auto* selection = select_atlas_state(*atlas_, coefficients, item.tracking.pose);
+        if (selection != nullptr) {
             residual = compose_atlas_residual(item.source, item.track, item.tracking,
-                                              selection.primary->appearance,
-                                              selection.secondary->appearance,
-                                              selection.secondary_weight, now_ns);
-            residual.coefficients = coefficients;
+                                              selection->appearance,
+                                              coefficients, now_ns);
         }
     } else {
         residual = compose_current_frame_residual(item.source, item.track, item.tracking,

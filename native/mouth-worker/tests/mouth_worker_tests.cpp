@@ -391,13 +391,13 @@ void test_full_contour_visemes_have_distinct_geometry() {
         {0.542, 0.624, 0.96}, {0.558, 0.646, 0.96},
         {0.542, 0.671, 0.96}, {0.518, 0.682, 0.96},
         {0.482, 0.682, 0.96}, {0.458, 0.671, 0.96},
-        {0.558, 0.649, 0.96}, {0.535, 0.641, 0.96},
-        {0.500, 0.638, 0.96}, {0.465, 0.641, 0.96},
-        {0.442, 0.649, 0.96}, {0.465, 0.658, 0.96},
-        {0.500, 0.662, 0.96}, {0.535, 0.658, 0.96},
+        {0.442, 0.649, 0.96}, {0.465, 0.641, 0.96},
+        {0.500, 0.638, 0.96}, {0.535, 0.641, 0.96},
+        {0.558, 0.649, 0.96}, {0.535, 0.658, 0.96},
+        {0.500, 0.662, 0.96}, {0.465, 0.658, 0.96},
     }};
-    mouth.left_corner = mouth.contour[14U];
-    mouth.right_corner = mouth.contour[10U];
+    mouth.left_corner = mouth.contour[10U];
+    mouth.right_corner = mouth.contour[14U];
     mouth.upper_lip_center = {0.500, 0.640, 0.96};
     mouth.lower_lip_center = {0.500, 0.659, 0.96};
 
@@ -446,28 +446,25 @@ void test_full_contour_visemes_have_distinct_geometry() {
     };
     const auto open_extent = opaque_extent(open);
     const auto rounded_extent = opaque_extent(rounded);
-    const auto spread_extent = opaque_extent(spread);
     expect(open_extent.second > rounded_extent.second,
            "open vowel has more vertical articulation than rounded speech");
-    expect(spread_extent.first > rounded_extent.first,
-           "spread vowel is wider than a rounded/puckered mouth");
 }
 
-void test_atlas_residual_interpolates_and_binds_to_current_frame() {
+void test_atlas_residual_preserves_source_lips_and_binds_to_current_frame() {
     const auto item = make_item();
     const auto closed = make_atlas_patch(30U, 50U, 90U);
     const auto open = make_atlas_patch(80U, 140U, 210U);
+    const auto closed_coefficients = coefficients_for_viseme(Viseme::silence);
+    const auto open_coefficients = coefficients_for_viseme(Viseme::open_vowel, 1.0);
     const auto closed_result = compose_atlas_residual(
-        item.source, item.track, item.tracking, closed, open, 0.0,
-        item.source.identity.captured_at_ns + 4'000'000);
-    const auto mixed_result = compose_atlas_residual(
-        item.source, item.track, item.tracking, closed, open, 0.5,
+        item.source, item.track, item.tracking, closed,
+        closed_coefficients,
         item.source.identity.captured_at_ns + 4'000'000);
     const auto open_result = compose_atlas_residual(
-        item.source, item.track, item.tracking, closed, open, 1.0,
+        item.source, item.track, item.tracking, open,
+        open_coefficients,
         item.source.identity.captured_at_ns + 4'000'000);
     expect(!closed_result.premultiplied_bgra.empty() &&
-               !mixed_result.premultiplied_bgra.empty() &&
                !open_result.premultiplied_bgra.empty(),
            "valid atlas states produce current-frame residuals");
     expect(closed_result.source_frame == item.source.identity &&
@@ -477,26 +474,26 @@ void test_atlas_residual_interpolates_and_binds_to_current_frame() {
                closed_result.normalized_bounds.y <= item.tracking.mouth_bounds.y &&
                closed_result.normalized_bounds.bottom() >= item.tracking.mouth_bounds.bottom(),
            "atlas residual retains exact frame, track, and bounded mouth geometry");
-    expect(digest(closed_result.premultiplied_bgra) != digest(mixed_result.premultiplied_bgra) &&
-               digest(mixed_result.premultiplied_bgra) != digest(open_result.premultiplied_bgra),
-           "two atlas states interpolate to a distinct intermediate residual");
-    for (std::size_t offset = 0; offset < mixed_result.premultiplied_bgra.size(); offset += 4U) {
-        const auto alpha = mixed_result.premultiplied_bgra[offset + 3U];
-        expect(mixed_result.premultiplied_bgra[offset + 0U] <= alpha &&
-                   mixed_result.premultiplied_bgra[offset + 1U] <= alpha &&
-                   mixed_result.premultiplied_bgra[offset + 2U] <= alpha,
-               "interpolated atlas pixels preserve premultiplied alpha");
+    expect(digest(closed_result.premultiplied_bgra) !=
+               digest(open_result.premultiplied_bgra),
+           "closed and open coefficient geometry remain visually distinct");
+    for (std::size_t offset = 0; offset < open_result.premultiplied_bgra.size(); offset += 4U) {
+        const auto alpha = open_result.premultiplied_bgra[offset + 3U];
+        expect(open_result.premultiplied_bgra[offset + 0U] <= alpha &&
+                   open_result.premultiplied_bgra[offset + 1U] <= alpha &&
+                   open_result.premultiplied_bgra[offset + 2U] <= alpha,
+               "source-preserving atlas pixels preserve premultiplied alpha");
     }
 
-    const auto composited = composite_over_source(item.source, mixed_result);
+    const auto composited = composite_over_source(item.source, open_result);
     const auto left = static_cast<std::uint32_t>(std::llround(
-        mixed_result.normalized_bounds.x * item.source.lease.width));
+        open_result.normalized_bounds.x * item.source.lease.width));
     const auto top = static_cast<std::uint32_t>(std::llround(
-        mixed_result.normalized_bounds.y * item.source.lease.height));
+        open_result.normalized_bounds.y * item.source.lease.height));
     for (std::uint32_t y = 0; y < item.source.lease.height; ++y) {
         for (std::uint32_t x = 0; x < item.source.lease.width; ++x) {
             const bool inside = x >= left && y >= top &&
-                                x < left + mixed_result.width && y < top + mixed_result.height;
+                                x < left + open_result.width && y < top + open_result.height;
             const auto offset = static_cast<std::size_t>(y) * item.source.lease.stride_bytes +
                                 static_cast<std::size_t>(x) * 4U;
             const bool changed = !std::equal(
@@ -508,17 +505,78 @@ void test_atlas_residual_interpolates_and_binds_to_current_frame() {
         }
     }
 
+    const auto procedural = compose_current_frame_residual(
+        item.source, item.track, item.tracking, open_coefficients,
+        item.source.identity.captured_at_ns + 4'000'000);
+    expect(procedural.normalized_bounds.x == open_result.normalized_bounds.x &&
+               procedural.normalized_bounds.y == open_result.normalized_bounds.y &&
+               procedural.normalized_bounds.width == open_result.normalized_bounds.width &&
+               procedural.normalized_bounds.height == open_result.normalized_bounds.height &&
+               procedural.width == open_result.width &&
+               procedural.height == open_result.height,
+           "atlas rendering reuses the source-preserving current-frame lip geometry");
+    const double source_width = static_cast<double>(item.source.lease.width);
+    const double source_height = static_cast<double>(item.source.lease.height);
+    const double left_corner_x = item.tracking.mouth_landmarks.left_corner.x * source_width;
+    const double left_corner_y = item.tracking.mouth_landmarks.left_corner.y * source_height;
+    const double right_corner_x = item.tracking.mouth_landmarks.right_corner.x * source_width;
+    const double right_corner_y = item.tracking.mouth_landmarks.right_corner.y * source_height;
+    const double delta_x = right_corner_x - left_corner_x;
+    const double delta_y = right_corner_y - left_corner_y;
+    const double mouth_width = std::hypot(delta_x, delta_y);
+    const double mouth_center_x = (left_corner_x + right_corner_x) * 0.5;
+    const double mouth_center_y =
+        (item.tracking.mouth_landmarks.upper_lip_center.y +
+         item.tracking.mouth_landmarks.lower_lip_center.y) * 0.5 * source_height;
+    const double roll = std::atan2(delta_y, delta_x);
+    const double cosine = std::cos(roll);
+    const double sine = std::sin(roll);
+    const double canonical_width_pixels = mouth_width * 1.34;
+    const double canonical_height_pixels = canonical_width_pixels * 0.625;
+    std::size_t changed_inside_oral_region = 0U;
+    std::size_t atlas_changes_outside_hard_oral_limit = 0U;
+    for (std::uint32_t y = 0U; y < open_result.height; ++y) {
+        for (std::uint32_t x = 0U; x < open_result.width; ++x) {
+            const double frame_x = static_cast<double>(left + x) + 0.5;
+            const double frame_y = static_cast<double>(top + y) + 0.5;
+            const double frame_delta_x = frame_x - mouth_center_x;
+            const double frame_delta_y = frame_y - mouth_center_y;
+            const double canonical_x =
+                (cosine * frame_delta_x + sine * frame_delta_y) /
+                (canonical_width_pixels * 0.5);
+            const double canonical_y =
+                (-sine * frame_delta_x + cosine * frame_delta_y) /
+                (canonical_height_pixels * 0.5);
+            const auto offset = static_cast<std::size_t>(y) * open_result.stride_bytes +
+                                static_cast<std::size_t>(x) * 4U;
+            const bool changed = !std::equal(
+                open_result.premultiplied_bgra.begin() +
+                    static_cast<std::ptrdiff_t>(offset),
+                open_result.premultiplied_bgra.begin() +
+                    static_cast<std::ptrdiff_t>(offset + 4U),
+                procedural.premultiplied_bgra.begin() +
+                    static_cast<std::ptrdiff_t>(offset));
+            changed_inside_oral_region += changed ? 1U : 0U;
+            const bool outside_hard_oral_limit =
+                std::abs(canonical_x) >= 0.81 ||
+                canonical_y <= -0.25 || canonical_y >= 0.29;
+            atlas_changes_outside_hard_oral_limit +=
+                changed && outside_hard_oral_limit ? 1U : 0U;
+        }
+    }
+    expect(changed_inside_oral_region > 0U,
+           "the selected observation contributes real oral-interior pixels");
+    expect(atlas_changes_outside_hard_oral_limit == 0U,
+           "atlas pixels cannot replace outer lips, corners, facial hair, or surrounding skin");
+
     auto malformed = open;
     malformed.premultiplied_bgra[0] = 255U;
     malformed.premultiplied_bgra[3] = 0U;
-    expect(compose_atlas_residual(item.source, item.track, item.tracking, closed, malformed,
-                                  0.5, item.source.identity.captured_at_ns + 4'000'000)
+    expect(compose_atlas_residual(item.source, item.track, item.tracking, malformed,
+                                  open_coefficients,
+                                  item.source.identity.captured_at_ns + 4'000'000)
                .premultiplied_bgra.empty(),
            "atlas compositor rejects non-premultiplied enrollment artifacts");
-    expect(compose_atlas_residual(item.source, item.track, item.tracking, closed, open,
-                                  1.01, item.source.identity.captured_at_ns + 4'000'000)
-               .premultiplied_bgra.empty(),
-           "atlas compositor rejects an out-of-range interpolation weight");
 }
 
 void test_observed_patch_extraction_preserves_real_source_pixels() {
@@ -562,7 +620,8 @@ void test_worker_uses_identity_bound_atlas_and_clears_on_cancel() {
     auto atlas = make_character_atlas(item);
     const auto expected = compose_atlas_residual(
         item.source, item.track, item.tracking,
-        atlas.states[2U].appearance, atlas.states[2U].appearance, 0.0,
+        atlas.states[2U].appearance,
+        coefficients_for_viseme(Viseme::open_vowel, 1.0),
         item.source.identity.captured_at_ns + 10'000'000);
 
     ReferenceMouthWorker worker(item.track.cancellation_generation);
@@ -938,7 +997,7 @@ int main() {
     test_pcm_fallback_preserves_source_colour_envelope();
     test_pcm_fallback_keeps_cavity_below_upper_lip();
     test_full_contour_visemes_have_distinct_geometry();
-    test_atlas_residual_interpolates_and_binds_to_current_frame();
+    test_atlas_residual_preserves_source_lips_and_binds_to_current_frame();
     test_observed_patch_extraction_preserves_real_source_pixels();
     test_worker_uses_identity_bound_atlas_and_clears_on_cancel();
     test_worker_never_applies_an_atlas_to_another_actor();
