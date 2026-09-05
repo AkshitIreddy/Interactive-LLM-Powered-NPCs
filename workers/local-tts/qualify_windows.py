@@ -111,10 +111,25 @@ class _ProcessMemoryCounters(ctypes.Structure):
 def process_snapshot() -> ProcessSnapshot:
     if os.name != "nt":
         raise QualificationError("real Kokoro qualification is Windows-only")
+    # ctypes defaults an unannotated function return to a 32-bit C int.  A
+    # Windows HANDLE is pointer-sized, so relying on that default makes the
+    # exact-process RSS probe fail on x64 before any useful measurement can be
+    # collected.  Bind the two Win32 calls explicitly at the point of use so
+    # importing the plan/test helpers remains portable.
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    psapi = ctypes.WinDLL("psapi", use_last_error=True)
+    kernel32.GetCurrentProcess.argtypes = []
+    kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+    psapi.GetProcessMemoryInfo.argtypes = [
+        ctypes.c_void_p,
+        ctypes.POINTER(_ProcessMemoryCounters),
+        ctypes.c_ulong,
+    ]
+    psapi.GetProcessMemoryInfo.restype = ctypes.c_int
     counters = _ProcessMemoryCounters()
     counters.cb = ctypes.sizeof(counters)
-    process = ctypes.windll.kernel32.GetCurrentProcess()
-    ok = ctypes.windll.psapi.GetProcessMemoryInfo(
+    process = kernel32.GetCurrentProcess()
+    ok = psapi.GetProcessMemoryInfo(
         process,
         ctypes.byref(counters),
         counters.cb,
