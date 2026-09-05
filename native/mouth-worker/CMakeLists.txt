@@ -134,6 +134,16 @@ if(NPC_MOUTH_WORKER_BUILD_SYNTHETIC_PROOF)
 endif()
 
 if(WIN32 AND NPC_MOUTH_WORKER_BUILD_HEADLESS_REALISTIC_PROOF)
+    add_executable(npc_mouth_worker_tracked_replay tools/replay_tracked_mouth.cpp)
+    target_compile_features(npc_mouth_worker_tracked_replay PRIVATE cxx_std_20)
+    target_link_libraries(npc_mouth_worker_tracked_replay PRIVATE npc_mouth_worker bcrypt psapi)
+    if(MSVC)
+        target_compile_options(npc_mouth_worker_tracked_replay PRIVATE /W4 /permissive- /EHsc /utf-8)
+        if(NPC_MOUTH_WORKER_WARNINGS_AS_ERRORS)
+            target_compile_options(npc_mouth_worker_tracked_replay PRIVATE /WX)
+        endif()
+    endif()
+
     add_executable(npc_mouth_worker_headless_realistic_proof
                    tools/headless_realistic_proof.cpp
                    src/windows_ort_landmark_provider.cpp)
