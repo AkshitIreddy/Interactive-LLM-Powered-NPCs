@@ -2111,7 +2111,14 @@ fn selected_turn_timing_ledger(
         || tts.voice_id.is_none()
         || !matches!(
             llm.provider_id.as_str(),
-            "openai" | "anthropic" | "gemini" | "groq" | "cohere" | "nvidia-nim"
+            "openai"
+                | "anthropic"
+                | "gemini"
+                | "groq"
+                | "mistral"
+                | "openrouter"
+                | "cohere"
+                | "nvidia-nim"
         )
         || !matches!(
             tts.provider_id.as_str(),

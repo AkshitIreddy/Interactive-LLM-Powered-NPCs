@@ -8,9 +8,9 @@ use std::{sync::Arc, time::Duration};
 use async_trait::async_trait;
 use interactive_npcs_credential_vault::{CredentialVault, VaultError};
 use npc_providers_llm::{
-    AdapterConfig, AnthropicMessages, CohereChat, GeminiGenerateContent, GroqChatCompletions,
-    HostedLanguageModel, NvidiaNimChat, OpenAiResponses, RuntimeBridge, RuntimeBridgeConfig,
-    SecretBytes, SecretError, SecretProvider, SecretReference,
+    AdapterConfig, AnthropicMessages, CohereChat, CompatibleOptions, GeminiGenerateContent,
+    GroqChatCompletions, HostedLanguageModel, NvidiaNimChat, OpenAiCompatible, OpenAiResponses,
+    RuntimeBridge, RuntimeBridgeConfig, SecretBytes, SecretError, SecretProvider, SecretReference,
 };
 use npc_runtime_core::LanguageModelProvider;
 use url::Url;
@@ -78,6 +78,34 @@ pub(crate) fn selected_hosted_llm_with_timing(
             )?)
             .map_err(|_| SelectedLlmError::InvalidConfiguration)?,
         ),
+        "mistral" => Arc::new(
+            OpenAiCompatible::new(
+                adapter("https://api.mistral.ai/v1/", reference, secrets)?,
+                CompatibleOptions {
+                    provider_id: "mistral".into(),
+                    display_name: "Mistral AI".into(),
+                    supports_model_listing: true,
+                    supports_json_schema: true,
+                    send_store_false: false,
+                    provider_may_retain_data: true,
+                },
+            )
+            .map_err(|_| SelectedLlmError::InvalidConfiguration)?,
+        ),
+        "openrouter" => Arc::new(
+            OpenAiCompatible::new(
+                adapter("https://openrouter.ai/api/v1/", reference, secrets)?,
+                CompatibleOptions {
+                    provider_id: "openrouter".into(),
+                    display_name: "OpenRouter".into(),
+                    supports_model_listing: true,
+                    supports_json_schema: true,
+                    send_store_false: false,
+                    provider_may_retain_data: true,
+                },
+            )
+            .map_err(|_| SelectedLlmError::InvalidConfiguration)?,
+        ),
         "cohere" => Arc::new(
             CohereChat::new(adapter("https://api.cohere.com/", reference, secrets)?)
                 .map_err(|_| SelectedLlmError::InvalidConfiguration)?,
@@ -125,6 +153,8 @@ fn credential_target(provider_id: &str) -> Option<&'static str> {
         "anthropic" => Some("providers/anthropic"),
         "gemini" => Some("providers/gemini"),
         "groq" => Some("providers/groq"),
+        "mistral" => Some("providers/mistral"),
+        "openrouter" => Some("providers/openrouter"),
         "cohere" => Some("providers/cohere"),
         "nvidia-nim" => Some("providers/nvidia-nim"),
         _ => None,
@@ -192,6 +222,85 @@ mod tests {
         assert!(matches!(
             selected_hosted_llm(
                 &route,
+                Arc::new(MemoryCredentialVault::default()),
+                "Remain in character.".into()
+            ),
+            Err(SelectedLlmError::CredentialReferenceMismatch)
+        ));
+    }
+
+    #[test]
+    fn named_mistral_route_builds_with_its_fixed_vault_target() {
+        let route = SelectedProviderRoute {
+            provider_id: "mistral".into(),
+            model_id: "ministral-8b-2512".into(),
+            voice_id: None,
+            execution: RouteExecution::Cloud,
+            egress: "conversation_text".into(),
+            credential_reference: Some("providers/mistral".into()),
+        };
+        let provider = selected_hosted_llm(
+            &route,
+            Arc::new(MemoryCredentialVault::default()),
+            "Remain in character.".into(),
+        )
+        .expect("fixed Mistral route");
+        assert_eq!(provider.descriptor().id, "mistral");
+        assert_eq!(provider.descriptor().display_name, "Mistral AI");
+        assert_eq!(
+            provider
+                .descriptor()
+                .capabilities
+                .get("json_schema")
+                .map(String::as_str),
+            Some("true")
+        );
+    }
+
+    #[test]
+    fn generic_compatible_route_cannot_supply_an_endpoint_or_vault_target() {
+        let route = SelectedProviderRoute {
+            provider_id: "openai-compatible".into(),
+            model_id: "user-model".into(),
+            voice_id: None,
+            execution: RouteExecution::Cloud,
+            egress: "conversation_text".into(),
+            credential_reference: Some("providers/openai-compatible".into()),
+        };
+        assert!(matches!(
+            selected_hosted_llm(
+                &route,
+                Arc::new(MemoryCredentialVault::default()),
+                "Remain in character.".into()
+            ),
+            Err(SelectedLlmError::UnsupportedRoute)
+        ));
+    }
+
+    #[test]
+    fn named_openrouter_route_builds_with_its_fixed_vault_target() {
+        let route = SelectedProviderRoute {
+            provider_id: "openrouter".into(),
+            model_id: "liquid/lfm-2.5-2.6b:free".into(),
+            voice_id: None,
+            execution: RouteExecution::Cloud,
+            egress: "conversation_text".into(),
+            credential_reference: Some("providers/openrouter".into()),
+        };
+        let provider = selected_hosted_llm(
+            &route,
+            Arc::new(MemoryCredentialVault::default()),
+            "Remain in character.".into(),
+        )
+        .expect("fixed OpenRouter route");
+        assert_eq!(provider.descriptor().id, "openrouter");
+        assert_eq!(provider.descriptor().display_name, "OpenRouter");
+        assert!(matches!(
+            selected_hosted_llm(
+                &SelectedProviderRoute {
+                    credential_reference: Some("providers/openai-compatible".into()),
+                    ..route
+                },
                 Arc::new(MemoryCredentialVault::default()),
                 "Remain in character.".into()
             ),

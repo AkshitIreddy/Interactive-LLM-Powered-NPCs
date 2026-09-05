@@ -254,7 +254,7 @@ fn hosted_contracts() -> Vec<String> {
     let _stt = std::mem::size_of::<npc_providers_stt::RecognitionConfig>();
     let _tts = std::mem::size_of::<npc_providers_tts::TtsSessionRequest>();
     vec![
-        "llm:openai,anthropic,gemini,groq,cohere,nvidia-nim,openai-compatible".to_owned(),
+        "llm:openai,anthropic,gemini,groq,mistral,openrouter,cohere,nvidia-nim".to_owned(),
         "retrieval:nvidia-nim-embeddings-adapter,nvidia-nim-reranking-contract".to_owned(),
         "stt:deepgram,assemblyai,elevenlabs,nvidia-nim-asr,openai".to_owned(),
         // Only providers with a production credential resolver, hosted
@@ -309,9 +309,10 @@ mod tests {
             "anthropic",
             "gemini",
             "groq",
+            "mistral",
+            "openrouter",
             "cohere",
             "nvidia-nim",
-            "openai-compatible",
         ] {
             assert!(
                 llm.split_once(':')
