@@ -177,7 +177,10 @@ struct ObservedCommand {
 impl ObservedCommand {
     fn decode(frame: &[u8]) -> Self {
         let mut cursor = Cursor::new(frame);
-        assert_eq!(cursor.u32(), u32::try_from(frame.len() - 4).unwrap());
+        assert_eq!(
+            cursor.u32(),
+            u32::try_from(frame.len() - 4).expect("bounded broker frame length")
+        );
         assert_eq!(cursor.bytes(4), b"NPCP");
         assert_eq!(cursor.u32(), SCHEMA_VERSION);
         let kind = match cursor.u16() {
@@ -293,7 +296,11 @@ async fn respond_ok(server: &mut NamedPipeServer, command: &ObservedCommand) {
     body.extend_from_slice(&command.sequence.to_le_bytes());
     body.extend_from_slice(&accepted_frames.to_le_bytes());
     let mut frame = Vec::new();
-    frame.extend_from_slice(&u32::try_from(body.len()).unwrap().to_le_bytes());
+    frame.extend_from_slice(
+        &u32::try_from(body.len())
+            .expect("bounded broker response length")
+            .to_le_bytes(),
+    );
     frame.extend_from_slice(&body);
     server
         .write_all(&frame)
@@ -450,7 +457,8 @@ async fn provider_cue_and_pcm_share_the_admitted_audio_clock_until_cancellation(
         .expect("controlled broker task does not panic");
 
     assert_eq!(
-        sink.remaining_leases().unwrap(),
+        sink.remaining_leases()
+            .expect("read remaining broker leases"),
         0,
         "one lease is consumed once"
     );
@@ -489,23 +497,39 @@ async fn provider_cue_and_pcm_share_the_admitted_audio_clock_until_cancellation(
         .expect("provider phoneme becomes one native visual cue");
     assert_eq!(cue.payload.len(), 24);
     assert_eq!(
-        u32::from_le_bytes(cue.payload[0..4].try_into().unwrap()),
+        u32::from_le_bytes(
+            cue.payload[0..4]
+                .try_into()
+                .expect("four-byte cue sample rate")
+        ),
         VISUAL_CUE_SCHEMA_VERSION
     );
     assert_eq!(
-        u64::from_le_bytes(cue.payload[4..12].try_into().unwrap()),
+        u64::from_le_bytes(
+            cue.payload[4..12]
+                .try_into()
+                .expect("eight-byte cue start sample")
+        ),
         1_440,
         "60 ms is represented on the admitted 24 kHz source-sample clock"
     );
     assert_eq!(
-        u64::from_le_bytes(cue.payload[12..20].try_into().unwrap()),
+        u64::from_le_bytes(
+            cue.payload[12..20]
+                .try_into()
+                .expect("eight-byte cue sample duration")
+        ),
         480,
         "20 ms is represented on the admitted 24 kHz source-sample clock"
     );
     assert_eq!(cue.payload[20], 1, "Cartesia phoneme p selects bilabial");
     assert_eq!(cue.payload[21], 0);
     assert_eq!(
-        u16::from_le_bytes(cue.payload[22..24].try_into().unwrap()),
+        u16::from_le_bytes(
+            cue.payload[22..24]
+                .try_into()
+                .expect("two-byte cue symbol length")
+        ),
         32_767
     );
 
