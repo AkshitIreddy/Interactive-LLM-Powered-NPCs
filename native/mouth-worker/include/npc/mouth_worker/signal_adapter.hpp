@@ -144,17 +144,26 @@ private:
         NormalizedRect mouth_bounds;
         MouthLandmarks mouth_landmarks;
         Nanoseconds last_accepted_at_ns{};
-        std::uint32_t recovery_matches{};
         bool rejected_since_accept{};
+    };
+
+    struct ReacquisitionCandidate {
+        TrackBinding track;
+        NormalizedRect mouth_bounds;
+        MouthLandmarks mouth_landmarks;
+        Nanoseconds last_observed_at_ns{};
+        std::uint32_t consecutive_matches{};
     };
 
     [[nodiscard]] SignalDecision bypass(SignalDisposition disposition,
                                         std::uint32_t rate) const noexcept;
+    void clear_reacquisition_candidate() noexcept;
 
     std::uint64_t active_generation_{};
     std::uint64_t latch_generation_{1};
     OpenSeeFaceAdapterPolicy policy_;
     std::optional<StableState> stable_;
+    std::optional<ReacquisitionCandidate> reacquisition_candidate_;
 };
 
 } // namespace npc::mouth

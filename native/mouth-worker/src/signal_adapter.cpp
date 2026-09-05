@@ -24,6 +24,11 @@ constexpr double hard_minimum_temporal_iou = 0.42;
 constexpr double hard_maximum_blocker_coverage = 0.35;
 constexpr double hard_maximum_center_motion_face_fraction = 0.12;
 constexpr double hard_maximum_area_delta_fraction = 0.60;
+constexpr std::uint32_t hard_minimum_recovery_matches = 2U;
+// A candidate is evidence from the next admitted inference observations, not
+// a durable alternate pose. Two signal intervals tolerate normal scheduling
+// jitter without allowing observations separated by a pause to form consensus.
+constexpr Nanoseconds maximum_reacquisition_gap_intervals = 2;
 // Heatmap maxima can swap the two inner-lip rows by less than a pixel when the
 // mouth is fully closed. Treat only that small, contour-relative inversion as
 // a zero aperture; a materially crossed mouth still fails closed.
@@ -97,6 +102,22 @@ constexpr double closed_mouth_semantic_gap_over_contour_height = 0.005;
     return diagonal > std::numeric_limits<double>::epsilon()
         ? std::hypot(dx, dy) / diagonal
         : std::numeric_limits<double>::infinity();
+}
+
+[[nodiscard]] bool geometry_compatible(
+    const NormalizedRect& current,
+    const NormalizedRect& reference,
+    const NormalizedRect& face,
+    const OpenSeeFaceAdapterPolicy& policy) noexcept {
+    const double reference_area = area(reference);
+    const double area_delta = reference_area > std::numeric_limits<double>::epsilon()
+        ? std::abs(area(current) - reference_area) / reference_area
+        : std::numeric_limits<double>::infinity();
+    return center_distance_over_face(current, reference, face) <=
+               std::min(policy.maximum_center_motion_face_fraction,
+                        hard_maximum_center_motion_face_fraction) &&
+           area_delta <= std::min(policy.maximum_area_delta_fraction,
+                                  hard_maximum_area_delta_fraction);
 }
 
 [[nodiscard]] NormalizedRect mouth_contour_bounds_from_landmarks(
@@ -251,6 +272,7 @@ SignalDecision OpenSeeFaceSignalAdapter::adapt(const OpenSeeFaceLandmarkPacketV1
         return bypass(SignalDisposition::bypass_pressure, 0U);
     }
     if (packet.track.cancellation_generation != active_generation_) {
+        clear_reacquisition_candidate();
         return bypass(SignalDisposition::bypass_cancelled, rate);
     }
     if (packet.track.actor_id == 0U || packet.track.track_id == 0U ||
@@ -262,6 +284,7 @@ SignalDecision OpenSeeFaceSignalAdapter::adapt(const OpenSeeFaceLandmarkPacketV1
         return bypass(SignalDisposition::bypass_invalid_packet, rate);
     }
     if (packet.frame != current_frame) {
+        clear_reacquisition_candidate();
         return bypass(SignalDisposition::bypass_wrong_frame, rate);
     }
     if (packet.schema_version != 1U || !valid_rect(packet.face_bounds) ||
@@ -289,14 +312,15 @@ SignalDecision OpenSeeFaceSignalAdapter::adapt(const OpenSeeFaceLandmarkPacketV1
     if (packet.measured_at_ns > now_ns || current_frame.captured_at_ns > now_ns ||
         now_ns - packet.measured_at_ns > maximum_age ||
         now_ns - current_frame.captured_at_ns > maximum_age) {
+        clear_reacquisition_candidate();
         return bypass(SignalDisposition::bypass_stale, rate);
     }
     if (packet.mouth_occluded || finite_probability(appearance.blocker_coverage) &&
         appearance.blocker_coverage > std::min(policy_.maximum_blocker_coverage,
                                                hard_maximum_blocker_coverage)) {
+        clear_reacquisition_candidate();
         if (stable_) {
             stable_->rejected_since_accept = true;
-            stable_->recovery_matches = 0U;
         }
         return bypass(SignalDisposition::bypass_occluded, rate);
     }
@@ -307,8 +331,8 @@ SignalDecision OpenSeeFaceSignalAdapter::adapt(const OpenSeeFaceLandmarkPacketV1
         }
         if (stable_) {
             stable_->rejected_since_accept = true;
-            stable_->recovery_matches = 0U;
         }
+        clear_reacquisition_candidate();
         return bypass(SignalDisposition::bypass_appearance, rate);
     }
 
@@ -331,47 +355,80 @@ SignalDecision OpenSeeFaceSignalAdapter::adapt(const OpenSeeFaceLandmarkPacketV1
     }
 
     const Nanoseconds minimum_interval = 1'000'000'000LL / static_cast<Nanoseconds>(rate);
+    const Nanoseconds maximum_reacquisition_gap =
+        minimum_interval * maximum_reacquisition_gap_intervals;
     if (stable_ && stable_->track == packet.track) {
-        if (packet.measured_at_ns <= stable_->last_accepted_at_ns ||
-            packet.measured_at_ns - stable_->last_accepted_at_ns < minimum_interval) {
+        const Nanoseconds last_vote_at = reacquisition_candidate_ &&
+                reacquisition_candidate_->track == packet.track
+            ? std::max(stable_->last_accepted_at_ns,
+                       reacquisition_candidate_->last_observed_at_ns)
+            : stable_->last_accepted_at_ns;
+        if (packet.measured_at_ns <= last_vote_at ||
+            packet.measured_at_ns - last_vote_at < minimum_interval) {
             return bypass(SignalDisposition::bypass_rate_limited, rate);
         }
-        const double previous_area = area(stable_->mouth_bounds);
-        const double area_delta = previous_area > std::numeric_limits<double>::epsilon()
-            ? std::abs(area(mouth_bounds) - previous_area) / previous_area
-            : std::numeric_limits<double>::infinity();
-        if (center_distance_over_face(mouth_bounds, stable_->mouth_bounds, packet.face_bounds) >
-                std::min(policy_.maximum_center_motion_face_fraction,
-                         hard_maximum_center_motion_face_fraction) ||
-            area_delta > std::min(policy_.maximum_area_delta_fraction,
-                                  hard_maximum_area_delta_fraction)) {
+        bool reacquired_geometry = false;
+        const bool matches_stable_geometry = geometry_compatible(
+            mouth_bounds, stable_->mouth_bounds, packet.face_bounds, policy_);
+        if (!matches_stable_geometry) {
             stable_->rejected_since_accept = true;
-            stable_->recovery_matches = 0U;
-            return bypass(SignalDisposition::bypass_appearance, rate);
         }
         if (stable_->rejected_since_accept) {
-            ++stable_->recovery_matches;
-            if (stable_->recovery_matches < std::max(1U, policy_.recovery_matches_after_rejection)) {
+            const bool continues_candidate = reacquisition_candidate_ &&
+                reacquisition_candidate_->track == packet.track &&
+                packet.measured_at_ns - reacquisition_candidate_->last_observed_at_ns <=
+                    maximum_reacquisition_gap &&
+                geometry_compatible(mouth_bounds,
+                                    reacquisition_candidate_->mouth_bounds,
+                                    packet.face_bounds,
+                                    policy_);
+            if (!continues_candidate) {
+                reacquisition_candidate_ = ReacquisitionCandidate{
+                    packet.track, mouth_bounds, semantic, packet.measured_at_ns, 1U};
+            } else {
+                reacquisition_candidate_->mouth_bounds = mouth_bounds;
+                reacquisition_candidate_->mouth_landmarks = semantic;
+                reacquisition_candidate_->last_observed_at_ns = packet.measured_at_ns;
+                ++reacquisition_candidate_->consecutive_matches;
+            }
+            if (reacquisition_candidate_->consecutive_matches <
+                std::max(hard_minimum_recovery_matches,
+                         policy_.recovery_matches_after_rejection)) {
                 return bypass(SignalDisposition::bypass_appearance, rate);
             }
+            // The same authoritative actor remained visible while multiple
+            // fresh observations agreed on a new mouth position. Latch that
+            // raw position directly; blending from the stale pose would sweep
+            // the mask through unrelated face pixels.
+            mouth_bounds = reacquisition_candidate_->mouth_bounds;
+            semantic = reacquisition_candidate_->mouth_landmarks;
+            reacquired_geometry = !geometry_compatible(
+                mouth_bounds, stable_->mouth_bounds, packet.face_bounds, policy_);
+            clear_reacquisition_candidate();
             stable_->rejected_since_accept = false;
-            stable_->recovery_matches = 0U;
+        } else {
+            clear_reacquisition_candidate();
         }
-        const double alpha = std::clamp(policy_.smoothing_alpha, 0.0, 1.0);
-        mouth_bounds = smooth(mouth_bounds, stable_->mouth_bounds, alpha);
-        semantic.left_corner = smooth(semantic.left_corner, stable_->mouth_landmarks.left_corner, alpha);
-        semantic.right_corner = smooth(semantic.right_corner, stable_->mouth_landmarks.right_corner, alpha);
-        semantic.upper_lip_center = smooth(semantic.upper_lip_center,
-                                           stable_->mouth_landmarks.upper_lip_center, alpha);
-        semantic.lower_lip_center = smooth(semantic.lower_lip_center,
-                                           stable_->mouth_landmarks.lower_lip_center, alpha);
-        for (std::size_t index = 0; index < semantic.contour.size(); ++index) {
-            semantic.contour[index] = smooth(semantic.contour[index],
-                                             stable_->mouth_landmarks.contour[index], alpha);
+        if (!reacquired_geometry) {
+            const double alpha = std::clamp(policy_.smoothing_alpha, 0.0, 1.0);
+            mouth_bounds = smooth(mouth_bounds, stable_->mouth_bounds, alpha);
+            semantic.left_corner = smooth(
+                semantic.left_corner, stable_->mouth_landmarks.left_corner, alpha);
+            semantic.right_corner = smooth(
+                semantic.right_corner, stable_->mouth_landmarks.right_corner, alpha);
+            semantic.upper_lip_center = smooth(
+                semantic.upper_lip_center, stable_->mouth_landmarks.upper_lip_center, alpha);
+            semantic.lower_lip_center = smooth(
+                semantic.lower_lip_center, stable_->mouth_landmarks.lower_lip_center, alpha);
+            for (std::size_t index = 0; index < semantic.contour.size(); ++index) {
+                semantic.contour[index] = smooth(
+                    semantic.contour[index], stable_->mouth_landmarks.contour[index], alpha);
+            }
         }
     } else {
         ++latch_generation_;
         stable_.reset();
+        clear_reacquisition_candidate();
     }
 
     TrackingEvidence tracking{};
@@ -392,7 +449,6 @@ SignalDecision OpenSeeFaceSignalAdapter::adapt(const OpenSeeFaceLandmarkPacketV1
         mouth_bounds,
         semantic,
         packet.measured_at_ns,
-        0U,
         false,
     };
     return {SignalDisposition::accepted, std::move(tracking), rate, latch_generation_};
@@ -408,10 +464,15 @@ bool OpenSeeFaceSignalAdapter::cancel_to(const std::uint64_t generation) noexcep
 }
 
 void OpenSeeFaceSignalAdapter::reset_track() noexcept {
+    clear_reacquisition_candidate();
     if (stable_) {
         stable_.reset();
         ++latch_generation_;
     }
+}
+
+void OpenSeeFaceSignalAdapter::clear_reacquisition_candidate() noexcept {
+    reacquisition_candidate_.reset();
 }
 
 std::uint64_t OpenSeeFaceSignalAdapter::active_generation() const noexcept {

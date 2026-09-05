@@ -101,6 +101,15 @@ ProductFrameRequest make_request(const std::uint64_t request_id,
     return request;
 }
 
+void shift_mouth_geometry(ProductFrameRequest& request,
+                          const double dx,
+                          const double dy = 0.0) {
+    for (std::size_t index = 48U; index < 66U; ++index) {
+        request.landmarks.landmarks[index].x += dx;
+        request.landmarks.landmarks[index].y += dy;
+    }
+}
+
 void test_typed_openseeface_mapping_and_rate_policy() {
     OpenSeeFaceSignalAdapter adapter;
     auto request = make_request(1U, 9U, 1'000'000'000);
@@ -277,6 +286,378 @@ void test_appearance_occlusion_latch_and_recovery() {
            "identity runtime actor mismatch fails closed");
 }
 
+void test_persistent_moved_geometry_reacquires_without_old_position_deadlock() {
+    OpenSeeFaceSignalAdapter adapter;
+    auto initial = make_request(110U, 110U, 9'000'000'000);
+    const auto first = adapter.adapt(initial.landmarks, initial.appearance, initial.resources,
+                                     initial.source.identity, 9'005'000'000);
+    expect(first.accepted(), "persistent-motion test establishes stable geometry");
+
+    auto moved_one = make_request(111U, 111U, 9'070'000'000);
+    shift_mouth_geometry(moved_one, 0.10);
+    const auto first_vote = adapter.adapt(
+        moved_one.landmarks, moved_one.appearance, moved_one.resources,
+        moved_one.source.identity, 9'075'000'000);
+    expect(first_vote.disposition == SignalDisposition::bypass_appearance,
+           "the first large geometry jump is withheld while reacquisition starts");
+
+    auto moved_two = make_request(112U, 112U, 9'140'000'000);
+    shift_mouth_geometry(moved_two, 0.10);
+    const auto reacquired = adapter.adapt(
+        moved_two.landmarks, moved_two.appearance, moved_two.resources,
+        moved_two.source.identity, 9'145'000'000);
+    expect(reacquired.accepted(),
+           "two fresh consistent moved observations replace stale stable geometry");
+    expect(reacquired.accepted() && first.accepted() &&
+               reacquired.tracking->mouth_bounds.x > first.tracking->mouth_bounds.x + 0.08,
+           "reacquisition latches the new position without smoothing across the jump");
+}
+
+void test_geometry_reacquisition_requires_consecutive_fresh_consensus() {
+    OpenSeeFaceSignalAdapter single_outlier_adapter;
+    auto initial = make_request(120U, 120U, 10'000'000'000);
+    const auto stable = single_outlier_adapter.adapt(
+        initial.landmarks, initial.appearance, initial.resources,
+        initial.source.identity, 10'005'000'000);
+    expect(stable.accepted(), "single-outlier test establishes stable geometry");
+
+    auto outlier = make_request(121U, 121U, 10'070'000'000);
+    shift_mouth_geometry(outlier, 0.10);
+    expect(single_outlier_adapter.adapt(
+               outlier.landmarks, outlier.appearance, outlier.resources,
+               outlier.source.identity, 10'075'000'000).disposition ==
+               SignalDisposition::bypass_appearance,
+           "one large geometry outlier cannot move the accepted mouth position");
+
+    auto original_one = make_request(122U, 122U, 10'140'000'000);
+    expect(single_outlier_adapter.adapt(
+               original_one.landmarks, original_one.appearance, original_one.resources,
+               original_one.source.identity, 10'145'000'000).disposition ==
+               SignalDisposition::bypass_appearance,
+           "returning stable geometry starts fresh post-rejection consensus");
+    auto original_two = make_request(123U, 123U, 10'210'000'000);
+    const auto recovered_original = single_outlier_adapter.adapt(
+        original_two.landmarks, original_two.appearance, original_two.resources,
+        original_two.source.identity, 10'215'000'000);
+    expect(recovered_original.accepted() && stable.accepted() &&
+               std::abs(recovered_original.tracking->mouth_bounds.x -
+                        stable.tracking->mouth_bounds.x) < 1e-12,
+           "a rejected outlier never becomes the stable mouth geometry");
+
+    OpenSeeFaceSignalAdapter alternating_adapter;
+    auto alternating_initial = make_request(124U, 124U, 11'000'000'000);
+    expect(alternating_adapter.adapt(
+               alternating_initial.landmarks, alternating_initial.appearance,
+               alternating_initial.resources, alternating_initial.source.identity,
+               11'005'000'000).accepted(),
+           "alternating-candidate test establishes stable geometry");
+    const double offsets[] = {0.10, -0.10, 0.10, -0.10};
+    for (std::size_t index = 0; index < 4U; ++index) {
+        const auto timestamp = 11'070'000'000 +
+            static_cast<Nanoseconds>(index) * 70'000'000;
+        auto alternating = make_request(125U + index, 125U + index, timestamp);
+        shift_mouth_geometry(alternating, offsets[index]);
+        expect(alternating_adapter.adapt(
+                   alternating.landmarks, alternating.appearance, alternating.resources,
+                   alternating.source.identity, timestamp + 5'000'000).disposition ==
+                   SignalDisposition::bypass_appearance,
+               "alternating incompatible geometry cannot form reacquisition consensus");
+    }
+
+    OpenSeeFaceAdapterPolicy one_match_policy{};
+    one_match_policy.recovery_matches_after_rejection = 1U;
+    OpenSeeFaceSignalAdapter hard_floor_adapter(1U, one_match_policy);
+    auto floor_initial = make_request(130U, 130U, 12'000'000'000);
+    expect(hard_floor_adapter.adapt(
+               floor_initial.landmarks, floor_initial.appearance, floor_initial.resources,
+               floor_initial.source.identity, 12'005'000'000).accepted(),
+           "hard-floor test establishes stable geometry");
+    auto floor_jump = make_request(131U, 131U, 12'070'000'000);
+    shift_mouth_geometry(floor_jump, 0.10);
+    expect(hard_floor_adapter.adapt(
+               floor_jump.landmarks, floor_jump.appearance, floor_jump.resources,
+               floor_jump.source.identity, 12'075'000'000).disposition ==
+               SignalDisposition::bypass_appearance,
+           "configuration cannot weaken the two-observation reacquisition floor");
+}
+
+void test_geometry_reacquisition_rejects_duplicate_fast_and_old_votes() {
+    OpenSeeFaceSignalAdapter adapter;
+    auto initial = make_request(140U, 140U, 13'000'000'000);
+    expect(adapter.adapt(initial.landmarks, initial.appearance, initial.resources,
+                         initial.source.identity, 13'005'000'000).accepted(),
+           "vote-timing test establishes stable geometry");
+
+    auto first_vote = make_request(141U, 141U, 13'070'000'000);
+    shift_mouth_geometry(first_vote, 0.10);
+    expect(adapter.adapt(first_vote.landmarks, first_vote.appearance, first_vote.resources,
+                         first_vote.source.identity, 13'075'000'000).disposition ==
+               SignalDisposition::bypass_appearance,
+           "first moved observation starts withheld consensus");
+
+    auto duplicate = make_request(142U, 142U, 13'100'000'000);
+    shift_mouth_geometry(duplicate, 0.10);
+    duplicate.landmarks.measured_at_ns = first_vote.landmarks.measured_at_ns;
+    expect(adapter.adapt(duplicate.landmarks, duplicate.appearance, duplicate.resources,
+                         duplicate.source.identity, 13'105'000'000).disposition ==
+               SignalDisposition::bypass_rate_limited,
+           "a duplicate measurement timestamp cannot cast a second vote");
+
+    auto too_fast = make_request(143U, 143U, 13'100'000'000);
+    shift_mouth_geometry(too_fast, 0.10);
+    expect(adapter.adapt(too_fast.landmarks, too_fast.appearance, too_fast.resources,
+                         too_fast.source.identity, 13'105'000'000).disposition ==
+               SignalDisposition::bypass_rate_limited,
+           "a too-fast measurement cannot cast a second vote");
+
+    auto second_fresh = make_request(144U, 144U, 13'140'000'000);
+    shift_mouth_geometry(second_fresh, 0.10);
+    expect(adapter.adapt(second_fresh.landmarks, second_fresh.appearance,
+                         second_fresh.resources, second_fresh.source.identity,
+                         13'145'000'000).accepted(),
+           "the next rate-valid compatible observation completes consensus");
+
+    OpenSeeFaceSignalAdapter old_vote_adapter;
+    auto old_initial = make_request(145U, 145U, 14'000'000'000);
+    expect(old_vote_adapter.adapt(
+               old_initial.landmarks, old_initial.appearance, old_initial.resources,
+               old_initial.source.identity, 14'005'000'000).accepted(),
+           "old-vote test establishes stable geometry");
+    auto old_first = make_request(146U, 146U, 14'070'000'000);
+    shift_mouth_geometry(old_first, 0.10);
+    expect(old_vote_adapter.adapt(
+               old_first.landmarks, old_first.appearance, old_first.resources,
+               old_first.source.identity, 14'075'000'000).disposition ==
+               SignalDisposition::bypass_appearance,
+           "old-vote test starts a candidate");
+    auto after_pause = make_request(147U, 147U, 15'070'000'000);
+    shift_mouth_geometry(after_pause, 0.10);
+    expect(old_vote_adapter.adapt(
+               after_pause.landmarks, after_pause.appearance, after_pause.resources,
+               after_pause.source.identity, 15'075'000'000).disposition ==
+               SignalDisposition::bypass_appearance,
+           "a long gap restarts rather than completes geometry consensus");
+    auto after_pause_fresh = make_request(148U, 148U, 15'140'000'000);
+    shift_mouth_geometry(after_pause_fresh, 0.10);
+    expect(old_vote_adapter.adapt(
+               after_pause_fresh.landmarks, after_pause_fresh.appearance,
+               after_pause_fresh.resources, after_pause_fresh.source.identity,
+               15'145'000'000).accepted(),
+           "two fresh observations after the gap can reacquire geometry");
+
+    OpenSeeFaceSignalAdapter five_hz_adapter;
+    auto five_hz_initial = make_request(149U, 149U, 15'500'000'000);
+    five_hz_initial.resources.pressure = VisualPressure::elevated_memory;
+    expect(five_hz_adapter.adapt(
+               five_hz_initial.landmarks, five_hz_initial.appearance,
+               five_hz_initial.resources, five_hz_initial.source.identity,
+               15'505'000'000).accepted(),
+           "five-hertz test establishes stable geometry at admitted cadence");
+    auto five_hz_one = make_request(150U, 150U, 15'700'000'000);
+    five_hz_one.resources.pressure = VisualPressure::elevated_memory;
+    shift_mouth_geometry(five_hz_one, 0.10);
+    expect(five_hz_adapter.adapt(
+               five_hz_one.landmarks, five_hz_one.appearance, five_hz_one.resources,
+               five_hz_one.source.identity, 15'705'000'000).disposition ==
+               SignalDisposition::bypass_appearance,
+           "first five-hertz moved observation starts consensus");
+    auto five_hz_two = make_request(151U, 151U, 15'900'000'000);
+    five_hz_two.resources.pressure = VisualPressure::elevated_memory;
+    shift_mouth_geometry(five_hz_two, 0.10);
+    expect(five_hz_adapter.adapt(
+               five_hz_two.landmarks, five_hz_two.appearance, five_hz_two.resources,
+               five_hz_two.source.identity, 15'905'000'000).accepted(),
+           "fresh consensus remains reachable at the admitted five-hertz cadence");
+}
+
+void test_original_geometry_recovery_also_requires_fresh_consensus() {
+    OpenSeeFaceSignalAdapter duplicate_adapter;
+    auto initial = make_request(149U, 149U, 15'500'000'000);
+    expect(duplicate_adapter.adapt(
+               initial.landmarks, initial.appearance, initial.resources,
+               initial.source.identity, 15'505'000'000).accepted(),
+           "original-geometry duplicate test establishes stable geometry");
+    auto occluded = make_request(150U, 150U, 15'570'000'000);
+    occluded.landmarks.mouth_occluded = true;
+    expect(duplicate_adapter.adapt(
+               occluded.landmarks, occluded.appearance, occluded.resources,
+               occluded.source.identity, 15'575'000'000).disposition ==
+               SignalDisposition::bypass_occluded,
+           "occlusion opens the original-geometry appearance latch");
+    auto original_one = make_request(151U, 151U, 15'640'000'000);
+    expect(duplicate_adapter.adapt(
+               original_one.landmarks, original_one.appearance, original_one.resources,
+               original_one.source.identity, 15'645'000'000).disposition ==
+               SignalDisposition::bypass_appearance,
+           "one original-geometry observation starts recovery consensus");
+    auto duplicate = make_request(152U, 152U, 15'670'000'000);
+    duplicate.landmarks.measured_at_ns = original_one.landmarks.measured_at_ns;
+    expect(duplicate_adapter.adapt(
+               duplicate.landmarks, duplicate.appearance, duplicate.resources,
+               duplicate.source.identity, 15'675'000'000).disposition ==
+               SignalDisposition::bypass_rate_limited,
+           "a duplicate original-geometry timestamp cannot complete recovery");
+    auto original_two = make_request(153U, 153U, 15'710'000'000);
+    expect(duplicate_adapter.adapt(
+               original_two.landmarks, original_two.appearance, original_two.resources,
+               original_two.source.identity, 15'715'000'000).accepted(),
+           "the next fresh original-geometry observation completes recovery");
+
+    OpenSeeFaceSignalAdapter gap_adapter;
+    auto gap_initial = make_request(154U, 154U, 16'000'000'000);
+    expect(gap_adapter.adapt(
+               gap_initial.landmarks, gap_initial.appearance, gap_initial.resources,
+               gap_initial.source.identity, 16'005'000'000).accepted(),
+           "original-geometry gap test establishes stable geometry");
+    auto gap_occluded = make_request(155U, 155U, 16'070'000'000);
+    gap_occluded.landmarks.mouth_occluded = true;
+    expect(gap_adapter.adapt(
+               gap_occluded.landmarks, gap_occluded.appearance, gap_occluded.resources,
+               gap_occluded.source.identity, 16'075'000'000).disposition ==
+               SignalDisposition::bypass_occluded,
+           "original-geometry gap test opens the appearance latch");
+    auto gap_one = make_request(156U, 156U, 16'140'000'000);
+    expect(gap_adapter.adapt(
+               gap_one.landmarks, gap_one.appearance, gap_one.resources,
+               gap_one.source.identity, 16'145'000'000).disposition ==
+               SignalDisposition::bypass_appearance,
+           "original-geometry gap test starts recovery consensus");
+    auto gap_old = make_request(157U, 157U, 17'140'000'000);
+    expect(gap_adapter.adapt(
+               gap_old.landmarks, gap_old.appearance, gap_old.resources,
+               gap_old.source.identity, 17'145'000'000).disposition ==
+               SignalDisposition::bypass_appearance,
+           "a long gap restarts original-geometry recovery consensus");
+    auto gap_fresh = make_request(158U, 158U, 17'210'000'000);
+    expect(gap_adapter.adapt(
+               gap_fresh.landmarks, gap_fresh.appearance, gap_fresh.resources,
+               gap_fresh.source.identity, 17'215'000'000).accepted(),
+           "fresh original-geometry observations after a gap can recover");
+}
+
+void test_geometry_reacquisition_candidate_resets_at_safety_boundaries() {
+    OpenSeeFaceSignalAdapter occlusion_adapter;
+    auto occlusion_initial = make_request(150U, 150U, 16'000'000'000);
+    expect(occlusion_adapter.adapt(
+               occlusion_initial.landmarks, occlusion_initial.appearance,
+               occlusion_initial.resources, occlusion_initial.source.identity,
+               16'005'000'000).accepted(),
+           "occlusion reset test establishes stable geometry");
+    auto before_occlusion = make_request(151U, 151U, 16'070'000'000);
+    shift_mouth_geometry(before_occlusion, 0.10);
+    expect(occlusion_adapter.adapt(
+               before_occlusion.landmarks, before_occlusion.appearance,
+               before_occlusion.resources, before_occlusion.source.identity,
+               16'075'000'000).disposition == SignalDisposition::bypass_appearance,
+           "occlusion reset test starts a candidate");
+    auto occluded = make_request(152U, 152U, 16'140'000'000);
+    shift_mouth_geometry(occluded, 0.10);
+    occluded.landmarks.mouth_occluded = true;
+    expect(occlusion_adapter.adapt(
+               occluded.landmarks, occluded.appearance, occluded.resources,
+               occluded.source.identity, 16'145'000'000).disposition ==
+               SignalDisposition::bypass_occluded,
+           "occlusion interrupts geometry consensus");
+    auto after_occlusion_one = make_request(153U, 153U, 16'210'000'000);
+    shift_mouth_geometry(after_occlusion_one, 0.10);
+    expect(occlusion_adapter.adapt(
+               after_occlusion_one.landmarks, after_occlusion_one.appearance,
+               after_occlusion_one.resources, after_occlusion_one.source.identity,
+               16'215'000'000).disposition == SignalDisposition::bypass_appearance,
+           "the first moved observation after occlusion cannot reuse an old vote");
+    auto after_occlusion_two = make_request(154U, 154U, 16'280'000'000);
+    shift_mouth_geometry(after_occlusion_two, 0.10);
+    expect(occlusion_adapter.adapt(
+               after_occlusion_two.landmarks, after_occlusion_two.appearance,
+               after_occlusion_two.resources, after_occlusion_two.source.identity,
+               16'285'000'000).accepted(),
+           "fresh post-occlusion consensus can reacquire geometry");
+
+    OpenSeeFaceSignalAdapter identity_adapter;
+    auto identity_initial = make_request(155U, 155U, 17'000'000'000);
+    expect(identity_adapter.adapt(
+               identity_initial.landmarks, identity_initial.appearance,
+               identity_initial.resources, identity_initial.source.identity,
+               17'005'000'000).accepted(),
+           "identity reset test establishes stable geometry");
+    auto before_identity_loss = make_request(156U, 156U, 17'070'000'000);
+    shift_mouth_geometry(before_identity_loss, 0.10);
+    expect(identity_adapter.adapt(
+               before_identity_loss.landmarks, before_identity_loss.appearance,
+               before_identity_loss.resources, before_identity_loss.source.identity,
+               17'075'000'000).disposition == SignalDisposition::bypass_appearance,
+           "identity reset test starts a candidate");
+    auto identity_lost = make_request(157U, 157U, 17'140'000'000);
+    shift_mouth_geometry(identity_lost, 0.10);
+    identity_lost.appearance.identity_locked = false;
+    expect(identity_adapter.adapt(
+               identity_lost.landmarks, identity_lost.appearance, identity_lost.resources,
+               identity_lost.source.identity, 17'145'000'000).disposition ==
+               SignalDisposition::bypass_appearance,
+           "identity uncertainty interrupts geometry consensus");
+    auto after_identity_one = make_request(158U, 158U, 17'210'000'000);
+    shift_mouth_geometry(after_identity_one, 0.10);
+    expect(identity_adapter.adapt(
+               after_identity_one.landmarks, after_identity_one.appearance,
+               after_identity_one.resources, after_identity_one.source.identity,
+               17'215'000'000).disposition == SignalDisposition::bypass_appearance,
+           "the first moved observation after identity loss cannot reuse an old vote");
+    auto after_identity_two = make_request(159U, 159U, 17'280'000'000);
+    shift_mouth_geometry(after_identity_two, 0.10);
+    expect(identity_adapter.adapt(
+               after_identity_two.landmarks, after_identity_two.appearance,
+               after_identity_two.resources, after_identity_two.source.identity,
+               17'285'000'000).accepted(),
+           "fresh post-identity consensus can reacquire geometry");
+
+    OpenSeeFaceSignalAdapter invalid_adapter;
+    auto invalid_initial = make_request(160U, 160U, 18'000'000'000);
+    const auto invalid_stable = invalid_adapter.adapt(
+        invalid_initial.landmarks, invalid_initial.appearance, invalid_initial.resources,
+        invalid_initial.source.identity, 18'005'000'000);
+    expect(invalid_stable.accepted(), "invalid reset test establishes stable geometry");
+    auto before_invalid = make_request(161U, 161U, 18'070'000'000);
+    shift_mouth_geometry(before_invalid, 0.10);
+    expect(invalid_adapter.adapt(
+               before_invalid.landmarks, before_invalid.appearance, before_invalid.resources,
+               before_invalid.source.identity, 18'075'000'000).disposition ==
+               SignalDisposition::bypass_appearance,
+           "invalid reset test starts a candidate");
+    auto low_confidence = make_request(162U, 162U, 18'140'000'000);
+    shift_mouth_geometry(low_confidence, 0.10);
+    low_confidence.landmarks.landmark_confidence = 0.50;
+    expect(invalid_adapter.adapt(
+               low_confidence.landmarks, low_confidence.appearance,
+               low_confidence.resources, low_confidence.source.identity,
+               18'145'000'000).disposition == SignalDisposition::bypass_invalid_packet,
+           "invalid confidence clears the track and pending geometry candidate");
+    expect(!invalid_adapter.appearance_latched(),
+           "invalid confidence removes the prior appearance latch");
+
+    OpenSeeFaceSignalAdapter cancelled_adapter;
+    auto cancel_initial = make_request(163U, 163U, 19'000'000'000);
+    expect(cancelled_adapter.adapt(
+               cancel_initial.landmarks, cancel_initial.appearance, cancel_initial.resources,
+               cancel_initial.source.identity, 19'005'000'000).accepted(),
+           "cancellation reset test establishes stable geometry");
+    auto before_cancel = make_request(164U, 164U, 19'070'000'000);
+    shift_mouth_geometry(before_cancel, 0.10);
+    expect(cancelled_adapter.adapt(
+               before_cancel.landmarks, before_cancel.appearance, before_cancel.resources,
+               before_cancel.source.identity, 19'075'000'000).disposition ==
+               SignalDisposition::bypass_appearance,
+           "cancellation reset test starts a candidate");
+    expect(cancelled_adapter.cancel_to(2U),
+           "generation cancellation clears stable and candidate geometry");
+    auto cancelled_old_packet = make_request(165U, 165U, 19'140'000'000);
+    shift_mouth_geometry(cancelled_old_packet, 0.10);
+    expect(cancelled_adapter.adapt(
+               cancelled_old_packet.landmarks, cancelled_old_packet.appearance,
+               cancelled_old_packet.resources, cancelled_old_packet.source.identity,
+               19'145'000'000).disposition == SignalDisposition::bypass_cancelled,
+           "an old-generation packet cannot continue pre-cancellation consensus");
+}
+
 void test_product_queue_receipts_and_exact_current_frame() {
     MouthProductRuntime runtime;
     auto first = make_request(1U, 10U, 3'000'000'000);
@@ -363,6 +744,11 @@ int main() {
     test_padded_mask_may_cross_detector_edge_but_lip_contour_may_not();
     test_closed_mouth_landmark_jitter_is_canonicalized();
     test_appearance_occlusion_latch_and_recovery();
+    test_persistent_moved_geometry_reacquires_without_old_position_deadlock();
+    test_geometry_reacquisition_requires_consecutive_fresh_consensus();
+    test_geometry_reacquisition_rejects_duplicate_fast_and_old_votes();
+    test_original_geometry_recovery_also_requires_fresh_consensus();
+    test_geometry_reacquisition_candidate_resets_at_safety_boundaries();
     test_product_queue_receipts_and_exact_current_frame();
     test_cancel_pressure_and_invalid_identity_receipts();
     if (failures != 0) {
