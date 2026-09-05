@@ -1085,25 +1085,7 @@ impl HostState {
             // conservatively as retaining. Reaching this branch requires the
             // request's explicit, per-turn developer authorization.
             allow_retaining_providers: networked_turn,
-            metadata: selected_route
-                .as_ref()
-                .map(|snapshot| {
-                    BTreeMap::from([
-                        (
-                            "route_snapshot_generation".into(),
-                            snapshot.generation.to_string(),
-                        ),
-                        (
-                            "route_snapshot_loadout".into(),
-                            snapshot.source_loadout_id.clone(),
-                        ),
-                        (
-                            npc_runtime_core::StreamingResponseFormatV1::ROUTE_METADATA_KEY.into(),
-                            "legacy_plain_text".into(),
-                        ),
-                    ])
-                })
-                .unwrap_or_default(),
+            metadata: selected_route_metadata(selected_route.as_deref()),
         };
         if let Some(timing) = &runtime_timing {
             timing.mark_input_finalized();
@@ -2150,6 +2132,31 @@ fn selected_turn_timing_ledger(
             egress: tts.egress.clone(),
         },
     )
+}
+
+fn selected_route_metadata(snapshot: Option<&SelectedRouteSnapshot>) -> BTreeMap<String, String> {
+    let Some(snapshot) = snapshot else {
+        return BTreeMap::new();
+    };
+    let mut metadata = BTreeMap::from([
+        (
+            "route_snapshot_generation".into(),
+            snapshot.generation.to_string(),
+        ),
+        (
+            "route_snapshot_loadout".into(),
+            snapshot.source_loadout_id.clone(),
+        ),
+    ]);
+    if ready_primary(&snapshot.roles.llm)
+        .is_some_and(|route| route.execution == crate::RouteExecution::Cloud)
+    {
+        metadata.insert(
+            npc_runtime_core::StreamingResponseFormatV1::ROUTE_METADATA_KEY.into(),
+            "structured_speech_first_v1".into(),
+        );
+    }
+    metadata
 }
 
 fn consumed_private_evaluation_acknowledgement(
@@ -4054,6 +4061,19 @@ mod tests {
                 lip_sync: disabled(),
             },
         };
+        let route_metadata = selected_route_metadata(Some(&snapshot));
+        assert_eq!(
+            route_metadata
+                .get(npc_runtime_core::StreamingResponseFormatV1::ROUTE_METADATA_KEY)
+                .map(String::as_str),
+            Some("structured_speech_first_v1")
+        );
+        assert_eq!(
+            npc_runtime_core::StreamingResponseFormatV1::from_route_metadata(&route_metadata),
+            Ok(Some(
+                npc_runtime_core::StreamingResponseFormatV1::StructuredSpeechFirstV1
+            ))
+        );
         assert!(selected_turn_timing_ledger(&request, &snapshot, true).is_some());
 
         snapshot
@@ -4063,6 +4083,12 @@ mod tests {
             .as_mut()
             .expect("LLM route")
             .execution = crate::RouteExecution::Local;
+        assert_eq!(
+            npc_runtime_core::StreamingResponseFormatV1::from_route_metadata(
+                &selected_route_metadata(Some(&snapshot))
+            ),
+            Ok(None)
+        );
         assert!(selected_turn_timing_ledger(&request, &snapshot, true).is_none());
         snapshot
             .roles

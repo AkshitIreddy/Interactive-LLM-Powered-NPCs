@@ -447,6 +447,11 @@ pub struct ProviderResponseAdapter {
 #[serde(rename_all = "snake_case")]
 pub enum StreamingResponseFormatV1 {
     StructuredV1,
+    /// Uses the same final v1 envelope as [`Self::StructuredV1`], but may release
+    /// the complete validated `spoken_response` field once the exact schema
+    /// version has also arrived. All remaining fields stay blocked until the
+    /// complete envelope passes strict validation.
+    StructuredSpeechFirstV1,
     LegacyPlainText,
 }
 
@@ -458,6 +463,7 @@ impl StreamingResponseFormatV1 {
     ) -> Result<Option<Self>, StreamingResponseError> {
         match metadata.get(Self::ROUTE_METADATA_KEY).map(String::as_str) {
             Some("structured_v1") => Ok(Some(Self::StructuredV1)),
+            Some("structured_speech_first_v1") => Ok(Some(Self::StructuredSpeechFirstV1)),
             Some("legacy_plain_text") => Ok(Some(Self::LegacyPlainText)),
             Some(value) => Err(StreamingResponseError::UnsupportedRouteFormat(
                 value.to_owned(),
@@ -470,7 +476,9 @@ impl StreamingResponseFormatV1 {
 #[derive(Clone, Debug, PartialEq)]
 pub struct StreamingResponseUpdateV1 {
     /// Complete spoken sentences that became safe for TTS during this call.
-    /// Structured JSON routes always return an empty vector until `finish`.
+    /// Whole-envelope structured routes return an empty vector until `finish`.
+    /// Speech-first structured routes release only after the complete spoken
+    /// field and exact schema version have both been validated.
     pub ready_sentences: Vec<SentenceSpan>,
 }
 
@@ -478,8 +486,10 @@ pub struct StreamingResponseUpdateV1 {
 pub struct FinalizedStreamingResponseV1 {
     pub response: NpcResponseEnvelopeV1,
     pub format: StreamingResponseFormatV1,
-    /// Sentences newly released by `finish`. For a structured route this is every
-    /// sentence; for legacy text this is only the final buffered fragment.
+    /// Sentences newly released by `finish`. For a whole-envelope structured
+    /// route this is every sentence; for legacy text this is only the final
+    /// buffered fragment; speech-first routes normally released every sentence
+    /// earlier and return an empty vector here.
     pub ready_sentences: Vec<SentenceSpan>,
     /// Every sentence in the canonical spoken response, with ranges relative to
     /// `response.spoken_response.text`.
@@ -509,9 +519,12 @@ pub enum StreamingResponseError {
 
 /// Incremental provider boundary used before SentenceReady/TTS.
 ///
-/// Structured JSON is only buffered during `push_delta`; no JSON fragment can
-/// escape through `ready_sentences`. At `finish`, the complete buffer must pass
-/// the strict v1 parser before its spoken field is segmented. Legacy plain text
+/// Whole-envelope structured JSON is buffered during `push_delta`; no JSON
+/// fragment can escape through `ready_sentences`. The explicit speech-first mode
+/// may release the complete decoded `spoken_response` field after its object and
+/// the exact schema version are present. It never releases partial JSON strings,
+/// keys, actions, or memory proposals. Every structured mode still requires the
+/// complete buffer to pass the strict v1 parser at `finish`. Legacy plain text
 /// keeps sentence-level latency, but callers must select that mode explicitly.
 #[derive(Clone, Debug)]
 pub struct StreamingResponseAdapterV1 {
@@ -524,6 +537,195 @@ pub struct StreamingResponseAdapterV1 {
     last_sequence: Option<u64>,
     provider_buffer: String,
     released_sentences: Vec<SentenceSpan>,
+    speech_first_spoken_text: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct SpeechFirstEnvelopeScan {
+    spoken_response: Option<SpokenResponseV1>,
+    complete: bool,
+}
+
+/// Scans only complete top-level JSON values. Field order is deliberately not
+/// significant: constrained decoders are free to serialize schema properties in
+/// a different order. Values other than the schema marker and spoken response
+/// are kept opaque here and remain unusable until `from_json_strict` succeeds.
+fn scan_speech_first_envelope(
+    raw: &str,
+) -> Result<SpeechFirstEnvelopeScan, ResponseValidationError> {
+    let mut position = skip_json_whitespace(raw, 0);
+    match raw.as_bytes().get(position) {
+        Some(b'{') => position += 1,
+        None => {
+            return Ok(SpeechFirstEnvelopeScan {
+                spoken_response: None,
+                complete: false,
+            })
+        }
+        Some(_) => {
+            return Err(ResponseValidationError::MalformedProviderOutput(
+                "speech-first response must start with a JSON object".into(),
+            ))
+        }
+    }
+
+    let mut fields = BTreeSet::new();
+    let mut schema_version_validated = false;
+    let mut spoken_response = None;
+
+    loop {
+        position = skip_json_whitespace(raw, position);
+        let Some(next) = raw.as_bytes().get(position) else {
+            return Ok(speech_first_scan_progress(
+                schema_version_validated,
+                spoken_response,
+            ));
+        };
+        if *next == b'}' {
+            position += 1;
+            position = skip_json_whitespace(raw, position);
+            if position != raw.len() {
+                return Err(ResponseValidationError::MalformedProviderOutput(
+                    "speech-first response has trailing provider output".into(),
+                ));
+            }
+            if !schema_version_validated || spoken_response.is_none() {
+                return Err(ResponseValidationError::MalformedProviderOutput(
+                    "speech-first response omitted a required field".into(),
+                ));
+            }
+            return Ok(SpeechFirstEnvelopeScan {
+                spoken_response,
+                complete: true,
+            });
+        }
+
+        let Some((field, field_end)) = parse_complete_json_value::<String>(raw, position)? else {
+            return Ok(speech_first_scan_progress(
+                schema_version_validated,
+                spoken_response,
+            ));
+        };
+        position = skip_json_whitespace(raw, field_end);
+        match raw.as_bytes().get(position) {
+            Some(b':') => position += 1,
+            None => {
+                return Ok(speech_first_scan_progress(
+                    schema_version_validated,
+                    spoken_response,
+                ))
+            }
+            Some(_) => {
+                return Err(ResponseValidationError::MalformedProviderOutput(
+                    "speech-first response field is missing its colon".into(),
+                ))
+            }
+        }
+        if !fields.insert(field.clone()) {
+            return Err(ResponseValidationError::MalformedProviderOutput(format!(
+                "duplicate response field: {field}"
+            )));
+        }
+        if !TOP_LEVEL_FIELDS.contains(&field.as_str()) {
+            return Err(ResponseValidationError::UnsupportedField(field));
+        }
+
+        position = skip_json_whitespace(raw, position);
+        let value_start = position;
+        let Some((_, value_end)) = parse_complete_json_value::<Value>(raw, value_start)? else {
+            return Ok(speech_first_scan_progress(
+                schema_version_validated,
+                spoken_response,
+            ));
+        };
+        let value_raw = &raw[value_start..value_end];
+        match field.as_str() {
+            "schema_version" => {
+                let schema: NpcResponseSchemaVersion =
+                    serde_json::from_str(value_raw).map_err(|error| {
+                        ResponseValidationError::MalformedProviderOutput(error.to_string())
+                    })?;
+                if schema != NpcResponseSchemaVersion::V1 {
+                    return Err(ResponseValidationError::MalformedProviderOutput(
+                        "unsupported speech-first schema version".into(),
+                    ));
+                }
+                schema_version_validated = true;
+            }
+            "spoken_response" => {
+                let spoken: SpokenResponseV1 =
+                    serde_json::from_str(value_raw).map_err(|error| {
+                        ResponseValidationError::MalformedProviderOutput(error.to_string())
+                    })?;
+                spoken_response = Some(spoken);
+            }
+            _ => {}
+        }
+
+        position = skip_json_whitespace(raw, value_end);
+        match raw.as_bytes().get(position) {
+            Some(b',') => position += 1,
+            Some(b'}') => continue,
+            None => {
+                // A JSON value at EOF is not yet a complete top-level field:
+                // the next delta could add an invalid non-delimiter byte. The
+                // speech gate opens only after `,` or `}` proves the boundary.
+                return Ok(SpeechFirstEnvelopeScan {
+                    spoken_response: None,
+                    complete: false,
+                });
+            }
+            Some(_) => {
+                return Err(ResponseValidationError::MalformedProviderOutput(
+                    "speech-first response fields require a comma or object terminator".into(),
+                ))
+            }
+        }
+    }
+}
+
+fn speech_first_scan_progress(
+    schema_version_validated: bool,
+    spoken_response: Option<SpokenResponseV1>,
+) -> SpeechFirstEnvelopeScan {
+    SpeechFirstEnvelopeScan {
+        spoken_response: schema_version_validated
+            .then_some(spoken_response)
+            .flatten(),
+        complete: false,
+    }
+}
+
+fn skip_json_whitespace(raw: &str, mut position: usize) -> usize {
+    while raw
+        .as_bytes()
+        .get(position)
+        .is_some_and(|byte| matches!(byte, b' ' | b'\n' | b'\r' | b'\t'))
+    {
+        position += 1;
+    }
+    position
+}
+
+/// Parses exactly one complete JSON value from `position` and reports its byte
+/// end. `serde_json` supplies correct split escape and UTF-16 surrogate handling;
+/// EOF is treated as an incremental wait rather than malformed output.
+fn parse_complete_json_value<T: DeserializeOwned>(
+    raw: &str,
+    position: usize,
+) -> Result<Option<(T, usize)>, ResponseValidationError> {
+    if position >= raw.len() {
+        return Ok(None);
+    }
+    let mut values = serde_json::Deserializer::from_str(&raw[position..]).into_iter::<T>();
+    match values.next() {
+        Some(Ok(value)) => Ok(Some((value, position + values.byte_offset()))),
+        Some(Err(error)) if error.is_eof() => Ok(None),
+        Some(Err(error)) => Err(ResponseValidationError::MalformedProviderOutput(
+            error.to_string(),
+        )),
+        None => Ok(None),
+    }
 }
 
 impl StreamingResponseAdapterV1 {
@@ -544,6 +746,7 @@ impl StreamingResponseAdapterV1 {
             last_sequence: None,
             provider_buffer: String::new(),
             released_sentences: Vec::new(),
+            speech_first_spoken_text: None,
         }
     }
 
@@ -553,6 +756,13 @@ impl StreamingResponseAdapterV1 {
 
     pub fn cancellation_generation(&self) -> u64 {
         self.cancellation_generation
+    }
+
+    /// Returns only speech that has already crossed the speech-first validation
+    /// gate. Supervisors use this on a later stream/envelope failure so delivered
+    /// receipts retain their canonical text without exposing provider JSON.
+    pub fn released_spoken_text(&self) -> Option<&str> {
+        self.speech_first_spoken_text.as_deref()
     }
 
     pub fn push_delta(
@@ -573,7 +783,8 @@ impl StreamingResponseAdapterV1 {
         }
 
         let maximum = match self.format {
-            StreamingResponseFormatV1::StructuredV1 => MAX_PROVIDER_RESPONSE_BYTES,
+            StreamingResponseFormatV1::StructuredV1
+            | StreamingResponseFormatV1::StructuredSpeechFirstV1 => MAX_PROVIDER_RESPONSE_BYTES,
             StreamingResponseFormatV1::LegacyPlainText => self
                 .policy
                 .max_spoken_response_bytes
@@ -597,12 +808,42 @@ impl StreamingResponseAdapterV1 {
 
         self.last_sequence = Some(sequence);
         self.provider_buffer.push_str(delta);
-        let ready_sentences = if let Some(segmenter) = self.sentence_segmenter.as_mut() {
-            let sentences = segmenter.push_spans(delta);
-            self.released_sentences.extend(sentences.iter().cloned());
-            sentences
-        } else {
-            Vec::new()
+        let ready_sentences = match self.format {
+            StreamingResponseFormatV1::StructuredV1 => Vec::new(),
+            StreamingResponseFormatV1::StructuredSpeechFirstV1 => {
+                let scan = scan_speech_first_envelope(&self.provider_buffer)?;
+                let Some(spoken) = scan.spoken_response else {
+                    return Ok(StreamingResponseUpdateV1 {
+                        ready_sentences: Vec::new(),
+                    });
+                };
+                validate_spoken(&spoken, &self.policy)?;
+                if let Some(released) = &self.speech_first_spoken_text {
+                    if released != &spoken.text {
+                        return Err(ResponseValidationError::MalformedProviderOutput(
+                            "speech-first spoken response changed after release".into(),
+                        )
+                        .into());
+                    }
+                    Vec::new()
+                } else {
+                    let mut segmenter = SentenceSegmenter::new(self.sentence_config.clone());
+                    let mut sentences = segmenter.push_spans(&spoken.text);
+                    sentences.extend(segmenter.finish_spans());
+                    self.speech_first_spoken_text = Some(spoken.text);
+                    self.released_sentences.extend(sentences.iter().cloned());
+                    sentences
+                }
+            }
+            StreamingResponseFormatV1::LegacyPlainText => {
+                let segmenter = self
+                    .sentence_segmenter
+                    .as_mut()
+                    .expect("legacy routes own a sentence segmenter");
+                let sentences = segmenter.push_spans(delta);
+                self.released_sentences.extend(sentences.iter().cloned());
+                sentences
+            }
         };
         Ok(StreamingResponseUpdateV1 { ready_sentences })
     }
@@ -621,6 +862,29 @@ impl StreamingResponseAdapterV1 {
                 let mut sentences = segmenter.push_spans(&response.spoken_response.text);
                 sentences.extend(segmenter.finish_spans());
                 (response, sentences.clone(), sentences)
+            }
+            StreamingResponseFormatV1::StructuredSpeechFirstV1 => {
+                let scan = scan_speech_first_envelope(&self.provider_buffer)?;
+                if !scan.complete {
+                    return Err(ResponseValidationError::MalformedProviderOutput(
+                        "speech-first response ended before the top-level object closed".into(),
+                    )
+                    .into());
+                }
+                let released = self.speech_first_spoken_text.as_ref().ok_or_else(|| {
+                    ResponseValidationError::MalformedProviderOutput(
+                        "speech-first response omitted its required validated fields".into(),
+                    )
+                })?;
+                let response =
+                    NpcResponseEnvelopeV1::from_json_strict(&self.provider_buffer, &self.policy)?;
+                if released != &response.spoken_response.text {
+                    return Err(ResponseValidationError::MalformedProviderOutput(
+                        "speech-first spoken response changed after release".into(),
+                    )
+                    .into());
+                }
+                (response, Vec::new(), self.released_sentences.clone())
             }
             StreamingResponseFormatV1::LegacyPlainText => {
                 let response = NpcResponseEnvelopeV1::plain_text(self.provider_buffer.clone());
@@ -1479,6 +1743,260 @@ mod tests {
                 ResponseValidationError::MalformedProviderOutput(_)
             ))
         ));
+    }
+
+    #[test]
+    fn speech_first_waits_for_schema_then_releases_complete_decoded_spoken_field() {
+        let generation = 31;
+        let metadata = std::collections::BTreeMap::from([(
+            StreamingResponseFormatV1::ROUTE_METADATA_KEY.into(),
+            "structured_speech_first_v1".into(),
+        )]);
+        assert_eq!(
+            StreamingResponseFormatV1::from_route_metadata(&metadata),
+            Ok(Some(StreamingResponseFormatV1::StructuredSpeechFirstV1))
+        );
+        let mut adapter = StreamingResponseAdapterV1::new(
+            StreamingResponseFormatV1::StructuredSpeechFirstV1,
+            ResponseValidationPolicy::default(),
+            SentenceSegmenterConfig::default(),
+            generation,
+        );
+        let before_schema = concat!(
+            r#"{"emotion":null,"spoken_response":{"text":"Launch the bright "#,
+            r#"\uD83D\uDE80"#,
+            r#" now. Caf\u00e9 waits."},"#,
+        );
+        assert!(adapter
+            .push_delta(generation, 1, before_schema)
+            .unwrap()
+            .ready_sentences
+            .is_empty());
+
+        let released = adapter
+            .push_delta(generation, 2, r#""schema_version":"npc_response.v1","#)
+            .expect("exact schema version opens the speech gate");
+        assert_eq!(
+            adapter.released_spoken_text(),
+            Some("Launch the bright 🚀 now. Café waits.")
+        );
+        assert_eq!(released.ready_sentences.len(), 2);
+        for sentence in &released.ready_sentences {
+            assert_eq!(
+                adapter
+                    .released_spoken_text()
+                    .unwrap()
+                    .get(sentence.text_start_bytes..sentence.text_end_bytes),
+                Some(sentence.text.as_str())
+            );
+            assert!(!sentence.text.contains("spoken_response"));
+        }
+
+        assert!(adapter
+            .push_delta(
+                generation,
+                3,
+                r#""voice_style":{"kind":"neutral","speaking_rate":1.0,"pitch_semitones":0.0,"energy":1.0}}"#,
+            )
+            .unwrap()
+            .ready_sentences
+            .is_empty());
+        let finalized = adapter.finish(generation).expect("strict final envelope");
+        assert_eq!(
+            finalized.format,
+            StreamingResponseFormatV1::StructuredSpeechFirstV1
+        );
+        assert!(finalized.ready_sentences.is_empty());
+        assert_eq!(finalized.all_sentences, released.ready_sentences);
+    }
+
+    #[test]
+    fn speech_first_handles_every_escape_boundary_without_partial_release() {
+        let raw = concat!(
+            r#"{"schema_version":"npc_response.v1","spoken_response":{"text":"A quote: \"yes\". Emoji: "#,
+            r#"\uD83D\uDE80"#,
+            r#"."},"actions":[]}"#,
+        );
+        let expected = "A quote: \"yes\". Emoji: 🚀.";
+        let mut adapter = StreamingResponseAdapterV1::new(
+            StreamingResponseFormatV1::StructuredSpeechFirstV1,
+            ResponseValidationPolicy::default(),
+            SentenceSegmenterConfig::default(),
+            52,
+        );
+        let mut released = Vec::new();
+        for (index, byte) in raw.as_bytes().iter().enumerate() {
+            let delta = std::str::from_utf8(std::slice::from_ref(byte)).unwrap();
+            let update = adapter.push_delta(52, index as u64 + 1, delta).unwrap();
+            released.extend(update.ready_sentences);
+        }
+        assert_eq!(adapter.released_spoken_text(), Some(expected));
+        assert!(!released.is_empty());
+        assert!(released.iter().all(|sentence| {
+            expected.get(sentence.text_start_bytes..sentence.text_end_bytes)
+                == Some(sentence.text.as_str())
+        }));
+        assert!(adapter.finish(52).unwrap().ready_sentences.is_empty());
+    }
+
+    #[test]
+    fn speech_first_rejects_duplicates_controls_oversize_and_invalid_late_output() {
+        let policy = ResponseValidationPolicy::default();
+        let config = SentenceSegmenterConfig::default();
+
+        let mut duplicate = StreamingResponseAdapterV1::new(
+            StreamingResponseFormatV1::StructuredSpeechFirstV1,
+            policy.clone(),
+            config.clone(),
+            1,
+        );
+        let duplicate_error = duplicate
+            .push_delta(
+                1,
+                1,
+                r#"{"schema_version":"npc_response.v1","spoken_response":{"text":"One."},"spoken_response":{"text":"Two."}}"#,
+            )
+            .unwrap_err();
+        assert!(matches!(
+            duplicate_error,
+            StreamingResponseError::InvalidResponse(
+                ResponseValidationError::MalformedProviderOutput(_)
+            )
+        ));
+
+        let mut control = StreamingResponseAdapterV1::new(
+            StreamingResponseFormatV1::StructuredSpeechFirstV1,
+            policy.clone(),
+            config.clone(),
+            2,
+        );
+        assert_eq!(
+            control.push_delta(
+                2,
+                1,
+                r#"{"schema_version":"npc_response.v1","spoken_response":{"text":"Bad\u0001text."}}"#,
+            ),
+            Err(StreamingResponseError::InvalidResponse(
+                ResponseValidationError::InvalidText("spoken response")
+            ))
+        );
+
+        let mut invalid_surrogate = StreamingResponseAdapterV1::new(
+            StreamingResponseFormatV1::StructuredSpeechFirstV1,
+            policy.clone(),
+            config.clone(),
+            21,
+        );
+        let invalid_surrogate_json = concat!(
+            r#"{"schema_version":"npc_response.v1","spoken_response":{"text":"Bad "#,
+            r#"\uD83D"#,
+            r#" value."}}"#,
+        );
+        assert!(matches!(
+            invalid_surrogate.push_delta(21, 1, invalid_surrogate_json),
+            Err(StreamingResponseError::InvalidResponse(
+                ResponseValidationError::MalformedProviderOutput(_)
+            ))
+        ));
+
+        let mut oversized = StreamingResponseAdapterV1::new(
+            StreamingResponseFormatV1::StructuredSpeechFirstV1,
+            policy,
+            config,
+            3,
+        );
+        let oversized_json = format!(
+            r#"{{"schema_version":"npc_response.v1","spoken_response":{{"text":"{}"}}}}"#,
+            "x".repeat(MAX_SPOKEN_RESPONSE_BYTES + 1)
+        );
+        assert_eq!(
+            oversized.push_delta(3, 1, &oversized_json),
+            Err(StreamingResponseError::InvalidResponse(
+                ResponseValidationError::TextTooLarge("spoken response")
+            ))
+        );
+
+        let mut late_invalid = StreamingResponseAdapterV1::new(
+            StreamingResponseFormatV1::StructuredSpeechFirstV1,
+            ResponseValidationPolicy::default(),
+            SentenceSegmenterConfig::default(),
+            4,
+        );
+        let first = late_invalid
+            .push_delta(
+                4,
+                1,
+                r#"{"schema_version":"npc_response.v1","spoken_response":{"text":"Already delivered."},"#,
+            )
+            .unwrap();
+        assert_eq!(first.ready_sentences.len(), 1);
+        assert_eq!(
+            late_invalid.push_delta(4, 2, r#""unsupported":true}"#),
+            Err(StreamingResponseError::InvalidResponse(
+                ResponseValidationError::UnsupportedField("unsupported".into())
+            ))
+        );
+        assert_eq!(
+            late_invalid.released_spoken_text(),
+            Some("Already delivered.")
+        );
+
+        let mut late_duplicate = StreamingResponseAdapterV1::new(
+            StreamingResponseFormatV1::StructuredSpeechFirstV1,
+            ResponseValidationPolicy::default(),
+            SentenceSegmenterConfig::default(),
+            5,
+        );
+        assert_eq!(
+            late_duplicate
+                .push_delta(
+                    5,
+                    1,
+                    r#"{"schema_version":"npc_response.v1","spoken_response":{"text":"Keep only this."},"#,
+                )
+                .unwrap()
+                .ready_sentences
+                .len(),
+            1
+        );
+        assert!(matches!(
+            late_duplicate.push_delta(5, 2, r#""spoken_response":{"text":"Replace it."}}"#),
+            Err(StreamingResponseError::InvalidResponse(
+                ResponseValidationError::MalformedProviderOutput(_)
+            ))
+        ));
+        assert_eq!(
+            late_duplicate.released_spoken_text(),
+            Some("Keep only this.")
+        );
+    }
+
+    #[test]
+    fn speech_first_cancellation_closes_after_release_without_late_output() {
+        let mut adapter = StreamingResponseAdapterV1::new(
+            StreamingResponseFormatV1::StructuredSpeechFirstV1,
+            ResponseValidationPolicy::default(),
+            SentenceSegmenterConfig::default(),
+            90,
+        );
+        assert_eq!(
+            adapter
+                .push_delta(
+                    90,
+                    1,
+                    r#"{"schema_version":"npc_response.v1","spoken_response":{"text":"Safe first."},"#,
+                )
+                .unwrap()
+                .ready_sentences
+                .len(),
+            1
+        );
+        adapter.cancel(90).unwrap();
+        assert_eq!(
+            adapter.push_delta(90, 2, r#""actions":[]}"#),
+            Err(StreamingResponseError::Closed)
+        );
+        assert_eq!(adapter.finish(90), Err(StreamingResponseError::Closed));
     }
 
     #[test]

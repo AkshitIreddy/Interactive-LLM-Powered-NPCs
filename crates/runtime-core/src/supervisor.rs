@@ -818,6 +818,21 @@ struct LlmLaneResult {
     terminal_error: Option<SupervisorError>,
 }
 
+fn safe_partial_response(
+    format: StreamingResponseFormatV1,
+    provider_output: &str,
+    adapter: &StreamingResponseAdapterV1,
+) -> String {
+    match format {
+        StreamingResponseFormatV1::LegacyPlainText => provider_output.to_owned(),
+        StreamingResponseFormatV1::StructuredSpeechFirstV1 => adapter
+            .released_spoken_text()
+            .unwrap_or_default()
+            .to_owned(),
+        StreamingResponseFormatV1::StructuredV1 => String::new(),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_llm_lane(
     request: GenerationRequest,
@@ -926,13 +941,11 @@ async fn run_llm_lane(
                             permit.failure();
                             drop(sentence_tx);
                             return Ok(LlmLaneResult {
-                                full_text: if response_format
-                                    == StreamingResponseFormatV1::LegacyPlainText
-                                {
-                                    provider_output
-                                } else {
-                                    String::new()
-                                },
+                                full_text: safe_partial_response(
+                                    response_format,
+                                    &provider_output,
+                                    &response_adapter,
+                                ),
                                 structured_response: None,
                                 provider_id: provider.descriptor().id.clone(),
                                 degradations: Vec::new(),
@@ -943,12 +956,18 @@ async fn run_llm_lane(
                         }
                     };
                     provider_output.push_str(&delta.text);
-                    emitter
-                        .emit(TurnEvent::TextDelta {
-                            identity: request.identity.clone(),
-                            delta: delta.clone(),
-                        })
-                        .await?;
+                    // Structured deltas contain JSON syntax and proposal fields.
+                    // They remain internal until the adapter emits validated
+                    // sentence spans; publishing them as display text would leak
+                    // keys (and potentially unvalidated actions) to consumers.
+                    if response_format == StreamingResponseFormatV1::LegacyPlainText {
+                        emitter
+                            .emit(TurnEvent::TextDelta {
+                                identity: request.identity.clone(),
+                                delta: delta.clone(),
+                            })
+                            .await?;
+                    }
                     for sentence in update.ready_sentences {
                         emitter
                             .emit(TurnEvent::SentenceReady {
@@ -973,12 +992,11 @@ async fn run_llm_lane(
                     }
                     drop(sentence_tx);
                     return Ok(LlmLaneResult {
-                        full_text: if response_format == StreamingResponseFormatV1::LegacyPlainText
-                        {
-                            provider_output
-                        } else {
-                            String::new()
-                        },
+                        full_text: safe_partial_response(
+                            response_format,
+                            &provider_output,
+                            &response_adapter,
+                        ),
                         structured_response: None,
                         provider_id: provider.descriptor().id.clone(),
                         degradations: Vec::new(),
@@ -1008,13 +1026,11 @@ async fn run_llm_lane(
                             permit.failure();
                             drop(sentence_tx);
                             return Ok(LlmLaneResult {
-                                full_text: if response_format
-                                    == StreamingResponseFormatV1::LegacyPlainText
-                                {
-                                    provider_output
-                                } else {
-                                    String::new()
-                                },
+                                full_text: safe_partial_response(
+                                    response_format,
+                                    &provider_output,
+                                    &response_adapter,
+                                ),
                                 structured_response: None,
                                 provider_id: provider.descriptor().id.clone(),
                                 degradations: Vec::new(),
@@ -1058,9 +1074,12 @@ async fn run_llm_lane(
                     };
                     return Ok(LlmLaneResult {
                         full_text: finalized.response.spoken_response.text.clone(),
-                        structured_response: (response_format
-                            == StreamingResponseFormatV1::StructuredV1)
-                            .then_some(finalized.response),
+                        structured_response: matches!(
+                            response_format,
+                            StreamingResponseFormatV1::StructuredV1
+                                | StreamingResponseFormatV1::StructuredSpeechFirstV1
+                        )
+                        .then_some(finalized.response),
                         provider_id: provider.descriptor().id.clone(),
                         degradations,
                         terminal_error: None,
@@ -1475,6 +1494,30 @@ mod tests {
         }
     }
 
+    async fn wait_for_speech_delivery(handle: &mut TurnHandle) -> DeliveredSentence {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                match handle.next_event().await {
+                    Some(TurnEvent::SpeechDelivered { sentence, .. }) => return sentence,
+                    Some(TurnEvent::TextDelta { delta, .. }) => panic!(
+                        "structured provider JSON escaped as display text: sequence {}",
+                        delta.sequence
+                    ),
+                    Some(TurnEvent::Terminal { outcome }) => {
+                        panic!(
+                            "turn terminated before speech delivery: {:?}",
+                            outcome.error
+                        )
+                    }
+                    Some(_) => {}
+                    None => panic!("event stream closed before speech delivery"),
+                }
+            }
+        })
+        .await
+        .expect("speech must be delivered while the provider JSON tail is blocked")
+    }
+
     struct FakeIdentity;
 
     #[async_trait]
@@ -1533,6 +1576,11 @@ mod tests {
         OpenError,
         Delayed(String),
         ErrorAfter(String),
+        GatedTail {
+            first: String,
+            tail: String,
+            release_tail: Arc<tokio::sync::Notify>,
+        },
     }
 
     struct FakeLlm {
@@ -1576,6 +1624,26 @@ mod tests {
                         "stream disconnected",
                     )),
                 ]))),
+                LlmBehavior::GatedTail {
+                    first,
+                    tail,
+                    release_tail,
+                } => {
+                    let first = stream::once(async move {
+                        Ok(LlmDelta {
+                            text: first,
+                            sequence: 1,
+                        })
+                    });
+                    let tail = stream::once(async move {
+                        release_tail.notified().await;
+                        Ok(LlmDelta {
+                            text: tail,
+                            sequence: 2,
+                        })
+                    });
+                    Ok(Box::pin(first.chain(tail)))
+                }
             }
         }
     }
@@ -2131,6 +2199,88 @@ mod tests {
             );
             assert!(!sentence.text.contains("schema_version"));
         }
+        assert_eq!(memory.commits.lock().await.as_slice(), &[outcome.delivered]);
+    }
+
+    #[tokio::test]
+    async fn speech_first_structured_route_delivers_before_the_json_tail_arrives() {
+        let release_tail = Arc::new(tokio::sync::Notify::new());
+        let spoken = "The beacon is ready for departure.";
+        let llm: Arc<dyn LanguageModelProvider> = Arc::new(FakeLlm {
+            descriptor: descriptor(
+                "llm-speech-first",
+                ProviderModality::LanguageModel,
+                ProviderLocation::Local,
+            ),
+            behavior: LlmBehavior::GatedTail {
+                first: format!(
+                    r#"{{"spoken_response":{{"text":"{spoken}"}},"schema_version":"npc_response.v1","#
+                ),
+                tail: r#""actions":[]}"#.into(),
+                release_tail: release_tail.clone(),
+            },
+        });
+        let (supervisor, memory, _) = supervisor(vec![llm], false, true);
+        let mut turn_request = request("turn-speech-first", "Is the beacon ready?");
+        turn_request.metadata.insert(
+            StreamingResponseFormatV1::ROUTE_METADATA_KEY.into(),
+            "structured_speech_first_v1".into(),
+        );
+        let mut handle = supervisor.start_turn(turn_request).await.unwrap();
+
+        let delivered_before_tail = wait_for_speech_delivery(&mut handle).await;
+        assert_eq!(delivered_before_tail.text, spoken);
+        assert_eq!(delivered_before_tail.delivery, DeliveryMode::Audio);
+
+        release_tail.notify_one();
+        let outcome = handle.outcome().await.unwrap();
+        assert_eq!(outcome.lifecycle, TurnLifecycle::Completed);
+        assert_eq!(outcome.full_response, spoken);
+        assert!(outcome.structured_response.is_some());
+        assert_eq!(outcome.delivered, vec![delivered_before_tail]);
+        assert_eq!(memory.commits.lock().await.as_slice(), &[outcome.delivered]);
+    }
+
+    #[tokio::test]
+    async fn late_invalid_speech_first_tail_retains_delivery_but_commits_no_envelope_proposals() {
+        let release_tail = Arc::new(tokio::sync::Notify::new());
+        let spoken = "Only this validated sentence may survive.";
+        let llm: Arc<dyn LanguageModelProvider> = Arc::new(FakeLlm {
+            descriptor: descriptor(
+                "llm-speech-first-invalid-tail",
+                ProviderModality::LanguageModel,
+                ProviderLocation::Local,
+            ),
+            behavior: LlmBehavior::GatedTail {
+                first: format!(
+                    r#"{{"schema_version":"npc_response.v1","spoken_response":{{"text":"{spoken}"}},"#
+                ),
+                tail: r#""memory_proposals":[{"kind":"fact","content":"must not commit","importance":9.0,"evidence_turn_ids":[],"expires_after_ms":null}],"actions":[{"action_id":"run_shell","arguments":{},"rationale":"must not commit","requires_confirmation":false}]}"#.into(),
+                release_tail: release_tail.clone(),
+            },
+        });
+        let (supervisor, memory, _) = supervisor(vec![llm], false, true);
+        let mut turn_request = request("turn-speech-first-invalid-tail", "Proceed?");
+        turn_request.metadata.insert(
+            StreamingResponseFormatV1::ROUTE_METADATA_KEY.into(),
+            "structured_speech_first_v1".into(),
+        );
+        let mut handle = supervisor.start_turn(turn_request).await.unwrap();
+
+        let delivered_before_tail = wait_for_speech_delivery(&mut handle).await;
+        release_tail.notify_one();
+        let outcome = handle.outcome().await.unwrap();
+
+        assert_eq!(outcome.lifecycle, TurnLifecycle::Failed);
+        assert_eq!(outcome.full_response, spoken);
+        assert_eq!(outcome.delivered, vec![delivered_before_tail]);
+        assert!(outcome.structured_response.is_none());
+        assert!(outcome.effects.memory_proposals.is_empty());
+        assert!(outcome.effects.action_proposals.is_empty());
+        assert_eq!(
+            outcome.error.as_ref().map(|error| error.code.as_str()),
+            Some("provider_response_invalid")
+        );
         assert_eq!(memory.commits.lock().await.as_slice(), &[outcome.delivered]);
     }
 
