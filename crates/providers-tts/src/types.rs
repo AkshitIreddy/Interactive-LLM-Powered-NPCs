@@ -244,7 +244,16 @@ pub struct WordAlignment {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TimingSymbolKind {
+    /// A provider-defined mouth-shape category, not a phoneme.
+    ProviderViseme,
+    /// A spoken phoneme which requires an explicit provider/model mapping.
+    Phoneme,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VisemeEvent {
+    pub symbol_kind: TimingSymbolKind,
     pub symbol: String,
     pub start_ms: u64,
     pub duration_ms: u64,

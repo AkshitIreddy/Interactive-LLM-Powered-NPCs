@@ -1156,6 +1156,7 @@ mod tests {
         let plan = FakeSessionPlan::events([
             pcm(0, &[7, -7]),
             TtsEvent::Viseme(vec![VisemeEvent {
+                symbol_kind: npc_providers_tts::TimingSymbolKind::ProviderViseme,
                 symbol: "PP".to_owned(),
                 start_ms: 125,
                 duration_ms: 42,

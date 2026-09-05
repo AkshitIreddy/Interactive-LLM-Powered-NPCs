@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeSet, VecDeque},
     sync::Arc,
+    time::Duration,
 };
 
 use npc_providers_tts::*;
@@ -319,6 +320,56 @@ async fn every_adapter_uses_documented_streaming_shape() {
 }
 
 #[tokio::test]
+async fn inworld_flushes_once_at_the_utterance_boundary() {
+    let transport = Arc::new(MockTransport::default());
+    let inworld = provider(HostedTtsProviderId::Inworld, Arc::clone(&transport));
+    let mut session = inworld.start_session(request()).await.expect("starts");
+
+    let pushed = session
+        .push_text("The eastern lock is open. The western gate is secure.")
+        .await
+        .expect("accepted");
+    assert_eq!(pushed.clauses_submitted, 2);
+    session.finish().await.expect("finished");
+
+    let commands = transport.commands();
+    assert!(matches!(
+        commands.as_slice(),
+        [
+            RecordedCommand::InworldCreateContext,
+            RecordedCommand::InworldSendText {
+                flush_context: false,
+                ..
+            },
+            RecordedCommand::InworldSendText {
+                flush_context: false,
+                ..
+            },
+            RecordedCommand::InworldFlushContext,
+        ]
+    ));
+
+    let transport = Arc::new(MockTransport::default());
+    let inworld = provider(HostedTtsProviderId::Inworld, Arc::clone(&transport));
+    let mut session = inworld.start_session(request()).await.expect("starts");
+    session
+        .push_text("An incomplete final clause")
+        .await
+        .expect("accepted");
+    session.finish().await.expect("finished");
+    assert!(matches!(
+        transport.commands().as_slice(),
+        [
+            RecordedCommand::InworldCreateContext,
+            RecordedCommand::InworldSendText {
+                flush_context: true,
+                ..
+            },
+        ]
+    ));
+}
+
+#[tokio::test]
 async fn semantic_chunking_ignores_network_chunk_boundaries() {
     let transport = Arc::new(MockTransport::default());
     let provider = provider(HostedTtsProviderId::Deepgram, Arc::clone(&transport));
@@ -366,6 +417,7 @@ async fn audio_alignment_visemes_usage_and_completion_stay_ordered() {
         source_text_length: Some(5),
     }];
     let visemes = vec![VisemeEvent {
+        symbol_kind: TimingSymbolKind::ProviderViseme,
         symbol: "R".into(),
         start_ms: 10,
         duration_ms: 40,
@@ -436,6 +488,34 @@ async fn cancellation_is_idempotent_and_emits_interrupted_once() {
         .any(|command| matches!(command, RecordedCommand::DeepgramClear)));
 }
 
+#[tokio::test(start_paused = true)]
+async fn cancellation_does_not_wait_for_a_stalled_provider_signal() {
+    let transport = Arc::new(MockTransport::scripted(MockScript {
+        // Deepgram sends the text at index zero; its best-effort Interrupt is one.
+        stall_send_at: Some(1),
+        ..MockScript::default()
+    }));
+    let provider = provider(HostedTtsProviderId::Deepgram, Arc::clone(&transport));
+    let mut session = provider.start_session(request()).await.expect("starts");
+    session
+        .push_text("Stop me after this complete clause.")
+        .await
+        .expect("accepted");
+
+    let started = tokio::time::Instant::now();
+    tokio::time::timeout(Duration::from_millis(100), session.cancel())
+        .await
+        .expect("cancellation has its own bounded signal deadline")
+        .expect("hard close succeeds");
+    assert_eq!(started.elapsed(), Duration::from_millis(50));
+    assert_eq!(session.state(), SessionState::Cancelled);
+    assert_eq!(transport.close_count(), 1);
+    assert_eq!(
+        session.next_event().await,
+        Some(Ok(TtsEvent::Interrupted { reason: "barge_in" }))
+    );
+}
+
 #[tokio::test]
 async fn transport_faults_become_content_free_typed_errors() {
     let transport = Arc::new(MockTransport::scripted(MockScript {
@@ -504,14 +584,69 @@ async fn premature_stream_close_and_invalid_alignment_are_protocol_faults() {
         }]))]),
         ..MockScript::default()
     }));
-    let provider = provider(HostedTtsProviderId::Cartesia, invalid_transport);
-    let mut session = provider.start_session(request()).await.expect("starts");
+    let invalid_provider = provider(HostedTtsProviderId::Cartesia, invalid_transport);
+    let mut session = invalid_provider
+        .start_session(request())
+        .await
+        .expect("starts");
     let error = session
         .next_event()
         .await
         .expect("typed event")
         .expect_err("invalid alignment rejected");
     assert_eq!(error.code, "invalid_alignment");
+
+    let non_monotonic_transport = Arc::new(MockTransport::scripted(MockScript {
+        incoming: VecDeque::from([Ok(WireEvent::Alignment(vec![
+            WordAlignment {
+                word: "later".into(),
+                start_ms: 200,
+                end_ms: 300,
+                source_text_start: None,
+                source_text_length: None,
+            },
+            WordAlignment {
+                word: "earlier".into(),
+                start_ms: 100,
+                end_ms: 200,
+                source_text_start: None,
+                source_text_length: None,
+            },
+        ]))]),
+        ..MockScript::default()
+    }));
+    let non_monotonic_provider = provider(HostedTtsProviderId::Cartesia, non_monotonic_transport);
+    let mut session = non_monotonic_provider
+        .start_session(request())
+        .await
+        .expect("starts");
+    let error = session
+        .next_event()
+        .await
+        .expect("typed event")
+        .expect_err("non-monotonic alignment rejected");
+    assert_eq!(error.code, "invalid_alignment");
+
+    let invalid_viseme_transport = Arc::new(MockTransport::scripted(MockScript {
+        incoming: VecDeque::from([Ok(WireEvent::Viseme(vec![VisemeEvent {
+            symbol_kind: TimingSymbolKind::ProviderViseme,
+            symbol: "a".into(),
+            start_ms: 4 * 60 * 60 * 1_000,
+            duration_ms: 1,
+        }]))]),
+        ..MockScript::default()
+    }));
+    let invalid_viseme_provider = provider(HostedTtsProviderId::Inworld, invalid_viseme_transport);
+    let mut session = invalid_viseme_provider
+        .start_session(request())
+        .await
+        .expect("starts");
+    let error = session
+        .next_event()
+        .await
+        .expect("typed event")
+        .expect_err("unbounded viseme timestamp rejected");
+    assert_eq!(error.code, "invalid_visemes");
 }
 
 #[tokio::test]

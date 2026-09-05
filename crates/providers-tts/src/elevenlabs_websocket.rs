@@ -345,12 +345,13 @@ impl TtsConnection for ElevenLabsWebSocketConnection {
         if self.terminal_received || self.closed {
             return None;
         }
+        let receive_deadline = tokio::time::Instant::now() + self.io_timeout;
         loop {
             let socket = match self.socket.as_mut() {
                 Some(socket) => socket,
                 None => return Some(Err(TransportError::Closed)),
             };
-            let next = match tokio::time::timeout(self.io_timeout, socket.next()).await {
+            let next = match tokio::time::timeout_at(receive_deadline, socket.next()).await {
                 Err(_) => return Some(Err(TransportError::Timeout)),
                 Ok(None) => return Some(Err(TransportError::Closed)),
                 Ok(Some(Err(error))) => return Some(Err(map_websocket_error(error))),
@@ -368,7 +369,7 @@ impl TtsConnection for ElevenLabsWebSocketConnection {
                         return Some(Err(TransportError::Closed));
                     };
                     let pong = socket.send(Message::Pong(payload));
-                    match tokio::time::timeout(self.io_timeout, pong).await {
+                    match tokio::time::timeout_at(receive_deadline, pong).await {
                         Err(_) => return Some(Err(TransportError::Timeout)),
                         Ok(Err(error)) => return Some(Err(map_websocket_error(error))),
                         Ok(Ok(())) => {}
@@ -522,8 +523,31 @@ fn decode_response(
             "elevenlabs_response_too_large",
         ));
     }
-    let response: ProviderResponse = serde_json::from_slice(bytes)
+    let value: serde_json::Value = serde_json::from_slice(bytes)
         .map_err(|_| TransportError::ProtocolStage("elevenlabs_response_json_invalid"))?;
+    if let Some(error) = provider_error(&value) {
+        return Err(error);
+    }
+    let recognized_frame = value.as_object().is_some_and(|object| {
+        object.keys().any(|key| {
+            matches!(
+                key.as_str(),
+                "audio"
+                    | "alignment"
+                    | "normalizedAlignment"
+                    | "normalized_alignment"
+                    | "isFinal"
+                    | "is_final"
+            )
+        })
+    });
+    let response: ProviderResponse = serde_json::from_value(value)
+        .map_err(|_| TransportError::ProtocolStage("elevenlabs_response_json_invalid"))?;
+    // ElevenLabs may emit a typed non-terminal acknowledgement with no audio
+    // or alignment yet. It is a valid protocol frame and must be skipped while
+    // the bounded receive loop waits for the next substantive event. An empty
+    // object still fails closed because it carries no recognized state.
+    let recognized_nonterminal = recognized_frame && response.is_final != Some(true);
     let mut events = VecDeque::new();
     if let Some(audio) = response.audio {
         let audio = Zeroizing::new(audio);
@@ -554,12 +578,61 @@ fn decode_response(
     if response.is_final == Some(true) {
         events.push_back(WireEvent::Complete);
     }
-    if events.is_empty() {
+    if events.is_empty() && !recognized_nonterminal {
         return Err(TransportError::ProtocolStage(
             "elevenlabs_response_has_no_events",
         ));
     }
     Ok(events)
+}
+
+fn provider_error(value: &serde_json::Value) -> Option<TransportError> {
+    let object = value.as_object()?;
+    if !object.contains_key("error")
+        && !object.contains_key("message")
+        && !object.contains_key("detail")
+    {
+        return None;
+    }
+    // Provider rejection text is used only for coarse classification. Keep
+    // both copies zeroized because a remote error may echo account or request
+    // material even though neither string ever crosses the adapter boundary.
+    let mut classification_text = Zeroizing::new(String::new());
+    for key in ["error", "message", "detail"] {
+        if let Some(value) = object.get(key) {
+            let serialized = value.to_string();
+            classification_text.push_str(&serialized[..serialized.len().min(4_096)]);
+            classification_text.push(' ');
+        }
+    }
+    let normalized = Zeroizing::new(classification_text.to_ascii_lowercase());
+    if normalized.contains("quota")
+        || normalized.contains("credit")
+        || normalized.contains("payment")
+    {
+        Some(TransportError::QuotaExceeded)
+    } else if normalized.contains("unauthor")
+        || normalized.contains("authentication")
+        || normalized.contains("api key")
+    {
+        Some(TransportError::Authentication)
+    } else if normalized.contains("voice")
+        && (normalized.contains("not found") || normalized.contains("unavailable"))
+    {
+        Some(TransportError::ProtocolStage(
+            "elevenlabs_voice_unavailable",
+        ))
+    } else if normalized.contains("model")
+        && (normalized.contains("not found") || normalized.contains("unavailable"))
+    {
+        Some(TransportError::ProtocolStage(
+            "elevenlabs_model_unavailable",
+        ))
+    } else {
+        Some(TransportError::ProtocolStage(
+            "elevenlabs_provider_rejected",
+        ))
+    }
 }
 
 fn word_alignment(alignment: CharacterAlignment) -> Result<Vec<WordAlignment>, TransportError> {
@@ -739,6 +812,38 @@ mod tests {
         assert_eq!(words[0].end_ms, 20);
         assert_eq!(words[1].word, "NPC");
         assert_eq!(words[1].source_text_start, Some(3));
+    }
+
+    #[test]
+    fn typed_nonterminal_acknowledgement_is_ignored_but_empty_object_is_rejected() {
+        assert!(decode_response(br#"{"is_final":false}"#, 1024)
+            .expect("recognized acknowledgement")
+            .is_empty());
+        assert!(
+            decode_response(br#"{"audio":null,"alignment":null,"isFinal":null}"#, 1024)
+                .expect("recognized null acknowledgement")
+                .is_empty()
+        );
+        assert_eq!(
+            decode_response(b"{}", 1024),
+            Err(TransportError::ProtocolStage(
+                "elevenlabs_response_has_no_events"
+            ))
+        );
+    }
+
+    #[test]
+    fn provider_error_payloads_are_classified_without_exposing_provider_text() {
+        assert_eq!(
+            decode_response(br#"{"error":"quota exceeded for private account"}"#, 1024),
+            Err(TransportError::QuotaExceeded)
+        );
+        assert_eq!(
+            decode_response(br#"{"detail":{"message":"voice not found"}}"#, 1024),
+            Err(TransportError::ProtocolStage(
+                "elevenlabs_voice_unavailable"
+            ))
+        );
     }
 
     #[test]

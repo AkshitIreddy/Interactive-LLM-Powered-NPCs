@@ -26,7 +26,7 @@ url = "2"
 zeroize = "1.8"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["io-util", "macros", "rt-multi-thread", "sync"] }
+tokio = { version = "1", features = ["io-util", "macros", "rt-multi-thread", "sync", "test-util"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 
 [build-dependencies]

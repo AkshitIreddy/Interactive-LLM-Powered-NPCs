@@ -221,6 +221,48 @@ async fn receive_deadline_is_bounded_and_content_free() {
 }
 
 #[tokio::test]
+async fn receive_deadline_is_total_across_nonterminal_acknowledgements() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind fixture server");
+    let address = listener.local_addr().expect("fixture address");
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("accept fixture client");
+        let mut socket = tokio_tungstenite::accept_async(stream)
+            .await
+            .expect("upgrade fixture websocket");
+        for _ in 0..100 {
+            if socket
+                .send(Message::Text(r#"{"isFinal":false}"#.into()))
+                .await
+                .is_err()
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    });
+
+    let transport = fixture_transport(Duration::from_millis(10));
+    let endpoint = format!("ws://{address}/v1/text-to-speech/voice-1/stream-input");
+    let mut connection = transport
+        .connect(fixture_request(endpoint))
+        .await
+        .expect("connect to local fixture");
+    assert_eq!(
+        tokio::time::timeout(Duration::from_millis(250), connection.receive())
+            .await
+            .expect("fixture has a strict wall-clock budget"),
+        Some(Err(TransportError::Timeout))
+    );
+    let _ignored = connection.close().await;
+    tokio::time::timeout(Duration::from_millis(250), server)
+        .await
+        .expect("fixture server has a strict wall-clock budget")
+        .expect("fixture server completes");
+}
+
+#[tokio::test]
 async fn close_aborts_an_unresponsive_peer_within_the_barge_in_budget() {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await

@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 
@@ -11,6 +11,10 @@ use crate::{
     TtsTransport, VoiceBindings, WireCommand, WireEvent, MAX_AUDIO_CHUNK_BYTES,
     MAX_PUSH_TEXT_CHARS,
 };
+
+const CANCEL_SIGNAL_TIMEOUT: Duration = Duration::from_millis(50);
+const MAX_EVENT_TIMELINE_MS: u64 = 4 * 60 * 60 * 1_000;
+const MAX_EVENT_DURATION_MS: u64 = 60_000;
 
 #[derive(Clone, Debug)]
 pub struct CartesiaConfig {
@@ -124,7 +128,7 @@ impl ProviderFlavor {
                 streaming_input: true,
                 streaming_pcm: true,
                 alignment: true,
-                visemes_or_phonemes: false,
+                visemes_or_phonemes: true,
                 cancellation: true,
                 usage: true,
             },
@@ -255,7 +259,7 @@ impl ProviderFlavor {
                 model_id: binding.model_id.clone(),
                 locale: request.locale.clone(),
                 output: request.output,
-                request_alignment: request.request_alignment,
+                request_alignment: request.request_alignment || request.request_visemes,
             })),
         }
     }
@@ -290,6 +294,7 @@ impl ProviderFlavor {
             Self::Inworld(_) => WireCommand::Inworld(InworldCommand::SendText {
                 context_id: context_id(&request.identity),
                 text: SensitiveString::new(text),
+                flush_context: !more_text_expected,
             }),
             Self::Deepgram(_) => WireCommand::Deepgram(DeepgramCommand::Speak {
                 text: SensitiveString::new(text),
@@ -302,6 +307,8 @@ impl ProviderFlavor {
             // Cartesia finishes by sending a continuation with `continue: false`.
             Self::Cartesia(_) => None,
             Self::ElevenLabs(_) => Some(WireCommand::ElevenLabs(ElevenLabsCommand::Finish)),
+            // When semantic chunking already emitted every text clause, the
+            // documented standalone flush closes the still-open context.
             Self::Inworld(_) => Some(WireCommand::Inworld(InworldCommand::FlushContext {
                 context_id: context_id(identity),
             })),
@@ -580,10 +587,20 @@ impl StreamingTtsSession for HostedSession {
         if clauses.is_empty() && !self.utterance_started {
             return Err(invalid(self.provider_id(), "empty_utterance"));
         }
-        let is_cartesia = matches!(self.flavor, ProviderFlavor::Cartesia(_));
-        if is_cartesia {
+        let final_clause_owns_the_boundary = matches!(
+            self.flavor,
+            ProviderFlavor::Cartesia(_) | ProviderFlavor::Inworld(_)
+        );
+        if final_clause_owns_the_boundary {
             if clauses.is_empty() {
-                self.send_clause(String::new(), false).await?;
+                if matches!(self.flavor, ProviderFlavor::Cartesia(_)) {
+                    self.send_clause(String::new(), false).await?;
+                } else if let Some(command) = self.flavor.finish_command(&self.request.identity) {
+                    self.connection.send(command).await.map_err(|error| {
+                        self.state = SessionState::Faulted;
+                        map_transport(self.provider_id(), error)
+                    })?;
+                }
             } else {
                 let clause_count = clauses.len();
                 for (index, clause) in clauses.into_iter().enumerate() {
@@ -647,12 +664,16 @@ impl StreamingTtsSession for HostedSession {
                 }
                 Ok(WireEvent::Alignment(alignment)) => {
                     if alignment.len() > 16_384
-                        || alignment.iter().any(|item| {
+                        || alignment.iter().enumerate().any(|(index, item)| {
                             item.word.len() > 512
                                 || item.end_ms < item.start_ms
+                                || item.end_ms > MAX_EVENT_TIMELINE_MS
                                 || item
                                     .source_text_length
                                     .is_some_and(|length| length > 16_384)
+                                || (index > 0
+                                    && (item.start_ms < alignment[index - 1].start_ms
+                                        || item.end_ms < alignment[index - 1].end_ms))
                         })
                     {
                         self.state = SessionState::Faulted;
@@ -667,9 +688,19 @@ impl StreamingTtsSession for HostedSession {
                 }
                 Ok(WireEvent::Viseme(visemes)) => {
                     if visemes.len() > 32_768
-                        || visemes
-                            .iter()
-                            .any(|item| item.symbol.is_empty() || item.symbol.len() > 64)
+                        || visemes.iter().enumerate().any(|(index, item)| {
+                            let end = item.start_ms.saturating_add(item.duration_ms);
+                            item.symbol.is_empty()
+                                || item.symbol.len() > 64
+                                || item.duration_ms > MAX_EVENT_DURATION_MS
+                                || end > MAX_EVENT_TIMELINE_MS
+                                || (index > 0
+                                    && (item.start_ms < visemes[index - 1].start_ms
+                                        || end
+                                            < visemes[index - 1]
+                                                .start_ms
+                                                .saturating_add(visemes[index - 1].duration_ms)))
+                        })
                     {
                         self.state = SessionState::Faulted;
                         return Some(Err(TtsError::new(
@@ -716,8 +747,10 @@ impl StreamingTtsSession for HostedSession {
         }
         if let Some(command) = self.flavor.cancel_command(&self.request.identity) {
             // Cancellation remains authoritative even if the best-effort provider
-            // command fails; closing the transport is the hard boundary.
-            let _ignored = self.connection.send(command).await;
+            // command stalls or fails; the bounded send attempt may not postpone
+            // the hard transport close by a full provider I/O timeout.
+            let _ignored =
+                tokio::time::timeout(CANCEL_SIGNAL_TIMEOUT, self.connection.send(command)).await;
         }
         let close_result = self.connection.close().await;
         self.state = SessionState::Cancelled;

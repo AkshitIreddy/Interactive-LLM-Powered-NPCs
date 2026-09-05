@@ -186,6 +186,7 @@ pub enum InworldCommand {
     SendText {
         context_id: String,
         text: SensitiveString,
+        flush_context: bool,
     },
     FlushContext {
         context_id: String,
@@ -214,10 +215,15 @@ impl fmt::Debug for InworldCommand {
                 .field("output", output)
                 .field("request_alignment", request_alignment)
                 .finish(),
-            Self::SendText { context_id, text } => formatter
+            Self::SendText {
+                context_id,
+                text,
+                flush_context,
+            } => formatter
                 .debug_struct("SendText")
                 .field("context_id", context_id)
                 .field("text", text)
+                .field("flush_context", flush_context)
                 .finish(),
             Self::FlushContext { context_id } => formatter
                 .debug_struct("FlushContext")
@@ -296,6 +302,8 @@ pub struct MockScript {
     pub connect_error: Option<TransportError>,
     /// Zero-based send call that fails.
     pub fail_send_at: Option<usize>,
+    /// Zero-based send call that remains pending until its future is cancelled.
+    pub stall_send_at: Option<usize>,
     pub close_error: Option<TransportError>,
 }
 
@@ -330,6 +338,7 @@ pub enum RecordedCommand {
     InworldSendText {
         text_chars: usize,
         text_ends_with_space: bool,
+        flush_context: bool,
     },
     InworldFlushContext,
     InworldCloseContext,
@@ -376,12 +385,15 @@ impl WireCommand {
             Self::Inworld(InworldCommand::CreateContext { .. }) => {
                 RecordedCommand::InworldCreateContext
             }
-            Self::Inworld(InworldCommand::SendText { text, .. }) => {
-                RecordedCommand::InworldSendText {
-                    text_chars: text.expose().chars().count(),
-                    text_ends_with_space: text.expose().ends_with(' '),
-                }
-            }
+            Self::Inworld(InworldCommand::SendText {
+                text,
+                flush_context,
+                ..
+            }) => RecordedCommand::InworldSendText {
+                text_chars: text.expose().chars().count(),
+                text_ends_with_space: text.expose().ends_with(' '),
+                flush_context: *flush_context,
+            },
             Self::Inworld(InworldCommand::FlushContext { .. }) => {
                 RecordedCommand::InworldFlushContext
             }
@@ -469,12 +481,23 @@ struct MockConnection {
 #[async_trait]
 impl TtsConnection for MockConnection {
     async fn send(&mut self, command: WireCommand) -> Result<(), TransportError> {
+        let send_index = self.sends;
+        self.sends += 1;
+        let should_stall = self
+            .shared
+            .lock()
+            .expect("mock mutex poisoned")
+            .script
+            .stall_send_at
+            == Some(send_index);
+        if should_stall {
+            std::future::pending::<()>().await;
+            unreachable!("a stalled mock send only resumes when its future is cancelled");
+        }
         let mut shared = self.shared.lock().expect("mock mutex poisoned");
-        if shared.script.fail_send_at == Some(self.sends) {
-            self.sends += 1;
+        if shared.script.fail_send_at == Some(send_index) {
             return Err(TransportError::Unavailable);
         }
-        self.sends += 1;
         shared.commands.push(command.recording());
         Ok(())
     }
