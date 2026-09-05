@@ -1305,6 +1305,8 @@ mod tests {
             "gemini",
             "anthropic",
             "groq",
+            "mistral",
+            "openrouter",
             "cohere",
             "nvidia-nim",
             "openai-compatible",
@@ -1324,10 +1326,37 @@ mod tests {
         ] {
             assert!(ids.contains(expected), "missing provider {expected}");
         }
-        assert_eq!(document.content.providers.len(), 20);
-        assert_eq!(document.content.models.len(), 30);
+        assert_eq!(document.content.providers.len(), 22);
+        assert_eq!(document.content.models.len(), 34);
         assert_eq!(document.content.pack_templates.len(), 8);
         assert_eq!(document.content.voice_intents.len(), 8);
+        for id in [
+            "gemini.llm.gemini-3.1-flash-lite",
+            "groq.llm.gpt-oss-20b",
+            "groq.llm.qwen3.6-27b",
+            "mistral.llm.ministral-8b-2512",
+            "mistral.llm.ministral-3b-2512",
+            "openrouter.llm.liquid-lfm-2.5-2.6b-free",
+            "cohere.llm.command-a-plus-05-2026",
+        ] {
+            assert!(
+                document
+                    .content
+                    .models
+                    .iter()
+                    .find(|model| model.id == id)
+                    .expect("qualified hosted LLM model")
+                    .is_selectable(),
+                "qualified hosted LLM must be selectable: {id}"
+            );
+        }
+        assert!(!document
+            .content
+            .models
+            .iter()
+            .find(|model| model.id == "openai-compatible.llm.user-selected")
+            .expect("generic compatible catalog route")
+            .is_selectable());
         assert!(!document.content.fallback_policy.automatic_fallback_enabled);
         assert!(document
             .content
@@ -1335,22 +1364,25 @@ mod tests {
             .iter()
             .all(|model| !model.eligibility.automatic_fallback_candidate));
         for id in [
-            "deepgram.tts.user-selected",
-            "cartesia.tts.user-selected",
-            "inworld.tts.user-selected",
+            "deepgram.tts.aura-2-arcas-en",
+            "cartesia.tts.sonic-3.6",
+            "inworld.tts.inworld-tts-2-flash",
         ] {
             let route = document
                 .content
                 .models
                 .iter()
                 .find(|model| model.id == id)
-                .expect("declared catalog-only TTS route");
-            assert_eq!(route.availability, RouteAvailability::CatalogOnly);
-            assert_eq!(route.lifecycle, Lifecycle::QualificationRequired);
-            assert!(!route.is_selectable());
+                .expect("exact live-qualified hosted TTS route");
+            assert_eq!(route.availability, RouteAvailability::ImplementedAdapter);
+            assert_eq!(route.lifecycle, Lifecycle::Stable);
+            assert!(route.is_selectable());
+            assert!(route.capabilities.stock_voice_only);
+            assert_eq!(route.capabilities.audio_sample_rates_hz, vec![24_000]);
+            assert_eq!(route.capabilities.audio_channels, Some(1));
             assert_eq!(
                 route.eligibility.qualification_gate.as_deref(),
-                Some("runtime_adapter_implementation_and_live_qualification")
+                Some("exact_native_credential_model_stock_voice_and_egress_consent")
             );
         }
 
@@ -1374,7 +1406,7 @@ mod tests {
             .content
             .models
             .iter()
-            .find(|model| model.id == "cohere.llm.discovered-default")
+            .find(|model| model.id == "cohere.llm.command-a-plus-05-2026")
             .unwrap();
         assert_eq!(
             cohere_chat.availability,
@@ -1601,7 +1633,7 @@ mod tests {
 
         assert_eq!(
             document.signing_sha256().unwrap(),
-            "32372c27b89814c2f7ce99bb641791ffeb67dea1bfe3a915ccc5b317f3f2397e"
+            "a2c5ea813ed701b7894a15e06c9dfe3ad75128cef6ab67269a1b05c2258335ee"
         );
     }
 
