@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -15,7 +16,7 @@ from lock_inventory import InventoryError, load_inventory  # noqa: E402
 from reconcile_distribution import ReconciliationError, reconcile, validate_installer_legal_materials  # noqa: E402
 from check_lock_licenses import ExpressionError, expression_is_allowed, is_model_pack_manifest, validate_installer_toolchain_provenance, validate_license_material_overrides  # noqa: E402
 from collect_artifact_licenses import override_sources  # noqa: E402
-from generate_source_evidence import windows_unaddressable  # noqa: E402
+from generate_source_evidence import windows_unaddressable, working_tree_changes  # noqa: E402
 
 
 class SourceEvidenceTests(unittest.TestCase):
@@ -26,6 +27,83 @@ class SourceEvidenceTests(unittest.TestCase):
         for relative in ("NULL", "console.txt", "nested/component.log"):
             with self.subTest(relative=relative):
                 self.assertFalse(windows_unaddressable(relative))
+
+    def test_dirty_manifest_hashes_modified_deleted_and_untracked_files(self) -> None:
+        root = Path(tempfile.mkdtemp(prefix="npc-source-evidence-"))
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+        modified = root / "modified.txt"
+        deleted = root / "deleted.txt"
+        modified.write_text("before\n", encoding="utf-8")
+        deleted.write_text("delete me\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "fixture"], check=True)
+
+        modified.write_text("after\n", encoding="utf-8")
+        # Preserve the disposable fixture bytes inside Git's ignored metadata
+        # directory while exercising a missing tracked path. No local deletion
+        # is needed to prove the deleted-entry source-identity behavior.
+        preserved = root / ".git" / "npc-deleted-fixture.txt"
+        self.assertFalse(preserved.exists())
+        self.assertEqual(root.resolve(), preserved.resolve().parents[1])
+        deleted.rename(preserved)
+        untracked = root / "new file.txt"
+        untracked.write_text("new\n", encoding="utf-8")
+
+        changes = {item["path"]: item for item in working_tree_changes(root)}
+        self.assertEqual({"modified.txt", "deleted.txt", "new file.txt"}, set(changes))
+        self.assertEqual(" M", changes["modified.txt"]["status"])
+        self.assertEqual("file", changes["modified.txt"]["kind"])
+        self.assertEqual(hashlib.sha256(modified.read_bytes()).hexdigest(), changes["modified.txt"]["sha256"])
+        self.assertEqual(" D", changes["deleted.txt"]["status"])
+        self.assertEqual("deleted", changes["deleted.txt"]["kind"])
+        self.assertIsNone(changes["deleted.txt"]["sha256"])
+        self.assertEqual("??", changes["new file.txt"]["status"])
+        self.assertEqual(hashlib.sha256(untracked.read_bytes()).hexdigest(), changes["new file.txt"]["sha256"])
+
+    def test_source_identity_hashes_symlink_text_without_reading_external_target(self) -> None:
+        root = Path(tempfile.mkdtemp(prefix="npc-source-symlink-"))
+        outside = Path(tempfile.mkdtemp(prefix="npc-source-external-")) / "target.txt"
+        outside.write_text("first external contents\n", encoding="utf-8")
+        for relative in __import__("generate_source_evidence").EVIDENCE_PATHS:
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"fixture for {relative}\n", encoding="utf-8")
+        profile = root / "profiles/games/fixture/profile.json"
+        profile.parent.mkdir(parents=True)
+        profile.write_text("{}\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+        subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "fixture"], check=True)
+
+        link = root / "external-link.txt"
+        try:
+            link.symlink_to(outside)
+        except OSError as error:
+            self.skipTest(f"file symlinks are unavailable on this host: {error}")
+
+        first = outside.parent / "source-first.json"
+        second = outside.parent / "source-second.json"
+        command = [sys.executable, str(SECURITY_DIR / "generate_source_evidence.py"), "--root", str(root)]
+        subprocess.run(command + ["--out", str(first)], check=True, capture_output=True)
+        first_evidence = json.loads(first.read_text(encoding="utf-8"))
+        outside.write_text("changed external contents\n", encoding="utf-8")
+        subprocess.run(command + ["--out", str(second)], check=True, capture_output=True)
+        second_evidence = json.loads(second.read_text(encoding="utf-8"))
+
+        expected_link_hash = hashlib.sha256(
+            os.fsencode(os.readlink(link))
+        ).hexdigest()
+        self.assertEqual(
+            first_evidence["source_candidate_digest"]["sha256"],
+            second_evidence["source_candidate_digest"]["sha256"],
+        )
+        self.assertEqual(first_evidence["working_tree_changes"], second_evidence["working_tree_changes"])
+        self.assertEqual("symlink", first_evidence["working_tree_changes"][0]["kind"])
+        self.assertEqual(expected_link_hash, first_evidence["working_tree_changes"][0]["sha256"])
 
 
 class InstallerToolchainProvenanceTests(unittest.TestCase):
