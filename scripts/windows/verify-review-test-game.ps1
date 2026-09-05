@@ -24,7 +24,7 @@ $manifestItem = Get-Item -LiteralPath $manifestPath -Force
 if ($manifestItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { throw 'Review fixture manifest must not be a reparse point.' }
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 if ($manifest.schema_version -ne 1 -or $manifest.component_id -ne 'project:synthetic-review-target' -or
-    $manifest.fixture_source -ne 'project-source-generated-native-v1' -or
+    $manifest.fixture_source -ne 'project-source-generated-native-v2' -or
     $manifest.distribution_scope -ne 'review-test-game' -or
     $manifest.distribution_class -ne 'project-owned-source-built-review-fixture' -or
     @($manifest.third_party_binaries).Count -ne 0 -or
@@ -38,6 +38,7 @@ if (@($manifest.manifest_self.PSObject.Properties.Name).Count -ne 2 -or
 }
 $expectedFiles = @(
     'interactive-npcs-synthetic-target.exe',
+    'mara-venn-camera-idle-v1.inpcseq',
     'README.md',
     'REVIEW-FIXTURE-MANIFEST.json',
     'THIRD-PARTY-NOTICES.md',
@@ -57,7 +58,7 @@ foreach ($file in $actualFiles) {
 }
 
 $entries = @($manifest.files)
-if ($entries.Count -ne 4) { throw 'Review fixture manifest must hash exactly four non-manifest files.' }
+if ($entries.Count -ne 5) { throw 'Review fixture manifest must hash exactly five non-manifest files.' }
 $seen = @{}
 foreach ($entry in $entries) {
     $path = [string]$entry.path
@@ -76,7 +77,7 @@ foreach ($entry in $entries) {
         $entry.notice_reference -ne 'THIRD-PARTY-NOTICES.md') {
         throw "Review fixture manifest metadata is incomplete for: $path"
     }
-    $expectedComponent = if ($path -eq 'interactive-npcs-synthetic-target.exe') { 'project:synthetic-review-target' } else { 'project:legal-resources' }
+    $expectedComponent = if (@('interactive-npcs-synthetic-target.exe', 'mara-venn-camera-idle-v1.inpcseq') -contains $path) { 'project:synthetic-review-target' } else { 'project:legal-resources' }
     if ($entry.component_id -ne $expectedComponent) { throw "Review fixture component ownership is invalid for: $path" }
     $filePath = Join-Path $root $path
     if ((Get-LowerSha256 -Path $filePath) -cne [string]$entry.sha256 -or
@@ -93,17 +94,41 @@ if (@($manifest.inbox_system_dependencies).Count -ne 3 -or
     @($manifest.inbox_system_dependencies | Where-Object { $_.distribution_class -ne 'operating-system-inbox-not-bundled' }).Count -ne 0) {
     throw 'Review fixture inbox system dependencies are missing or misclassified.'
 }
-if ($manifest.generated_media.renderer -ne 'project-owned-gdi-generated-v1' -or
-    $manifest.generated_media.frames_differ -ne $true -or
-    $manifest.generated_media.visual_source -ne 'embedded-original-generated-photorealistic-portrait-v1' -or
+if ($manifest.generated_media.renderer -ne 'project-owned-gdi-source-pixel-idle-v2' -or
+    $manifest.generated_media.visual_source -ne 'verified-sibling-project-owned-mara-camera-sequence-v1' -or
+    $manifest.generated_media.visual_mode -ne 'moving-source-controlled-idle-v2' -or
     [string]$manifest.generated_media.portrait_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
     $manifest.generated_media.portrait_embedded_in_executable -ne $true -or
+    $manifest.generated_media.moving_sequence_path -ne 'mara-venn-camera-idle-v1.inpcseq' -or
+    [string]$manifest.generated_media.moving_sequence_file_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+    [int64]$manifest.generated_media.moving_sequence_file_size_bytes -le 0 -or
+    $manifest.generated_media.source_sequence_sha256 -cne '22022d1564ba8f74137fe8b6813dd1d22dc47b00fa013632c6f6bbbc60bb265d' -or
+    $manifest.generated_media.source_raw_pixels_sha256 -cne 'c58602f601d31b06cf1e006a1f65aea4e306e7983dc2b1d80d14bf4e5f094a0b' -or
+    $manifest.generated_media.source_frame_count -ne 42 -or $manifest.generated_media.source_frame_width -ne 960 -or
+    $manifest.generated_media.source_frame_height -ne 720 -or $manifest.generated_media.source_frame_rate -ne 30 -or
+    $manifest.generated_media.source_frame_motion -ne $true -or
+    $manifest.generated_media.source_actor_motion -ne $false -or
+    $manifest.generated_media.source_camera_motion_only -ne $true -or
+    $manifest.generated_media.rendered_actor_motion -ne $true -or
+    $manifest.generated_media.rendered_blink_motion -ne $true -or
+    $manifest.generated_media.rendered_breathing_motion -ne $true -or
     $manifest.generated_media.source_mouth_motion -ne $false -or
-    $manifest.generated_media.mouth_region_invariant -ne $true -or
+    $manifest.generated_media.source_mouth_articulation -ne $false -or
+    $manifest.generated_media.product_lip_sync -ne $false -or
+    $manifest.generated_media.renderer_mouth_pixels_preserved -ne $true -or
+    $manifest.generated_media.deterministic_rendering -ne $true -or
+    $manifest.generated_media.source_advance_passed -ne $true -or
+    $manifest.generated_media.generated_probe_frames -ne 6 -or
+    $manifest.generated_media.distinct_rendered_frame_hashes -ne 6 -or
     $manifest.generated_media.audio_source -ne 'project-owned-generated-pcm-v1' -or
     $manifest.generated_media.audio_clipped_samples -ne 0 -or
     $manifest.generated_media.audio_loop_boundary_delta -ge 256) {
-    throw 'Review fixture generated frame/audio evidence is invalid.'
+    throw 'Review fixture moving-source, controlled-idle, mouth-truth, or audio evidence is invalid.'
+}
+$sequenceFile = Join-Path $root 'mara-venn-camera-idle-v1.inpcseq'
+if ((Get-LowerSha256 -Path $sequenceFile) -cne [string]$manifest.generated_media.moving_sequence_file_sha256 -or
+    (Get-Item -LiteralPath $sequenceFile).Length -ne [int64]$manifest.generated_media.moving_sequence_file_size_bytes) {
+    throw 'Review fixture compressed moving sequence does not match generated-media evidence.'
 }
 if ($manifest.build.reproducibility_class -ne 'bit-for-bit-deterministic-for-pinned-roslyn-and-framework-reference-inputs' -or
     $manifest.build.reproducible_rebuild_verified -ne $true -or
@@ -129,6 +154,20 @@ foreach ($sourceInput in @(
         throw "Review fixture source/license provenance mismatch: $($sourceInput.path)"
     }
 }
+$sourceManifest = Get-Content -LiteralPath $sourceManifestPath -Raw | ConvertFrom-Json
+$movingContract = $sourceManifest.moving_sequence
+if ($null -eq $movingContract -or
+    $movingContract.packaged_path -ne 'mara-venn-camera-idle-v1.inpcseq' -or
+    $movingContract.visual_source -ne [string]$manifest.generated_media.visual_source -or
+    $movingContract.visual_mode -ne [string]$manifest.generated_media.visual_mode -or
+    $movingContract.sequence_sha256 -cne [string]$manifest.generated_media.source_sequence_sha256 -or
+    $movingContract.raw_pixels_sha256 -cne [string]$manifest.generated_media.source_raw_pixels_sha256 -or
+    $movingContract.origin_portrait_sha256 -cne [string]$manifest.generated_media.portrait_sha256 -or
+    $movingContract.source_actor_motion -ne $false -or $movingContract.source_mouth_articulation -ne $false -or
+    $movingContract.renderer_adds_controlled_blink -ne $true -or $movingContract.renderer_adds_controlled_breathing -ne $true -or
+    $movingContract.product_lip_sync -ne $false) {
+    throw 'Review fixture moving sequence is not bound to the repository source manifest.'
+}
 
 $sbom = Get-Content -LiteralPath (Join-Path $root 'review-test-game.cdx.json') -Raw | ConvertFrom-Json
 if ($sbom.bomFormat -ne 'CycloneDX' -or $sbom.specVersion -ne '1.5' -or
@@ -149,9 +188,25 @@ if ($sbom.bomFormat -ne 'CycloneDX' -or $sbom.specVersion -ne '1.5' -or
     executable_sha256 = [string]$manifest.build.executable_sha256
     source_sha256 = [string]$manifest.source.sha256
     visual_source = [string]$manifest.generated_media.visual_source
+    visual_mode = [string]$manifest.generated_media.visual_mode
     portrait_sha256 = [string]$manifest.generated_media.portrait_sha256
+    moving_sequence_path = $sequenceFile
+    moving_sequence_sha256 = [string]$manifest.generated_media.moving_sequence_file_sha256
+    moving_sequence_size_bytes = [int64]$manifest.generated_media.moving_sequence_file_size_bytes
+    source_sequence_sha256 = [string]$manifest.generated_media.source_sequence_sha256
+    source_frame_count = [int]$manifest.generated_media.source_frame_count
+    source_frame_width = [int]$manifest.generated_media.source_frame_width
+    source_frame_height = [int]$manifest.generated_media.source_frame_height
+    source_frame_rate = [int]$manifest.generated_media.source_frame_rate
+    source_frame_motion = [bool]$manifest.generated_media.source_frame_motion
+    source_actor_motion = [bool]$manifest.generated_media.source_actor_motion
+    rendered_actor_motion = [bool]$manifest.generated_media.rendered_actor_motion
+    rendered_blink_motion = [bool]$manifest.generated_media.rendered_blink_motion
+    rendered_breathing_motion = [bool]$manifest.generated_media.rendered_breathing_motion
     source_mouth_motion = [bool]$manifest.generated_media.source_mouth_motion
-    mouth_region_invariant = [bool]$manifest.generated_media.mouth_region_invariant
+    source_mouth_articulation = [bool]$manifest.generated_media.source_mouth_articulation
+    product_lip_sync = [bool]$manifest.generated_media.product_lip_sync
+    renderer_mouth_pixels_preserved = [bool]$manifest.generated_media.renderer_mouth_pixels_preserved
     license_expression = [string]$manifest.license.expression
     third_party_binary_count = @($manifest.third_party_binaries).Count
 } | ConvertTo-Json -Depth 4
