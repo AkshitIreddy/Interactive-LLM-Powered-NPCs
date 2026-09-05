@@ -22,6 +22,9 @@ side-view dialogue sequence representative of the primary case. A separate
 secondary test should cover idle-to-incidental-speech transitions. Visual mouth
 replacement and audible game-voice overlap must be evaluated separately; this
 compositor does not isolate or suppress a character's original game audio.
+The user explicitly deferred game-audio overlap handling as an edge case;
+it is not a blocker for the current visual work and no audio-isolation or
+ducking subsystem should be added in this iteration.
 
 ## Result and scope
 
