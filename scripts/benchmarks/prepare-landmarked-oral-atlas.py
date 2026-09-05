@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Export a private native oral atlas from landmarked identity observations.
 
-The atlas deliberately stores only observed oral-interior pixels.  Current
-frame lip surfaces remain under native contour-warp ownership, which avoids
-replacing sharp game pixels with a rectangular or elliptical generated face
-patch.  Dense inner-mouth polygons provide the enrollment boundary and each
-state is normalized to the fixed canonical oral slot consumed by the native
-compositor.
+The atlas stores only declared reference oral-interior pixels. References may
+be observed, generated, or geometry transfers, and the quality receipt keeps
+those types distinct. Current-frame lip surfaces remain under native
+contour-warp ownership, which avoids replacing sharp game pixels with a
+rectangular or elliptical face patch. Dense inner-mouth polygons provide the
+enrollment boundary and each state is normalized to the fixed canonical oral
+slot consumed by the native compositor.
 
 Inputs are private review observations under E:\\temp.  This script downloads
 nothing and never treats generated images as a distributable model pack.
@@ -19,6 +20,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import re
 import sys
 
 import cv2
@@ -41,6 +43,121 @@ DEFAULT_STATE_SPECS = (
 )
 
 STATE_SPEC_SCHEMA = "interactive-npcs-landmarked-oral-state-specs/v1"
+REFERENCE_TYPES = {"observed", "generated", "geometry-transfer"}
+SAFE_BINDING_ID = re.compile(r"^[a-z0-9][a-z0-9.-]{0,95}$")
+SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+
+
+def validate_non_negative_finite(value: object, field: str) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or float(value) < 0.0
+    ):
+        raise ValueError(f"{field} must be a finite non-negative number")
+    return float(value)
+
+
+def parse_coverage_review(value: object) -> dict[str, object] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("coverageReview must be an object")
+
+    required = value.get("requiredObservedArticulations", [])
+    if (
+        not isinstance(required, list)
+        or any(not isinstance(item, str) or not item.strip() for item in required)
+    ):
+        raise ValueError(
+            "coverageReview.requiredObservedArticulations must be a list of non-empty strings"
+        )
+    required = list(dict.fromkeys(item.strip() for item in required))
+
+    thresholds: dict[str, dict[str, float]] = {}
+    for field in (
+        "minimumCenterAperturePixels",
+        "minimumCenterApertureRatio",
+    ):
+        raw = value.get(field, {})
+        if not isinstance(raw, dict) or any(
+            not isinstance(key, str) or not key.strip() for key in raw
+        ):
+            raise ValueError(f"coverageReview.{field} must map articulation names to numbers")
+        thresholds[field] = {
+            key.strip(): validate_non_negative_finite(
+                item, f"coverageReview.{field}.{key}"
+            )
+            for key, item in raw.items()
+        }
+
+    if not required and not any(thresholds.values()):
+        raise ValueError("coverageReview must contain at least one caller-defined requirement")
+    return {
+        "requiredObservedArticulations": required,
+        **thresholds,
+    }
+
+
+def build_enrollment_binding(
+    game_profile_id: str | None,
+    character_id: str | None,
+    provenance_hashes: list[str] | None,
+    review_status: str | None,
+    review_evidence_sha256: str | None,
+) -> dict[str, object] | None:
+    values = (
+        game_profile_id,
+        character_id,
+        provenance_hashes,
+        review_status,
+        review_evidence_sha256,
+    )
+    if not any(value is not None for value in values):
+        return None
+    if not game_profile_id or not SAFE_BINDING_ID.fullmatch(game_profile_id):
+        raise ValueError(
+            "enrollment binding gameProfileId must be 1..96 lowercase letters, digits, "
+            "dots, or hyphens and start with a letter or digit"
+        )
+    if not character_id or not SAFE_BINDING_ID.fullmatch(character_id):
+        raise ValueError(
+            "enrollment binding characterId must be 1..96 lowercase letters, digits, "
+            "dots, or hyphens and start with a letter or digit"
+        )
+    if review_status not in {"reviewed-private", "unreviewed"}:
+        raise ValueError(
+            "enrollment binding reviewStatus must be reviewed-private or unreviewed"
+        )
+    hashes = provenance_hashes or []
+    if not 1 <= len(hashes) <= 16:
+        raise ValueError(
+            "enrollment binding requires 1..16 reference provenance SHA-256 values"
+        )
+    if len(set(hashes)) != len(hashes) or any(
+        not SHA256_HEX.fullmatch(value) for value in hashes
+    ):
+        raise ValueError(
+            "reference provenance SHA-256 values must be unique lowercase 64-hex strings"
+        )
+    if review_evidence_sha256 is not None and not SHA256_HEX.fullmatch(
+        review_evidence_sha256
+    ):
+        raise ValueError("review evidence SHA-256 must be a lowercase 64-hex string")
+    if review_status == "reviewed-private" and review_evidence_sha256 is None:
+        raise ValueError("reviewed-private enrollment binding requires review evidence SHA-256")
+
+    binding: dict[str, object] = {
+        "schemaVersion": 1,
+        "gameProfileId": game_profile_id,
+        "characterId": character_id,
+        "referenceProvenanceSha256": hashes,
+        "reviewStatus": review_status,
+    }
+    if review_evidence_sha256 is not None:
+        binding["reviewEvidenceSha256"] = review_evidence_sha256
+    return binding
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -91,6 +208,10 @@ def load_state_specs(path: Path | None) -> tuple[list[dict[str, object]], str, d
                 "image": image,
                 "metadata": metadata,
                 "coefficients": list(coefficients),
+                # Mara is a synthetic review actor. A decoded image is not an
+                # observed articulation merely because the exporter can hash it.
+                "referenceType": "generated",
+                "_referenceTypeBasis": "default-synthetic-recipe",
             }
             for name, image, metadata, coefficients in DEFAULT_STATE_SPECS
         ]
@@ -141,14 +262,209 @@ def load_state_specs(path: Path | None) -> tuple[list[dict[str, object]], str, d
                 not isinstance(state[field], str) or not state[field]
             ):
                 raise ValueError(f"state {field} must be a non-empty string: {name}")
+        if "referenceType" in state and state["referenceType"] not in REFERENCE_TYPES:
+            raise ValueError(
+                f"state referenceType must be observed, generated, or geometry-transfer: {name}"
+            )
+        if "articulation" in state and (
+            not isinstance(state["articulation"], str) or not state["articulation"].strip()
+        ):
+            raise ValueError(f"state articulation must be a non-empty string: {name}")
     scope = document.get("scope", "private-review-only")
     if not isinstance(scope, str) or not scope:
         raise ValueError("state specification scope must be a non-empty string")
+    coverage_review = parse_coverage_review(document.get("coverageReview"))
     return states, scope, {
         "file": str(resolved),
         "sha256": sha256(resolved),
         "notes": document.get("notes", []),
+        "coverageReview": coverage_review,
     }
+
+
+def infer_reference_type(state: dict[str, object]) -> tuple[str, str]:
+    explicit = state.get("referenceType")
+    if isinstance(explicit, str):
+        return explicit, str(state.get("_referenceTypeBasis", "explicit-state-spec"))
+    coverage = str(state.get("coverage", "")).lower()
+    if "generated" in coverage:
+        return "generated", "legacy-coverage-inference"
+    if coverage == "observed":
+        return "observed", "legacy-coverage-inference"
+    # Approximation, reuse, and non-phoneme-aligned shapes use real pixels but
+    # do not observe the articulation represented by their runtime slot.
+    return "geometry-transfer", "legacy-coverage-inference"
+
+
+def infer_articulation(state: dict[str, object]) -> str:
+    explicit = state.get("articulation")
+    if isinstance(explicit, str):
+        return explicit.strip()
+    name = str(state["name"]).lower()
+    coefficients = [float(value) for value in state["coefficients"]]
+    if bool(state.get("transparent", False)) or "neutral" in name:
+        return "neutral"
+    if "labiodental" in name or name in {"fv", "f-v"} or name.startswith("fv-"):
+        return "labiodental"
+    if "alveolar" in name:
+        return "alveolar"
+    if "dental" in name:
+        return "dental"
+    rounded = max(coefficients[2], coefficients[3]) >= 0.5 or any(
+        token in name for token in ("rounded", "oo", "oh")
+    )
+    if rounded:
+        return (
+            "rounded-open"
+            if coefficients[0] >= 0.2 or "open" in name
+            else "rounded-contact"
+        )
+    if (
+        max(coefficients[4], coefficients[5]) >= 0.4
+        or "spread" in name
+        or name.startswith("ee")
+    ):
+        return "spread"
+    if coefficients[0] >= 0.5 or "open" in name or name.startswith("ah"):
+        return "open"
+    return "unclassified"
+
+
+def decoded_source_aperture_metrics(frame: dict) -> dict[str, object]:
+    width = int(frame["width"])
+    height = int(frame["height"])
+    corner_width = float(frame["cornerWidth"]) * width
+    upper = frame["innerUpper"]
+    lower = frame["innerLower"]
+    if len(upper) < 3 or len(lower) < 3:
+        raise ValueError("inner mouth contours must each contain at least three points")
+
+    ordered = upper + list(reversed(lower[1:-1]))
+    polygon = np.asarray(
+        [
+            [
+                min(width - 1, max(0, int(round(float(point[0]) * width)))),
+                min(height - 1, max(0, int(round(float(point[1]) * height)))),
+            ]
+            for point in ordered
+        ],
+        dtype=np.int32,
+    )
+    aperture_mask = np.zeros((height, width), np.uint8)
+    cv2.fillPoly(aperture_mask, [polygon], 255, lineType=cv2.LINE_8)
+    aperture_pixels = int(np.count_nonzero(aperture_mask))
+
+    center_index = min(len(upper), len(lower)) // 2
+    upper_center = upper[center_index]
+    lower_center = lower[center_index]
+    delta_x = (float(lower_center[0]) - float(upper_center[0])) * width
+    delta_y = (float(lower_center[1]) - float(upper_center[1])) * height
+    roll = float(frame["rollRadians"])
+    # Project onto the mouth-local down axis so head roll does not inflate or
+    # suppress the reported aperture.
+    center_aperture = max(0.0, -math.sin(roll) * delta_x + math.cos(roll) * delta_y)
+    width_squared = corner_width * corner_width
+    return {
+        "decodedWidthPixels": width,
+        "decodedHeightPixels": height,
+        "sourceCornerWidthPixels": round(corner_width, 4),
+        "sourceAperturePixelCount": aperture_pixels,
+        "sourceAperturePixelRatioToCornerWidthSquared": round(
+            aperture_pixels / width_squared if width_squared > 0.0 else 0.0, 6
+        ),
+        "sourceCenterAperturePixels": round(center_aperture, 4),
+        "sourceCenterApertureRatioToCornerWidth": round(
+            center_aperture / corner_width if corner_width > 0.0 else 0.0, 6
+        ),
+        "measurementBasis": (
+            "decoded source pixels bounded by MediaPipe inner-mouth landmarks; "
+            "geometry does not prove visible cavity, teeth, tongue, or phoneme alignment"
+        ),
+    }
+
+
+def evaluate_coverage(
+    states: list[dict[str, object]], review: dict[str, object] | None
+) -> dict[str, object]:
+    required_by_slots = sorted(
+        {
+            str(state["articulation"])
+            for state in states
+            if state["articulation"] not in {"neutral", "unclassified"}
+        }
+    )
+    observed = sorted(
+        {
+            str(state["articulation"])
+            for state in states
+            if state["referenceType"] == "observed"
+            and state["articulation"] not in {"neutral", "unclassified"}
+        }
+    )
+    missing = sorted(set(required_by_slots) - set(observed))
+    unclassified = sorted(
+        str(state.get("name", "unnamed"))
+        for state in states
+        if state["articulation"] == "unclassified"
+    )
+    result: dict[str, object] = {
+        "slotArticulations": required_by_slots,
+        "observedArticulations": observed,
+        "missingArticulationCoverage": missing,
+        "unclassifiedStateNames": unclassified,
+        "referenceTypeCounts": {
+            reference_type: sum(
+                1 for state in states if state["referenceType"] == reference_type
+            )
+            for reference_type in sorted(REFERENCE_TYPES)
+        },
+        "status": "incomplete" if missing or unclassified else "observed-slots-present",
+        "note": (
+            "Generated and geometry-transfer references render a slot but do not count as "
+            "an observed articulation. Coverage alone is not a visual quality qualification."
+        ),
+    }
+    if review is None:
+        result["strictReview"] = {
+            "configured": False,
+            "passed": None,
+            "failures": [],
+        }
+        return result
+
+    failures: list[str] = []
+    required = list(review["requiredObservedArticulations"])
+    by_articulation: dict[str, list[dict[str, object]]] = {}
+    for state in states:
+        if state["referenceType"] == "observed":
+            by_articulation.setdefault(str(state["articulation"]), []).append(state)
+    for articulation in required:
+        if not by_articulation.get(articulation):
+            failures.append(f"missing observed articulation: {articulation}")
+    for field, metric in (
+        ("minimumCenterAperturePixels", "sourceCenterAperturePixels"),
+        ("minimumCenterApertureRatio", "sourceCenterApertureRatioToCornerWidth"),
+    ):
+        for articulation, minimum in dict(review[field]).items():
+            candidates = by_articulation.get(articulation, [])
+            measured = max(
+                (float(state["decodedSourceAperture"][metric]) for state in candidates),
+                default=None,
+            )
+            if measured is None:
+                failures.append(f"no observed {articulation} reference for {field}")
+            elif measured < float(minimum):
+                failures.append(
+                    f"observed {articulation} {metric} {measured:g} is below "
+                    f"caller minimum {float(minimum):g}"
+                )
+    result["strictReview"] = {
+        "configured": True,
+        "requirements": review,
+        "passed": not failures,
+        "failures": failures,
+    }
+    return result
 
 
 def canonical_map(frame: dict, width: int, height: int) -> tuple[np.ndarray, np.ndarray]:
@@ -244,8 +560,8 @@ def normalized_oral_state(
             np.zeros_like(canonical),
             np.zeros((height, width), np.float32),
             {
-                "sourceOralBounds": None,
-                "sourceOralPixelCount": 0,
+                "normalizedLandmarkBounds": None,
+                "normalizedLandmarkMaskPixelCount": 0,
                 "normalizedAlphaPixelCount": 0,
                 "laplacianVariance": 0.0,
             },
@@ -287,8 +603,8 @@ def normalized_oral_state(
     laplacian = cv2.Laplacian(gray, cv2.CV_32F)
     sharpness = float(np.var(laplacian[supported])) if np.any(supported) else 0.0
     return output, alpha, {
-        "sourceOralBounds": [x0, y0, x1, y1],
-        "sourceOralPixelCount": int(np.count_nonzero(source_mask)),
+        "normalizedLandmarkBounds": [x0, y0, x1, y1],
+        "normalizedLandmarkMaskPixelCount": int(np.count_nonzero(source_mask)),
         "normalizedAlphaPixelCount": int(np.count_nonzero(alpha > 1.0 / 255.0)),
         "laplacianVariance": round(sharpness, 4),
     }
@@ -299,6 +615,49 @@ def premultiply(image: np.ndarray, alpha: np.ndarray) -> bytes:
     premultiplied = np.rint(image.astype(np.float32) * alpha[..., None]).astype(np.uint8)
     alpha_byte = np.rint(alpha * 255.0).astype(np.uint8)
     return np.dstack((premultiplied, alpha_byte)).tobytes()
+
+
+def make_quality_document(
+    scope: str,
+    observations: Path,
+    configuration: dict[str, object],
+    coverage: dict[str, object],
+    states: list[dict[str, object]],
+    enrollment_binding: dict[str, object] | None = None,
+) -> dict[str, object]:
+    reviewed_binding_declared = (
+        enrollment_binding is not None
+        and enrollment_binding.get("reviewStatus") == "reviewed-private"
+    )
+    return {
+        "schema": "interactive-npcs-landmarked-oral-atlas-quality/v2",
+        "scope": scope,
+        "source": str(observations),
+        "configuration": configuration or None,
+        "renderingStatus": "rendered",
+        "qualityStatus": "rendered-not-qualified",
+        "qualityStatusReason": (
+            "Successful decoding, hashing, landmark normalization, and rendering do not "
+            "qualify articulation coverage or visible oral anatomy."
+        ),
+        "textureOwnership": "declared-reference-oral-interior-only",
+        "currentFrameOwnership": "lip-surface-and-all-exterior-pixels",
+        "enrollmentBinding": {
+            "present": enrollment_binding is not None,
+            "value": enrollment_binding,
+            "reviewedBindingDeclared": reviewed_binding_declared,
+            "loaderAdmissionVerified": False,
+            "bindingStatusReason": (
+                "reviewed private binding supplied; actual loader admission still requires "
+                "matching game and character, verified bytes, and runtime validation"
+                if reviewed_binding_declared
+                else "binding is absent or unreviewed, so the schema-v2 atlas is an "
+                "exportable experiment but is not loader-qualified"
+            ),
+        },
+        "articulationCoverage": coverage,
+        "states": states,
+    }
 
 
 def make_board(states: list[tuple[str, np.ndarray, np.ndarray]], output: Path) -> None:
@@ -404,6 +763,26 @@ def main() -> int:
     )
     parser.add_argument("--width", type=int, default=256)
     parser.add_argument("--height", type=int, default=160)
+    parser.add_argument(
+        "--strict-coverage",
+        action="store_true",
+        help=(
+            "return a failing status when caller-defined coverageReview requirements in "
+            "the state specification are not met"
+        ),
+    )
+    parser.add_argument("--game-profile-id")
+    parser.add_argument("--character-id")
+    parser.add_argument(
+        "--reference-provenance-sha256",
+        action="append",
+        help="repeatable lowercase SHA-256 binding the atlas to private reference evidence",
+    )
+    parser.add_argument(
+        "--review-status",
+        choices=("reviewed-private", "unreviewed"),
+    )
+    parser.add_argument("--review-evidence-sha256")
     args = parser.parse_args()
     observations = require_e_temp(args.observations, must_exist=True)
     output = require_e_temp(args.output)
@@ -411,7 +790,19 @@ def main() -> int:
         raise ValueError(f"refusing to overwrite existing atlas: {output}")
     if not 64 <= args.width <= 512 or not 64 <= args.height <= 512:
         raise ValueError("canonical dimensions must be in 64..512")
+    enrollment_binding = build_enrollment_binding(
+        args.game_profile_id,
+        args.character_id,
+        args.reference_provenance_sha256,
+        args.review_status,
+        args.review_evidence_sha256,
+    )
     state_specs, scope, configuration = load_state_specs(args.state_specs)
+    coverage_review = configuration.get("coverageReview") if configuration else None
+    if args.strict_coverage and coverage_review is None:
+        raise ValueError(
+            "--strict-coverage requires caller-defined coverageReview requirements in --state-specs"
+        )
 
     texture = bytearray()
     manifest_states: list[dict[str, object]] = []
@@ -425,6 +816,9 @@ def main() -> int:
         metadata_name = str(state["metadata"])
         coefficients = tuple(float(value) for value in state["coefficients"])
         image, frame = parse_observation(observations, image_name, metadata_name)
+        reference_type, reference_type_basis = infer_reference_type(state)
+        articulation = infer_articulation(state)
+        decoded_aperture = decoded_source_aperture_metrics(frame)
         state_image, alpha, metrics = normalized_oral_state(
             image,
             frame,
@@ -457,11 +851,25 @@ def main() -> int:
                     for key in ("sourceSeconds", "coverage", "disclosure")
                     if key in state
                 },
+                "referenceType": reference_type,
+                "referenceTypeBasis": reference_type_basis,
+                "articulation": articulation,
+                "articulationObserved": reference_type == "observed" and articulation != "neutral",
+                "articulationCoverageStatus": (
+                    "not-applicable"
+                    if articulation == "neutral"
+                    else "observed"
+                    if reference_type == "observed"
+                    else "missing-observed-reference"
+                ),
+                "decodedSourceAperture": decoded_aperture,
                 **metrics,
             }
         )
         board_states.append((name, state_image, alpha))
         reference_states.append((name, image, frame))
+
+    coverage = evaluate_coverage(quality_states, coverage_review)
 
     output.mkdir(parents=True)
     texture_path = output / "atlas-bgra8-premultiplied.bin"
@@ -485,20 +893,21 @@ def main() -> int:
         },
         "states": manifest_states,
     }
+    if enrollment_binding is not None:
+        manifest["enrollmentBinding"] = enrollment_binding
     manifest_path = output / "atlas.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     quality_path = output / "atlas-quality.json"
     quality_path.write_text(
         json.dumps(
-            {
-                "schema": "interactive-npcs-landmarked-oral-atlas-quality/v1",
-                "scope": scope,
-                "source": str(observations),
-                "configuration": configuration or None,
-                "textureOwnership": "observed-oral-interior-only",
-                "currentFrameOwnership": "lip-surface-and-all-exterior-pixels",
-                "states": quality_states,
-            },
+            make_quality_document(
+                scope,
+                observations,
+                configuration,
+                coverage,
+                quality_states,
+                enrollment_binding,
+            ),
             indent=2,
         )
         + "\n",
@@ -508,10 +917,17 @@ def main() -> int:
     make_board(board_states, board_path)
     reference_board_path = output / "atlas-reference-contact-sheet.png"
     make_reference_contact_sheet(reference_states, reference_board_path)
+    strict_coverage_failed = bool(
+        args.strict_coverage and not coverage["strictReview"]["passed"]
+    )
     print(
         json.dumps(
             {
-                "status": "prepared",
+                "status": (
+                    "rendered-coverage-review-failed"
+                    if strict_coverage_failed
+                    else "prepared"
+                ),
                 "scope": scope,
                 "output": str(output),
                 "states": len(manifest_states),
@@ -521,9 +937,13 @@ def main() -> int:
                 "quality": str(quality_path),
                 "board": str(board_path),
                 "references": str(reference_board_path),
+                "qualityStatus": "rendered-not-qualified",
+                "strictCoveragePassed": coverage["strictReview"]["passed"],
             }
         )
     )
+    if strict_coverage_failed:
+        return 3
     return 0
 
 
