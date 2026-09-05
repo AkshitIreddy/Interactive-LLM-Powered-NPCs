@@ -94,6 +94,7 @@ constexpr int ort_mem_type_default = 0;
 constexpr int onnx_tensor_float = 1;
 constexpr std::size_t detector_input_size = 224U;
 constexpr std::size_t detector_grid_size = 56U;
+constexpr std::size_t yunet_input_size = 640U;
 constexpr std::size_t landmark_grid_size = 28U;
 constexpr std::size_t landmark_channels = 198U;
 constexpr float detector_threshold = 0.60F;
@@ -361,6 +362,67 @@ struct DetectorInput {
     double model_padding_y{};
 };
 
+struct YuNetInput {
+    std::vector<float> tensor;
+    std::uint32_t content_width{};
+    std::uint32_t content_height{};
+};
+
+[[nodiscard]] YuNetInput yunet_tensor_for(const CpuFrame& frame) {
+    const auto source_width = static_cast<std::size_t>(frame.lease.width);
+    const auto source_height = static_cast<std::size_t>(frame.lease.height);
+    const auto stride = static_cast<std::size_t>(frame.lease.stride_bytes);
+    const double scale = std::min(
+        static_cast<double>(yunet_input_size) / source_width,
+        static_cast<double>(yunet_input_size) / source_height);
+    YuNetInput result{};
+    result.content_width = static_cast<std::uint32_t>(std::clamp(
+        std::llround(source_width * scale), 1LL,
+        static_cast<long long>(yunet_input_size)));
+    result.content_height = static_cast<std::uint32_t>(std::clamp(
+        std::llround(source_height * scale), 1LL,
+        static_cast<long long>(yunet_input_size)));
+    const std::size_t plane = yunet_input_size * yunet_input_size;
+    // OpenCV's official YuNet preprocessing is raw BGR float planar data. The
+    // pinned graph has a fixed 640x640 input, so the aspect-preserving OpenCV
+    // input is placed at the top left and the unused grid rows/columns remain
+    // zero. This is convolutionally identical to the smaller OpenCV DNN input
+    // away from its padded boundary and preserves source x/y scaling.
+    result.tensor.assign(plane * 3U, 0.0F);
+    for (std::size_t y = 0U; y < result.content_height; ++y) {
+        const double source_y =
+            (static_cast<double>(y) + 0.5) * source_height / result.content_height - 0.5;
+        const auto y0 = static_cast<std::size_t>(std::clamp(
+            std::floor(source_y), 0.0, static_cast<double>(source_height - 1U)));
+        const auto y1 = std::min(y0 + 1U, source_height - 1U);
+        const float fy = static_cast<float>(std::clamp(
+            source_y - std::floor(source_y), 0.0, 1.0));
+        for (std::size_t x = 0U; x < result.content_width; ++x) {
+            const double source_x =
+                (static_cast<double>(x) + 0.5) * source_width / result.content_width - 0.5;
+            const auto x0 = static_cast<std::size_t>(std::clamp(
+                std::floor(source_x), 0.0, static_cast<double>(source_width - 1U)));
+            const auto x1 = std::min(x0 + 1U, source_width - 1U);
+            const float fx = static_cast<float>(std::clamp(
+                source_x - std::floor(source_x), 0.0, 1.0));
+            const auto sample = [&](const std::size_t sx, const std::size_t sy,
+                                    const std::size_t channel) {
+                return static_cast<float>(frame.bgra[sy * stride + sx * 4U + channel]);
+            };
+            const std::size_t destination = y * yunet_input_size + x;
+            for (std::size_t bgr = 0U; bgr < 3U; ++bgr) {
+                const float top = sample(x0, y0, bgr) * (1.0F - fx) +
+                                  sample(x1, y0, bgr) * fx;
+                const float bottom = sample(x0, y1, bgr) * (1.0F - fx) +
+                                     sample(x1, y1, bgr) * fx;
+                result.tensor[bgr * plane + destination] =
+                    top * (1.0F - fy) + bottom * fy;
+            }
+        }
+    }
+    return result;
+}
+
 [[nodiscard]] DetectorInput detector_tensor_for(const CpuFrame& frame,
                                                 const PixelRect& crop) {
     constexpr std::array<float, 3U> mean{-0.485F / 0.229F,
@@ -438,13 +500,17 @@ struct DetectorInput {
 
 class WindowsOrtLandmarkProviderV1 final : public NativeLandmarkProviderV1 {
 public:
+    explicit WindowsOrtLandmarkProviderV1(YuNetTrackingPolicyV1 yunet_tracking) noexcept
+        : yunet_tracking_(yunet_tracking) {}
+
     ~WindowsOrtLandmarkProviderV1() override { unload(); }
 
     [[nodiscard]] bool load(const AdmittedLandmarkProviderLaunchV1& launch,
                             const std::uint64_t generation,
                             std::string& failure) override {
         unload();
-        if (generation == 0U || !validate_landmark_provider_launch_v1(launch)) {
+        if (generation == 0U || !validate_landmark_provider_launch_v1(launch) ||
+            !validate_yunet_tracking_policy_v1(yunet_tracking_)) {
             failure = "provider_launch_invalid";
             return false;
         }
@@ -535,6 +601,9 @@ public:
         landmark_file_ = std::move(*landmark);
         runtime_file_ = std::move(*runtime);
         runtime_shared_file_ = std::move(*runtime_shared);
+        detector_kind_ = launch.pack_id == admitted_yunet_openseeface_pack_id_v1
+            ? DetectorKind::yunet640
+            : DetectorKind::mnv3;
         generation_ = generation;
         provider_instance_id_ = provider_instance_from_digest(launch.measured_envelope_sha256);
         loaded_ = provider_instance_id_ != 0U;
@@ -554,18 +623,140 @@ public:
             failure = "provider_work_cancelled_or_stale";
             return std::nullopt;
         }
-        const PixelRect seed = normalized_to_pixels(work.seed_face_bounds,
-                                                    work.source.lease.width,
-                                                    work.source.lease.height);
-        if (!valid_pixel_rect(seed, work.source.lease.width, work.source.lease.height)) {
+        last_diagnostics_ = {};
+        const PixelRect requested_seed = normalized_to_pixels(
+            work.seed_face_bounds, work.source.lease.width, work.source.lease.height);
+        if (!valid_pixel_rect(requested_seed, work.source.lease.width,
+                              work.source.lease.height)) {
             failure = "provider_seed_roi_invalid";
             return std::nullopt;
         }
         const auto generation_before = generation_;
-        const auto detection = detect(work.source, seed, failure);
-        if (!detection) return std::nullopt;
-        const auto decoded = landmarks(work.source, detection->first, failure);
-        if (!decoded) return std::nullopt;
+        std::optional<std::pair<PixelRect, double>> detection;
+        std::optional<LandmarkDecode> decoded;
+        NormalizedRect packet_face{};
+        double detector_confidence{};
+
+        const auto run_detector = [&](const PixelRect& seed) {
+            last_diagnostics_.detector_ran = true;
+            const Nanoseconds started = monotonic_ns();
+            auto value = detect(work.source, seed, failure);
+            last_diagnostics_.detector_ms +=
+                static_cast<double>(monotonic_ns() - started) / 1'000'000.0;
+            return value;
+        };
+        const auto run_landmarks = [&](const PixelRect& face) {
+            ++last_diagnostics_.landmark_runs;
+            const Nanoseconds started = monotonic_ns();
+            auto value = landmarks(work.source, face, failure);
+            last_diagnostics_.landmark_ms +=
+                static_cast<double>(monotonic_ns() - started) / 1'000'000.0;
+            return value;
+        };
+        const auto normalized_face = [&](const PixelRect& face) {
+            const double width = static_cast<double>(work.source.lease.width);
+            const double height = static_cast<double>(work.source.lease.height);
+            return NormalizedRect{face.left / width, face.top / height,
+                                  face.width() / width, face.height() / height};
+        };
+        const auto pixel_face = [&](const NormalizedRect& face) {
+            return normalized_to_pixels(face, work.source.lease.width,
+                                        work.source.lease.height);
+        };
+        const auto acceptable_landmarks = [](const LandmarkDecode& value) {
+            return value.mean_confidence >= 0.62 && value.visibility_ratio >= 0.80;
+        };
+
+        if (detector_kind_ != DetectorKind::yunet640) {
+            detection = run_detector(requested_seed);
+            if (!detection) return std::nullopt;
+            decoded = run_landmarks(detection->first);
+            if (!decoded) return std::nullopt;
+            packet_face = normalized_face(detection->first);
+            detector_confidence = detection->second;
+        } else {
+            if (tracked_yunet_ &&
+                (tracked_yunet_->track != work.track ||
+                 tracked_yunet_->device_generation != work.frame.device_generation ||
+                 tracked_yunet_->geometry_epoch != work.frame.geometry_epoch ||
+                 tracked_yunet_->last_frame_sequence >= work.frame.sequence)) {
+                tracked_yunet_.reset();
+            }
+            const auto action = choose_yunet_tracking_action_v1(
+                tracked_yunet_.has_value(),
+                tracked_yunet_ ? tracked_yunet_->frames_since_detector : 0U,
+                yunet_tracking_);
+            if (action == YuNetTrackingActionV1::reacquire_face) {
+                last_diagnostics_.detector_refresh_due = tracked_yunet_.has_value();
+                const NormalizedRect identity_seed = tracked_yunet_
+                    ? tracked_yunet_->face_bounds
+                    : work.seed_face_bounds;
+                detection = run_detector(pixel_face(identity_seed));
+                if (!detection) {
+                    tracked_yunet_.reset();
+                    return std::nullopt;
+                }
+                packet_face = normalized_face(detection->first);
+                if (tracked_yunet_ && !yunet_face_matches_locked_actor_v1(
+                        packet_face, tracked_yunet_->face_bounds)) {
+                    failure = "provider_reacquired_face_identity_mismatch";
+                    tracked_yunet_.reset();
+                    return std::nullopt;
+                }
+                decoded = run_landmarks(detection->first);
+                if (!decoded || !acceptable_landmarks(*decoded)) {
+                    if (decoded) failure = "provider_reacquired_landmark_quality_low";
+                    tracked_yunet_.reset();
+                    return std::nullopt;
+                }
+                detector_confidence = detection->second;
+                tracked_yunet_ = TrackedYuNetFace{
+                    work.track, packet_face, decoded->points, detector_confidence, 1U,
+                    work.frame.sequence, work.frame.device_generation,
+                    work.frame.geometry_epoch};
+            } else {
+                last_diagnostics_.used_tracked_roi = true;
+                const auto locked_face = tracked_yunet_->face_bounds;
+                decoded = run_landmarks(pixel_face(locked_face));
+                const auto tracked_update = decoded && acceptable_landmarks(*decoded)
+                    ? update_yunet_tracked_face_v1(
+                          locked_face, tracked_yunet_->landmarks, decoded->points)
+                    : std::nullopt;
+                if (!tracked_update) {
+                    last_diagnostics_.quality_reacquisition = true;
+                    failure.clear();
+                    detection = run_detector(pixel_face(locked_face));
+                    if (!detection) {
+                        tracked_yunet_.reset();
+                        return std::nullopt;
+                    }
+                    packet_face = normalized_face(detection->first);
+                    if (!yunet_face_matches_locked_actor_v1(packet_face, locked_face)) {
+                        failure = "provider_reacquired_face_identity_mismatch";
+                        tracked_yunet_.reset();
+                        return std::nullopt;
+                    }
+                    decoded = run_landmarks(detection->first);
+                    if (!decoded || !acceptable_landmarks(*decoded)) {
+                        if (decoded) failure = "provider_reacquired_landmark_quality_low";
+                        tracked_yunet_.reset();
+                        return std::nullopt;
+                    }
+                    detector_confidence = detection->second;
+                    tracked_yunet_ = TrackedYuNetFace{
+                        work.track, packet_face, decoded->points, detector_confidence, 1U,
+                        work.frame.sequence, work.frame.device_generation,
+                        work.frame.geometry_epoch};
+                } else {
+                    packet_face = tracked_update->face_bounds;
+                    detector_confidence = tracked_yunet_->detector_confidence;
+                    tracked_yunet_->face_bounds = packet_face;
+                    tracked_yunet_->landmarks = decoded->points;
+                    ++tracked_yunet_->frames_since_detector;
+                    tracked_yunet_->last_frame_sequence = work.frame.sequence;
+                }
+            }
+        }
         const Nanoseconds completed = monotonic_ns();
         if (generation_ != generation_before || generation_before != work.track.cancellation_generation ||
             completed < work.frame.captured_at_ns || completed > work.deadline_ns) {
@@ -579,14 +770,9 @@ public:
         packet.frame = work.frame;
         packet.source_frame_qpc = work.source_frame_qpc;
         packet.qpc_frequency = work.qpc_frequency;
-        const double frame_width = static_cast<double>(work.source.lease.width);
-        const double frame_height = static_cast<double>(work.source.lease.height);
-        packet.face_bounds = {detection->first.left / frame_width,
-                              detection->first.top / frame_height,
-                              detection->first.width() / frame_width,
-                              detection->first.height() / frame_height};
+        packet.face_bounds = packet_face;
         packet.landmarks = decoded->points;
-        packet.detector_confidence = detection->second;
+        packet.detector_confidence = detector_confidence;
         packet.landmark_confidence = decoded->mean_confidence;
         packet.visibility_ratio = decoded->visibility_ratio;
         packet.pose = decoded->pose;
@@ -598,6 +784,7 @@ public:
     [[nodiscard]] bool cancel_to(const std::uint64_t generation) noexcept override {
         if (!loaded_ || generation <= generation_) return false;
         generation_ = generation;
+        tracked_yunet_.reset();
         return true;
     }
 
@@ -629,9 +816,17 @@ public:
         landmark_file_ = {};
         runtime_file_ = {};
         runtime_shared_file_ = {};
+        detector_kind_ = DetectorKind::mnv3;
+        tracked_yunet_.reset();
+        last_diagnostics_ = {};
     }
 
     [[nodiscard]] bool loaded() const noexcept override { return loaded_; }
+
+    [[nodiscard]] LandmarkProviderInferenceDiagnosticsV1
+    last_inference_diagnostics() const noexcept override {
+        return last_diagnostics_;
+    }
 
 private:
     struct LandmarkDecode {
@@ -640,6 +835,22 @@ private:
         double mean_confidence{};
         double visibility_ratio{};
         bool mouth_occluded{};
+    };
+
+    struct TrackedYuNetFace {
+        TrackBinding track;
+        NormalizedRect face_bounds;
+        std::array<NormalizedLandmark, openseeface_landmark_count_v1> landmarks{};
+        double detector_confidence{};
+        std::uint32_t frames_since_detector{};
+        std::uint64_t last_frame_sequence{};
+        std::uint64_t device_generation{};
+        std::uint64_t geometry_epoch{};
+    };
+
+    enum class DetectorKind : std::uint8_t {
+        mnv3,
+        yunet640,
     };
 
     [[nodiscard]] bool required_api_present() const noexcept {
@@ -736,6 +947,111 @@ private:
     }
 
     [[nodiscard]] std::optional<std::pair<PixelRect, double>> detect(
+        const CpuFrame& frame,
+        const PixelRect& seed,
+        std::string& failure) const {
+        return detector_kind_ == DetectorKind::yunet640
+            ? detect_yunet(frame, seed, failure)
+            : detect_mnv3(frame, seed, failure);
+    }
+
+    [[nodiscard]] std::optional<std::pair<PixelRect, double>> detect_yunet(
+        const CpuFrame& frame,
+        const PixelRect& seed,
+        std::string& failure) const {
+        auto prepared = yunet_tensor_for(frame);
+        const std::array<std::int64_t, 4U> input_shape{1, 3, 640, 640};
+        OrtValue* input{};
+        if (!call(api_function<CreateTensorWithDataFn>(api_, ApiSlot::create_tensor_with_data)(
+                      memory_info_, prepared.tensor.data(),
+                      prepared.tensor.size() * sizeof(float), input_shape.data(),
+                      input_shape.size(), onnx_tensor_float, &input), failure,
+                  "provider_detector_input_failed") || !input) {
+            return std::nullopt;
+        }
+        const char* input_names[]{"input"};
+        const char* output_names[]{
+            "cls_8", "cls_16", "cls_32", "obj_8", "obj_16", "obj_32",
+            "bbox_8", "bbox_16", "bbox_32", "kps_8", "kps_16", "kps_32",
+        };
+        const OrtValue* inputs[]{input};
+        std::array<OrtValue*, 12U> outputs{};
+        const bool ran = call(api_function<RunFn>(api_, ApiSlot::run)(
+                                  detector_session_, nullptr, input_names, inputs, 1U,
+                                  output_names, outputs.size(), outputs.data()), failure,
+                              "provider_detector_run_failed");
+        api_function<ReleaseValueFn>(api_, ApiSlot::release_value)(input);
+        if (!ran) {
+            for (auto* output : outputs) if (output) {
+                api_function<ReleaseValueFn>(api_, ApiSlot::release_value)(output);
+            }
+            return std::nullopt;
+        }
+
+        constexpr std::array<std::uint32_t, 3U> strides{8U, 16U, 32U};
+        constexpr std::array<std::size_t, 3U> cells{6'400U, 1'600U, 400U};
+        std::array<float*, 3U> classes{};
+        std::array<float*, 3U> objects{};
+        std::array<float*, 3U> boxes{};
+        std::array<float*, 3U> keypoints{};
+        bool valid = true;
+        for (std::size_t level = 0U; level < strides.size(); ++level) {
+            const std::array<std::int64_t, 3U> scalar_shape{
+                1, static_cast<std::int64_t>(cells[level]), 1};
+            const std::array<std::int64_t, 3U> box_shape{
+                1, static_cast<std::int64_t>(cells[level]), 4};
+            const std::array<std::int64_t, 3U> keypoint_shape{
+                1, static_cast<std::int64_t>(cells[level]), 10};
+            valid = validate_tensor(outputs[level], scalar_shape, classes[level], failure) &&
+                    validate_tensor(outputs[3U + level], scalar_shape, objects[level], failure) &&
+                    validate_tensor(outputs[6U + level], box_shape, boxes[level], failure) &&
+                    validate_tensor(outputs[9U + level], keypoint_shape,
+                                    keypoints[level], failure) && valid;
+        }
+
+        std::optional<std::pair<PixelRect, double>> result;
+        if (valid) {
+            std::array<YuNetDetectorLevelV1, 3U> levels{};
+            for (std::size_t level = 0U; level < levels.size(); ++level) {
+                const auto grid = static_cast<std::uint32_t>(yunet_input_size / strides[level]);
+                levels[level] = {
+                    strides[level], grid, grid,
+                    std::span<const float>(classes[level], cells[level]),
+                    std::span<const float>(objects[level], cells[level]),
+                    std::span<const float>(boxes[level], cells[level] * 4U),
+                };
+            }
+            const NormalizedRect normalized_seed{
+                seed.left / frame.lease.width,
+                seed.top / frame.lease.height,
+                seed.width() / frame.lease.width,
+                seed.height() / frame.lease.height,
+            };
+            const auto selected = decode_and_select_yunet_face_v1(
+                levels, static_cast<std::uint32_t>(yunet_input_size),
+                static_cast<std::uint32_t>(yunet_input_size), prepared.content_width,
+                prepared.content_height, frame.lease.width, frame.lease.height,
+                normalized_seed);
+            if (selected) {
+                PixelRect box{
+                    selected->bounds.x * frame.lease.width,
+                    selected->bounds.y * frame.lease.height,
+                    selected->bounds.right() * frame.lease.width,
+                    selected->bounds.bottom() * frame.lease.height,
+                };
+                if (valid_pixel_rect(box, frame.lease.width, frame.lease.height)) {
+                    result = std::pair{box, selected->confidence};
+                }
+            }
+        }
+        for (auto* output : outputs) if (output) {
+            api_function<ReleaseValueFn>(api_, ApiSlot::release_value)(output);
+        }
+        if (!result && failure.empty()) failure = "provider_face_not_found_in_seed_roi";
+        return result;
+    }
+
+    [[nodiscard]] std::optional<std::pair<PixelRect, double>> detect_mnv3(
         const CpuFrame& frame,
         const PixelRect& seed,
         std::string& failure) const {
@@ -937,6 +1253,10 @@ private:
     bool loaded_{};
     std::uint64_t generation_{};
     std::uint64_t provider_instance_id_{};
+    DetectorKind detector_kind_{DetectorKind::mnv3};
+    YuNetTrackingPolicyV1 yunet_tracking_{};
+    std::optional<TrackedYuNetFace> tracked_yunet_;
+    LandmarkProviderInferenceDiagnosticsV1 last_diagnostics_{};
     UniqueModule module_;
     const OrtApiSlots* api_{};
     OrtEnv* environment_{};
@@ -951,8 +1271,9 @@ private:
 
 } // namespace
 
-std::unique_ptr<NativeLandmarkProviderV1> make_windows_ort_landmark_provider_v1() {
-    return std::make_unique<WindowsOrtLandmarkProviderV1>();
+std::unique_ptr<NativeLandmarkProviderV1> make_windows_ort_landmark_provider_v1(
+    const YuNetTrackingPolicyV1 yunet_tracking) {
+    return std::make_unique<WindowsOrtLandmarkProviderV1>(yunet_tracking);
 }
 
 } // namespace npc::mouth
@@ -960,7 +1281,8 @@ std::unique_ptr<NativeLandmarkProviderV1> make_windows_ort_landmark_provider_v1(
 #else
 
 namespace npc::mouth {
-std::unique_ptr<NativeLandmarkProviderV1> make_windows_ort_landmark_provider_v1() {
+std::unique_ptr<NativeLandmarkProviderV1> make_windows_ort_landmark_provider_v1(
+    const YuNetTrackingPolicyV1) {
     return {};
 }
 } // namespace npc::mouth

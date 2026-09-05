@@ -7,15 +7,23 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace npc::mouth {
 
 inline constexpr std::string_view admitted_openseeface_pack_id_v1 =
     "openseeface-mnv3-lm1-mouth-signal";
+inline constexpr std::string_view admitted_yunet_openseeface_pack_id_v1 =
+    "openseeface-yunet640-lm1-mouth-signal";
 inline constexpr std::string_view admitted_openseeface_revision_v1 =
     "85aa70fc67582d046e771ea73625182a0d8f7475";
+inline constexpr std::string_view admitted_yunet_detector_sha256_v1 =
+    "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4";
+inline constexpr std::string_view admitted_openseeface_lm1_sha256_v1 =
+    "5bec42b298a24142cdb249a7256d65bc3fc0fbc673fa1752a64f4d7164719c9f";
 inline constexpr std::string_view admitted_openseeface_runtime_revision_v1 = "1.22.1";
 inline constexpr std::string_view admitted_openseeface_backend_v1 =
     "cpu-execution-provider-one-thread";
@@ -55,6 +63,84 @@ struct LandmarkInferenceWorkV1 {
     CpuFrame source;
     Nanoseconds deadline_ns{};
 };
+
+// Cross-platform, allocation-bounded YuNet decoding contract shared by the
+// Windows ORT provider and deterministic tests. Each level contains one
+// class/object score and four box values per grid cell. Coordinates returned
+// by the decoder are normalized to the source frame, after excluding the
+// square model tensor's right/bottom padding.
+struct YuNetDetectorLevelV1 {
+    std::uint32_t stride{};
+    std::uint32_t grid_width{};
+    std::uint32_t grid_height{};
+    std::span<const float> class_scores;
+    std::span<const float> object_scores;
+    std::span<const float> boxes;
+};
+
+struct YuNetFaceCandidateV1 {
+    NormalizedRect bounds;
+    double confidence{};
+};
+
+struct YuNetTrackingPolicyV1 {
+    // A full-frame detector refresh is intentionally bounded: shorter periods
+    // cannot sustain the capture freshness contract on the admitted CPU pack,
+    // while longer periods leave too much time for an ROI to drift.
+    std::uint32_t detector_refresh_interval_frames{12U};
+};
+
+inline constexpr std::uint32_t yunet_min_detector_refresh_interval_v1 = 10U;
+inline constexpr std::uint32_t yunet_max_detector_refresh_interval_v1 = 15U;
+
+enum class YuNetTrackingActionV1 : std::uint8_t {
+    track_landmarks,
+    reacquire_face,
+};
+
+struct YuNetTrackedFaceUpdateV1 {
+    NormalizedRect face_bounds;
+    double center_motion_face_fraction{};
+    double scale_ratio{};
+};
+
+struct LandmarkProviderInferenceDiagnosticsV1 {
+    bool detector_ran{};
+    bool detector_refresh_due{};
+    bool quality_reacquisition{};
+    bool used_tracked_roi{};
+    std::uint32_t landmark_runs{};
+    double detector_ms{};
+    double landmark_ms{};
+};
+
+[[nodiscard]] std::optional<YuNetFaceCandidateV1>
+decode_and_select_yunet_face_v1(
+    std::span<const YuNetDetectorLevelV1> levels,
+    std::uint32_t model_width,
+    std::uint32_t model_height,
+    std::uint32_t content_width,
+    std::uint32_t content_height,
+    std::uint32_t source_width,
+    std::uint32_t source_height,
+    const NormalizedRect& seed_face_bounds,
+    double score_threshold = 0.50,
+    double nms_threshold = 0.30) noexcept;
+
+[[nodiscard]] bool validate_yunet_tracking_policy_v1(
+    const YuNetTrackingPolicyV1& policy) noexcept;
+[[nodiscard]] YuNetTrackingActionV1 choose_yunet_tracking_action_v1(
+    bool has_tracked_face,
+    std::uint32_t frames_since_detector,
+    const YuNetTrackingPolicyV1& policy) noexcept;
+[[nodiscard]] bool yunet_face_matches_locked_actor_v1(
+    const NormalizedRect& candidate,
+    const NormalizedRect& locked_face) noexcept;
+[[nodiscard]] std::optional<YuNetTrackedFaceUpdateV1>
+update_yunet_tracked_face_v1(
+    const NormalizedRect& previous_face,
+    std::span<const NormalizedLandmark> previous_landmarks,
+    std::span<const NormalizedLandmark> current_landmarks) noexcept;
 
 enum class LandmarkProviderDispositionV1 : std::uint8_t {
     ready,
@@ -105,6 +191,8 @@ public:
     [[nodiscard]] virtual bool cancel_to(std::uint64_t generation) noexcept = 0;
     virtual void unload() noexcept = 0;
     [[nodiscard]] virtual bool loaded() const noexcept = 0;
+    [[nodiscard]] virtual LandmarkProviderInferenceDiagnosticsV1
+    last_inference_diagnostics() const noexcept { return {}; }
 };
 
 // Queue-depth-one native owner. It revalidates provider output against the
@@ -157,6 +245,7 @@ private:
 // the exact pinned ORT v22 ABI from that DLL. A missing/changed runtime returns
 // a visual-only provider failure.
 [[nodiscard]] std::unique_ptr<NativeLandmarkProviderV1>
-make_windows_ort_landmark_provider_v1();
+make_windows_ort_landmark_provider_v1(
+    YuNetTrackingPolicyV1 yunet_tracking = {});
 
 } // namespace npc::mouth

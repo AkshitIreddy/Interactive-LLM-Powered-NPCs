@@ -15,6 +15,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <numeric>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -29,6 +30,8 @@ using namespace npc::mouth;
 
 constexpr std::string_view detector_sha256 =
     "0e8e4806766d85ab067a52c7af0dcb59eb7f9dfe580b44f20a8e6ab712d89809";
+constexpr std::string_view yunet_detector_sha256 =
+    "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4";
 constexpr std::string_view landmark_sha256 =
     "5bec42b298a24142cdb249a7256d65bc3fc0fbc673fa1752a64f4d7164719c9f";
 constexpr std::string_view runtime_sha256 =
@@ -40,6 +43,16 @@ constexpr std::string_view runtime_shared_sha256 =
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
                std::chrono::steady_clock::now().time_since_epoch())
         .count();
+}
+
+[[nodiscard]] double percentile(std::vector<double> values, const double quantile) {
+    std::sort(values.begin(), values.end());
+    if (values.empty()) return 0.0;
+    const double position = static_cast<double>(values.size() - 1U) * quantile;
+    const auto lower = static_cast<std::size_t>(std::floor(position));
+    const auto upper = static_cast<std::size_t>(std::ceil(position));
+    const double fraction = position - static_cast<double>(lower);
+    return values[lower] + (values[upper] - values[lower]) * fraction;
 }
 
 [[nodiscard]] std::string ppm_token(std::istream& stream) {
@@ -123,12 +136,15 @@ constexpr std::string_view runtime_shared_sha256 =
 }
 
 [[nodiscard]] AdmittedLandmarkProviderLaunchV1 launch_for(
-    const std::filesystem::path& root) {
+    const std::filesystem::path& root,
+    const bool yunet640) {
     AdmittedLandmarkProviderLaunchV1 launch{};
-    launch.pack_id = std::string(admitted_openseeface_pack_id_v1);
+    launch.pack_id = std::string(yunet640 ? admitted_yunet_openseeface_pack_id_v1
+                                         : admitted_openseeface_pack_id_v1);
     launch.pack_revision = std::string(admitted_openseeface_revision_v1);
     launch.artifact_root = std::filesystem::canonical(root);
-    launch.detector_model = launch.artifact_root / "models/mnv3_detection_opt.onnx";
+    launch.detector_model = launch.artifact_root / "models" /
+        (yunet640 ? "face_detection_yunet_2023mar.onnx" : "mnv3_detection_opt.onnx");
     launch.landmark_model = launch.artifact_root / "models/lm_model1_opt.onnx";
     launch.runtime_library =
         launch.artifact_root / "runtime/onnxruntime-1.22.1-cpu/lib/onnxruntime.dll";
@@ -138,7 +154,7 @@ constexpr std::string_view runtime_shared_sha256 =
     launch.landmark_size_bytes = std::filesystem::file_size(launch.landmark_model);
     launch.runtime_size_bytes = std::filesystem::file_size(launch.runtime_library);
     launch.runtime_shared_size_bytes = std::filesystem::file_size(launch.runtime_shared_library);
-    launch.detector_sha256 = detector_sha256;
+    launch.detector_sha256 = yunet640 ? yunet_detector_sha256 : detector_sha256;
     launch.landmark_sha256 = landmark_sha256;
     launch.runtime_sha256 = runtime_sha256;
     launch.runtime_shared_sha256 = runtime_shared_sha256;
@@ -157,6 +173,16 @@ void write_rect(std::ostream& stream, const NormalizedRect& value) {
 
 void write_point(std::ostream& stream, const NormalizedLandmark& value) {
     stream << '[' << value.x << ',' << value.y << ',' << value.confidence << ']';
+}
+
+void write_mouth_contour(std::ostream& stream,
+                         const OpenSeeFaceLandmarkPacketV1& packet) {
+    stream << '[';
+    for (std::size_t point = 48U; point < 66U; ++point) {
+        if (point != 48U) stream << ',';
+        write_point(stream, packet.landmarks[point]);
+    }
+    stream << ']';
 }
 
 [[nodiscard]] bool finite_landmark(const NormalizedLandmark& point) noexcept {
@@ -196,9 +222,14 @@ void write_point(std::ostream& stream, const NormalizedLandmark& value) {
 
 int main(int argc, char** argv) {
     try {
-        if (argc != 4) {
+        if (argc != 4 && argc != 5) {
             throw std::runtime_error(
-                "usage: npc_mouth_worker_landmark_dump <pack-root> <ppm|ppm-directory> <output.json>");
+                "usage: npc_mouth_worker_landmark_dump <pack-root> <ppm|ppm-directory> "
+                "<output.json> [yunet640]");
+        }
+        const bool yunet640 = argc == 5 && std::string_view(argv[4]) == "yunet640";
+        if (argc == 5 && !yunet640) {
+            throw std::runtime_error("detector variant must be yunet640");
         }
         const auto pack_root = std::filesystem::path(argv[1]);
         const auto input = std::filesystem::path(argv[2]);
@@ -210,9 +241,12 @@ int main(int argc, char** argv) {
         auto provider = make_windows_ort_landmark_provider_v1();
         if (!provider) throw std::runtime_error("Windows ORT provider is unavailable");
         std::string failure;
-        if (!provider->load(launch_for(pack_root), generation, failure)) {
+        const auto load_started = monotonic_ns();
+        if (!provider->load(launch_for(pack_root, yunet640), generation, failure)) {
             throw std::runtime_error("provider load failed: " + failure);
         }
+        const double model_load_ms =
+            static_cast<double>(monotonic_ns() - load_started) / 1'000'000.0;
 
         AppearanceGateEvidenceV1 appearance{};
         appearance.runtime_actor_id = track.actor_id;
@@ -235,16 +269,28 @@ int main(int argc, char** argv) {
         stream << std::fixed << std::setprecision(8);
         stream << "{\n  \"schema\": \"interactive-npcs-landmark-dump/v1\",\n  \"frames\": [\n";
         std::optional<NormalizedRect> seed;
-        std::size_t accepted{};
+        std::size_t provider_packets{};
+        std::size_t enrollment_qualified{};
+        std::size_t adapter_accepted{};
         Nanoseconds previous_inference_ns{};
+        std::vector<double> inference_timings_ms;
+        std::vector<double> detector_timings_ms;
+        std::vector<double> landmark_timings_ms;
+        std::size_t detector_runs{};
+        std::size_t tracked_roi_frames{};
+        std::size_t quality_reacquisitions{};
+        inference_timings_ms.reserve(paths.size());
         for (std::size_t index = 0; index < paths.size(); ++index) {
+            // PPM decoding is replay-fixture I/O, not provider work. Capture
+            // workers hand the provider an already leased in-memory frame, so
+            // bind the frame timestamp only after this fixture has been read.
+            auto frame = read_ppm(paths[index]);
             const auto now = monotonic_ns();
             if (previous_inference_ns > 0 && now - previous_inference_ns < 67'000'000LL) {
                 std::this_thread::sleep_for(
                     std::chrono::nanoseconds(67'000'000LL - (now - previous_inference_ns)));
             }
             const auto inference_now = monotonic_ns();
-            auto frame = read_ppm(paths[index]);
             frame.identity = {index + 1U, 1U, 1U, inference_now};
             frame.lease.lease_nonce_low = index + 1U;
             frame.lease.expires_at_ns = inference_now + 2'000'000'000LL;
@@ -257,12 +303,37 @@ int main(int argc, char** argv) {
             work.source = std::move(frame);
             work.deadline_ns = inference_now + 2'000'000'000LL;
             auto packet = provider->infer(work, inference_now, failure);
+            const auto diagnostics = provider->last_inference_diagnostics();
             previous_inference_ns = monotonic_ns();
+            const double inference_ms =
+                static_cast<double>(previous_inference_ns - inference_now) / 1'000'000.0;
+            inference_timings_ms.push_back(inference_ms);
+            if (diagnostics.detector_ran) {
+                ++detector_runs;
+                detector_timings_ms.push_back(diagnostics.detector_ms);
+            }
+            if (diagnostics.landmark_runs > 0U) {
+                landmark_timings_ms.push_back(diagnostics.landmark_ms /
+                                               diagnostics.landmark_runs);
+            }
+            if (diagnostics.used_tracked_roi) ++tracked_roi_frames;
+            if (diagnostics.quality_reacquisition) ++quality_reacquisitions;
 
-            stream << "    {\"file\":\"" << json_escape(paths[index].filename().string()) << "\"";
+            stream << "    {\"file\":\"" << json_escape(paths[index].filename().string())
+                   << "\",\"inferenceMs\":" << inference_ms
+                   << ",\"detectorRan\":"
+                   << (diagnostics.detector_ran ? "true" : "false")
+                   << ",\"detectorMs\":" << diagnostics.detector_ms
+                   << ",\"landmarkRuns\":" << diagnostics.landmark_runs
+                   << ",\"landmarkMs\":" << diagnostics.landmark_ms
+                   << ",\"usedTrackedRoi\":"
+                   << (diagnostics.used_tracked_roi ? "true" : "false")
+                   << ",\"qualityReacquisition\":"
+                   << (diagnostics.quality_reacquisition ? "true" : "false");
             if (!packet) {
                 stream << ",\"accepted\":false,\"reason\":\"provider:" << json_escape(failure) << "\"}";
             } else {
+                ++provider_packets;
                 seed = expanded_tracking_seed(packet->face_bounds);
                 const auto decision = adapter.adapt(
                     *packet, appearance, resources, packet->frame, packet->measured_at_ns + 1'000'000LL);
@@ -271,7 +342,8 @@ int main(int argc, char** argv) {
                     packet->detector_confidence >= 0.60 &&
                     packet->landmark_confidence >= 0.62 &&
                     packet->visibility_ratio >= 0.80;
-                if (!enrollment_accepted) {
+                if (enrollment_accepted) ++enrollment_qualified;
+                if (!enrollment_accepted || !decision.accepted()) {
                     stream << ",\"accepted\":false,\"reason\":\"adapter:"
                            << to_string(decision.disposition) << "\",\"detectorConfidence\":"
                            << packet->detector_confidence << ",\"landmarkConfidence\":"
@@ -279,9 +351,11 @@ int main(int argc, char** argv) {
                            << packet->visibility_ratio << ",\"rawFace\":";
                     write_rect(stream, packet->face_bounds);
                     stream << ",\"rawPose\":[" << packet->pose.yaw << ',' << packet->pose.pitch
-                           << ',' << packet->pose.roll << "]}";
+                           << ',' << packet->pose.roll << "],\"rawContour\":";
+                    write_mouth_contour(stream, *packet);
+                    stream << '}';
                 } else {
-                    ++accepted;
+                    ++adapter_accepted;
                     stream << ",\"accepted\":true,\"width\":" << work.source.lease.width
                            << ",\"height\":" << work.source.lease.height << ",\"face\":";
                     write_rect(stream, packet->face_bounds);
@@ -292,20 +366,56 @@ int main(int argc, char** argv) {
                            << ",\"landmarkConfidence\":" << packet->landmark_confidence
                            << ",\"visibilityRatio\":" << packet->visibility_ratio
                            << ",\"pose\":[" << packet->pose.yaw << ',' << packet->pose.pitch
-                           << ',' << packet->pose.roll << "],\"contour\":[";
-                    for (std::size_t point = 48U; point < 66U; ++point) {
-                        if (point != 48U) stream << ',';
-                        write_point(stream, packet->landmarks[point]);
-                    }
-                    stream << "]}";
+                           << ',' << packet->pose.roll << "],\"contour\":";
+                    write_mouth_contour(stream, *packet);
+                    stream << '}';
                 }
             }
             stream << (index + 1U == paths.size() ? "\n" : ",\n");
         }
-        stream << "  ],\n  \"accepted\": " << accepted << ",\n  \"total\": " << paths.size() << "\n}\n";
+        const double inference_mean_ms = std::accumulate(
+            inference_timings_ms.begin(), inference_timings_ms.end(), 0.0) /
+            static_cast<double>(inference_timings_ms.size());
+        stream << "  ],\n  \"accepted\": " << adapter_accepted
+               << ",\n  \"total\": " << paths.size()
+               << ",\n  \"providerPackets\": " << provider_packets
+               << ",\n  \"enrollmentQualifiedPackets\": " << enrollment_qualified
+               << ",\n  \"detectorVariant\": \"" << (yunet640 ? "yunet640" : "mnv3")
+               << "\",\n  \"modelLoadMs\": " << model_load_ms
+               << ",\n  \"detectorRuns\": " << detector_runs
+               << ",\n  \"trackedRoiFrames\": " << tracked_roi_frames
+               << ",\n  \"qualityReacquisitions\": " << quality_reacquisitions;
+        if (!detector_timings_ms.empty()) {
+            stream << ",\n  \"detectorInferenceMs\": {\"mean\":"
+                   << std::accumulate(detector_timings_ms.begin(),
+                                      detector_timings_ms.end(), 0.0) /
+                          static_cast<double>(detector_timings_ms.size())
+                   << ",\"p50\":" << percentile(detector_timings_ms, 0.50)
+                   << ",\"p95\":" << percentile(detector_timings_ms, 0.95)
+                   << ",\"maximum\":" << *std::max_element(
+                          detector_timings_ms.begin(), detector_timings_ms.end()) << '}';
+        }
+        if (!landmark_timings_ms.empty()) {
+            stream << ",\n  \"landmarkInferenceMs\": {\"mean\":"
+                   << std::accumulate(landmark_timings_ms.begin(),
+                                      landmark_timings_ms.end(), 0.0) /
+                          static_cast<double>(landmark_timings_ms.size())
+                   << ",\"p50\":" << percentile(landmark_timings_ms, 0.50)
+                   << ",\"p95\":" << percentile(landmark_timings_ms, 0.95)
+                   << ",\"maximum\":" << *std::max_element(
+                          landmark_timings_ms.begin(), landmark_timings_ms.end()) << '}';
+        }
+        stream
+               << ",\n  \"combinedInferenceMs\": {\"mean\":" << inference_mean_ms
+               << ",\"p50\":" << percentile(inference_timings_ms, 0.50)
+               << ",\"p95\":" << percentile(inference_timings_ms, 0.95)
+               << ",\"maximum\":" << *std::max_element(
+                      inference_timings_ms.begin(), inference_timings_ms.end())
+               << "}\n}\n";
         if (!stream) throw std::runtime_error("could not write output JSON");
-        std::cout << output.string() << " accepted=" << accepted << '/' << paths.size() << '\n';
-        return accepted == paths.size() ? 0 : 1;
+        std::cout << output.string() << " adapter-accepted=" << adapter_accepted << '/'
+                  << paths.size() << " provider-packets=" << provider_packets << '\n';
+        return adapter_accepted == paths.size() ? 0 : 1;
     } catch (const std::exception& error) {
         std::cerr << "landmark dump error: " << error.what() << '\n';
         return 2;

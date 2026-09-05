@@ -1,9 +1,12 @@
 #include "npc/mouth_worker/landmark_provider.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
@@ -112,6 +115,17 @@ AdmittedLandmarkProviderLaunchV1 launch() {
     };
 }
 
+AdmittedLandmarkProviderLaunchV1 yunet_launch() {
+    auto value = launch();
+    value.pack_id = std::string(admitted_yunet_openseeface_pack_id_v1);
+    value.detector_model = value.artifact_root / "models" /
+                           "face_detection_yunet_2023mar.onnx";
+    value.detector_size_bytes = 232'589U;
+    value.detector_sha256 = std::string(admitted_yunet_detector_sha256_v1);
+    value.landmark_sha256 = std::string(admitted_openseeface_lm1_sha256_v1);
+    return value;
+}
+
 LandmarkInferenceWorkV1 work(const std::uint64_t frame_sequence,
                              const Nanoseconds deadline = 1'000'000) {
     LandmarkInferenceWorkV1 value{};
@@ -145,6 +159,125 @@ void test_launch_is_exact_and_fail_closed() {
     auto exact = launch();
     exact.backend = "gpu";
     require(!validate_landmark_provider_launch_v1(exact), "wrong backend rejected");
+
+    const auto yunet = yunet_launch();
+    require(validate_landmark_provider_launch_v1(yunet),
+            "exact pinned YuNet640 plus LM1 alternate pack admitted");
+    auto changed_yunet = yunet;
+    changed_yunet.detector_sha256[0] = '0';
+    require(!validate_landmark_provider_launch_v1(changed_yunet),
+            "changed YuNet detector digest rejected");
+    changed_yunet = yunet;
+    changed_yunet.landmark_sha256[0] = '0';
+    require(!validate_landmark_provider_launch_v1(changed_yunet),
+            "changed LM1 digest rejected for YuNet pack");
+}
+
+void test_yunet_decoder_matches_stride_geometry_and_seed_identity() {
+    constexpr float log_half = -0.6931471805599453F;
+    const std::array<float, 2U> classes{0.99F, 0.81F};
+    const std::array<float, 2U> objects{1.0F, 1.0F};
+    const std::array<float, 8U> boxes{
+        0.5F, 0.5F, log_half, log_half,
+        0.5F, 0.5F, log_half, log_half,
+    };
+    const YuNetDetectorLevelV1 level{8U, 2U, 1U, classes, objects, boxes};
+    const auto selected = decode_and_select_yunet_face_v1(
+        std::span<const YuNetDetectorLevelV1>(&level, 1U),
+        16U, 8U, 16U, 8U, 160U, 80U,
+        NormalizedRect{0.625, 0.10, 0.25, 0.80});
+    require(selected.has_value(), "YuNet stride output decoded");
+    require(std::abs(selected->bounds.x - 0.625) < 1.0e-6 &&
+                std::abs(selected->bounds.y - 0.25) < 1.0e-6 &&
+                std::abs(selected->bounds.width - 0.25) < 1.0e-6 &&
+                std::abs(selected->bounds.height - 0.50) < 1.0e-6,
+            "YuNet center/size exponent decode matches OpenCV geometry");
+    require(std::abs(selected->confidence - 0.9) < 1.0e-6,
+            "YuNet confidence is geometric mean of class and object outputs");
+    require(selected->confidence < 0.99,
+            "seed-overlap identity selection rejects higher-score different face");
+
+    const auto padded = decode_and_select_yunet_face_v1(
+        std::span<const YuNetDetectorLevelV1>(&level, 1U),
+        16U, 8U, 8U, 8U, 80U, 80U,
+        NormalizedRect{0.10, 0.10, 0.50, 0.80});
+    require(padded.has_value() && padded->bounds.x < 0.75,
+            "detections centered in padded tensor columns are excluded");
+
+    constexpr std::size_t crowded_cells = 2'048U;
+    std::vector<float> crowded_classes(crowded_cells);
+    std::vector<float> crowded_objects(crowded_cells, 1.0F);
+    std::vector<float> crowded_boxes(crowded_cells * 4U, 0.0F);
+    for (std::size_t index = 0U; index < crowded_cells; ++index) {
+        crowded_classes[index] = 0.51F + static_cast<float>(index) /
+            static_cast<float>(crowded_cells) * 0.48F;
+    }
+    const YuNetDetectorLevelV1 crowded_level{
+        8U, 64U, 32U, crowded_classes, crowded_objects, crowded_boxes};
+    const auto crowded = decode_and_select_yunet_face_v1(
+        std::span<const YuNetDetectorLevelV1>(&crowded_level, 1U),
+        512U, 256U, 512U, 256U, 512U, 256U,
+        NormalizedRect{0.0, 0.0, 1.0, 1.0});
+    require(crowded.has_value() && crowded->confidence > 0.99,
+            "pre-NMS candidate bound retains the highest-confidence eligible face");
+}
+
+void test_yunet_tracking_periodic_refresh_loss_and_actor_lock() {
+    const YuNetTrackingPolicyV1 policy{12U};
+    require(validate_yunet_tracking_policy_v1(policy),
+            "bounded YuNet detector refresh policy accepted");
+    require(!validate_yunet_tracking_policy_v1(YuNetTrackingPolicyV1{9U}) &&
+                !validate_yunet_tracking_policy_v1(YuNetTrackingPolicyV1{16U}),
+            "unmeasured detector refresh periods rejected");
+    require(choose_yunet_tracking_action_v1(false, 0U, policy) ==
+                YuNetTrackingActionV1::reacquire_face,
+            "lost track reacquires instead of borrowing another ROI");
+    require(choose_yunet_tracking_action_v1(true, 11U, policy) ==
+                YuNetTrackingActionV1::track_landmarks &&
+                choose_yunet_tracking_action_v1(true, 12U, policy) ==
+                YuNetTrackingActionV1::reacquire_face,
+            "detector refresh fires at configured bounded cadence");
+
+    const NormalizedRect locked{0.32, 0.16, 0.16, 0.28};
+    require(yunet_face_matches_locked_actor_v1(
+                NormalizedRect{0.33, 0.17, 0.16, 0.28}, locked),
+            "nearby periodic detection preserves actor lock");
+    require(!yunet_face_matches_locked_actor_v1(
+                NormalizedRect{0.67, 0.16, 0.16, 0.28}, locked),
+            "higher-confidence different actor cannot replace locked actor");
+
+    std::array<NormalizedLandmark, openseeface_landmark_count_v1> before{};
+    std::array<NormalizedLandmark, openseeface_landmark_count_v1> after{};
+    for (std::size_t index = 0U; index < before.size(); ++index) {
+        const double x = 0.35 + static_cast<double>(index % 8U) * 0.012;
+        const double y = 0.21 + static_cast<double>(index / 8U) * 0.018;
+        before[index] = {x, y, 0.95};
+        after[index] = {0.405 + (x - 0.395) * 1.02,
+                        0.285 + (y - 0.275) * 1.02, 0.94};
+    }
+    const auto updated = update_yunet_tracked_face_v1(locked, before, after);
+    require(updated.has_value() && updated->center_motion_face_fraction < 0.10 &&
+                std::abs(updated->scale_ratio - 1.02) < 1.0e-6,
+            "small landmark motion advances the locked ROI without detector inference");
+
+    auto jumped = after;
+    for (auto& point : jumped) point.x += 0.25;
+    require(!update_yunet_tracked_face_v1(locked, before, jumped),
+            "high-motion landmark drift triggers detector reacquisition");
+    auto lost = after;
+    for (std::size_t index = 0U; index < 30U; ++index) lost[index].confidence = 0.20;
+    require(!update_yunet_tracked_face_v1(locked, before, lost),
+            "insufficient current landmark coverage is treated as lost tracking");
+
+    auto partially_invalid = after;
+    for (std::size_t index = 24U; index < 48U; ++index) {
+        partially_invalid[index].confidence =
+            std::numeric_limits<double>::quiet_NaN();
+        partially_invalid[index].x += 0.40;
+        partially_invalid[index].y += 0.40;
+    }
+    require(update_yunet_tracked_face_v1(locked, before, partially_invalid).has_value(),
+            "nonfinite-confidence landmarks are excluded from both geometry passes");
 }
 
 void test_queue_one_exact_packet_binding_cancel_and_unload() {
@@ -227,6 +360,8 @@ void test_stale_and_wrong_binding_fail_open() {
 
 int main() {
     test_launch_is_exact_and_fail_closed();
+    test_yunet_decoder_matches_stride_geometry_and_seed_identity();
+    test_yunet_tracking_periodic_refresh_loss_and_actor_lock();
     test_queue_one_exact_packet_binding_cancel_and_unload();
     test_stale_and_wrong_binding_fail_open();
     std::cout << "PASS: admitted landmark provider boundary, queue-one, exact binding, cancel/unload\n";
