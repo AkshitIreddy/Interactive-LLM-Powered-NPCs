@@ -34,6 +34,12 @@ const MAX_LOADOUT_BYTES: u64 = 512 * 1024;
 const PRIVATE_EVALUATION_FILE_NAME: &str = "provider-private-evaluation-v1.json";
 const PRIVATE_EVALUATION_PROVIDER_ID: &str = "nvidia-nim";
 const MAGPIE_ROUTE_PROVIDER_ID: &str = "nvidia-nim-magpie";
+const CARTESIA_QUALIFIED_MODEL_ID: &str = "sonic-3.6";
+const CARTESIA_QUALIFIED_STOCK_VOICE_ID: &str = "a0e99841-438c-4a64-b679-ae501e7d6091";
+const INWORLD_QUALIFIED_MODEL_ID: &str = "inworld-tts-2-flash";
+const INWORLD_QUALIFIED_STOCK_VOICE_ID: &str = "Dennis";
+const DEEPGRAM_QUALIFIED_MODEL_ID: &str = "aura-2-arcas-en";
+const DEEPGRAM_QUALIFIED_STOCK_VOICE_ID: &str = "Arcas";
 pub const PRIVATE_EVALUATION_TERMS_REVISION: &str =
     "nvidia-api-trial-terms-2025-09-19-private-evaluation-v1";
 pub const PRIVATE_EVALUATION_TERMS_URL: &str = "https://assets.ngc.nvidia.com/products/api-catalog/legal/NVIDIA%20API%20Trial%20Terms%20of%20Service.pdf";
@@ -448,15 +454,6 @@ fn validate_document_against_catalog_for_distribution(
     Ok(())
 }
 
-#[cfg(test)]
-fn validate_route_against_catalog(
-    role: ProviderRole,
-    route: &ProviderModelRouteV1,
-    catalog: &CatalogDocument,
-) -> Result<(), CatalogRouteError> {
-    validate_route_against_catalog_for_distribution(role, route, catalog, false)
-}
-
 fn validate_route_against_catalog_for_distribution(
     role: ProviderRole,
     route: &ProviderModelRouteV1,
@@ -479,7 +476,8 @@ fn validate_route_against_catalog_for_distribution(
         .ok_or(CatalogRouteError::Provider)?;
     validate_provider_route_metadata(route, provider)?;
     if role == ProviderRole::Tts
-        && !hosted_tts_route_supported(&route.provider_id, private_evaluation_enabled)
+        && (!hosted_tts_route_supported(&route.provider_id, private_evaluation_enabled)
+            || !qualified_hosted_tts_route(route))
     {
         // Catalog metadata may describe future adapters, but native
         // persistence can authorize only transports implemented by the current
@@ -521,13 +519,34 @@ fn validate_route_against_catalog_for_distribution(
 
 fn hosted_tts_route_supported(provider_id: &str, private_evaluation_enabled: bool) -> bool {
     match provider_id {
-        "elevenlabs" => true,
+        "cartesia" | "deepgram" | "elevenlabs" | "inworld" => true,
         // Magpie is executable only in an isolated private-evaluation namespace.
         // Activation separately requires the persisted current provider-wide
         // NVIDIA trial acknowledgement, exact credential, and stock-voice gates;
         // compiling a Release review binary does not grant production authority.
         "nvidia-nim-magpie" => private_evaluation_enabled,
         _ => false,
+    }
+}
+
+fn qualified_hosted_tts_route(route: &ProviderModelRouteV1) -> bool {
+    match route.provider_id.as_str() {
+        "cartesia" => {
+            route.model_id == CARTESIA_QUALIFIED_MODEL_ID
+                && route.voice_id.as_deref() == Some(CARTESIA_QUALIFIED_STOCK_VOICE_ID)
+                && route.explicit_user_selection
+        }
+        "inworld" => {
+            route.model_id == INWORLD_QUALIFIED_MODEL_ID
+                && route.voice_id.as_deref() == Some(INWORLD_QUALIFIED_STOCK_VOICE_ID)
+                && route.explicit_user_selection
+        }
+        "deepgram" => {
+            route.model_id == DEEPGRAM_QUALIFIED_MODEL_ID
+                && route.voice_id.as_deref() == Some(DEEPGRAM_QUALIFIED_STOCK_VOICE_ID)
+                && route.explicit_user_selection
+        }
+        _ => true,
     }
 }
 
@@ -602,12 +621,17 @@ fn validate_voice_capability(
             .ok_or(CatalogRouteError::Capability);
     }
     if model.capabilities.stock_voice_only {
-        let voice = route
-            .voice_id
-            .as_deref()
-            .ok_or(CatalogRouteError::Capability)?;
-        if !voice.starts_with("Magpie-") || model.capabilities.eligible_stock_voice_count == Some(0)
-        {
+        if route.provider_id == MAGPIE_ROUTE_PROVIDER_ID {
+            let voice = route
+                .voice_id
+                .as_deref()
+                .ok_or(CatalogRouteError::Capability)?;
+            if !voice.starts_with("Magpie-")
+                || model.capabilities.eligible_stock_voice_count == Some(0)
+            {
+                return Err(CatalogRouteError::Capability);
+            }
+        } else if !qualified_hosted_tts_route(route) {
             return Err(CatalogRouteError::Capability);
         }
     }
@@ -1469,11 +1493,11 @@ pub(crate) fn starter_document() -> ProviderLoadoutDocumentV1 {
             (
                 ProviderRole::Llm,
                 hosted(
-                    "nvidia-nim",
-                    "nvidia/nemotron-3.5-lightning-30b-a3b",
+                    "groq",
+                    "qwen/qwen3.6-27b",
                     None,
-                    "Transcript, selected game context, and memory context are sent to NVIDIA NIM when this route is used.",
-                    "Uses the user's NVIDIA API account; trial availability and provider limits may change.",
+                    "Transcript, selected game context, and memory context are sent to Groq when this route is used.",
+                    "Uses the user's Groq account and its current free or paid limits.",
                     BTreeSet::from([
                         TransmittedDataV1::Transcript,
                         TransmittedDataV1::GameContext,
@@ -1495,24 +1519,36 @@ pub(crate) fn starter_document() -> ProviderLoadoutDocumentV1 {
             (
                 ProviderRole::Tts,
                 hosted(
-                    "elevenlabs",
-                    "eleven_flash_v2_5",
-                    Some("EXAVITQu4vr4xnSDxMaL"),
-                    "Response text is sent to ElevenLabs only while this voice route is used.",
-                    "Uses the user's ElevenLabs account and its current trial or paid limits.",
+                    "cartesia",
+                    CARTESIA_QUALIFIED_MODEL_ID,
+                    Some(CARTESIA_QUALIFIED_STOCK_VOICE_ID),
+                    "Response text is sent to Cartesia only while this voice route is used.",
+                    "Uses the user's Cartesia account and its current free or paid limits.",
                     BTreeSet::from([TransmittedDataV1::ResponseText]),
                 ),
             ),
             (
                 ProviderRole::Embeddings,
-                hosted(
-                    "nvidia-nim",
-                    "nvidia/nemotron-3-embed-1b",
-                    None,
-                    "Selected lore and memory text are sent to NVIDIA NIM when retrieval embeddings are requested.",
-                    "Uses the user's NVIDIA API account; trial availability and provider limits may change.",
-                    BTreeSet::from([TransmittedDataV1::MemoryContext]),
-                ),
+                RoleOverrideV1::Route(Box::new(RoleRouteV1 {
+                    primary: ProviderModelRouteV1 {
+                        provider_id: "fts-only".into(),
+                        model_id: "sqlite-fts5".into(),
+                        voice_id: None,
+                        credential: None,
+                        disclosure: CatalogDisclosureV1 {
+                            catalog_revision,
+                            execution: ExecutionLocationV1::Local,
+                            egress: EgressClassV1::None,
+                            privacy_summary: "Scoped keyword memory search stays on this PC."
+                                .into(),
+                            cost_summary: "Uses the bundled SQLite FTS index without a model download."
+                                .into(),
+                            transmitted_data: BTreeSet::new(),
+                        },
+                        explicit_user_selection: true,
+                    },
+                    fallbacks: Vec::new(),
+                })),
             ),
             (ProviderRole::Vision, RoleOverrideV1::Disabled),
             (ProviderRole::Lipsync, RoleOverrideV1::Disabled),
@@ -1681,17 +1717,34 @@ mod tests {
         let pinned = resolved.pin_turn_routes(1);
         assert_eq!(
             pinned
-                .route(ProviderRole::Tts)
-                .and_then(|route| route.voice_id.as_deref()),
-            Some("EXAVITQu4vr4xnSDxMaL")
+                .route(ProviderRole::Llm)
+                .map(|route| (route.provider_id.as_str(), route.model_id.as_str())),
+            Some(("groq", "qwen/qwen3.6-27b"))
         );
         assert_eq!(
-            pinned
-                .route(ProviderRole::Embeddings)
-                .expect("embeddings route")
-                .model_id,
-            "nvidia/nemotron-3-embed-1b"
+            pinned.route(ProviderRole::Tts).map(|route| (
+                route.provider_id.as_str(),
+                route.model_id.as_str(),
+                route.voice_id.as_deref()
+            )),
+            Some((
+                "cartesia",
+                CARTESIA_QUALIFIED_MODEL_ID,
+                Some(CARTESIA_QUALIFIED_STOCK_VOICE_ID)
+            ))
         );
+        let embeddings = pinned
+            .route(ProviderRole::Embeddings)
+            .expect("embeddings route");
+        assert_eq!(
+            (
+                embeddings.provider_id.as_str(),
+                embeddings.model_id.as_str()
+            ),
+            ("fts-only", "sqlite-fts5")
+        );
+        assert!(embeddings.credential.is_none());
+        assert_eq!(embeddings.disclosure.execution, ExecutionLocationV1::Local);
         assert!(pinned.route(ProviderRole::Vision).is_none());
         assert!(pinned.route(ProviderRole::Lipsync).is_none());
     }
@@ -1733,8 +1786,13 @@ mod tests {
         else {
             panic!("expected TTS route")
         };
+        tts.primary.provider_id = "elevenlabs".into();
         tts.primary.model_id = "eleven-flash-v2.5".into();
         tts.primary.voice_id = None;
+        tts.primary.credential = Some(CredentialReferenceV1 {
+            provider_id: "elevenlabs".into(),
+            reference_id: "personal".into(),
+        });
         tts.primary.explicit_user_selection = false;
         let legacy_json = serde_json::to_string_pretty(&legacy)
             .expect("serialize legacy fixture")
@@ -1941,7 +1999,7 @@ mod tests {
             panic!("expected route")
         };
         route.primary.credential = Some(CredentialReferenceV1 {
-            provider_id: "nvidia-nim".into(),
+            provider_id: "groq".into(),
             reference_id: "personal".into(),
         });
         route.primary.disclosure.cost_summary = "sk-canary-never-persist-this".into();
@@ -1976,7 +2034,7 @@ mod tests {
             panic!("expected route")
         };
         route.primary.credential = Some(CredentialReferenceV1 {
-            provider_id: "nvidia-nim".into(),
+            provider_id: "groq".into(),
             reference_id: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b".into(),
         });
         assert!(matches!(
@@ -2233,32 +2291,46 @@ mod tests {
     }
 
     #[test]
-    fn crafted_hosted_tts_routes_without_runtime_transports_fail_closed() {
-        let catalog = bundled_catalog();
-        for provider_id in ["deepgram", "cartesia", "inworld"] {
-            let route = ProviderModelRouteV1 {
+    fn hosted_tts_routes_accept_only_the_exact_qualified_model_and_stock_voice() {
+        let exact = [
+            (
+                "cartesia",
+                CARTESIA_QUALIFIED_MODEL_ID,
+                CARTESIA_QUALIFIED_STOCK_VOICE_ID,
+            ),
+            (
+                "deepgram",
+                DEEPGRAM_QUALIFIED_MODEL_ID,
+                DEEPGRAM_QUALIFIED_STOCK_VOICE_ID,
+            ),
+            (
+                "inworld",
+                INWORLD_QUALIFIED_MODEL_ID,
+                INWORLD_QUALIFIED_STOCK_VOICE_ID,
+            ),
+        ];
+        for (provider_id, model_id, voice_id) in exact {
+            let mut route = ProviderModelRouteV1 {
                 provider_id: provider_id.into(),
-                model_id: "crafted-user-selection".into(),
-                voice_id: Some("crafted-stock-voice".into()),
-                credential: Some(CredentialReferenceV1 {
-                    provider_id: provider_id.into(),
-                    reference_id: "personal".into(),
-                }),
+                model_id: model_id.into(),
+                voice_id: Some(voice_id.into()),
+                credential: None,
                 disclosure: CatalogDisclosureV1 {
-                    catalog_revision: catalog.catalog_revision,
+                    catalog_revision: 9,
                     execution: ExecutionLocationV1::Hosted,
                     egress: EgressClassV1::ProviderCloud,
-                    privacy_summary: "Response text would leave this PC.".into(),
-                    cost_summary: "Provider account terms would apply.".into(),
-                    transmitted_data: BTreeSet::from([TransmittedDataV1::ResponseText]),
+                    privacy_summary: String::new(),
+                    cost_summary: String::new(),
+                    transmitted_data: BTreeSet::new(),
                 },
                 explicit_user_selection: true,
             };
-            assert_eq!(
-                validate_route_against_catalog(ProviderRole::Tts, &route, &catalog),
-                Err(CatalogRouteError::Capability),
-                "{provider_id} must remain unavailable until its runtime transport exists"
-            );
+            assert!(qualified_hosted_tts_route(&route), "{provider_id}");
+            route.voice_id = Some("crafted-stock-voice".into());
+            assert!(!qualified_hosted_tts_route(&route), "{provider_id}");
+            route.voice_id = Some(voice_id.into());
+            route.model_id = "crafted-model".into();
+            assert!(!qualified_hosted_tts_route(&route), "{provider_id}");
         }
     }
 
@@ -2298,9 +2370,11 @@ mod tests {
     #[test]
     fn magpie_route_authority_is_private_evaluation_namespace_only() {
         assert!(hosted_tts_route_supported("elevenlabs", false));
+        assert!(hosted_tts_route_supported("cartesia", false));
+        assert!(hosted_tts_route_supported("deepgram", false));
+        assert!(hosted_tts_route_supported("inworld", false));
         assert!(!hosted_tts_route_supported("nvidia-nim-magpie", false));
         assert!(hosted_tts_route_supported("nvidia-nim-magpie", true));
-        assert!(!hosted_tts_route_supported("cartesia", true));
     }
 
     #[test]
@@ -2344,15 +2418,35 @@ mod tests {
 
     #[test]
     fn provider_wide_nvidia_trial_authority_covers_selected_llm_and_embeddings() {
+        fn select_nvidia_trial_routes(routes: &mut ResolvedProviderLoadoutV1) {
+            for role in [ProviderRole::Llm, ProviderRole::Embeddings] {
+                let selected = routes.roles.get_mut(&role).expect("starter route");
+                selected.primary.provider_id = PRIVATE_EVALUATION_PROVIDER_ID.into();
+                selected.primary.model_id = match role {
+                    ProviderRole::Llm => "nvidia/nemotron-3.5-lightning-30b-a3b",
+                    ProviderRole::Embeddings => "nvidia/nemotron-3-embed-1b",
+                    _ => unreachable!("test selects only NVIDIA trial roles"),
+                }
+                .into();
+                selected.primary.credential = Some(CredentialReferenceV1 {
+                    provider_id: PRIVATE_EVALUATION_PROVIDER_ID.into(),
+                    reference_id: "personal".into(),
+                });
+                selected.primary.disclosure.execution = ExecutionLocationV1::Hosted;
+                selected.primary.disclosure.egress = EgressClassV1::ProviderCloud;
+            }
+        }
+
         let temp = tempfile::tempdir().expect("temporary directory");
         let public = ProviderLoadoutManager::new_internal(
             temp.path().to_path_buf(),
             PRODUCTION_APPLICATION_NAMESPACE.into(),
             Some(Arc::new(PresentCredential)),
         );
-        let public_routes = public
+        let mut public_routes = public
             .resolve_raw(&LoadoutContextV1::global(), false)
             .expect("starter resolution");
+        select_nvidia_trial_routes(&mut public_routes);
         assert!(public
             .private_evaluation_authority_for_routes(&public_routes)
             .expect_err("production namespace must block NVIDIA trial routes")
@@ -2364,9 +2458,10 @@ mod tests {
             REVIEW_APPLICATION_NAMESPACE.into(),
             Some(Arc::new(PresentCredential)),
         );
-        let review_routes = review
+        let mut review_routes = review
             .resolve_raw(&LoadoutContextV1::global(), false)
             .expect("review starter resolution");
+        select_nvidia_trial_routes(&mut review_routes);
         assert!(review
             .private_evaluation_authority_for_routes(&review_routes)
             .expect_err("current acknowledgement is required")

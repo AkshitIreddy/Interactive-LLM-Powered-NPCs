@@ -338,6 +338,8 @@ impl RuntimeRouter {
         trusted_safety_context: NativeSimulationSafetyContext,
         selected_stt: Option<ConsumedSelectedStt>,
         subtitle_renderer_authority: npc_subtitle_engine::SubtitleRendererAuthorityV1,
+        subtitles_enabled: bool,
+        overlay_enabled: bool,
     ) -> Result<StartSimulationResult, RouterError> {
         request.validate().map_err(RouterError::InvalidRequest)?;
         validate_trusted_safety_context(trusted_safety_context)?;
@@ -416,7 +418,9 @@ impl RuntimeRouter {
             .iter()
             .map(ExpectedPlaybackReceipt::from)
             .collect::<Vec<_>>();
-        self.visual_coordinator.start_turn(&playback_leases).await;
+        if overlay_enabled {
+            self.visual_coordinator.start_turn(&playback_leases).await;
+        }
         if playback_pool_allocated {
             let mut state = self.native.lock().map_err(|_| RouterError::State)?;
             let active = state
@@ -434,10 +438,11 @@ impl RuntimeRouter {
             private_evaluation_acknowledgements,
             application_namespace,
             selected_stt.as_ref(),
+            subtitles_enabled,
             &subtitle_renderer_authority,
         );
-        native_request.subtitle_presentation_context =
-            Some(if trusted_safety_context.visuals_allowed {
+        native_request.subtitle_presentation_context = Some(
+            if subtitles_enabled && overlay_enabled && trusted_safety_context.visuals_allowed {
                 self.media_broker
                     .trusted_subtitle_presentation_context()
                     .await
@@ -458,7 +463,8 @@ impl RuntimeRouter {
                 NativeSubtitlePresentationContext::console_unavailable(
                     subtitle_renderer_authority.clone(),
                 )
-            });
+            },
+        );
         native_request.audio_playback_leases = playback_leases;
         let (measurement_basis, runtime_fixture_only) = start_provenance(&request, &route_snapshot);
         let _ = self.diagnostics.record_native_turn_event(
@@ -713,6 +719,27 @@ fn selected_playback_format(
         .as_ref()
         .map(|credential| credential.provider_id.as_str());
     match route.provider_id.as_str() {
+        "cartesia"
+            if credential_provider == Some("cartesia")
+                && route.model_id == "sonic-3.6"
+                && route.voice_id.as_deref() == Some("a0e99841-438c-4a64-b679-ae501e7d6091") =>
+        {
+            Some((24_000, 1))
+        }
+        "inworld"
+            if credential_provider == Some("inworld")
+                && route.model_id == "inworld-tts-2-flash"
+                && route.voice_id.as_deref() == Some("Dennis") =>
+        {
+            Some((24_000, 1))
+        }
+        "deepgram"
+            if credential_provider == Some("deepgram")
+                && route.model_id == "aura-2-arcas-en"
+                && route.voice_id.as_deref() == Some("Arcas") =>
+        {
+            Some((24_000, 1))
+        }
         "elevenlabs" if credential_provider == Some("elevenlabs") => Some((24_000, 1)),
         "nvidia-nim-magpie"
             if credential_provider == Some("nvidia-nim")
@@ -1089,6 +1116,7 @@ fn native_request_for(
     private_evaluation_acknowledgements: Vec<ProviderPrivateEvaluationAcknowledgementV1>,
     application_namespace: String,
     selected_stt: Option<&ConsumedSelectedStt>,
+    subtitles_enabled: bool,
     subtitle_renderer_authority: &npc_subtitle_engine::SubtitleRendererAuthorityV1,
 ) -> NativeSimulationRequest {
     let is_generic = request.game_profile_id.is_none();
@@ -1160,7 +1188,7 @@ fn native_request_for(
         },
         delivery: NativeTurnDeliveryRequest {
             audio: true,
-            subtitles: true,
+            subtitles: subtitles_enabled,
         },
         audio_playback_leases: Vec::new(),
         private_evaluation_acknowledgements,
@@ -1473,6 +1501,23 @@ mod tests {
             .resolve(&LoadoutContextV1::global(), &ValidationContextV1::online())
             .expect("starter routes resolve")
             .pin_turn_routes(generation)
+    }
+
+    fn elevenlabs_route_snapshot(generation: u64) -> TurnRouteSnapshotV1 {
+        let mut snapshot = route_snapshot(generation);
+        let tts = snapshot
+            .roles
+            .get_mut(&ProviderRole::Tts)
+            .and_then(|role| role.primary.as_mut())
+            .expect("starter TTS route");
+        tts.provider_id = "elevenlabs".into();
+        tts.model_id = "eleven_flash_v2_5".into();
+        tts.voice_id = Some("EXAVITQu4vr4xnSDxMaL".into());
+        tts.credential = Some(npc_provider_loadouts::CredentialReferenceV1 {
+            provider_id: "elevenlabs".into(),
+            reference_id: "personal".into(),
+        });
+        snapshot
     }
 
     fn trusted_subtitle_evidence() -> TrustedSubtitlePresentationContext {
@@ -1863,6 +1908,42 @@ mod tests {
             Some((44_100, 1))
         );
 
+        for (provider_id, model_id, voice_id) in [
+            (
+                "cartesia",
+                "sonic-3.6",
+                "a0e99841-438c-4a64-b679-ae501e7d6091",
+            ),
+            ("deepgram", "aura-2-arcas-en", "Arcas"),
+            ("inworld", "inworld-tts-2-flash", "Dennis"),
+        ] {
+            let tts = routes
+                .roles
+                .get_mut(&ProviderRole::Tts)
+                .and_then(|role| role.primary.as_mut())
+                .expect("TTS route");
+            tts.provider_id = provider_id.into();
+            tts.model_id = model_id.into();
+            tts.voice_id = Some(voice_id.into());
+            tts.credential.as_mut().expect("credential").provider_id = provider_id.into();
+            assert_eq!(
+                selected_playback_format(&StartSimulationRequest::default(), &routes),
+                Some((24_000, 1)),
+                "{provider_id} exact stock route"
+            );
+        }
+
+        routes
+            .roles
+            .get_mut(&ProviderRole::Tts)
+            .and_then(|role| role.primary.as_mut())
+            .expect("TTS route")
+            .voice_id = Some("unqualified-voice".into());
+        assert_eq!(
+            selected_playback_format(&StartSimulationRequest::default(), &routes),
+            None
+        );
+
         let debug = StartSimulationRequest {
             dev_live_tts: Some(crate::domain::DevLiveTtsRequest {
                 provider_id: "elevenlabs".into(),
@@ -1905,6 +1986,7 @@ mod tests {
             Vec::new(),
             crate::provider_loadouts::PRODUCTION_APPLICATION_NAMESPACE.into(),
             None,
+            true,
             &test_renderer_authority(),
         );
         assert_eq!(native.game_id, "eclipse-harbor");
@@ -1930,6 +2012,30 @@ mod tests {
     }
 
     #[test]
+    fn disabled_subtitles_are_carried_into_the_native_turn_contract() {
+        let native = native_request_for(
+            &StartSimulationRequest::default(),
+            "subtitles-disabled-turn",
+            NativeSimulationSafetyContext::default(),
+            &route_snapshot(1),
+            Vec::new(),
+            crate::provider_loadouts::PRODUCTION_APPLICATION_NAMESPACE.into(),
+            None,
+            false,
+            &test_renderer_authority(),
+        );
+
+        assert!(!native.delivery.subtitles);
+        assert_eq!(
+            native
+                .subtitle_presentation_context
+                .expect("explicit console-unavailable context")
+                .provenance,
+            crate::sidecar_protocol::NativeSubtitleContextProvenance::ConsoleBottomCenterUnavailable
+        );
+    }
+
+    #[test]
     fn explicitly_unprofiled_turn_is_generic_without_identity_claim() {
         let request = StartSimulationRequest {
             game_profile_id: None,
@@ -1946,6 +2052,7 @@ mod tests {
             Vec::new(),
             crate::provider_loadouts::PRODUCTION_APPLICATION_NAMESPACE.into(),
             None,
+            true,
             &test_renderer_authority(),
         );
         let generic = native.generic_selection.expect("generic manual selection");
@@ -1967,14 +2074,16 @@ mod tests {
             }),
             ..StartSimulationRequest::default()
         };
+        let routes = elevenlabs_route_snapshot(1);
         let native = native_request_for(
             &request,
             "dev-live-tts-turn",
             NativeSimulationSafetyContext::default(),
-            &route_snapshot(1),
+            &routes,
             Vec::new(),
             crate::provider_loadouts::PRODUCTION_APPLICATION_NAMESPACE.into(),
             None,
+            true,
             &test_renderer_authority(),
         );
         let route = native.dev_live_tts.as_ref().expect("authorized route");
@@ -2003,7 +2112,29 @@ mod tests {
 
     #[test]
     fn explicit_live_tts_must_match_the_resolved_immutable_route() {
-        let resolved = crate::provider_loadouts::starter_document()
+        let mut document = crate::provider_loadouts::starter_document();
+        let loadout = document
+            .loadouts
+            .get_mut(
+                &npc_provider_loadouts::LoadoutId::new("api-first-starter")
+                    .expect("static starter id"),
+            )
+            .expect("starter loadout");
+        let npc_provider_loadouts::RoleOverrideV1::Route(tts) = loadout
+            .roles
+            .get_mut(&ProviderRole::Tts)
+            .expect("starter TTS role")
+        else {
+            panic!("expected TTS route")
+        };
+        tts.primary.provider_id = "elevenlabs".into();
+        tts.primary.model_id = "eleven_flash_v2_5".into();
+        tts.primary.voice_id = Some("EXAVITQu4vr4xnSDxMaL".into());
+        tts.primary.credential = Some(npc_provider_loadouts::CredentialReferenceV1 {
+            provider_id: "elevenlabs".into(),
+            reference_id: "personal".into(),
+        });
+        let resolved = document
             .resolve(&LoadoutContextV1::global(), &ValidationContextV1::online())
             .expect("starter routes resolve");
         let matching = StartSimulationRequest {
@@ -2057,6 +2188,7 @@ mod tests {
             Vec::new(),
             crate::provider_loadouts::PRODUCTION_APPLICATION_NAMESPACE.into(),
             None,
+            true,
             &test_renderer_authority(),
         );
         assert_eq!(native.safety_context, trusted);

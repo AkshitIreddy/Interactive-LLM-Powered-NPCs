@@ -759,6 +759,29 @@ pub async fn start_simulation(
     let application_namespace = state.provider_loadouts.application_namespace().to_owned();
     let safety_context =
         trusted_turn_safety_context(&request, &state.resources, synthetic_capture_verified);
+    let product_preference_scope = match (
+        request.game_profile_id.as_ref(),
+        request.character_id.as_ref(),
+    ) {
+        (Some(game_profile_id), Some(character_id)) => ProductPreferenceScopeV1::Character {
+            game_profile_id: game_profile_id.clone(),
+            character_id: character_id.clone(),
+        },
+        (Some(game_profile_id), None) => ProductPreferenceScopeV1::Game {
+            game_profile_id: game_profile_id.clone(),
+        },
+        (None, _) => ProductPreferenceScopeV1::Global,
+    };
+    let (route_authority, resource_authority) =
+        preference_authority_references(&product_preference_scope, &state);
+    let product_preferences = state
+        .product_preferences
+        .snapshot(
+            product_preference_scope,
+            route_authority,
+            resource_authority,
+        )
+        .map_err(product_error)?;
     // Pin the effective subtitle renderer state atomically after canonical
     // character selection and before dispatch. The WebView never supplies this
     // authority, and save/reset races can only affect a later turn.
@@ -792,6 +815,8 @@ pub async fn start_simulation(
             safety_context,
             selected_stt,
             subtitle_renderer_authority,
+            product_preferences.effective.subtitles.value,
+            product_preferences.effective.overlay.value,
         )
         .await
         .map_err(|error| CommandError::Simulation {

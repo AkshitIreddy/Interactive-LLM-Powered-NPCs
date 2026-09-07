@@ -1755,7 +1755,7 @@ mod tests {
         assert_eq!(wire["routeSnapshot"]["roles"]["tts"]["state"], "ready");
         assert_eq!(
             wire["routeSnapshot"]["roles"]["tts"]["primary"]["voiceId"],
-            "EXAVITQu4vr4xnSDxMaL"
+            "a0e99841-438c-4a64-b679-ae501e7d6091"
         );
         assert_eq!(
             wire["routeSnapshot"]["roles"]["vision"]["state"],
