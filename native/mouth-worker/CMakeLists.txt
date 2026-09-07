@@ -69,6 +69,17 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING AND NPC_MOUTH_WORKER_BUILD_TESTS)
+    # Appearance continuity is an experimental diagnostic, not a product veto.
+    add_executable(npc_mouth_source_frame_guard_tests
+                   tests/source_frame_guard_tests.cpp src/source_frame_guard.cpp)
+    target_compile_features(npc_mouth_source_frame_guard_tests PRIVATE cxx_std_20)
+    target_link_libraries(npc_mouth_source_frame_guard_tests PRIVATE npc_mouth_worker)
+    if(MSVC)
+        target_compile_options(npc_mouth_source_frame_guard_tests PRIVATE /W4 /WX /permissive-)
+    else()
+        target_compile_options(npc_mouth_source_frame_guard_tests PRIVATE -Wall -Wextra -Werror)
+    endif()
+    add_test(NAME npc_mouth_source_frame_guard_tests COMMAND npc_mouth_source_frame_guard_tests)
     add_executable(npc_mouth_current_mouth_shape_filter_tests tests/current_mouth_shape_filter_tests.cpp)
     target_compile_features(npc_mouth_current_mouth_shape_filter_tests PRIVATE cxx_std_20)
     target_link_libraries(npc_mouth_current_mouth_shape_filter_tests PRIVATE npc_mouth_worker)
