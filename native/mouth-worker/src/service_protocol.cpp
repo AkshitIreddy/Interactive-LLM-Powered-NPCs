@@ -698,6 +698,9 @@ std::optional<std::vector<std::byte>> encode_provider_configuration(
     writer.scalar(command.launch.maximum_signal_rate_hz);
     writer.scalar(command.launch.inference_threads);
     writer.scalar(command.launch.exact_target_process_id);
+    if (command.launch.schema_version >= 2U) {
+        writer.scalar(static_cast<std::uint8_t>(command.launch.provider_load_self_test ? 1U : 0U));
+    }
     auto result = std::move(writer).take();
     if (result.size() > maximum_message_bytes) return std::nullopt;
     return result;
@@ -731,9 +734,17 @@ std::optional<ConfigureAdmittedLandmarkProviderCommandV1> decode_provider_config
         !reader.string(value.launch.backend, 128U) ||
         !reader.scalar(value.launch.maximum_signal_rate_hz) ||
         !reader.scalar(value.launch.inference_threads) ||
-        !reader.scalar(value.launch.exact_target_process_id) || !reader.done()) {
+        !reader.scalar(value.launch.exact_target_process_id)) {
         return std::nullopt;
     }
+    if (value.launch.schema_version >= 2U) {
+        std::uint8_t provider_load_self_test{};
+        if (!reader.scalar(provider_load_self_test) || provider_load_self_test > 1U) {
+            return std::nullopt;
+        }
+        value.launch.provider_load_self_test = provider_load_self_test == 1U;
+    }
+    if (!reader.done()) return std::nullopt;
     value.launch.artifact_root = path_from_utf8(root);
     value.launch.detector_model = path_from_utf8(detector);
     value.launch.landmark_model = path_from_utf8(landmark);

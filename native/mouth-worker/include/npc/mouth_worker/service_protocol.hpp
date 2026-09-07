@@ -37,6 +37,9 @@ enum class CommandKind : std::uint16_t {
     configure_admitted_landmark_provider = 7,
     install_character_mouth_atlas = 8,
     clear_character_mouth_atlas = 9,
+    // Loads and immediately unloads an admitted provider for setup. This
+    // command accepts no target process authority and can never render.
+    self_test_admitted_landmark_provider = 10,
 };
 
 enum class StatusCode : std::uint16_t {

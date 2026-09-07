@@ -731,11 +731,39 @@ int wmain(const int argc, wchar_t** argv) {
         native_session, CommandKind::health, native_sequence++, 1U));
     expect(native_health && native_health->status == StatusCode::ok,
            "admitted-provider service authenticates health");
+    auto self_test_launch = fake_admitted_launch();
+    self_test_launch.schema_version = 2U;
+    self_test_launch.exact_target_process_id = 0U;
+    self_test_launch.provider_load_self_test = true;
+    const auto self_test_payload = encode_provider_configuration(
+        ConfigureAdmittedLandmarkProviderCommandV1{self_test_launch});
+    expect(self_test_payload.has_value(),
+           "setup provider-load payload carries no target authority");
+    const auto self_test = request(native_pipe.get(), envelope(
+        native_session, CommandKind::self_test_admitted_landmark_provider,
+        native_sequence++, 1U, *self_test_payload));
+    expect(self_test && self_test->status == StatusCode::ok &&
+               self_test->detail ==
+                   "admitted_landmark_provider_load_self_test_passed",
+           "authenticated setup command loads and unloads the admitted provider");
+    const auto setup_on_runtime_command = request(native_pipe.get(), envelope(
+        native_session, CommandKind::configure_admitted_landmark_provider,
+        native_sequence++, 1U, *self_test_payload));
+    expect(setup_on_runtime_command &&
+               setup_on_runtime_command->status == StatusCode::payload_invalid,
+           "runtime configure command rejects setup-only provider purpose");
+    const auto runtime_payload = encode_provider_configuration(
+        ConfigureAdmittedLandmarkProviderCommandV1{fake_admitted_launch()});
+    const auto runtime_on_setup_command = request(native_pipe.get(), envelope(
+        native_session, CommandKind::self_test_admitted_landmark_provider,
+        native_sequence++, 1U, *runtime_payload));
+    expect(runtime_on_setup_command &&
+               runtime_on_setup_command->status == StatusCode::payload_invalid,
+           "setup command rejects runtime target authority");
     const auto configured = request(native_pipe.get(), envelope(
         native_session, CommandKind::configure_admitted_landmark_provider,
         native_sequence++, 1U,
-        *encode_provider_configuration(
-            ConfigureAdmittedLandmarkProviderCommandV1{fake_admitted_launch()})));
+        *runtime_payload));
     expect(configured && configured->status == StatusCode::ok &&
                configured->detail == "admitted_landmark_provider_ready",
            "authenticated controller configures the exact admitted provider authority");

@@ -346,12 +346,18 @@ bool validate_landmark_provider_launch_v1(
         launch.detector_model.filename() == "face_detection_yunet_2023mar.onnx" &&
         launch.detector_sha256 == admitted_yunet_detector_sha256_v1 &&
         launch.landmark_sha256 == admitted_openseeface_lm1_sha256_v1;
-    return launch.schema_version == 1U && (mnv3_pack || yunet_pack) &&
+    const bool runtime_launch = !launch.provider_load_self_test &&
+                                launch.exact_target_process_id != 0U;
+    const bool setup_self_test = launch.schema_version == 2U &&
+                                 launch.provider_load_self_test &&
+                                 launch.exact_target_process_id == 0U;
+    return (launch.schema_version == 1U || launch.schema_version == 2U) &&
+           (runtime_launch || setup_self_test) && (mnv3_pack || yunet_pack) &&
            launch.pack_revision == admitted_openseeface_revision_v1 &&
            launch.runtime_revision == admitted_openseeface_runtime_revision_v1 &&
            launch.backend == admitted_openseeface_backend_v1 &&
            launch.maximum_signal_rate_hz > 0U && launch.maximum_signal_rate_hz <= 15U &&
-           launch.inference_threads == 1U && launch.exact_target_process_id != 0U &&
+           launch.inference_threads == 1U &&
            valid_sha256(launch.detector_sha256) && valid_sha256(launch.landmark_sha256) &&
            valid_sha256(launch.runtime_sha256) &&
            valid_sha256(launch.runtime_shared_sha256) &&

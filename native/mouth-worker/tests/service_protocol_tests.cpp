@@ -287,6 +287,26 @@ void test_provider_configuration_round_trip() {
                decoded->launch.detector_size_bytes == launch.detector_size_bytes &&
                decoded->launch.measured_envelope_sha256 == launch.measured_envelope_sha256,
            "exact provider paths, sizes, hashes, envelope, and target survive authenticated wire");
+
+    auto setup = launch;
+    setup.schema_version = 2U;
+    setup.exact_target_process_id = 0U;
+    setup.provider_load_self_test = true;
+    const auto encoded_setup = encode_provider_configuration({setup});
+    const auto decoded_setup = encoded_setup
+        ? decode_provider_configuration(*encoded_setup)
+        : std::nullopt;
+    expect(decoded_setup && decoded_setup->launch.provider_load_self_test &&
+               decoded_setup->launch.exact_target_process_id == 0U,
+           "setup provider-load purpose round-trips without target authority");
+
+    setup.exact_target_process_id = 42U;
+    expect(!encode_provider_configuration({setup}),
+           "setup provider-load purpose rejects target authority");
+    setup.provider_load_self_test = false;
+    setup.exact_target_process_id = 0U;
+    expect(!encode_provider_configuration({setup}),
+           "runtime provider purpose still requires exact target authority");
 }
 
 void test_character_mouth_atlas_round_trip() {

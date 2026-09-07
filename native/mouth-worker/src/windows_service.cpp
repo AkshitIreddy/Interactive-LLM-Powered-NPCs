@@ -713,11 +713,14 @@ int run_windows_service(const WindowsServiceConfig& config,
             }
             case CommandKind::configure_admitted_landmark_provider: {
                 const auto command = decode_provider_configuration(envelope->payload);
-                if (!command || !landmark_coordinator) {
-                    response.status = command ? StatusCode::capability_unavailable
-                                              : StatusCode::payload_invalid;
-                    response.detail = command ? "native_landmark_provider_not_built"
-                                              : "provider_configuration_invalid";
+                if (!command || command->launch.provider_load_self_test) {
+                    response.status = StatusCode::payload_invalid;
+                    response.detail = "provider_configuration_invalid";
+                    break;
+                }
+                if (!landmark_coordinator) {
+                    response.status = StatusCode::capability_unavailable;
+                    response.detail = "native_landmark_provider_not_built";
                     break;
                 }
                 const auto loaded = landmark_coordinator->load(command->launch,
@@ -728,6 +731,37 @@ int run_windows_service(const WindowsServiceConfig& config,
                     break;
                 }
                 response.detail = "admitted_landmark_provider_ready";
+                break;
+            }
+            case CommandKind::self_test_admitted_landmark_provider: {
+                const auto command = decode_provider_configuration(envelope->payload);
+                if (!command || !command->launch.provider_load_self_test ||
+                    command->launch.exact_target_process_id != 0U) {
+                    response.status = StatusCode::payload_invalid;
+                    response.detail = "provider_load_self_test_contract_invalid";
+                    break;
+                }
+                if (!landmark_coordinator) {
+                    response.status = StatusCode::capability_unavailable;
+                    response.detail = "native_landmark_provider_not_built";
+                    break;
+                }
+                const auto loaded = landmark_coordinator->load(
+                    command->launch, runtime.active_generation(), now);
+                if (loaded.disposition != LandmarkProviderDispositionV1::ready) {
+                    const auto ignored = landmark_coordinator->unload(monotonic_ns());
+                    (void)ignored;
+                    response.status = StatusCode::capability_unavailable;
+                    response.detail = "provider_load_self_test_bypass:" + loaded.detail;
+                    break;
+                }
+                const auto unloaded = landmark_coordinator->unload(monotonic_ns());
+                if (unloaded.disposition != LandmarkProviderDispositionV1::unloaded) {
+                    response.status = StatusCode::internal_error;
+                    response.detail = "provider_load_self_test_unload_failed";
+                    break;
+                }
+                response.detail = "admitted_landmark_provider_load_self_test_passed";
                 break;
             }
             case CommandKind::install_character_mouth_atlas: {

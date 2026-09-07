@@ -51,6 +51,9 @@ struct AdmittedLandmarkProviderLaunchV1 {
     std::uint32_t maximum_signal_rate_hz{};
     std::uint32_t inference_threads{};
     std::uint32_t exact_target_process_id{};
+    // Schema v2 only. A setup self-test has no game target authority and the
+    // worker unloads it before acknowledging success.
+    bool provider_load_self_test{};
 };
 
 struct LandmarkInferenceWorkV1 {
