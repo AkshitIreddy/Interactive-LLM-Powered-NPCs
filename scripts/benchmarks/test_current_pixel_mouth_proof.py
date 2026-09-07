@@ -247,6 +247,29 @@ class CurrentPixelMouthProofTests(unittest.TestCase):
         unrelated = np.random.default_rng(501).integers(0,256,source.shape,dtype=np.uint8)
         self.assertIsNone(mouth_proof.bridge_geometry(source,unrelated,contours))
 
+    def test_source_edges_reject_a_mesh_cavity_drawn_through_closed_lips(self) -> None:
+        prior = self.contours()
+        x = prior["outerUpper"][:,0]
+        arch = np.maximum(0,1-((x-self.mouth_center[0])/30)**2)
+        for key,offset in (("outerUpper",-12),("outerLower",8),("innerUpper",-8),("innerLower",2)):
+            prior[key][:,1] = self.mouth_center[1]+offset*arch
+        source = np.full((self.frame_height,self.frame_width,3),150,np.uint8)
+        upper = np.stack([x,self.mouth_center[1]-4*arch],-1)
+        lower = np.stack([x,self.mouth_center[1]+5*arch],-1)
+        polygon = np.rint(np.concatenate([upper,lower[::-1]])).astype(np.int32)
+        cv2.fillPoly(source,[polygon],(25,15,40))
+        cv2.line(source,(72,72),(120,72),(10,5,15),1)
+        corrected,evidence = mouth_proof.refine_source_edges(source,prior)
+        self.assertTrue(evidence["sourceEdgeContact"])
+        self.assertTrue(np.allclose(corrected["innerUpper"],corrected["innerLower"]))
+        self.assertLess(abs(corrected["outerUpper"][5,1]-68),1.5)
+        self.assertLess(abs(corrected["outerLower"][5,1]-77),1.5)
+
+    def test_source_edge_refinement_rejects_flat_appearance(self) -> None:
+        blank = np.full((self.frame_height,self.frame_width,3),80,np.uint8)
+        with self.assertRaisesRegex(ValueError,"lack usable contrast"):
+            mouth_proof.refine_source_edges(blank,self.contours())
+
     def test_continuous_cues_hold_contact_without_overshooting(self) -> None:
         cues = [(0,200,8),(200,300,1),(300,500,10),(500,700,0)]
         trajectory = mouth_proof.continuous_cue_trajectory(cues,1000)

@@ -83,6 +83,92 @@ def smooth_local_shape(contours: dict, previous: dict | None, fps: float) -> tup
     return {key: value*width @ axes+center for key, value in filtered.items()}, filtered
 
 
+def refine_source_edges(image: np.ndarray, contours: dict) -> tuple[dict, dict]:
+    """Resolve dark-vermilion boundaries from current pixels, not mesh labels.
+
+    This experimental contrast-dependent path is explicitly selected for its
+    qualification clip. It is not a generic skin/lip segmentation model.
+    Dynamic programming joins signed source edges across the mouth; an inner
+    polygon cutting through the observed lip surface is rejected as an aperture.
+    """
+    center, axes, width = mouth_coordinates(contours)
+    if width < 24:
+        raise ValueError("source-edge mouth below resolution floor")
+    local = {key: (value-center) @ axes.T for key,value in contours.items()}
+    xs = local["outerUpper"][:,0].copy()
+    prior = {}
+    for key,points in local.items():
+        order = np.argsort(points[:,0])
+        prior[key] = np.interp(xs,points[order,0],points[order,1])
+    points = np.concatenate(list(contours.values()))
+    origin = np.maximum(np.floor(points.min(0)-width*.4).astype(int),0)
+    end = np.minimum(np.ceil(points.max(0)+width*.4).astype(int),image.shape[1::-1])
+    gray = cv2.cvtColor(image[origin[1]:end[1],origin[0]:end[0]],cv2.COLOR_BGR2GRAY).astype(np.float32)
+    gray = cv2.GaussianBlur(gray,(3,3),.55)
+    derivative_x = cv2.Sobel(gray,cv2.CV_32F,1,0,ksize=3,scale=.125)
+    derivative_y = cv2.Sobel(gray,cv2.CV_32F,0,1,ksize=3,scale=.125)
+    derivative = derivative_x*axes[1,0]+derivative_y*axes[1,1]
+    def sample(field,ys):
+        coordinates = np.stack([np.broadcast_to(xs[:,None],ys.shape),ys],-1) @ axes+center-origin
+        return cv2.remap(field,coordinates[...,0].astype(np.float32),
+                         coordinates[...,1].astype(np.float32),cv2.INTER_LINEAR)
+    def trace(reference,low,high,polarity):
+        levels = np.arange(float(low.min())-.5,float(high.max())+.6,.25)
+        ys = np.broadcast_to(levels,(11,len(levels)))
+        edge = sample(derivative,ys)*polarity
+        scale = max(1,float(np.percentile(np.maximum(edge,0),90)))
+        score = -edge/scale + .002*(ys-reference[:,None])**2
+        allowed = (ys>=low[:,None]) & (ys<=high[:,None])
+        score[~allowed] = 1e6
+        score[0] += 20*(levels-reference[0])**2
+        score[-1] += 20*(levels-reference[-1])**2
+        # Neighbor cost penalizes slope jitter relative to the measured prior,
+        # while still allowing the ~0.2W cupid-bow corrections seen in Misty.
+        cost, back = score[0].copy(), []
+        for column in range(1,11):
+            slope = reference[column]-reference[column-1]
+            transition = .003*(levels[None,:]-levels[:,None]-slope)**2
+            candidates = cost[:,None]+transition
+            parent = candidates.argmin(0)
+            cost = score[column]+candidates[parent,np.arange(len(levels))]
+            back.append(parent)
+        selection = [int(cost.argmin())]
+        for parent in back[::-1]:
+            selection.append(int(parent[selection[-1]]))
+        selection = selection[::-1]
+        curve = levels[selection]
+        response = edge[np.arange(11),selection]
+        return curve, float(np.median(response[3:8]))
+    upper, upper_confidence = trace(prior["outerUpper"],prior["outerUpper"]-.1*width,
+        np.minimum(prior["innerUpper"]+.08*width,prior["outerUpper"]+.2*width),-1)
+    lower, lower_confidence = trace(prior["outerLower"],
+        np.maximum(prior["innerLower"]+.025*width,prior["outerLower"]-.2*width),
+        prior["outerLower"]+.1*width,1)
+    if min(upper_confidence,lower_confidence) < 2.0 or np.any(lower[2:9]-upper[2:9]<2):
+        raise ValueError("source vermilion edges lack usable contrast")
+    margin = np.minimum(prior["innerUpper"]-upper,lower-prior["innerLower"])
+    contact = float(np.min(margin[4:7])) < .75
+    result = {key:value.copy() for key,value in contours.items()}
+    result["outerUpper"] = np.stack([xs,upper],-1) @ axes+center
+    result["outerLower"] = np.stack([xs,lower],-1) @ axes+center
+    if contact:
+        # With no valid opposed cavity edges, fit the existing contact ridge.
+        # Do not collapse the detector's falsely labeled lipstick polygon.
+        ridge = np.linspace(upper[0],upper[-1],11)+width*.02*np.maximum(0,1-(xs/(width*.5))**2)
+        offsets = np.linspace(-.06*width,.06*width,25)
+        candidates = ridge[:,None]+offsets
+        darkness = sample(gray,candidates)
+        score = darkness*.07+.4*offsets[None,:]**2
+        score[(candidates<upper[:,None]+.8)|(candidates>lower[:,None]-.8)] = 1e6
+        seam = candidates[np.arange(11),score.argmin(1)]
+        seam[0],seam[-1] = upper[0],upper[-1]
+        result["innerUpper"] = np.stack([xs,seam],-1) @ axes+center
+        result["innerLower"] = result["innerUpper"].copy()
+    return result, {"sourceEdgeUpperContrast":upper_confidence,
+        "sourceEdgeLowerContrast":lower_confidence,"sourceEdgeContact":bool(contact),
+        "sourceEdgeInnerMarginPixels":float(np.min(margin[4:7]))}
+
+
 def bridge_geometry(previous_gray: np.ndarray, current_gray: np.ndarray,
                     previous_contours: dict) -> dict | None:
     """One-frame geometry bridge using untouched-frame forward/backward flow.
@@ -494,6 +580,7 @@ def main() -> None:
     parser.add_argument("--oral-contours", type=Path)
     parser.add_argument("--manual-exclusions", type=Path)
     parser.add_argument("--trajectory", choices=("continuous", "category-ema"), default="continuous")
+    parser.add_argument("--refine-source-edges", action="store_true")
     args = parser.parse_args()
     if args.oral_reference and args.warp != "strips":
         raise ValueError("oral references require the strips renderer")
@@ -549,6 +636,13 @@ def main() -> None:
             previous_raw = contours
             previous_gray = current_gray
             previous_was_bridge = geometry_source == "one-frame-source-optical-flow"
+            edge_evidence, edge_failure = {}, None
+            if contours is not None and args.refine_source_edges:
+                try:
+                    contours, edge_evidence = refine_source_edges(image,contours)
+                except ValueError as error:
+                    edge_failure = str(error)
+                    contours = None
             if contours is not None:
                 contours, previous_shape = smooth_local_shape(contours, previous_shape, args.fps)
             else:
@@ -599,7 +693,7 @@ def main() -> None:
                 except ValueError as error:
                     reason = str(error)
             elif contours is None:
-                reason = "missing-face-geometry"
+                reason = edge_failure or "missing-face-geometry"
             render_ms = (time.perf_counter()-started)*1000
             timing.append(render_ms)
             changed = np.any(result != image, axis=2)
@@ -607,6 +701,7 @@ def main() -> None:
                          "geometrySource": geometry_source,
                          "cueAperture": float(smooth[0]), "cueWidthScale": float(smooth[1]),
                          "speechStrength": speech_strength,
+                         **edge_evidence,
                          "changedPixels": int(changed.sum()), "landmarkMs": landmark_ms,
                          "renderMs": render_ms, **extra})
             geometry.append({"file": path.name, "contours": None if contours is None else
@@ -631,6 +726,7 @@ def main() -> None:
               "sourceFrames": str(args.frames.resolve()), "firstSourceSha256": digest(paths[0]),
               "cueSha256": digest(args.cues), "faceBox": args.face_box, "fps": args.fps,
               "strength": args.strength, "warp": args.warp, "frameCount": len(rows),
+              "sourceEdgeRefinement":args.refine_source_edges,
               "cueLookaheadMs": None if args.trajectory == "continuous" else 40,
               "cueTrajectory": args.trajectory,
               "cueScheduleScope": "whole utterance known offline; no streaming parity" if args.trajectory == "continuous" else "bounded 40ms cue anticipation",
