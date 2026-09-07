@@ -48,6 +48,7 @@ const MAX_MESSAGE_BYTES: usize = MAX_ATLAS_BYTES + 512 * 1024;
 const FULL_LIP_ATLAS_SCHEMA: u32 = 1;
 const NORMALIZED_ORAL_ATLAS_SCHEMA: u32 = 2;
 const PHOTOMETRIC_FULL_LIP_ATLAS_SCHEMA: u32 = 3;
+const CURRENT_PIXEL_ORAL_STRIP_ATLAS_SCHEMA: u32 = 4;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_millis(500);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
@@ -2361,6 +2362,10 @@ struct ReviewMouthAtlasState {
     index: u32,
     coefficients: [f64; 8],
     enrolled_pose: [f64; 3],
+    #[serde(default)]
+    reference_context_mean: Option<f64>,
+    #[serde(default)]
+    refine_source_edges: bool,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -2371,6 +2376,8 @@ enum ReviewMouthAtlasRepresentation {
     NormalizedOralInteriorV1,
     #[serde(rename = "photometric-full-lip-reference-v1")]
     PhotometricFullLipReferenceV1,
+    #[serde(rename = "normalized-oral-strip-v1")]
+    NormalizedOralStripV1,
 }
 
 #[derive(Clone, Debug)]
@@ -2380,6 +2387,8 @@ struct CharacterMouthAtlasState {
     height: u32,
     stride_bytes: u32,
     enrolled_pose: [f64; 3],
+    reference_context_mean: Option<f64>,
+    refine_source_edges: bool,
     premultiplied_bgra: Vec<u8>,
 }
 
@@ -3226,7 +3235,10 @@ fn encode_character_mouth_atlas(
 ) -> Result<Vec<u8>, VisualRuntimeError> {
     if !matches!(
         atlas.schema_version,
-        FULL_LIP_ATLAS_SCHEMA | NORMALIZED_ORAL_ATLAS_SCHEMA | PHOTOMETRIC_FULL_LIP_ATLAS_SCHEMA
+        FULL_LIP_ATLAS_SCHEMA
+            | NORMALIZED_ORAL_ATLAS_SCHEMA
+            | PHOTOMETRIC_FULL_LIP_ATLAS_SCHEMA
+            | CURRENT_PIXEL_ORAL_STRIP_ATLAS_SCHEMA
     ) || atlas.cancellation_generation == 0
         || atlas.actor_id == 0
         || atlas.identity_revision == 0
@@ -3236,6 +3248,7 @@ fn encode_character_mouth_atlas(
         return Err(VisualRuntimeError::Payload);
     }
     let first = atlas.states.first().ok_or(VisualRuntimeError::Payload)?;
+    let refine_source_edges = first.refine_source_edges;
     let mut total_pixels = 0_usize;
     let mut wire = WireWriter::default();
     wire.u32(atlas.schema_version);
@@ -3249,6 +3262,20 @@ fn encode_character_mouth_atlas(
             .iter()
             .all(|value| value.is_finite() && (0.0..=1.0).contains(value));
         let pose_valid = state.enrolled_pose.iter().all(|value| value.is_finite());
+        let reference_context_valid = match (atlas.schema_version, state.reference_context_mean) {
+            (CURRENT_PIXEL_ORAL_STRIP_ATLAS_SCHEMA, Some(value)) => {
+                value.is_finite() && value > 0.0 && value <= 255.0
+            }
+            (CURRENT_PIXEL_ORAL_STRIP_ATLAS_SCHEMA, None) => false,
+            (_, None) => true,
+            (_, Some(_)) => false,
+        };
+        let source_edge_policy_valid =
+            if atlas.schema_version == CURRENT_PIXEL_ORAL_STRIP_ATLAS_SCHEMA {
+                state.refine_source_edges == refine_source_edges
+            } else {
+                !state.refine_source_edges
+            };
         let pixels_valid = state.width >= 16
             && state.height >= 16
             && state.width <= 512
@@ -3266,7 +3293,12 @@ fn encode_character_mouth_atlas(
                 .premultiplied_bgra
                 .chunks_exact(4)
                 .all(|pixel| pixel[0] <= pixel[3] && pixel[1] <= pixel[3] && pixel[2] <= pixel[3]);
-        if !coefficients_valid || !pose_valid || !pixels_valid {
+        if !coefficients_valid
+            || !pose_valid
+            || !reference_context_valid
+            || !source_edge_policy_valid
+            || !pixels_valid
+        {
             return Err(VisualRuntimeError::Payload);
         }
         total_pixels = total_pixels
@@ -3283,6 +3315,14 @@ fn encode_character_mouth_atlas(
         wire.u32(state.stride_bytes);
         for pose in state.enrolled_pose {
             wire.f64(pose);
+        }
+        if atlas.schema_version == CURRENT_PIXEL_ORAL_STRIP_ATLAS_SCHEMA {
+            wire.f64(
+                state
+                    .reference_context_mean
+                    .ok_or(VisualRuntimeError::Payload)?,
+            );
+            wire.boolean(state.refine_source_edges);
         }
         wire.bytes(&state.premultiplied_bgra)?;
     }
@@ -4418,12 +4458,16 @@ fn resolve_character_mouth_atlas(
                 PHOTOMETRIC_FULL_LIP_ATLAS_SCHEMA,
                 Some(ReviewMouthAtlasRepresentation::PhotometricFullLipReferenceV1)
             )
+            | (
+                CURRENT_PIXEL_ORAL_STRIP_ATLAS_SCHEMA,
+                Some(ReviewMouthAtlasRepresentation::NormalizedOralStripV1)
+            )
     );
     let neutral_state_valid = match manifest.schema_version {
         PHOTOMETRIC_FULL_LIP_ATLAS_SCHEMA => manifest.neutral_state_index == Some(0),
-        FULL_LIP_ATLAS_SCHEMA | NORMALIZED_ORAL_ATLAS_SCHEMA => {
-            manifest.neutral_state_index.is_none()
-        }
+        FULL_LIP_ATLAS_SCHEMA
+        | NORMALIZED_ORAL_ATLAS_SCHEMA
+        | CURRENT_PIXEL_ORAL_STRIP_ATLAS_SCHEMA => manifest.neutral_state_index.is_none(),
         _ => false,
     };
     let dimensions_valid = representation_valid
@@ -4484,6 +4528,10 @@ fn resolve_character_mouth_atlas(
     let texture_file_name = texture.file.clone();
     let state_bytes = texture.state_bytes as usize;
     let mut states = Vec::with_capacity(manifest.states.len());
+    let refine_source_edges = manifest
+        .states
+        .first()
+        .map(|state| state.refine_source_edges);
     for (expected_index, state) in manifest.states.into_iter().enumerate() {
         if state.index as usize != expected_index
             || !state
@@ -4491,6 +4539,19 @@ fn resolve_character_mouth_atlas(
                 .iter()
                 .all(|value| value.is_finite() && (0.0..=1.0).contains(value))
             || !state.enrolled_pose.iter().all(|value| value.is_finite())
+            || match (manifest.schema_version, state.reference_context_mean) {
+                (CURRENT_PIXEL_ORAL_STRIP_ATLAS_SCHEMA, Some(value)) => {
+                    !value.is_finite() || value <= 0.0 || value > 255.0
+                }
+                (CURRENT_PIXEL_ORAL_STRIP_ATLAS_SCHEMA, None) => true,
+                (_, None) => false,
+                (_, Some(_)) => true,
+            }
+            || if manifest.schema_version == CURRENT_PIXEL_ORAL_STRIP_ATLAS_SCHEMA {
+                Some(state.refine_source_edges) != refine_source_edges
+            } else {
+                state.refine_source_edges
+            }
         {
             return Err(VisualRuntimeError::Admission(
                 "review mouth atlas state metadata is invalid".into(),
@@ -4520,6 +4581,8 @@ fn resolve_character_mouth_atlas(
             height: texture.height,
             stride_bytes: texture.stride_bytes,
             enrolled_pose: state.enrolled_pose,
+            reference_context_mean: state.reference_context_mean,
+            refine_source_edges: state.refine_source_edges,
             premultiplied_bgra: state_pixels,
         });
     }
@@ -5048,6 +5111,10 @@ pub enum VisualRuntimeError {
 }
 
 #[cfg(test)]
+#[path = "visual_runtime_schema4_join_tests.rs"]
+mod schema4_join_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -5068,6 +5135,8 @@ mod tests {
                 height: 16,
                 stride_bytes: 96,
                 enrolled_pose: [0.0, 0.0, 0.0],
+                reference_context_mean: None,
+                refine_source_edges: false,
                 premultiplied_bgra: pixels,
             }
         };
@@ -5128,12 +5197,17 @@ mod tests {
         }
         let states = (0..4)
             .map(|index| {
-                serde_json::json!({
+                let mut state = serde_json::json!({
                     "index": index,
                     "coefficients": [index as f64 / 3.0, 1.0 - index as f64 / 3.0,
                                       0.0, 0.0, 0.0, 0.0, 0.0, index as f64 / 3.0],
                     "enrolledPose": [0.0, 0.0, 0.0]
-                })
+                });
+                if schema_version == CURRENT_PIXEL_ORAL_STRIP_ATLAS_SCHEMA {
+                    state["referenceContextMean"] = serde_json::json!(84.0 + index as f64);
+                    state["refineSourceEdges"] = serde_json::json!(true);
+                }
+                state
             })
             .collect::<Vec<_>>();
         let mut manifest = serde_json::json!({
@@ -5173,6 +5247,7 @@ mod tests {
         let atlas = test_character_mouth_atlas();
         let encoded = encode_character_mouth_atlas(&atlas).expect("valid atlas wire");
         assert!(encoded.len() < MAX_MESSAGE_BYTES);
+        assert_eq!(encoded.len(), 6_592, "schema-one wire layout changed");
         assert_eq!(
             u32::from_le_bytes(encoded[0..4].try_into().expect("schema bytes")),
             1
@@ -5199,11 +5274,114 @@ mod tests {
         ));
 
         let mut invalid_schema = test_character_mouth_atlas();
-        invalid_schema.schema_version = 4;
+        invalid_schema.schema_version = 5;
         assert!(matches!(
             encode_character_mouth_atlas(&invalid_schema),
             Err(VisualRuntimeError::Payload)
         ));
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn review_atlas_loader_preserves_schema_four_context_and_edge_policy_on_worker_wire() {
+        let directory = tempfile::tempdir().expect("atlas scratch");
+        let (manifest, pixels) = test_review_atlas_document(
+            CURRENT_PIXEL_ORAL_STRIP_ATLAS_SCHEMA,
+            "normalized-oral-strip-v1",
+        );
+        write_test_review_atlas(directory.path(), &manifest, &pixels);
+
+        let loaded =
+            resolve_character_mouth_atlas(Some(directory.path()), 7, &test_review_atlas_identity())
+                .expect("schema-four oral strip atlas");
+        assert_eq!(loaded.schema_version, CURRENT_PIXEL_ORAL_STRIP_ATLAS_SCHEMA);
+        assert!(loaded.states.iter().all(|state| state.refine_source_edges));
+        assert_eq!(loaded.states[0].reference_context_mean, Some(84.0));
+
+        let wire = encode_character_mouth_atlas(&loaded).expect("schema-four worker wire");
+        assert_eq!(
+            u32::from_le_bytes(wire[0..4].try_into().expect("schema bytes")),
+            CURRENT_PIXEL_ORAL_STRIP_ATLAS_SCHEMA
+        );
+        assert_eq!(
+            f64::from_le_bytes(wire[132..140].try_into().expect("context bytes")),
+            84.0
+        );
+        assert_eq!(wire[140], 1, "source-edge opt-in must follow context");
+        assert_eq!(
+            u32::from_le_bytes(wire[141..145].try_into().expect("pixel length bytes")),
+            24 * 16 * 4
+        );
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn review_atlas_loader_rejects_invalid_schema_four_context_or_mixed_edge_policy() {
+        for case in [
+            "context-missing",
+            "context-zero",
+            "context-overflow",
+            "mixed-edge-policy",
+        ] {
+            let directory = tempfile::tempdir().expect("atlas scratch");
+            let (mut manifest, pixels) = test_review_atlas_document(
+                CURRENT_PIXEL_ORAL_STRIP_ATLAS_SCHEMA,
+                "normalized-oral-strip-v1",
+            );
+            match case {
+                "context-missing" => {
+                    manifest["states"][0]
+                        .as_object_mut()
+                        .expect("state object")
+                        .remove("referenceContextMean");
+                }
+                "context-zero" => {
+                    manifest["states"][0]["referenceContextMean"] = serde_json::json!(0.0);
+                }
+                "context-overflow" => {
+                    manifest["states"][0]["referenceContextMean"] = serde_json::json!(255.01);
+                }
+                "mixed-edge-policy" => {
+                    manifest["states"][1]["refineSourceEdges"] = serde_json::json!(false);
+                }
+                _ => unreachable!(),
+            }
+            write_test_review_atlas(directory.path(), &manifest, &pixels);
+            assert!(matches!(
+                resolve_character_mouth_atlas(
+                    Some(directory.path()),
+                    7,
+                    &test_review_atlas_identity(),
+                ),
+                Err(VisualRuntimeError::Admission(_))
+            ));
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn legacy_atlas_rejects_schema_four_only_state_fields() {
+        for field in ["referenceContextMean", "refineSourceEdges"] {
+            let directory = tempfile::tempdir().expect("atlas scratch");
+            let (mut manifest, pixels) = test_review_atlas_document(
+                NORMALIZED_ORAL_ATLAS_SCHEMA,
+                "normalized-oral-interior-v1",
+            );
+            manifest["states"][0][field] = if field == "referenceContextMean" {
+                serde_json::json!(84.0)
+            } else {
+                serde_json::json!(true)
+            };
+            write_test_review_atlas(directory.path(), &manifest, &pixels);
+            assert!(matches!(
+                resolve_character_mouth_atlas(
+                    Some(directory.path()),
+                    7,
+                    &test_review_atlas_identity(),
+                ),
+                Err(VisualRuntimeError::Admission(_))
+            ));
+        }
     }
 
     #[cfg(debug_assertions)]
