@@ -232,12 +232,39 @@ const fn offline_game(id: &'static str, name: &'static str) -> GameDeclaration {
 #[derive(Debug, Clone)]
 pub struct ResourceCatalog {
     installed_resource_root: Option<PathBuf>,
+    active_content_profile_root: Option<PathBuf>,
+    character_content_override_path: Option<PathBuf>,
 }
 
 impl ResourceCatalog {
     pub fn new(installed_resource_root: Option<PathBuf>) -> Self {
         Self {
             installed_resource_root,
+            active_content_profile_root: None,
+            character_content_override_path: None,
+        }
+    }
+
+    pub fn with_active_content_profiles(
+        installed_resource_root: Option<PathBuf>,
+        active_content_profile_root: PathBuf,
+    ) -> Self {
+        Self {
+            installed_resource_root,
+            active_content_profile_root: Some(active_content_profile_root),
+            character_content_override_path: None,
+        }
+    }
+
+    pub fn with_user_content_layers(
+        installed_resource_root: Option<PathBuf>,
+        active_content_profile_root: PathBuf,
+        character_content_override_path: PathBuf,
+    ) -> Self {
+        Self {
+            installed_resource_root,
+            active_content_profile_root: Some(active_content_profile_root),
+            character_content_override_path: Some(character_content_override_path),
         }
     }
 
@@ -269,6 +296,21 @@ impl ResourceCatalog {
         if !GAMES.iter().any(|game| game.id == id) {
             return Err(ResourceProfileError::UnknownProfile);
         }
+        let mut profile = self.load_fixed_game_profile(id)?;
+        if let Some(path) = &self.character_content_override_path {
+            crate::character_content_overrides::apply_saved_overrides(path, &mut profile)
+                .map_err(|error| ResourceProfileError::Overrides(error.to_string()))?;
+        }
+        Ok(profile)
+    }
+
+    pub(crate) fn load_game_profile_without_character_overrides(
+        &self,
+        id: &str,
+    ) -> Result<npc_game_profile::GameProfileV2, ResourceProfileError> {
+        if !GAMES.iter().any(|game| game.id == id) {
+            return Err(ResourceProfileError::UnknownProfile);
+        }
         self.load_fixed_game_profile(id)
     }
 
@@ -287,8 +329,20 @@ impl ResourceCatalog {
         &self,
         id: &str,
     ) -> Result<npc_game_profile::GameProfileV2, ResourceProfileError> {
+        if let Some(path) = self.active_content_profile_path(id) {
+            if path.is_file() {
+                return self.load_active_content_profile(id, &path);
+            }
+        }
+        self.load_builtin_game_profile(id)
+    }
+
+    pub(crate) fn load_builtin_game_profile(
+        &self,
+        id: &str,
+    ) -> Result<npc_game_profile::GameProfileV2, ResourceProfileError> {
         let path = self
-            .profile_paths(id)
+            .builtin_profile_paths(id)
             .into_iter()
             .find(|path| path.is_file())
             .ok_or(ResourceProfileError::Missing)?;
@@ -312,7 +366,48 @@ impl ResourceCatalog {
         Ok(profile)
     }
 
-    fn profile_paths(&self, id: &str) -> Vec<PathBuf> {
+    pub(crate) fn load_bundled_catalog_profile(
+        &self,
+        id: &str,
+    ) -> Result<npc_game_profile::GameProfileV2, ResourceProfileError> {
+        if !GAMES.iter().any(|game| game.id == id) {
+            return Err(ResourceProfileError::UnknownProfile);
+        }
+        self.load_builtin_game_profile(id)
+    }
+
+    fn load_active_content_profile(
+        &self,
+        id: &str,
+        path: &Path,
+    ) -> Result<npc_game_profile::GameProfileV2, ResourceProfileError> {
+        let metadata = std::fs::symlink_metadata(path).map_err(ResourceProfileError::Io)?;
+        if !metadata.is_file()
+            || metadata.file_type().is_symlink()
+            || metadata.len() > 4 * 1024 * 1024
+        {
+            return Err(ResourceProfileError::UnsafeResource);
+        }
+        let bytes = std::fs::read(path).map_err(ResourceProfileError::Io)?;
+        let active: crate::content_packs::ActiveProfileDocumentV1 =
+            serde_json::from_slice(&bytes).map_err(ResourceProfileError::Decode)?;
+        if active.schema_version != 1 || active.game_profile_id != id || active.profile.id != id {
+            return Err(ResourceProfileError::IdentityMismatch);
+        }
+        let profile_bytes =
+            serde_json::to_vec(&active.profile).map_err(ResourceProfileError::Decode)?;
+        let profile = npc_game_profile::load_profile(&profile_bytes)
+            .map_err(|_| ResourceProfileError::InvalidProfile)?;
+        Ok(profile)
+    }
+
+    fn active_content_profile_path(&self, id: &str) -> Option<PathBuf> {
+        self.active_content_profile_root
+            .as_ref()
+            .map(|root| root.join(format!("{id}.json")))
+    }
+
+    fn builtin_profile_paths(&self, id: &str) -> Vec<PathBuf> {
         let mut paths = Vec::with_capacity(2);
         if let Some(root) = &self.installed_resource_root {
             paths.push(
@@ -332,9 +427,12 @@ impl ResourceCatalog {
     }
 
     fn profile_exists(&self, id: &str) -> bool {
-        self.profile_paths(id)
-            .into_iter()
-            .any(|path| path.is_file())
+        self.active_content_profile_path(id)
+            .is_some_and(|path| path.is_file())
+            || self
+                .builtin_profile_paths(id)
+                .into_iter()
+                .any(|path| path.is_file())
     }
 }
 
@@ -354,6 +452,8 @@ pub enum ResourceProfileError {
     Io(std::io::Error),
     #[error("game profile JSON is invalid: {0}")]
     Decode(serde_json::Error),
+    #[error("saved character content override is invalid: {0}")]
+    Overrides(String),
 }
 
 pub fn model_summaries() -> Vec<ModelSummary> {

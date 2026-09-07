@@ -3,6 +3,11 @@ use crate::catalog::{
     provider_summaries, CredentialMutationError, CredentialPresence, ResourceCatalog,
     SystemCredentialPresence,
 };
+use crate::character_content_overrides::{
+    CharacterContentOverrideManagerV1, CharacterContentOverrideMutationV1,
+    CharacterContentOverrideScopeV1, CharacterContentOverrideSnapshotV1,
+    SaveCharacterContentOverrideRequestV1,
+};
 use crate::character_workspace::{
     CharacterCatalogSnapshot, CharacterInspection, CharacterInspectionRequest,
     CharacterMemoryBackupDeleteRequest, CharacterMemoryBackupDeleteResult,
@@ -11,6 +16,10 @@ use crate::character_workspace::{
     CharacterMemoryRestoreResult, CharacterMemoryStatus, CharacterMemoryStatusRequest,
     CharacterWorkspace, RemoveAllLocalMemoryRequest, RemoveAllLocalMemoryResult,
     SelectedCharacterResult,
+};
+use crate::content_packs::{
+    ActivateContentPackRequestV1, ActiveContentPackV1, ContentPackManagerV1, ContentPackPreviewV1,
+    ContentPackStateV1, InspectContentPackRequestV1,
 };
 use crate::credential_prompt::{
     CredentialPrompt, NativePromptOutcome, NativeWindowOwner, SystemCredentialPrompt,
@@ -187,6 +196,8 @@ pub struct AppState {
     pub(crate) credentials: Arc<dyn CredentialPresence>,
     credential_prompt: Arc<dyn CredentialPrompt>,
     resources: ResourceCatalog,
+    content_packs: ContentPackManagerV1,
+    character_content_overrides: CharacterContentOverrideManagerV1,
     pub(crate) provider_loadouts: ProviderLoadoutManager,
     character_workspace: CharacterWorkspace,
     game_targets: GameTargetManager,
@@ -316,6 +327,13 @@ impl AppState {
             media_broker.clone(),
             Arc::clone(&diagnostics_v2),
         );
+        let content_packs = ContentPackManagerV1::new(&config_directory);
+        let character_content_overrides = CharacterContentOverrideManagerV1::new(&config_directory);
+        let resources = ResourceCatalog::with_user_content_layers(
+            resource_directory,
+            content_packs.active_profile_root(),
+            character_content_overrides.path(),
+        );
         let provider_loadouts = ProviderLoadoutManager::new_for_distribution(
             config_directory,
             application_namespace,
@@ -335,7 +353,9 @@ impl AppState {
             identity_runtime,
             credentials,
             credential_prompt,
-            resources: ResourceCatalog::new(resource_directory),
+            resources,
+            content_packs,
+            character_content_overrides,
             provider_loadouts,
             character_workspace,
             game_targets: GameTargetManager::default(),
@@ -719,6 +739,12 @@ pub async fn start_simulation(
         // Authored profiles use the canonical character ID. A display name is
         // generic/manual-selection data and must not override profile identity.
         request.character_name = None;
+        request.effective_game_profile = Some(
+            state
+                .resources
+                .load_game_profile(game_profile_id)
+                .map_err(product_error)?,
+        );
     }
     let context = LoadoutContextV1 {
         game_id: request.game_profile_id.clone(),
@@ -1585,6 +1611,97 @@ pub fn select_game_character(
         .character_workspace
         .select(&state.resources, &game_profile_id, &character_id)
         .map_err(product_error)
+}
+
+#[tauri::command]
+pub fn character_content_override(
+    request: CharacterContentOverrideScopeV1,
+    state: State<'_, AppState>,
+) -> Result<CharacterContentOverrideSnapshotV1, CommandError> {
+    let profile = state
+        .resources
+        .load_game_profile_without_character_overrides(&request.game_profile_id)
+        .map_err(product_error)?;
+    CharacterDatabase::new(profile)
+        .map_err(product_error)?
+        .require_character(&request.character_id)
+        .map_err(product_error)?;
+    state
+        .character_content_overrides
+        .snapshot(request)
+        .map_err(product_error)
+}
+
+#[tauri::command]
+pub fn save_character_content_override(
+    request: SaveCharacterContentOverrideRequestV1,
+    state: State<'_, AppState>,
+) -> Result<CharacterContentOverrideMutationV1, CommandError> {
+    record_native_product_event(
+        &state,
+        "character-db",
+        "character.content_override_save_requested",
+    );
+    let profile = state
+        .resources
+        .load_game_profile_without_character_overrides(&request.game_profile_id)
+        .map_err(product_error)?;
+    state
+        .character_content_overrides
+        .save(request, &profile)
+        .map_err(product_error)
+}
+
+#[tauri::command]
+pub fn reset_character_content_override(
+    request: CharacterContentOverrideScopeV1,
+    state: State<'_, AppState>,
+) -> Result<CharacterContentOverrideMutationV1, CommandError> {
+    record_native_product_event(
+        &state,
+        "character-db",
+        "character.content_override_reset_requested",
+    );
+    let profile = state
+        .resources
+        .load_game_profile_without_character_overrides(&request.game_profile_id)
+        .map_err(product_error)?;
+    CharacterDatabase::new(profile)
+        .map_err(product_error)?
+        .require_character(&request.character_id)
+        .map_err(product_error)?;
+    state
+        .character_content_overrides
+        .reset(request)
+        .map_err(product_error)
+}
+
+#[tauri::command]
+pub fn inspect_content_pack(
+    request: InspectContentPackRequestV1,
+    state: State<'_, AppState>,
+) -> Result<ContentPackPreviewV1, CommandError> {
+    state
+        .content_packs
+        .inspect(request, &state.resources)
+        .map_err(product_error)
+}
+
+#[tauri::command]
+pub fn activate_content_pack(
+    request: ActivateContentPackRequestV1,
+    state: State<'_, AppState>,
+) -> Result<ActiveContentPackV1, CommandError> {
+    record_native_product_event(&state, "content-packs", "content-pack.activation_requested");
+    state
+        .content_packs
+        .activate(request, &state.resources)
+        .map_err(product_error)
+}
+
+#[tauri::command]
+pub fn content_pack_state(state: State<'_, AppState>) -> Result<ContentPackStateV1, CommandError> {
+    state.content_packs.state().map_err(product_error)
 }
 
 #[tauri::command]

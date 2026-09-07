@@ -1,6 +1,8 @@
 pub mod catalog;
+mod character_content_overrides;
 pub mod character_workspace;
 mod commands;
+mod content_packs;
 mod credential_prompt;
 mod diagnostics_v2;
 mod domain;
@@ -94,6 +96,12 @@ pub fn run() {
             commands::character_database_inspection,
             commands::character_database_catalog,
             commands::select_game_character,
+            commands::character_content_override,
+            commands::save_character_content_override,
+            commands::reset_character_content_override,
+            commands::inspect_content_pack,
+            commands::activate_content_pack,
+            commands::content_pack_state,
             commands::character_memory_status,
             commands::backup_all_local_memory,
             commands::list_local_memory_backups,

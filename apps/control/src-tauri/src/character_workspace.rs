@@ -448,7 +448,7 @@ impl CharacterWorkspace {
                         .to_ascii_lowercase(),
                 })
                 .collect(),
-            editable_authored_data: false,
+            editable_authored_data: true,
         })
     }
 
