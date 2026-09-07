@@ -1,0 +1,228 @@
+{
+  "$schema": "./model-pack-manifest.schema.json",
+  "schema": "npc.model-pack/v2",
+  "pack_id": "openseeface-yunet640-lm1-mouth-signal",
+  "revision": "85aa70fc67582d046e771ea73625182a0d8f7475",
+  "display_name": "YuNet 640 + OpenSeeFace LM1 mouth signal",
+  "description": "Optional CPU-only YuNet face detector and OpenSeeFace 66-point landmark signal pack for the native mouth worker. It emits generic face and mouth geometry, is not an identity model or complete lip-sync renderer, and remains inactive until its provider-load self-test, separate native inference qualification, signed current-device resource envelope, and whole-loadout admission all pass.",
+  "source": {
+    "project_url": "https://github.com/emilianavt/OpenSeeFace",
+    "immutable_revision": "85aa70fc67582d046e771ea73625182a0d8f7475",
+    "model_card_url": "https://github.com/emilianavt/OpenSeeFace/tree/85aa70fc67582d046e771ea73625182a0d8f7475"
+  },
+  "capability": {
+    "kind": "vision",
+    "scope": "generic"
+  },
+  "artifacts": [
+    {
+      "id": "yunet-2023mar-onnx",
+      "role": "model_weights",
+      "kind": "file",
+      "archive_format": null,
+      "source_urls": [
+        "https://media.githubusercontent.com/media/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
+      ],
+      "size_bytes": 232589,
+      "sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
+      "destination": "models/face_detection_yunet_2023mar.onnx",
+      "strip_prefix": null,
+      "required_paths": []
+    },
+    {
+      "id": "yunet-license",
+      "role": "license",
+      "kind": "file",
+      "archive_format": null,
+      "source_urls": [
+        "https://raw.githubusercontent.com/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_detection_yunet/LICENSE"
+      ],
+      "size_bytes": 1085,
+      "sha256": "c83b8120c50ccbd4c4f96edf53141bdd566ebb8f8e9227e415326aa1b1aba958",
+      "destination": "licenses/YUNET-MIT.txt",
+      "strip_prefix": null,
+      "required_paths": []
+    },
+    {
+      "id": "lm-model1-opt",
+      "role": "model_weights",
+      "kind": "file",
+      "archive_format": null,
+      "source_urls": [
+        "https://raw.githubusercontent.com/emilianavt/OpenSeeFace/85aa70fc67582d046e771ea73625182a0d8f7475/models/lm_model1_opt.onnx"
+      ],
+      "size_bytes": 4842329,
+      "sha256": "5bec42b298a24142cdb249a7256d65bc3fc0fbc673fa1752a64f4d7164719c9f",
+      "destination": "models/lm_model1_opt.onnx",
+      "strip_prefix": null,
+      "required_paths": []
+    },
+    {
+      "id": "openseeface-license",
+      "role": "license",
+      "kind": "file",
+      "archive_format": null,
+      "source_urls": [
+        "https://raw.githubusercontent.com/emilianavt/OpenSeeFace/85aa70fc67582d046e771ea73625182a0d8f7475/LICENSE"
+      ],
+      "size_bytes": 1364,
+      "sha256": "28612834d7ca038a9009550e3869a67e6be3a87c238d997f58c0907e08744146",
+      "destination": "licenses/OPENSEEFACE-BSD-2-CLAUSE.txt",
+      "strip_prefix": null,
+      "required_paths": []
+    },
+    {
+      "id": "onnxruntime-1.22.1-cpu-windows-x64",
+      "role": "runtime",
+      "kind": "archive",
+      "archive_format": "zip",
+      "source_urls": [
+        "https://github.com/microsoft/onnxruntime/releases/download/v1.22.1/onnxruntime-win-x64-1.22.1.zip"
+      ],
+      "size_bytes": 73731806,
+      "sha256": "855276cd4be3cda14fe636c69eb038d75bf5bcd552bda1193a5d79c51f436dfe",
+      "destination": "runtime/onnxruntime-1.22.1-cpu",
+      "strip_prefix": "onnxruntime-win-x64-1.22.1",
+      "required_paths": [
+        "GIT_COMMIT_ID",
+        "LICENSE",
+        "ThirdPartyNotices.txt",
+        "VERSION_NUMBER",
+        "lib/onnxruntime.dll",
+        "lib/onnxruntime_providers_shared.dll"
+      ]
+    }
+  ],
+  "runtime": {
+    "runtime": "onnxruntime",
+    "immutable_revision": "1.22.1",
+    "abi": "npc-yunet640-lm1-mouth-signal-v1",
+    "entrypoint": null,
+    "supported_platforms": ["windows10", "windows11"],
+    "supported_architectures": ["x86_64"],
+    "backends": ["cpu-execution-provider-one-thread"],
+    "network_access_after_install": false
+  },
+  "hardware": {
+    "minimum_ram_bytes": 268435456,
+    "recommended_ram_bytes": 536870912,
+    "minimum_vram_bytes": 0,
+    "recommended_vram_bytes": 0,
+    "minimum_cpu_threads": 1,
+    "accelerators": ["cpu"],
+    "required_cpu_features": []
+  },
+  "resources": {
+    "storage_bytes": 78809173,
+    "peak_install_bytes": 91581420,
+    "planning_resident_ram_bytes": null,
+    "planning_resident_vram_bytes": 0,
+    "planning_load_millis": null,
+    "planning_hardware": null,
+    "quality_tier": "experimental",
+    "languages": ["language-independent-visual-signal"],
+    "measurement": {
+      "required_schema": "npc.measured-resource-envelope/v1",
+      "minimum_samples": 20,
+      "current_device_fingerprint_required": true,
+      "signed_evidence_required": true,
+      "p99_reload_required": true,
+      "manifest_values_not_for_admission": true
+    }
+  },
+  "license": {
+    "spdx_expression": "MIT AND BSD-2-Clause",
+    "license_name": "YuNet MIT, OpenSeeFace BSD 2-Clause, and ONNX Runtime MIT",
+    "license_url": "https://github.com/emilianavt/OpenSeeFace/blob/85aa70fc67582d046e771ea73625182a0d8f7475/LICENSE",
+    "attribution": "YuNet contributors; OpenSeeFace by Emiliana Torrano; Microsoft ONNX Runtime contributors. Model and runtime artifacts are pinned to their immutable upstream revisions and notices.",
+    "redistributable": true,
+    "commercial_use": "allowed",
+    "derivative_use": "allowed",
+    "acceptance_required": false,
+    "notices": [
+      "The application does not bundle or automatically download this optional pack; installation requires explicit user selection.",
+      "YuNet 2023mar and its MIT notice are pinned to OpenCV Zoo revision 47534e27c9851bb1128ccc0102f1145e27f23f98.",
+      "OpenSeeFace LM1 and its BSD-2-Clause notice are pinned to OpenSeeFace revision 85aa70fc67582d046e771ea73625182a0d8f7475.",
+      "The official ONNX Runtime archive carries its MIT license and mandatory ThirdPartyNotices.txt; both remain subject to extracted-file allowlist and legal reconciliation.",
+      "A provider-load self-test proves only that the exact models can create CPU execution-provider sessions. Native inference packets, timing, memory, cancellation, unload behavior, and tracking quality require separate evidence."
+    ],
+    "components": [
+      {
+        "id": "yunet-2023mar-model",
+        "component": "OpenCV Zoo YuNet 2023mar face detector weight and notice",
+        "spdx_expression": "MIT",
+        "license_url": "https://github.com/opencv/opencv_zoo/blob/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_detection_yunet/LICENSE",
+        "immutable_source_revision": "47534e27c9851bb1128ccc0102f1145e27f23f98",
+        "redistributable": true,
+        "notice_required": true
+      },
+      {
+        "id": "openseeface-lm1-model",
+        "component": "OpenSeeFace LM1 66-point landmark model and notice",
+        "spdx_expression": "BSD-2-Clause",
+        "license_url": "https://github.com/emilianavt/OpenSeeFace/blob/85aa70fc67582d046e771ea73625182a0d8f7475/LICENSE",
+        "immutable_source_revision": "85aa70fc67582d046e771ea73625182a0d8f7475",
+        "redistributable": true,
+        "notice_required": true
+      },
+      {
+        "id": "onnxruntime-1.22.1-cpu",
+        "component": "Microsoft ONNX Runtime 1.22.1 Windows x64 CPU runtime",
+        "spdx_expression": "MIT",
+        "license_url": "https://github.com/microsoft/onnxruntime/blob/v1.22.1/LICENSE",
+        "immutable_source_revision": "v1.22.1",
+        "redistributable": true,
+        "notice_required": true
+      }
+    ]
+  },
+  "self_test": {
+    "kind": "yunet-lm1-provider-load-only-v1",
+    "suite_revision": "2026-09-05",
+    "allowed_runtime_backends": ["cpu-execution-provider-one-thread"],
+    "input_fixture": "self-tests/yunet-lm1-provider-load-only-v1.json",
+    "input_fixture_sha256": null,
+    "expected_output_sha256": null,
+    "timeout_millis": 300000
+  },
+  "voices": [],
+  "extensions": {
+    "vision": {
+      "input_pixel_formats": ["b8g8r8a8_unorm"],
+      "output_signals": ["face_detection", "face_landmarks_66", "mouth_landmarks"],
+      "maximum_signal_rate_hz": 15,
+      "identity_recognition": false
+    }
+  },
+  "lifecycle": {
+    "explicit_download_required": true,
+    "automatic_download_allowed": false,
+    "install_strategy": "verify_then_atomic_activate",
+    "repair_strategy": "verify_quarantine_reinstall",
+    "remove_requires_unreferenced": true,
+    "activation_gates": [
+      "explicit_user_approval",
+      "catalog_trust",
+      "artifact_integrity",
+      "license_acceptance",
+      "runtime_compatibility",
+      "self_test_attestation",
+      "current_device_measurement",
+      "whole_loadout_admission"
+    ]
+  },
+  "trust": {
+    "release_catalog_required": true,
+    "immutable_revision_required": true,
+    "artifact_sha256_required": true,
+    "self_test_attestation_required": true,
+    "measured_resource_envelope_required": true,
+    "unsigned_activation_allowed": false
+  },
+  "admission": {
+    "state": "blocked_pending_measurement",
+    "reason": "The exact YuNet, LM1, license, and ONNX Runtime artifacts are pinned. Provider-load is deliberately separate from native inference qualification. Activation remains blocked until both attestations, a trusted signed current-device resource envelope, release-catalog trust, optional-runtime legal reconciliation, and whole-loadout admission pass.",
+    "allowed_residencies": ["cpu_resident"],
+    "unknowns_fail_closed": true
+  }
+}

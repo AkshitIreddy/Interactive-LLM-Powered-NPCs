@@ -35,6 +35,7 @@ url = "2"
 walkdir = "2"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem"] }
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
+zeroize = "1.8"
 
 [dev-dependencies]
 pretty_assertions = "1"
