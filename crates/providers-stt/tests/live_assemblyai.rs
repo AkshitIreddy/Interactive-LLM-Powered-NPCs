@@ -71,6 +71,38 @@ impl KeyMaterial {
     }
 }
 
+fn resample_pcm_s16le_to_16k(input: &[i16], sample_rate: u32) -> Result<Vec<u8>, &'static str> {
+    if input.is_empty() || !(8_000..=48_000).contains(&sample_rate) {
+        return Err("resample input is invalid");
+    }
+    if sample_rate == 16_000 {
+        return Ok(input
+            .iter()
+            .flat_map(|sample| sample.to_le_bytes())
+            .collect());
+    }
+    let output_samples = input
+        .len()
+        .saturating_mul(16_000)
+        .checked_div(sample_rate as usize)
+        .ok_or("resample rate invalid")?;
+    if output_samples == 0 {
+        return Err("resample output is empty");
+    }
+    let mut output = Vec::with_capacity(output_samples.saturating_mul(2));
+    for index in 0..output_samples {
+        let numerator = index.saturating_mul(sample_rate as usize);
+        let left = numerator / 16_000;
+        let fraction = numerator % 16_000;
+        let a = i64::from(*input.get(left).ok_or("resample index invalid")?);
+        let b = i64::from(*input.get(left + 1).unwrap_or(&input[left]));
+        let sample = ((a * (16_000 - fraction) as i64 + b * fraction as i64) / 16_000)
+            .clamp(i64::from(i16::MIN), i64::from(i16::MAX)) as i16;
+        output.extend_from_slice(&sample.to_le_bytes());
+    }
+    Ok(output)
+}
+
 fn wav_pcm_16k_mono(path: &Path) -> Result<Vec<u8>, &'static str> {
     let wav = fs::read(path).map_err(|_| "audio fixture unavailable")?;
     if wav.len() < 44 || &wav[0..4] != b"RIFF" || &wav[8..12] != b"WAVE" {
@@ -79,7 +111,7 @@ fn wav_pcm_16k_mono(path: &Path) -> Result<Vec<u8>, &'static str> {
     let channels = u16::from_le_bytes([wav[22], wav[23]]);
     let sample_rate = u32::from_le_bytes([wav[24], wav[25], wav[26], wav[27]]);
     let bits = u16::from_le_bytes([wav[34], wav[35]]);
-    if channels != 1 || bits != 16 || !matches!(sample_rate, 16_000 | 24_000) {
+    if channels != 1 || bits != 16 || !(8_000..=48_000).contains(&sample_rate) {
         return Err("audio fixture format is unsupported");
     }
     let data_position = wav
@@ -103,25 +135,30 @@ fn wav_pcm_16k_mono(path: &Path) -> Result<Vec<u8>, &'static str> {
     if data_end > wav.len() || data_size == 0 || !data_size.is_multiple_of(2) {
         return Err("audio fixture data is invalid");
     }
-    if sample_rate == 16_000 {
-        return Ok(wav[data_start..data_end].to_vec());
-    }
     let input = wav[data_start..data_end]
         .chunks_exact(2)
         .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
         .collect::<Vec<_>>();
-    let output_samples = input.len().saturating_mul(2) / 3;
-    let mut output = Vec::with_capacity(output_samples.saturating_mul(2));
-    for index in 0..output_samples {
-        let numerator = index.saturating_mul(3);
-        let left = numerator / 2;
-        let fraction = numerator % 2;
-        let a = i32::from(*input.get(left).ok_or("resample index invalid")?);
-        let b = i32::from(*input.get(left + 1).unwrap_or(&input[left]));
-        let sample = if fraction == 0 { a } else { (a + b) / 2 } as i16;
-        output.extend_from_slice(&sample.to_le_bytes());
-    }
-    Ok(output)
+    resample_pcm_s16le_to_16k(&input, sample_rate)
+}
+
+#[test]
+fn generalized_resampler_handles_full_scale_up_and_down_sampling() {
+    let input = [i16::MAX, i16::MIN, i16::MAX, i16::MIN, i16::MAX, i16::MIN];
+    let upsampled = resample_pcm_s16le_to_16k(&input, 8_000).expect("8 kHz upsampling");
+    let downsampled = resample_pcm_s16le_to_16k(&input, 48_000).expect("48 kHz downsampling");
+    assert_eq!(upsampled.len(), input.len() * 4);
+    assert_eq!(downsampled.len(), input.len() * 2 / 3);
+    let upsampled_samples = upsampled
+        .chunks_exact(2)
+        .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
+        .collect::<Vec<_>>();
+    let downsampled_samples = downsampled
+        .chunks_exact(2)
+        .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
+        .collect::<Vec<_>>();
+    assert_eq!(&upsampled_samples[..3], &[i16::MAX, 0, i16::MIN]);
+    assert_eq!(downsampled_samples, vec![i16::MAX, i16::MIN]);
 }
 
 fn normalized(value: &str) -> String {
