@@ -15,6 +15,7 @@ add_library(npc_mouth_worker STATIC
     src/product_runtime.cpp
     src/service_protocol.cpp
     src/signal_adapter.cpp
+    src/streaming_trajectory.cpp
     src/worker.cpp
 )
 target_compile_features(npc_mouth_worker PUBLIC cxx_std_20)
@@ -66,6 +67,10 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING AND NPC_MOUTH_WORKER_BUILD_TESTS)
+    add_executable(npc_mouth_streaming_trajectory_tests tests/streaming_trajectory_tests.cpp)
+    target_compile_features(npc_mouth_streaming_trajectory_tests PRIVATE cxx_std_20)
+    target_link_libraries(npc_mouth_streaming_trajectory_tests PRIVATE npc_mouth_worker)
+    add_test(NAME npc_mouth_streaming_trajectory_tests COMMAND npc_mouth_streaming_trajectory_tests)
     add_executable(npc_mouth_compositor_render_tests tests/compositor_render_tests.cpp)
     target_compile_features(npc_mouth_compositor_render_tests PRIVATE cxx_std_20)
     target_link_libraries(npc_mouth_compositor_render_tests PRIVATE npc_mouth_worker)
