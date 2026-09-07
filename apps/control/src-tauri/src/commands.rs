@@ -57,6 +57,7 @@ use crate::local_resources::{
     ExperimentalPackMutationRequest, ExperimentalPackState, LocalResourceManager,
     LocalResourceSettings, ResourceTelemetryResult, SelectedLoadoutAdmissionResult,
     SelectedLoadoutPlannerResult, TrustedLocalPackCatalogResult,
+    TrustedOptionalPackActivationRequestV1, TrustedOptionalPackActivationResultV1,
     TrustedOptionalPackLifecycleResultV1, TrustedOptionalPackMutationRequestV1,
 };
 use crate::media_broker::{
@@ -2154,6 +2155,20 @@ pub async fn install_trusted_optional_pack(
         .map_err(product_error)?;
     state.identity_runtime.invalidate_and_reconcile_background();
     Ok(result)
+}
+
+#[tauri::command]
+pub async fn activate_trusted_optional_pack(
+    request: TrustedOptionalPackActivationRequestV1,
+    state: State<'_, AppState>,
+) -> Result<TrustedOptionalPackActivationResultV1, CommandError> {
+    record_native_product_event(&state, "model-pack", "optional.activation_requested");
+    let result = state
+        .local_resources
+        .activate_trusted_optional_pack(request, &state.visual_runtime)
+        .await;
+    state.identity_runtime.invalidate_and_reconcile_background();
+    result.map_err(product_error)
 }
 
 #[tauri::command]

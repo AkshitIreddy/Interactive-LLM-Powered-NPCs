@@ -1,3 +1,7 @@
+use crate::optional_pack_activation::{
+    activate_trusted_yunet_provider_pack_v1, SystemProviderLoadSelfTestClockV1,
+    TrustedProviderLoadActivationReceiptV1, TrustedProviderLoadSelfTestProbeV1,
+};
 use npc_identity_engine::PinnedIdentityQualificationV1;
 use npc_model_manager::{
     load_release_catalog_bundle_v1, openseeface_visual_signal_contract_v1,
@@ -171,6 +175,23 @@ pub struct TrustedOptionalPackMutationRequestV1 {
     pub revision: String,
     pub explicit_user_confirmation: bool,
     pub license_accepted: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TrustedOptionalPackActivationRequestV1 {
+    pub pack_id: String,
+    pub revision: String,
+    pub explicit_user_confirmation: bool,
+    pub selection: SelectedLoadoutSelectionV1,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrustedOptionalPackActivationResultV1 {
+    pub schema_version: u32,
+    pub receipt: TrustedProviderLoadActivationReceiptV1,
+    pub lifecycle: TrustedOptionalPackLifecycleResultV1,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -418,6 +439,7 @@ pub struct LocalResourceManager {
 enum NativeOptionalMutationKindV1 {
     Install,
     Repair,
+    Activate,
 }
 
 #[derive(Clone)]
@@ -452,6 +474,7 @@ enum NativeLoadoutPlanner {
 #[derive(Clone)]
 struct FileResourceEnvelopeSource {
     roots: Vec<PathBuf>,
+    catalog_qualified: Vec<(PackRevision, Sha256Digest, ResidencyModeV1, PathBuf)>,
 }
 
 impl SignedResourceEnvelopeSourceV1 for FileResourceEnvelopeSource {
@@ -463,7 +486,7 @@ impl SignedResourceEnvelopeSourceV1 for FileResourceEnvelopeSource {
         device_fingerprint_sha256: &npc_model_manager::Sha256Digest,
         placement: &ResidencyModeV1,
     ) -> Result<Option<SignedMeasuredResourceEnvelopeV1>, Self::Error> {
-        let placement = match placement {
+        let placement_label = match placement {
             ResidencyModeV1::CpuResident => "cpu_resident",
             ResidencyModeV1::GpuResident => "gpu_resident",
             ResidencyModeV1::CpuResidentGpuCold => "cpu_resident_gpu_cold",
@@ -473,10 +496,19 @@ impl SignedResourceEnvelopeSourceV1 for FileResourceEnvelopeSource {
                 .join(identity.pack_id.as_str())
                 .join(identity.revision.as_str())
                 .join(device_fingerprint_sha256.as_str())
-                .join(format!("{placement}.json"));
+                .join(format!("{placement_label}.json"));
             if let Some(envelope) = read_bounded_regular_json(&path, MAX_TRUST_METADATA_BYTES)? {
                 return Ok(Some(envelope));
             }
+        }
+        if let Some((_, _, _, path)) = self.catalog_qualified.iter().find(
+            |(bound_identity, bound_device, bound_placement, _)| {
+                bound_identity == identity
+                    && bound_device == device_fingerprint_sha256
+                    && bound_placement == placement
+            },
+        ) {
+            return read_bounded_regular_json(path, MAX_TRUST_METADATA_BYTES);
         }
         Ok(None)
     }
@@ -778,6 +810,118 @@ impl LocalResourceManager {
         self.trusted_optional_pack_lifecycle().await
     }
 
+    /// Activates an immutable inactive YuNet provider pack without requiring a
+    /// game window to be running. The setup-only admission uses current host
+    /// telemetry, the configured game reserves, and the complete explicit
+    /// loadout supplied by the UI. It is consumed only for self-test
+    /// authorization and is never stored as target-bound runtime authority.
+    pub(crate) async fn activate_trusted_optional_pack(
+        &self,
+        request: TrustedOptionalPackActivationRequestV1,
+        probe: &impl TrustedProviderLoadSelfTestProbeV1,
+    ) -> Result<TrustedOptionalPackActivationResultV1, LocalResourceError> {
+        if !request.explicit_user_confirmation {
+            return Err(LocalResourceError::ConfirmationRequired);
+        }
+        let mutation = TrustedOptionalPackMutationRequestV1 {
+            pack_id: request.pack_id.clone(),
+            revision: request.revision.clone(),
+            explicit_user_confirmation: true,
+            license_accepted: false,
+        };
+        let (identity, _) = self.validate_optional_mutation(&mutation)?;
+        let active =
+            self.begin_optional_mutation(&identity, NativeOptionalMutationKindV1::Activate)?;
+        let operation = async {
+            // Registering the Activate mutation first makes it a barrier for
+            // synchronous runtime admission. Revocation then prevents an old
+            // game/PID-bound receipt from becoming usable when the active
+            // installed pointer changes. Failure deliberately leaves it
+            // revoked.
+            self.revoke_active_loadout_admission()?;
+            let settings = self.settings()?;
+            let telemetry = collect(TelemetryRequest::default());
+            let pressure = native_resource_pressure(&telemetry);
+            let decision = {
+                let mut planner = self
+                    .loadout_planner
+                    .lock()
+                    .map_err(|_| LocalResourceError::State)?;
+                match &mut *planner {
+                    NativeLoadoutPlanner::Ready { manager, .. } => manager.admit_for_setup(
+                        &request.selection,
+                        NativeAdmissionContextV1 {
+                            exact_target_pid: None,
+                            now_unix_seconds: current_unix_seconds(),
+                            now_monotonic_millis: telemetry.captured_monotonic_millis,
+                            configured_game_reserve_vram_bytes: settings.game_reserve_vram_bytes,
+                            game_additional_reserve_ram_bytes: settings
+                                .game_additional_reserve_ram_bytes,
+                            resource_pressure: pressure,
+                            telemetry: Some(&telemetry),
+                        },
+                    ),
+                    NativeLoadoutPlanner::Unavailable(detail) => {
+                        return Err(LocalResourceError::Operation(detail.clone()));
+                    }
+                }
+            };
+            if !decision.admitted() || decision.exact_target_pid.is_some() {
+                return Err(LocalResourceError::Operation(format!(
+                    "setup-only whole-loadout admission was blocked: {}",
+                    decision.detail
+                )));
+            }
+            let admission = decision.admission_receipt.ok_or_else(|| {
+                LocalResourceError::Operation(
+                    "setup-only admission returned no native receipt".into(),
+                )
+            })?;
+            // Persist this only as the user's selected draft. It carries no
+            // PID and never populates `active_admission`; gameplay still has
+            // to reconstruct and admit the target-bound loadout.
+            atomic_write_json(&self.selected_loadout_path, &request.selection)?;
+            *self
+                .selected_loadout
+                .lock()
+                .map_err(|_| LocalResourceError::State)? = Some(request.selection.clone());
+            let receipt = {
+                let mut lifecycle = self.optional_lifecycle.lock().await;
+                let lifecycle = lifecycle.as_mut().ok_or_else(|| {
+                    LocalResourceError::Operation(
+                        "trusted optional-pack lifecycle is unavailable".into(),
+                    )
+                })?;
+                activate_trusted_yunet_provider_pack_v1(
+                    lifecycle,
+                    &identity,
+                    format!("activate-{}", uuid::Uuid::new_v4().simple()),
+                    &admission,
+                    probe,
+                    &SystemProviderLoadSelfTestClockV1,
+                )
+                .await
+                .map_err(|error| LocalResourceError::Operation(error.to_string()))?
+            };
+            let lifecycle = self.trusted_optional_pack_lifecycle().await?;
+            Ok(TrustedOptionalPackActivationResultV1 {
+                schema_version: 1,
+                receipt,
+                lifecycle,
+            })
+        }
+        .await;
+        // Keep the activation barrier registered through a final revocation:
+        // an admission either finishes before the barrier and is revoked, or
+        // observes the barrier and cannot store a receipt.
+        let final_revocation = self.revoke_active_loadout_admission();
+        let finish = self.finish_optional_mutation(&identity, active.operation_id);
+        let result = operation?;
+        final_revocation?;
+        finish?;
+        Ok(result)
+    }
+
     pub fn cancel_trusted_optional_pack_download(
         &self,
         request: TrustedOptionalPackMutationRequestV1,
@@ -962,6 +1106,25 @@ impl LocalResourceManager {
         selection: SelectedLoadoutSelectionV1,
         exact_target_pid: Option<u32>,
     ) -> Result<SelectedLoadoutAdmissionResult, LocalResourceError> {
+        // Hold the mutation registry lock until any target-bound receipt is
+        // stored. This makes the Activate registration and this entire
+        // synchronous admission atomic relative to each other.
+        let optional_mutations = self
+            .optional_downloads
+            .lock()
+            .map_err(|_| LocalResourceError::State)?;
+        if optional_mutations
+            .values()
+            .any(|mutation| mutation.kind == NativeOptionalMutationKindV1::Activate)
+        {
+            return Ok(SelectedLoadoutAdmissionResult {
+                schema_version: 1,
+                ready: false,
+                detail: "A local provider activation self-test is running. Wait for it to finish, then check and admit the selected game loadout again.".into(),
+                persisted: false,
+                decision: None,
+            });
+        }
         let settings = self.settings()?;
         let snapshot = collect(TelemetryRequest {
             selected_game_pid: exact_target_pid,
@@ -2191,6 +2354,23 @@ fn load_native_planner(
             promotion_supported: root.promotion_supported,
             publication_supported: root.publication_supported,
         };
+        let catalog_qualified = verified
+            .source_inventory
+            .manifests
+            .iter()
+            .flat_map(|manifest| {
+                manifest.qualified_envelopes.iter().map(|envelope| {
+                    (
+                        manifest.identity.clone(),
+                        envelope.device_fingerprint_sha256.clone(),
+                        envelope.placement.clone(),
+                        model_metadata_root
+                            .join("qual")
+                            .join(format!("{}.json", envelope.envelope_sha256.as_str())),
+                    )
+                })
+            })
+            .collect();
         let manager = SelectedLoadoutManagerV1::new(
             verified.catalog,
             verified.verifier,
@@ -2199,6 +2379,7 @@ fn load_native_planner(
                     config_directory.join("model-measurements-v1"),
                     model_metadata_root.join("qual"),
                 ],
+                catalog_qualified,
             },
             MeasurementTrustPolicyV1 {
                 signature_threshold: verified.signature_threshold,
@@ -2697,6 +2878,55 @@ mod tests {
             NativeOptionalMutationKindV1::Install,
             NativeOptionalMutationKindV1::Repair,
         );
+        race(
+            NativeOptionalMutationKindV1::Install,
+            NativeOptionalMutationKindV1::Activate,
+        );
+        race(
+            NativeOptionalMutationKindV1::Repair,
+            NativeOptionalMutationKindV1::Activate,
+        );
+        race(
+            NativeOptionalMutationKindV1::Activate,
+            NativeOptionalMutationKindV1::Activate,
+        );
+    }
+
+    #[test]
+    fn activation_mutation_blocks_target_admission_until_final_revocation() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let manager = LocalResourceManager::new(directory.path(), None).expect("manager");
+        let identity = PackRevision {
+            pack_id: npc_model_manager::PackId::parse(YUNET_OPENSEEFACE_VISUAL_SIGNAL_PACK_ID)
+                .expect("pack"),
+            revision: npc_model_manager::Revision::parse(OPENSEEFACE_VISUAL_SIGNAL_REVISION)
+                .expect("revision"),
+        };
+        let mutation = manager
+            .begin_optional_mutation(&identity, NativeOptionalMutationKindV1::Activate)
+            .expect("activation barrier");
+        let result = manager
+            .admit_selected_loadout(
+                SelectedLoadoutSelectionV1 {
+                    selection_id: "blocked-during-activation".into(),
+                    roles: Vec::new(),
+                    expected_idle_millis: 0,
+                },
+                Some(42),
+            )
+            .expect("actionable blocked result");
+        assert!(!result.ready);
+        assert!(!result.persisted);
+        assert!(result.decision.is_none());
+        assert!(result.detail.contains("activation self-test is running"));
+        assert!(manager
+            .active_admission
+            .lock()
+            .expect("admission")
+            .is_none());
+        manager
+            .finish_optional_mutation(&identity, mutation.operation_id)
+            .expect("finish barrier");
     }
 
     #[test]
@@ -2969,5 +3199,320 @@ mod tests {
             ),
             NativeLoadoutPlanner::Unavailable(_)
         ));
+    }
+
+    #[cfg(windows)]
+    fn real_provider_probe(
+        worker: PathBuf,
+        resource_root: &Path,
+        state_root: &Path,
+    ) -> crate::visual_runtime::MouthWorkerSupervisor {
+        let current = std::env::current_exe().expect("test executable");
+        let parent = crate::sidecar_supervisor::RuntimeSupervisor::try_new(
+            crate::sidecar_supervisor::RuntimeLaunchConfig {
+                executable: current.clone(),
+                resource_root: resource_root.to_path_buf(),
+                app_data: state_root.join("runtime-host-data"),
+                development_fixture_allowed: true,
+            },
+        )
+        .expect("kill-on-close parent job");
+        let broker = crate::media_broker::MediaBrokerSupervisor::new(
+            crate::media_broker::MediaBrokerLaunchConfig {
+                executable: current,
+                development_fixture_allowed: false,
+                audio_output_selection_path: state_root.join("audio-output-selection-v1.json"),
+                #[cfg(debug_assertions)]
+                debug_synthetic_metadata_path: state_root.join("synthetic-target.json"),
+            },
+            parent.clone(),
+        );
+        crate::visual_runtime::MouthWorkerSupervisor::new(
+            crate::visual_runtime::MouthWorkerLaunchConfig {
+                executable: worker,
+                development_fixture_allowed: false,
+                #[cfg(debug_assertions)]
+                review_openseeface_root: None,
+                #[cfg(debug_assertions)]
+                review_mouth_atlas_root: None,
+            },
+            parent,
+            broker,
+        )
+    }
+
+    /// Opt-in proof for the private signed YuNet catalog and cached official
+    /// artifacts. It intentionally leaves its isolated state directory intact
+    /// so the inactive/active inventories and receipt can be reviewed after
+    /// the test. No game, GPU, audio device, WebView, or provider API is used.
+    #[cfg(windows)]
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "requires the private signed catalog, exact cached official artifacts, and a built mouth worker"]
+    async fn real_private_catalog_provider_activation_is_hidden_retryable_and_inventory_bound() {
+        fn required_path(name: &str) -> PathBuf {
+            std::env::var_os(name)
+                .map(PathBuf::from)
+                .unwrap_or_else(|| panic!("{name} is required"))
+        }
+
+        let catalog_root = required_path("NPC_REAL_PROVIDER_CATALOG_ROOT");
+        let artifact_root = required_path("NPC_REAL_PROVIDER_ARTIFACT_ROOT");
+        let yunet_license = required_path("NPC_REAL_YUNET_LICENSE");
+        let openseeface_license = required_path("NPC_REAL_OPENSEEFACE_LICENSE");
+        let worker = required_path("NPC_REAL_MOUTH_WORKER");
+        let state_root = required_path("NPC_REAL_PROVIDER_STATE_ROOT");
+        assert!(catalog_root.is_absolute());
+        assert!(artifact_root.is_absolute());
+        assert!(worker.is_absolute());
+        assert!(state_root.is_absolute());
+        assert!(worker.is_file(), "built worker is missing");
+        assert!(
+            !state_root.exists(),
+            "state root must be fresh so no prior active pointer can satisfy the proof"
+        );
+
+        let model_catalog_root = state_root
+            .join("resource-root")
+            .join("packaging")
+            .join("model-packs");
+        fs::create_dir_all(model_catalog_root.join("qual")).expect("catalog directories");
+        for relative in [
+            "model-catalog-root-v1.json",
+            "model-catalog-v1.json",
+            "openseeface-yunet640-lm1-mouth-signal.json",
+            "qual/c35d184bc8f69b833c1da3fdf38a731b977b2612b565bc58cae1989f75990896.json",
+        ] {
+            let source = catalog_root.join(relative);
+            let destination = model_catalog_root.join(relative);
+            fs::copy(&source, &destination)
+                .unwrap_or_else(|error| panic!("copy {}: {error}", source.display()));
+        }
+
+        let config_root = state_root.join("config");
+        let resource_root = state_root.join("resource-root");
+        let manager = LocalResourceManager::new(&config_root, Some(&resource_root))
+            .expect("private catalog manager");
+        let identity = PackRevision {
+            pack_id: npc_model_manager::PackId::parse(YUNET_OPENSEEFACE_VISUAL_SIGNAL_PACK_ID)
+                .expect("pack id"),
+            revision: npc_model_manager::Revision::parse(OPENSEEFACE_VISUAL_SIGNAL_REVISION)
+                .expect("revision"),
+        };
+
+        let artifact_sources = [
+            (
+                "yunet-2023mar-onnx",
+                artifact_root.join("models/face_detection_yunet_2023mar.onnx"),
+                232_589,
+                YUNET_OPENSEEFACE_DETECTOR_SHA256,
+            ),
+            (
+                "yunet-license",
+                yunet_license,
+                1_085,
+                "c83b8120c50ccbd4c4f96edf53141bdd566ebb8f8e9227e415326aa1b1aba958",
+            ),
+            (
+                "lm-model1-opt",
+                artifact_root.join("models/lm_model1_opt.onnx"),
+                4_842_329,
+                OPENSEEFACE_LM1_SHA256,
+            ),
+            (
+                "openseeface-license",
+                openseeface_license,
+                1_364,
+                "28612834d7ca038a9009550e3869a67e6be3a87c238d997f58c0907e08744146",
+            ),
+            (
+                "onnxruntime-1.22.1-cpu-windows-x64",
+                artifact_root.join("onnxruntime-win-x64-1.22.1.zip"),
+                73_731_806,
+                "855276cd4be3cda14fe636c69eb038d75bf5bcd552bda1193a5d79c51f436dfe",
+            ),
+        ];
+        let mut evidence = Vec::with_capacity(artifact_sources.len());
+        {
+            let mut lifecycle = manager.optional_lifecycle.lock().await;
+            let lifecycle = lifecycle.as_mut().expect("trusted optional lifecycle");
+            for (artifact_id, source, size, sha256) in artifact_sources {
+                let expected = Sha256Digest::parse(sha256).expect("artifact digest");
+                let verified = verify_artifact(
+                    artifact_id,
+                    size,
+                    &expected,
+                    fs::File::open(&source)
+                        .unwrap_or_else(|error| panic!("open {}: {error}", source.display())),
+                )
+                .unwrap_or_else(|error| panic!("verify {}: {error}", source.display()));
+                let destination = lifecycle
+                    .manager()
+                    .storage()
+                    .download_path(&identity, artifact_id)
+                    .expect("download destination");
+                fs::create_dir_all(destination.parent().expect("download parent"))
+                    .expect("download parent directory");
+                fs::copy(&source, &destination)
+                    .unwrap_or_else(|error| panic!("stage {}: {error}", source.display()));
+                evidence.push(verified);
+            }
+            let state = lifecycle
+                .import_verified_downloads(
+                    &identity,
+                    "real-private-yunet-install".into(),
+                    current_unix_seconds(),
+                    true,
+                    false,
+                    evidence,
+                )
+                .expect("verified offline import");
+            assert_eq!(state, InstallState::AwaitingSelfTest);
+            assert!(lifecycle
+                .manager()
+                .storage()
+                .active_installed_inventory(&identity.pack_id)
+                .expect("inactive inventory query")
+                .is_none());
+        }
+
+        let selection = SelectedLoadoutSelectionV1 {
+            selection_id: "real-private-yunet-setup-selection".into(),
+            roles: vec![npc_model_manager::SelectedPackV1 {
+                role: ModelPackKindV1::Vision,
+                identity: identity.clone(),
+                preferred_residency: ResidencyModeV1::CpuResident,
+            }],
+            expected_idle_millis: 1_000,
+        };
+        let request = TrustedOptionalPackActivationRequestV1 {
+            pack_id: identity.pack_id.as_str().into(),
+            revision: identity.revision.as_str().into(),
+            explicit_user_confirmation: true,
+            selection: selection.clone(),
+        };
+
+        // Seed an older target-shaped receipt around the same setup fit. This
+        // cannot be reached from production APIs without target telemetry; it
+        // is used here only to prove activation revokes stale runtime storage.
+        let telemetry = collect(TelemetryRequest::default());
+        let settings = manager.settings().expect("settings");
+        let setup_decision = {
+            let mut planner = manager.loadout_planner.lock().expect("planner");
+            match &mut *planner {
+                NativeLoadoutPlanner::Ready { manager, .. } => manager.admit_for_setup(
+                    &selection,
+                    NativeAdmissionContextV1 {
+                        exact_target_pid: None,
+                        now_unix_seconds: current_unix_seconds(),
+                        now_monotonic_millis: telemetry.captured_monotonic_millis,
+                        configured_game_reserve_vram_bytes: settings.game_reserve_vram_bytes,
+                        game_additional_reserve_ram_bytes: settings
+                            .game_additional_reserve_ram_bytes,
+                        resource_pressure: native_resource_pressure(&telemetry),
+                        telemetry: Some(&telemetry),
+                    },
+                ),
+                NativeLoadoutPlanner::Unavailable(detail) => {
+                    panic!("planner unavailable: {detail}")
+                }
+            }
+        };
+        assert!(setup_decision.admitted(), "{}", setup_decision.detail);
+        *manager.active_admission.lock().expect("active admission") =
+            Some(NativeActiveLoadoutAdmissionV1 {
+                exact_target_pid: 42,
+                receipt: setup_decision.admission_receipt.expect("setup receipt"),
+                residency_decisions: setup_decision.residency_decisions,
+            });
+
+        let broken_probe = real_provider_probe(
+            state_root.join("missing-mouth-worker.exe"),
+            &resource_root,
+            &state_root,
+        );
+        let first_error = manager
+            .activate_trusted_optional_pack(request.clone(), &broken_probe)
+            .await
+            .expect_err("missing worker must fail");
+        assert!(first_error.to_string().contains("provider-load"));
+        assert!(manager
+            .active_admission
+            .lock()
+            .expect("admission")
+            .is_none());
+        assert_eq!(
+            manager
+                .selected_loadout
+                .lock()
+                .expect("selected draft")
+                .as_ref(),
+            Some(&selection)
+        );
+        assert_eq!(
+            manager
+                .optional_lifecycle
+                .lock()
+                .await
+                .as_ref()
+                .and_then(|lifecycle| lifecycle.state(&identity)),
+            Some(&InstallState::AwaitingSelfTest)
+        );
+
+        let real_probe = real_provider_probe(worker, &resource_root, &state_root);
+        let result = manager
+            .activate_trusted_optional_pack(request.clone(), &real_probe)
+            .await
+            .expect("real hidden provider activation");
+        assert_eq!(result.receipt.identity, identity);
+        assert!(result.receipt.detail.contains("provider load only"));
+        assert!(manager
+            .active_admission
+            .lock()
+            .expect("admission")
+            .is_none());
+        let active = manager
+            .optional_lifecycle
+            .lock()
+            .await
+            .as_ref()
+            .expect("lifecycle")
+            .manager()
+            .storage()
+            .active_installed_inventory(&identity.pack_id)
+            .expect("active inventory query")
+            .expect("active inventory");
+        assert_eq!(active.identity, identity);
+        assert_eq!(
+            active.content_tree_sha256,
+            result.receipt.installed_content_tree_sha256
+        );
+
+        let retry_error = manager
+            .activate_trusted_optional_pack(request, &real_probe)
+            .await
+            .expect_err("an active immutable revision cannot be activated twice");
+        assert!(retry_error.to_string().contains("not awaiting"));
+        let evidence_path = state_root.join("real-provider-activation-evidence.json");
+        fs::write(
+            &evidence_path,
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "schemaVersion": 1,
+                "initialFailure": first_error.to_string(),
+                "retryRejected": retry_error.to_string(),
+                "receipt": result.receipt,
+                "lifecycle": result.lifecycle,
+                "activeInventory": {
+                    "identity": active.identity,
+                    "root": active.root,
+                    "manifestSha256": active.manifest_sha256,
+                    "contentTreeSha256": active.content_tree_sha256,
+                    "totalFileBytes": active.total_file_bytes,
+                    "files": active.files,
+                }
+            }))
+            .expect("evidence JSON"),
+        )
+        .expect("write activation evidence");
+        assert!(evidence_path.is_file());
     }
 }

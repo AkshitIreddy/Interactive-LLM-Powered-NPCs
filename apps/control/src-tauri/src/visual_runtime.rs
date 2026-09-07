@@ -20,6 +20,10 @@ use crate::media_broker::{
     VisualAudioEnvelopeQuery, VisualSourceLease, VisualTrackBinding, VisualWorkerIdentity,
     MAX_PLAYBACK_LEASES_PER_TURN,
 };
+use crate::optional_pack_activation::{
+    AuthenticatedProviderLoadObservationV1, ProviderLoadActivationError,
+    ProviderLoadSelfTestRequestV1, TrustedProviderLoadSelfTestProbeV1,
+};
 use crate::sidecar_supervisor::RuntimeSupervisor;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -38,7 +42,7 @@ const WORKER_FILE_NAME: &str = if cfg!(windows) {
     "npc-mouth-worker"
 };
 const PROTOCOL_MAGIC: u32 = 0x3152_574d;
-const PROTOCOL_VERSION: u16 = 1;
+const PROTOCOL_VERSION: u16 = 2;
 const MAX_ATLAS_BYTES: usize = 16 * 1024 * 1024;
 const MAX_MESSAGE_BYTES: usize = MAX_ATLAS_BYTES + 512 * 1024;
 const FULL_LIP_ATLAS_SCHEMA: u32 = 1;
@@ -58,6 +62,16 @@ const OPENSEEFACE_YUNET_DETECTOR_SHA256: &str =
     "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4";
 const OPENSEEFACE_LM1_SHA256: &str =
     "5bec42b298a24142cdb249a7256d65bc3fc0fbc673fa1752a64f4d7164719c9f";
+const OPENSEEFACE_YUNET_DETECTOR_SIZE_BYTES: u64 = 232_589;
+const OPENSEEFACE_LM1_SIZE_BYTES: u64 = 4_842_329;
+const OPENSEEFACE_ORT_SIZE_BYTES: u64 = 12_416_032;
+const OPENSEEFACE_ORT_SHA256: &str =
+    "7788f3f38e9a339003f7d7e1bf47f928287cf409bb5273273149e1282fbf503f";
+const OPENSEEFACE_ORT_SHARED_SIZE_BYTES: u64 = 22_048;
+const OPENSEEFACE_ORT_SHARED_SHA256: &str =
+    "7a71dbee513692aeb0bd2346a50ae0edd28c8b34defc17254605a29e81c60569";
+const PROVIDER_LOAD_SELF_TEST_TIMEOUT: Duration = Duration::from_secs(30);
+const PROVIDER_LOAD_SELF_TEST_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const VISUAL_COORDINATOR_INTERVAL: Duration = Duration::from_millis(67);
 const VISUAL_FRAME_DEADLINE_NS: i64 = 150_000_000;
 #[cfg(debug_assertions)]
@@ -1990,6 +2004,98 @@ impl MouthWorkerSupervisor {
         }
     }
 
+    async fn run_fresh_provider_load_self_test(
+        &self,
+        request: ProviderLoadSelfTestRequestV1,
+    ) -> Result<AuthenticatedProviderLoadObservationV1, ProviderLoadActivationError> {
+        let _startup = self.startup_gate.lock().await;
+        let executable =
+            validate_fixed_worker(&self.config.executable).map_err(provider_load_worker_error)?;
+        let generation = stable_nonzero_id(&format!(
+            "provider-load-self-test:{}",
+            request.challenge().nonce
+        ));
+        let mut nonce = [0_u8; 32];
+        getrandom::fill(&mut nonce).map_err(|_| ProviderLoadActivationError::Random)?;
+        let mut session_bytes = [0_u8; 16];
+        getrandom::fill(&mut session_bytes).map_err(|_| ProviderLoadActivationError::Random)?;
+        let mut high = u64::from_le_bytes(session_bytes[..8].try_into().unwrap_or([0; 8]));
+        let low = u64::from_le_bytes(session_bytes[8..].try_into().unwrap_or([0; 8]));
+        if high == 0 && low == 0 {
+            high = 1;
+        }
+        let session = SessionBinding { nonce, high, low };
+        let pipe = format!(r"\\.\pipe\npc-mouth-worker-self-test-{high:016x}-{low:016x}");
+        let nonce_hex = nonce
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let args = [
+            "--pipe".to_owned(),
+            pipe.clone(),
+            "--nonce-hex".to_owned(),
+            nonce_hex,
+            "--session-high".to_owned(),
+            high.to_string(),
+            "--session-low".to_owned(),
+            low.to_string(),
+            "--controller-pid".to_owned(),
+            std::process::id().to_string(),
+            "--generation".to_owned(),
+            generation.to_string(),
+        ];
+        let mut child = spawn_worker_process(&executable, &args, &self.parent_job)
+            .map_err(provider_load_worker_error)?;
+        let identity = match child.creation_time() {
+            Ok(creation_time) => (child.id(), creation_time),
+            Err(error) => {
+                terminate_ephemeral_worker(&mut child).await;
+                return Err(provider_load_worker_error(error));
+            }
+        };
+        let stream = match connect_worker_pipe(&pipe).await {
+            Ok(stream) => stream,
+            Err(error) => {
+                terminate_ephemeral_worker(&mut child).await;
+                return Err(provider_load_worker_error(error));
+            }
+        };
+        let client = WorkerClient::new(stream, session);
+        let operation = async {
+            client
+                .health(generation)
+                .await
+                .map_err(provider_load_worker_error)?;
+            let payload = encode_provider_load_self_test_configuration(&request)
+                .map_err(provider_load_worker_error)?;
+            client
+                .self_test_provider_load(generation, payload)
+                .await
+                .map_err(provider_load_worker_error)?;
+            let session_binding_sha256 = provider_load_session_binding_sha256(
+                session,
+                identity.0,
+                identity.1,
+                &request.challenge().nonce,
+            );
+            request.authenticated_mouth_worker_ready(
+                identity.0,
+                identity.1,
+                session_binding_sha256,
+                "admitted_landmark_provider_load_self_test_passed",
+            )
+        }
+        .await;
+        let cleanup = shutdown_ephemeral_worker(&client, &mut child, generation).await;
+        match (operation, cleanup) {
+            (Ok(observation), Ok(())) => Ok(observation),
+            (Err(error), _) => Err(error),
+            (Ok(_), Err(error)) => Err(ProviderLoadActivationError::WorkerCleanup(
+                error.to_string(),
+            )),
+        }
+    }
+
     async fn ensure_ready(
         &self,
         generation: u64,
@@ -2090,6 +2196,64 @@ impl MouthWorkerSupervisor {
         self.discard_worker().await;
         let _ = self.broker.release_visual_source(lease).await;
     }
+}
+
+#[async_trait]
+impl TrustedProviderLoadSelfTestProbeV1 for MouthWorkerSupervisor {
+    async fn run_provider_load_self_test(
+        &self,
+        request: ProviderLoadSelfTestRequestV1,
+    ) -> Result<AuthenticatedProviderLoadObservationV1, ProviderLoadActivationError> {
+        self.run_fresh_provider_load_self_test(request).await
+    }
+}
+
+fn provider_load_worker_error(error: impl std::fmt::Display) -> ProviderLoadActivationError {
+    ProviderLoadActivationError::Worker(error.to_string())
+}
+
+async fn terminate_ephemeral_worker(child: &mut WorkerChild) {
+    let _ = child.kill().await;
+    let _ = tokio::time::timeout(PROVIDER_LOAD_SELF_TEST_SHUTDOWN_TIMEOUT, child.wait()).await;
+}
+
+async fn shutdown_ephemeral_worker(
+    client: &WorkerClient,
+    child: &mut WorkerChild,
+    generation: u64,
+) -> Result<(), VisualRuntimeError> {
+    let shutdown = client.shutdown(generation).await;
+    let exit = tokio::time::timeout(PROVIDER_LOAD_SELF_TEST_SHUTDOWN_TIMEOUT, child.wait()).await;
+    match (shutdown, exit) {
+        (Ok(()), Ok(Ok(0))) => Ok(()),
+        (shutdown, exit) => {
+            let _ = child.kill().await;
+            let _ =
+                tokio::time::timeout(PROVIDER_LOAD_SELF_TEST_SHUTDOWN_TIMEOUT, child.wait()).await;
+            shutdown?;
+            match exit {
+                Ok(Ok(0)) => Ok(()),
+                _ => Err(VisualRuntimeError::Process),
+            }
+        }
+    }
+}
+
+fn provider_load_session_binding_sha256(
+    session: SessionBinding,
+    process_id: u32,
+    process_creation_time: u64,
+    challenge_nonce: &str,
+) -> npc_model_manager::Sha256Digest {
+    let mut bytes = Vec::with_capacity(160);
+    bytes.extend_from_slice(b"npc.mouth-worker-authenticated-provider-load-session/v1\0");
+    bytes.extend_from_slice(&session.nonce);
+    bytes.extend_from_slice(&session.high.to_le_bytes());
+    bytes.extend_from_slice(&session.low.to_le_bytes());
+    bytes.extend_from_slice(&process_id.to_le_bytes());
+    bytes.extend_from_slice(&process_creation_time.to_le_bytes());
+    bytes.extend_from_slice(challenge_nonce.as_bytes());
+    npc_model_manager::Sha256Digest::of_bytes(&bytes)
 }
 
 #[derive(Debug)]
@@ -2337,6 +2501,25 @@ impl WorkerClient {
             .ok_or(VisualRuntimeError::Worker(response.detail))
     }
 
+    async fn self_test_provider_load(
+        &self,
+        generation: u64,
+        payload: Vec<u8>,
+    ) -> Result<(), VisualRuntimeError> {
+        let response = self
+            .request_with_timeout(
+                WorkerCommand::SelfTestAdmittedLandmarkProvider,
+                generation,
+                payload,
+                PROVIDER_LOAD_SELF_TEST_TIMEOUT,
+            )
+            .await?;
+        (response.status == 0
+            && response.detail == "admitted_landmark_provider_load_self_test_passed")
+            .then_some(())
+            .ok_or(VisualRuntimeError::Worker(response.detail))
+    }
+
     async fn install_atlas(
         &self,
         generation: u64,
@@ -2366,9 +2549,20 @@ impl WorkerClient {
         generation: u64,
         payload: Vec<u8>,
     ) -> Result<WorkerResponse, VisualRuntimeError> {
+        self.request_with_timeout(command, generation, payload, REQUEST_TIMEOUT)
+            .await
+    }
+
+    async fn request_with_timeout(
+        &self,
+        command: WorkerCommand,
+        generation: u64,
+        payload: Vec<u8>,
+        timeout: Duration,
+    ) -> Result<WorkerResponse, VisualRuntimeError> {
         let connection = Arc::clone(&self.0);
         tokio::time::timeout(
-            REQUEST_TIMEOUT,
+            timeout,
             tauri::async_runtime::spawn_blocking(move || {
                 worker_request_blocking(&connection, command, generation, payload)
             }),
@@ -2390,6 +2584,7 @@ enum WorkerCommand {
     RenderWithAdmittedLandmarks = 6,
     ConfigureAdmittedLandmarkProvider = 7,
     InstallCharacterMouthAtlas = 8,
+    SelfTestAdmittedLandmarkProvider = 10,
 }
 
 fn worker_request_blocking(
@@ -2881,6 +3076,103 @@ fn encode_provider_configuration(
     wire.u32(15);
     wire.u32(1);
     wire.u32(launch.exact_target_pid);
+    let bytes = wire.take();
+    (bytes.len() <= MAX_MESSAGE_BYTES)
+        .then_some(bytes)
+        .ok_or(VisualRuntimeError::Payload)
+}
+
+fn encode_provider_load_self_test_configuration(
+    request: &ProviderLoadSelfTestRequestV1,
+) -> Result<Vec<u8>, VisualRuntimeError> {
+    let inventory = request.inventory();
+    if !inventory.root.is_absolute()
+        || inventory.identity.pack_id.as_str() != YUNET_OPENSEEFACE_PACK_ID
+        || inventory.identity.revision.as_str() != OPENSEEFACE_PACK_REVISION
+    {
+        return Err(VisualRuntimeError::Admission(
+            "provider-load self-test inventory is not the exact YuNet revision".into(),
+        ));
+    }
+    let file = |relative: &str,
+                expected_size: u64,
+                expected_sha256: &str|
+     -> Result<PathBuf, VisualRuntimeError> {
+        let installed = inventory
+            .files
+            .iter()
+            .find(|file| file.relative_path == relative)
+            .ok_or_else(|| {
+                VisualRuntimeError::Admission(format!(
+                    "provider-load self-test inventory is missing {relative}"
+                ))
+            })?;
+        if installed.size_bytes != expected_size || installed.sha256.as_str() != expected_sha256 {
+            return Err(VisualRuntimeError::Admission(format!(
+                "provider-load self-test inventory changed {relative}"
+            )));
+        }
+        let path = inventory.root.join(relative);
+        path.is_absolute()
+            .then_some(path)
+            .ok_or_else(|| VisualRuntimeError::Admission("provider path is not absolute".into()))
+    };
+    let detector = file(
+        "models/face_detection_yunet_2023mar.onnx",
+        OPENSEEFACE_YUNET_DETECTOR_SIZE_BYTES,
+        OPENSEEFACE_YUNET_DETECTOR_SHA256,
+    )?;
+    let landmark = file(
+        "models/lm_model1_opt.onnx",
+        OPENSEEFACE_LM1_SIZE_BYTES,
+        OPENSEEFACE_LM1_SHA256,
+    )?;
+    let runtime = file(
+        "runtime/onnxruntime-1.22.1-cpu/lib/onnxruntime.dll",
+        OPENSEEFACE_ORT_SIZE_BYTES,
+        OPENSEEFACE_ORT_SHA256,
+    )?;
+    let runtime_shared = file(
+        "runtime/onnxruntime-1.22.1-cpu/lib/onnxruntime_providers_shared.dll",
+        OPENSEEFACE_ORT_SHARED_SIZE_BYTES,
+        OPENSEEFACE_ORT_SHARED_SHA256,
+    )?;
+    let path = |value: &Path| {
+        value
+            .to_str()
+            .filter(|text| text.len() <= 2048)
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                VisualRuntimeError::Admission(
+                    "provider-load self-test path is not bounded UTF-8".into(),
+                )
+            })
+    };
+    let mut wire = WireWriter::default();
+    wire.u32(2);
+    wire.string(inventory.identity.pack_id.as_str())?;
+    wire.string(inventory.identity.revision.as_str())?;
+    wire.string(&path(&inventory.root)?)?;
+    wire.string(&path(&detector)?)?;
+    wire.string(&path(&landmark)?)?;
+    wire.string(&path(&runtime)?)?;
+    wire.string(&path(&runtime_shared)?)?;
+    wire.u64(OPENSEEFACE_YUNET_DETECTOR_SIZE_BYTES);
+    wire.u64(OPENSEEFACE_LM1_SIZE_BYTES);
+    wire.u64(OPENSEEFACE_ORT_SIZE_BYTES);
+    wire.u64(OPENSEEFACE_ORT_SHARED_SIZE_BYTES);
+    wire.string(OPENSEEFACE_YUNET_DETECTOR_SHA256)?;
+    wire.string(OPENSEEFACE_LM1_SHA256)?;
+    wire.string(OPENSEEFACE_ORT_SHA256)?;
+    wire.string(OPENSEEFACE_ORT_SHARED_SHA256)?;
+    wire.string(request.measured_envelope_sha256().as_str())?;
+    wire.string(OPENSEEFACE_RUNTIME_REVISION)?;
+    wire.string(OPENSEEFACE_BACKEND)?;
+    wire.u32(15);
+    wire.u32(1);
+    // Setup-only provider load has deliberately no target-process authority.
+    wire.u32(0);
+    wire.boolean(true);
     let bytes = wire.take();
     (bytes.len() <= MAX_MESSAGE_BYTES)
         .then_some(bytes)

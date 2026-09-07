@@ -14,6 +14,7 @@ pub(crate) mod identity_worker_transport;
 mod lifecycle;
 mod local_resources;
 pub mod media_broker;
+mod optional_pack_activation;
 mod packaged_privacy_receipt;
 mod persistence;
 mod private_directory;
@@ -123,6 +124,7 @@ pub fn run() {
             commands::trusted_local_pack_catalog,
             commands::trusted_optional_pack_lifecycle,
             commands::install_trusted_optional_pack,
+            commands::activate_trusted_optional_pack,
             commands::cancel_trusted_optional_pack_download,
             commands::repair_trusted_optional_pack,
             commands::remove_trusted_optional_pack,
