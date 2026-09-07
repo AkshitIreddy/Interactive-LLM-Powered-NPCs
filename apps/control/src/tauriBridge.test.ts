@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  activateTrustedOptionalPack,
   admitSelectedLocalLoadout,
   backupAllLocalMemory,
   clearGameTarget,
@@ -50,12 +51,14 @@ import {
   saveSubtitlePreferences,
   selectGameTarget,
   persistSelectedCharacter,
+  prepareSyntheticReviewTarget,
   mutateExperimentalVisualPack,
   mergeUnknownEncounters,
   startNativeSimulation,
   startThisPcBenchmark,
   startManualActorPicker,
   syntheticReplayCaptureAvailability,
+  syntheticReviewTargetAvailability,
   type NativeBootstrapSnapshot,
   type OnboardingSnapshot,
   verifySelectedGameCapture,
@@ -776,6 +779,34 @@ describe("Tauri bridge normalization", () => {
     ]);
   });
 
+  it("launches or reattaches the attested local test game through its debug capability", async () => {
+    enableTauri();
+    expect(syntheticReviewTargetAvailability(true)).toEqual({
+      available: true,
+      commandName: "prepare_synthetic_review_target",
+    });
+    const prepared = {
+      schemaVersion: 1 as const,
+      launched: true,
+      executablePath:
+        "C:\\review\\local-app-data\\test-game\\interactive-npcs-synthetic-target.exe",
+      targetProcessId: 7331,
+      targetWindowHandle: 880055,
+      targetExecutableBasename: "interactive-npcs-synthetic-target.exe",
+    };
+    tauriMocks.invoke.mockResolvedValueOnce(prepared);
+
+    await expect(
+      prepareSyntheticReviewTarget({
+        available: true,
+        commandName: "prepare_synthetic_review_target",
+      }),
+    ).resolves.toEqual(prepared);
+    expect(tauriMocks.invoke.mock.calls).toEqual([
+      ["prepare_synthetic_review_target"],
+    ]);
+  });
+
   it("preserves a native synthetic verification error", async () => {
     enableTauri();
     tauriMocks.invoke.mockRejectedValueOnce(
@@ -834,6 +865,43 @@ describe("Tauri command bridge", () => {
     expect(tauriMocks.invoke.mock.calls.map(([command]) => command)).toEqual([
       "diagnostic_summary",
     ]);
+  });
+
+  it("sends exact optional-pack identity and confirmation for activation", async () => {
+    enableTauri();
+    tauriMocks.invoke.mockResolvedValueOnce({
+      schemaVersion: 1,
+      receipt: {},
+      lifecycle: {},
+    });
+
+    const selection = {
+      selection_id: "setup-yunet",
+      roles: [
+        {
+          role: "lip_sync" as const,
+          identity: {
+            pack_id: "openseeface-yunet640-lm1-mouth-signal",
+            revision: "85aa70fc67582d046e771ea73625182a0d8f7475",
+          },
+          preferred_residency: "cpu_resident" as const,
+        },
+      ],
+      expected_idle_millis: 30_000,
+    };
+    await activateTrustedOptionalPack(selection.roles[0].identity, selection);
+
+    expect(tauriMocks.invoke).toHaveBeenCalledWith(
+      "activate_trusted_optional_pack",
+      {
+        request: {
+          packId: "openseeface-yunet640-lm1-mouth-signal",
+          revision: "85aa70fc67582d046e771ea73625182a0d8f7475",
+          explicitUserConfirmation: true,
+          selection,
+        },
+      },
+    );
   });
 
   it("uses the frozen product command names and exact argument nesting", async () => {

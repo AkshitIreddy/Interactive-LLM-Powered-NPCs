@@ -1843,6 +1843,7 @@ export interface NativeGameCaptureVerification {
   exactPidHwndExecutableMatch: true;
   frameSequenceAdvanced: true;
   contentChanged: boolean;
+  reviewFixtureMotionMode?: string;
   safetyState: "verified_synthetic_fixture";
 }
 
@@ -1850,8 +1851,45 @@ export interface SyntheticReplayCaptureResult {
   targetProcessId: number;
   targetWindowHandle: number;
   targetExecutableBasename: string;
+  fixtureMotionMode: string;
   diagnostics: SyntheticReplayCaptureDiagnostics;
   captureEvidence?: NativeCaptureEvidence;
+}
+
+export interface PreparedSyntheticReviewTarget {
+  schemaVersion: 1;
+  launched: boolean;
+  executablePath: string;
+  targetProcessId: number;
+  targetWindowHandle: number;
+  targetExecutableBasename: string;
+  fixtureMotionMode: string;
+}
+
+export function syntheticReviewTargetAvailability(
+  debugCapabilityEnabled = false,
+): SyntheticReplayCaptureAvailability {
+  if (!hasTauri()) return { available: false, reason: "browserPreview" };
+  if (!debugCapabilityEnabled)
+    return { available: false, reason: "releaseBuild" };
+  return {
+    available: true,
+    commandName: "prepare_synthetic_review_target",
+  };
+}
+
+export async function prepareSyntheticReviewTarget(
+  availability = syntheticReviewTargetAvailability(),
+): Promise<PreparedSyntheticReviewTarget> {
+  if (!availability.available) {
+    throw new Error(
+      availability.reason === "browserPreview"
+        ? "The local test game requires the native desktop shell."
+        : "The local test game is unavailable in release builds.",
+    );
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<PreparedSyntheticReviewTarget>(availability.commandName);
 }
 
 /**
@@ -2083,7 +2121,7 @@ export interface NativeCharacterCatalogSnapshot {
     voiceDescription: string;
     identityStrategy: string;
   }>;
-  editableAuthoredData: false;
+  editableAuthoredData: boolean;
 }
 
 export interface NativeResourceGovernorPolicy {
@@ -2350,6 +2388,23 @@ export interface NativeTrustedOptionalPackLifecycle {
   ready: boolean;
   detail: string;
   packs: NativeTrustedOptionalPackState[];
+}
+
+export interface NativeTrustedOptionalPackActivationReceipt {
+  schemaVersion: number;
+  identity: { pack_id: string; revision: string };
+  manifestSha256: string;
+  installedContentTreeSha256: string;
+  attestationSha256: string;
+  providerLoadDurationMillis: number;
+  trustDomain: "local_review_dev_only" | "release_threshold";
+  detail: string;
+}
+
+export interface NativeTrustedOptionalPackActivationResult {
+  schemaVersion: number;
+  receipt: NativeTrustedOptionalPackActivationReceipt;
+  lifecycle: NativeTrustedOptionalPackLifecycle;
 }
 
 export type NativeExperimentalPackPhase =
@@ -2937,6 +2992,25 @@ export const cancelTrustedOptionalPackDownload = (identity: {
       licenseAccepted: false,
     },
   });
+
+export const activateTrustedOptionalPack = (
+  identity: {
+    pack_id: string;
+    revision: string;
+  },
+  selection: NativeSelectedLoadoutSelection,
+) =>
+  nativeInvoke<NativeTrustedOptionalPackActivationResult>(
+    "activate_trusted_optional_pack",
+    {
+      request: {
+        packId: identity.pack_id,
+        revision: identity.revision,
+        explicitUserConfirmation: true,
+        selection,
+      },
+    },
+  );
 
 export const admitSelectedLocalLoadout = (
   selection: NativeSelectedLoadoutSelection,

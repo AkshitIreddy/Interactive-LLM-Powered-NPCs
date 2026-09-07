@@ -8,6 +8,7 @@ import {
 } from "react";
 import type { AppPreferences } from "./types";
 import {
+  deleteProviderCredential,
   promptAndSaveProviderCredential,
   testProviderCredential,
 } from "./providerCredentials";
@@ -28,12 +29,15 @@ import {
   readSelectedAudioInput,
   readSelectedAudioOutput,
   runSyntheticReplayCapture,
+  saveProductPreferences,
   saveOnboarding,
   saveDiagnosticsSettings,
   selectAudioInput,
   selectAudioOutput,
   startNativeSimulation,
   syntheticReplayCaptureAvailability,
+  syntheticReviewTargetAvailability,
+  prepareSyntheticReviewTarget,
   verifySelectedGameCapture,
   type NativeBootstrapHealth,
   type NativeAudioInputSelection,
@@ -56,11 +60,22 @@ import {
   type NativeOnboardingStep,
   type NativeProviderCredentialSummary,
   type NativeProductPreferenceSnapshot,
+  type NativeProductPreferenceScope,
+  type NativeScopedProductPreferences,
   type NativeSimulationEvent,
   type NativeTurnExecutionEvidence,
   type OnboardingSnapshot,
 } from "./tauriBridge";
 import { ProviderLoadoutEditor } from "./ProviderLoadoutEditor";
+import { ProviderAccounts, type AccountAction } from "./ProviderAccounts";
+import { WorkspaceSections } from "./WorkspaceSections";
+import { Icon, type IconName } from "./icons";
+import {
+  nativeSnapshot as readNativeLoadouts,
+  fromNativeSnapshot,
+} from "./providerLoadoutBridge";
+import { SetupSystemCheck } from "./SetupSystemCheck";
+import { ContentPackWorkspace } from "./ContentPackWorkspace";
 import {
   activeBrowserLoadoutFor,
   modelFor,
@@ -139,12 +154,12 @@ const DEFAULT_PREFERENCES: AppPreferences = {
   diagnostics: true,
 };
 
-const NAV: Array<{ id: ProductPage; label: string; index: string }> = [
-  { id: "session", label: "Session deck", index: "01" },
-  { id: "world", label: "World", index: "02" },
-  { id: "voice", label: "Voice & models", index: "03" },
-  { id: "diagnostics", label: "Diagnostics", index: "04" },
-  { id: "settings", label: "Settings & guide", index: "05" },
+const NAV: Array<{ id: ProductPage; label: string; icon: IconName }> = [
+  { id: "session", label: "Session", icon: "conversation" },
+  { id: "world", label: "Games & characters", icon: "games" },
+  { id: "voice", label: "Voice & models", icon: "headphones" },
+  { id: "diagnostics", label: "Diagnostics", icon: "performance" },
+  { id: "settings", label: "Settings & help", icon: "settings" },
 ];
 
 const ONBOARDING_STEPS: Array<{ id: NativeOnboardingStep; label: string }> = [
@@ -228,6 +243,19 @@ function hasReceiptBackedSubtitle(
   );
 }
 
+function hasSpokenSetupTurn(
+  completed: (NativeSimulationEvent & { type: "completed" }) | null,
+  subtitles: boolean,
+) {
+  return Boolean(
+    completed &&
+      !completed.runtimeFixtureOnly &&
+      completed.turnExecution?.success.llmProviderLive &&
+      hasReceiptBackedAudio(completed) &&
+      (!subtitles || hasReceiptBackedSubtitle(completed)),
+  );
+}
+
 function subtitleReceiptSurfaceLabel(
   receipts: NativeTurnExecutionEvidence["subtitlePresentationReceipts"],
 ) {
@@ -267,6 +295,48 @@ function audioReceiptEndpointLabel(
   ].join(" + ");
 }
 
+function productPreferenceScopeKey(scope: NativeProductPreferenceScope) {
+  if (scope.kind === "global") return "global";
+  if (scope.kind === "game") return `game:${scope.gameProfileId}`;
+  return `character:${scope.gameProfileId}/${scope.characterId}`;
+}
+
+function sameProductPreferenceScope(
+  left: NativeProductPreferenceScope,
+  right: NativeProductPreferenceScope,
+) {
+  return productPreferenceScopeKey(left) === productPreferenceScopeKey(right);
+}
+
+function materialProductPreferenceKey(
+  snapshot: NativeProductPreferenceSnapshot,
+) {
+  const effective = snapshot.effective;
+  return JSON.stringify({
+    scope: productPreferenceScopeKey(effective.scope),
+    executionPreset: effective.executionPreset.value,
+    performancePreset: effective.performancePreset.value,
+    verbosity: effective.verbosity.value,
+    creativity: effective.creativity.value,
+    responseLength: effective.responseLength.value,
+    interruptionMode: effective.interruptionMode.value,
+    inputMode: effective.inputMode.value,
+    subtitles: effective.subtitles.value,
+    overlay: effective.overlay.value,
+    memory: effective.memory.value,
+    emotion: effective.emotion.value,
+    vision: effective.vision.value,
+    webcamPresence: effective.webcamPresence.value,
+    egress: {
+      transcript: effective.egress.transcript.value,
+      microphoneAudio: effective.egress.microphoneAudio.value,
+      capturedGameImage: effective.egress.capturedGameImage.value,
+      localMemoryContext: effective.egress.localMemoryContext.value,
+    },
+    automaticProviderFallback: effective.automaticProviderFallback,
+  });
+}
+
 export function ProductConsole() {
   const query = useMemo(() => new URLSearchParams(window.location.search), []);
   const [page, setPage] = useState<ProductPage>(initialPage);
@@ -275,6 +345,31 @@ export function ProductConsole() {
   );
   const [preferences, setPreferences] =
     useState<AppPreferences>(DEFAULT_PREFERENCES);
+  const [nativeLoadouts, setNativeLoadouts] = useState<
+    ProviderLoadout[] | null
+  >(null);
+  const configurationChangedAt = useRef(0);
+  const [configurationRevision, setConfigurationRevision] = useState(0);
+  const configurationRevisionRef = useRef(0);
+  const markConfigurationChanged = useCallback(() => {
+    configurationRevisionRef.current += 1;
+    setConfigurationRevision(configurationRevisionRef.current);
+    configurationChangedAt.current = Math.max(
+      Date.now() + 1,
+      configurationChangedAt.current + 1,
+    );
+  }, []);
+  const nativeLoadoutsRef = useRef<ProviderLoadout[] | null>(null);
+  const acceptConfiguredLoadouts = useCallback(
+    (value: ProviderLoadout[]) => {
+      if (JSON.stringify(nativeLoadoutsRef.current) !== JSON.stringify(value)) {
+        nativeLoadoutsRef.current = value;
+        setNativeLoadouts(value);
+        markConfigurationChanged();
+      }
+    },
+    [markConfigurationChanged],
+  );
   const [setupOpen, setSetupOpen] = useState(query.get("onboarding") === "1");
   const [setupStep, setSetupStep] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
@@ -283,6 +378,7 @@ export function ProductConsole() {
   const [deliveredTurn, setDeliveredTurn] = useState<
     (NativeSimulationEvent & { type: "completed" }) | null
   >(null);
+  const turnRequestEpochRef = useRef(0);
   const [selectedGameProfileId, setSelectedGameProfileId] =
     useState("eclipse-harbor");
   const [selectedCharacter, setSelectedCharacter] =
@@ -303,6 +399,8 @@ export function ProductConsole() {
   const [turnRoute, setTurnRoute] = useState<{
     loadout: ProviderLoadout;
     capturedAtEpochMs: number;
+    configurationChangedAt: number;
+    configurationRevision: number;
   } | null>(null);
   const [diagnostics, setDiagnostics] =
     useState<NativeDiagnosticSummary | null>(null);
@@ -318,6 +416,7 @@ export function ProductConsole() {
   const [providerBusy, setProviderBusy] = useState<string | null>(null);
   const [captureProof, setCaptureProof] =
     useState<SyntheticCaptureProof | null>(null);
+  const [captureBusy, setCaptureBusy] = useState(false);
   const [audioOutputs, setAudioOutputs] =
     useState<NativeAudioOutputSnapshot | null>(null);
   const [selectedAudioOutput, setSelectedAudioOutput] =
@@ -348,24 +447,266 @@ export function ProductConsole() {
   const [selectedSttBusy, setSelectedSttBusy] = useState(false);
   const [selectedSttError, setSelectedSttError] = useState<string | null>(null);
 
-  const applyNativeProductPreferences = useCallback(
-    (productPreferences: NativeProductPreferenceSnapshot) => {
-      const effective = productPreferences.effective;
-      setPreferences((current) => ({
-        ...current,
-        execution:
-          effective.executionPreset.value === "fullyLocal"
-            ? "local"
-            : effective.executionPreset.value,
-        performance: effective.performancePreset.value,
-        subtitles: effective.subtitles.value,
-        ptt: effective.inputMode.value === "ptt",
-        localOnly: effective.executionPreset.value === "fullyLocal",
-        screenPresence: effective.vision.value,
-      }));
-      setTurnInputMode(effective.inputMode.value === "ptt" ? "ptt" : "typed");
+  useEffect(
+    () => () => {
+      turnRequestEpochRef.current += 1;
     },
     [],
+  );
+
+  const currentSttScope = useMemo<SelectedSttScope>(
+    () =>
+      turnWorldMode === "selectedWorld" && selectedCharacter
+        ? {
+            gameProfileId: selectedCharacter.gameProfileId,
+            characterId: selectedCharacter.character.id,
+            characterLabel: `${selectedCharacter.gameDisplayName} · ${selectedCharacter.character.displayName}`,
+          }
+        : {
+            gameProfileId: "eclipse-harbor",
+            characterId: "mara-venn",
+            characterLabel: "Eclipse Harbor · Mara Venn",
+          },
+    [selectedCharacter, turnWorldMode],
+  );
+  const currentProductPreferenceScope = useMemo<NativeProductPreferenceScope>(
+    () => ({
+      kind: "character",
+      gameProfileId: currentSttScope.gameProfileId,
+      characterId: currentSttScope.characterId,
+    }),
+    [currentSttScope.characterId, currentSttScope.gameProfileId],
+  );
+  const currentProductPreferenceScopeKey = productPreferenceScopeKey(
+    currentProductPreferenceScope,
+  );
+  const sessionConfigurationIdentityKey = useMemo(
+    () =>
+      JSON.stringify({
+        worldMode: turnWorldMode,
+        gameProfileId: selectedGameProfileId,
+        characterScope: currentProductPreferenceScopeKey,
+        target: selectedTarget
+          ? {
+              gameProfileId: selectedTarget.gameProfileId,
+              processId: selectedTarget.target.processId,
+              nativeWindow: selectedTarget.target.nativeWindow,
+              executablePathSha256: selectedTarget.target.executablePathSha256,
+              captureAuthorized: selectedTarget.captureAuthorized,
+              safetyState: selectedTarget.safetyState,
+            }
+          : null,
+        inputMode: turnInputMode,
+        preferences: {
+          execution: preferences.execution,
+          performance: preferences.performance,
+          subtitles: preferences.subtitles,
+          ptt: preferences.ptt,
+          localOnly: preferences.localOnly,
+          screenPresence: preferences.screenPresence,
+        },
+      }),
+    [
+      currentProductPreferenceScopeKey,
+      preferences.execution,
+      preferences.localOnly,
+      preferences.performance,
+      preferences.ptt,
+      preferences.screenPresence,
+      preferences.subtitles,
+      selectedGameProfileId,
+      selectedTarget,
+      turnInputMode,
+      turnWorldMode,
+    ],
+  );
+  const observedSessionConfigurationRef = useRef<string | null>(null);
+  const currentProductPreferenceScopeRef = useRef(
+    currentProductPreferenceScope,
+  );
+  currentProductPreferenceScopeRef.current = currentProductPreferenceScope;
+  const [sessionPreferenceSnapshot, setSessionPreferenceSnapshot] =
+    useState<NativeProductPreferenceSnapshot | null>(null);
+  const sessionPreferenceSnapshotRef =
+    useRef<NativeProductPreferenceSnapshot | null>(null);
+  const [sessionPreferenceBusy, setSessionPreferenceBusy] = useState<
+    "load" | "save" | null
+  >(null);
+  const [sessionPreferenceError, setSessionPreferenceError] = useState<
+    string | null
+  >(null);
+  const sessionPreferenceSequence = useRef(0);
+  const appliedSessionPreferenceRef = useRef<{
+    materialKey: string;
+    scopeKey: string;
+    inputMode: "ptt" | "vad";
+  } | null>(null);
+
+  const applyNativeProductPreferences = useCallback(
+    (productPreferences: NativeProductPreferenceSnapshot) => {
+      const requestedScope = currentProductPreferenceScopeRef.current;
+      if (
+        !sameProductPreferenceScope(
+          productPreferences.effective.scope,
+          requestedScope,
+        )
+      ) {
+        return false;
+      }
+      const effective = productPreferences.effective;
+      const scopeKey = productPreferenceScopeKey(effective.scope);
+      const materialKey = materialProductPreferenceKey(productPreferences);
+      const previouslyApplied = appliedSessionPreferenceRef.current;
+      const materialChanged = previouslyApplied?.materialKey !== materialKey;
+      const inputPreferenceChanged =
+        !previouslyApplied ||
+        previouslyApplied.scopeKey !== scopeKey ||
+        previouslyApplied.inputMode !== effective.inputMode.value;
+
+      sessionPreferenceSnapshotRef.current = productPreferences;
+      setSessionPreferenceSnapshot(productPreferences);
+      if (materialChanged) {
+        setPreferences((current) => {
+          const next: AppPreferences = {
+            ...current,
+            execution:
+              effective.executionPreset.value === "fullyLocal"
+                ? "local"
+                : effective.executionPreset.value,
+            performance: effective.performancePreset.value,
+            subtitles: effective.subtitles.value,
+            ptt: effective.inputMode.value === "ptt",
+            localOnly: effective.executionPreset.value === "fullyLocal",
+            screenPresence: effective.vision.value,
+          };
+          return JSON.stringify(current) === JSON.stringify(next)
+            ? current
+            : next;
+        });
+        markConfigurationChanged();
+      }
+      if (inputPreferenceChanged) {
+        setTurnInputMode(effective.inputMode.value === "ptt" ? "ptt" : "typed");
+      }
+      appliedSessionPreferenceRef.current = {
+        materialKey,
+        scopeKey,
+        inputMode: effective.inputMode.value,
+      };
+      return true;
+    },
+    [markConfigurationChanged],
+  );
+
+  const refreshCurrentProductPreferences = useCallback(async () => {
+    const sequence = ++sessionPreferenceSequence.current;
+    const scope = currentProductPreferenceScopeRef.current;
+    setSessionPreferenceBusy("load");
+    setSessionPreferenceError(null);
+    try {
+      const next = await readProductPreferences(scope);
+      if (sequence !== sessionPreferenceSequence.current) return null;
+      if (!next) {
+        throw new Error("Native product preferences returned no snapshot.");
+      }
+      if (!applyNativeProductPreferences(next)) {
+        throw new Error(
+          "Native product preferences returned a different character scope.",
+        );
+      }
+      return next;
+    } catch (error) {
+      if (sequence !== sessionPreferenceSequence.current) return null;
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Native product preferences could not be loaded.";
+      setSessionPreferenceError(message);
+      return null;
+    } finally {
+      if (sequence === sessionPreferenceSequence.current) {
+        setSessionPreferenceBusy(null);
+      }
+    }
+  }, [applyNativeProductPreferences]);
+
+  const acceptPreferenceWorkspaceSnapshot = useCallback(
+    (next: NativeProductPreferenceSnapshot) => {
+      if (!applyNativeProductPreferences(next)) {
+        void refreshCurrentProductPreferences();
+      }
+    },
+    [applyNativeProductPreferences, refreshCurrentProductPreferences],
+  );
+
+  const saveSessionSubtitles = useCallback(
+    async (enabled: boolean) => {
+      if (
+        bootstrap.kind !== "snapshot" ||
+        !bootstrap.snapshot.runtime.connected
+      ) {
+        setSessionPreferenceError(
+          "Open the native desktop app to change subtitles.",
+        );
+        return;
+      }
+      const sequence = ++sessionPreferenceSequence.current;
+      const scope = currentProductPreferenceScopeRef.current;
+      setSessionPreferenceBusy("save");
+      setSessionPreferenceError(null);
+      try {
+        let base = sessionPreferenceSnapshotRef.current;
+        if (!base || !sameProductPreferenceScope(base.effective.scope, scope)) {
+          base = await readProductPreferences(scope);
+        }
+        if (sequence !== sessionPreferenceSequence.current) return;
+        if (!base) {
+          throw new Error("Native product preferences returned no snapshot.");
+        }
+        if (!sameProductPreferenceScope(base.effective.scope, scope)) {
+          throw new Error(
+            "Native product preferences returned a different character scope.",
+          );
+        }
+        const currentEntry = base.entries.find((candidate) =>
+          sameProductPreferenceScope(candidate.scope, scope),
+        );
+        const entry: NativeScopedProductPreferences = currentEntry
+          ? {
+              ...currentEntry,
+              scope,
+              overrides: { ...currentEntry.overrides, subtitles: enabled },
+            }
+          : { scope, overrides: { subtitles: enabled } };
+        const next = await saveProductPreferences(base.revision, entry);
+        if (sequence !== sessionPreferenceSequence.current) return;
+        if (!next) {
+          throw new Error(
+            "Native product preferences returned no saved subtitle state.",
+          );
+        }
+        if (!applyNativeProductPreferences(next)) {
+          throw new Error(
+            "Saved subtitle preferences did not resolve the current character.",
+          );
+        }
+        setNotice(
+          `Subtitles ${enabled ? "enabled" : "hidden"} for ${currentSttScope.characterLabel}.`,
+        );
+      } catch (error) {
+        if (sequence !== sessionPreferenceSequence.current) return;
+        setSessionPreferenceError(
+          error instanceof Error
+            ? error.message
+            : "Subtitles could not be saved for this character.",
+        );
+      } finally {
+        if (sequence === sessionPreferenceSequence.current) {
+          setSessionPreferenceBusy(null);
+        }
+      }
+    },
+    [applyNativeProductPreferences, bootstrap, currentSttScope.characterLabel],
   );
 
   const refreshAudioOutputs = useCallback(async () => {
@@ -389,6 +730,22 @@ export function ProductConsole() {
     }
   }, []);
 
+  useEffect(() => {
+    if (bootstrap.kind !== "snapshot") return;
+    let current = true;
+    void readNativeLoadouts()
+      .then((value) => {
+        if (current && value)
+          acceptConfiguredLoadouts(fromNativeSnapshot(value));
+      })
+      .catch(() => {
+        if (current) setNativeLoadouts(null);
+      });
+    return () => {
+      current = false;
+    };
+  }, [bootstrap.kind, acceptConfiguredLoadouts]);
+
   const chooseAudioOutput = useCallback(
     async (selection: NativeAudioOutputSelection) => {
       setAudioOutputBusy(true);
@@ -402,22 +759,23 @@ export function ProductConsole() {
           return;
         }
         setSelectedAudioOutput(selected);
+        markConfigurationChanged();
         setNotice(
-          `Audio output saved: ${selected.resolved.friendlyName}. Future receipts must identify the drained endpoint.`,
+          `Saved exact endpoint: ${selected.resolved.friendlyName}. Future receipts must identify the drained endpoint.`,
         );
         const catalog = await enumerateAudioOutputs();
         if (catalog) setAudioOutputs(catalog);
       } catch (error) {
         setAudioOutputError(
           error instanceof Error
-            ? error.message
+            ? `Selection not changed: ${error.message}`
             : "The selected audio output could not be persisted.",
         );
       } finally {
         setAudioOutputBusy(false);
       }
     },
-    [],
+    [markConfigurationChanged],
   );
 
   const refreshAudioInputs = useCallback(async () => {
@@ -452,22 +810,23 @@ export function ProductConsole() {
           return;
         }
         setSelectedAudioInput(selected);
+        markConfigurationChanged();
         setNotice(
-          `Audio input saved: ${selected.resolved.friendlyName}. Endpoint routing is configured; microphone frames, signal quality, and a transcript are not yet proven.`,
+          `Saved exact endpoint: ${selected.resolved.friendlyName}. Endpoint routing is configured; microphone frames, signal quality, and a transcript are not yet proven.`,
         );
         const catalog = await enumerateAudioInputs();
         if (catalog) setAudioInputs(catalog);
       } catch (error) {
         setAudioInputError(
           error instanceof Error
-            ? error.message
+            ? `Selection not changed: ${error.message}`
             : "The selected audio input could not be persisted.",
         );
       } finally {
         setAudioInputBusy(false);
       }
     },
-    [],
+    [markConfigurationChanged],
   );
 
   useEffect(() => {
@@ -499,6 +858,8 @@ export function ProductConsole() {
             setSetupStep(Math.max(0, knownStep));
             setSetupOpen(true);
           }
+        } else {
+          setSetupOpen(true);
         }
       })
       .catch((error: unknown) => {
@@ -563,19 +924,36 @@ export function ProductConsole() {
   }, [bootstrap.kind]);
 
   useEffect(() => {
-    if (bootstrap.kind !== "snapshot") return;
-    void readProductPreferences({ kind: "global" })
-      .then((next) => {
-        if (next) applyNativeProductPreferences(next);
-      })
-      .catch((error: unknown) =>
-        setNotice(
-          error instanceof Error
-            ? error.message
-            : "Native product preferences could not be loaded.",
-        ),
-      );
-  }, [applyNativeProductPreferences, bootstrap.kind]);
+    if (bootstrap.kind !== "snapshot") {
+      sessionPreferenceSequence.current += 1;
+      sessionPreferenceSnapshotRef.current = null;
+      setSessionPreferenceSnapshot(null);
+      setSessionPreferenceBusy(null);
+      return;
+    }
+    void refreshCurrentProductPreferences();
+    return () => {
+      sessionPreferenceSequence.current += 1;
+    };
+  }, [
+    bootstrap.kind,
+    currentProductPreferenceScopeKey,
+    refreshCurrentProductPreferences,
+  ]);
+
+  useEffect(() => {
+    if (observedSessionConfigurationRef.current === null) {
+      observedSessionConfigurationRef.current = sessionConfigurationIdentityKey;
+      return;
+    }
+    if (
+      observedSessionConfigurationRef.current !==
+      sessionConfigurationIdentityKey
+    ) {
+      observedSessionConfigurationRef.current = sessionConfigurationIdentityKey;
+      markConfigurationChanged();
+    }
+  }, [markConfigurationChanged, sessionConfigurationIdentityKey]);
 
   useEffect(() => {
     if (bootstrap.kind !== "snapshot") return;
@@ -627,22 +1005,38 @@ export function ProductConsole() {
   const assemblyAiProvider = snapshot?.providers?.find(
     (item) => item.providerId === "assemblyai",
   );
-  const currentSttScope: SelectedSttScope =
-    turnWorldMode === "selectedWorld" && selectedCharacter
-      ? {
-          gameProfileId: selectedCharacter.gameProfileId,
-          characterId: selectedCharacter.character.id,
-          characterLabel: `${selectedCharacter.gameDisplayName} · ${selectedCharacter.character.displayName}`,
-        }
-      : {
-          gameProfileId: "eclipse-harbor",
-          characterId: "mara-venn",
-          characterLabel: "Eclipse Harbor · Mara Venn",
-        };
-  const configuredSttRoute = activeBrowserLoadoutFor(
-    currentSttScope.gameProfileId,
-    currentSttScope.characterId,
-  ).routes.stt;
+  const configuredLoadout =
+    nativeLoadouts?.find(
+      (item) =>
+        item.active &&
+        item.scope === "character" &&
+        item.targetId ===
+          `${currentSttScope.gameProfileId}/${currentSttScope.characterId}`,
+    ) ??
+    nativeLoadouts?.find(
+      (item) =>
+        item.active &&
+        item.scope === "game" &&
+        item.targetId === currentSttScope.gameProfileId,
+    ) ??
+    nativeLoadouts?.find((item) => item.active && item.scope === "global") ??
+    activeBrowserLoadoutFor(
+      currentSttScope.gameProfileId,
+      currentSttScope.characterId,
+    );
+  const configuredSttRoute = configuredLoadout.routes.stt;
+  const configuredTtsCredentialId =
+    configuredLoadout.routes.tts.providerId === "nvidia-nim-magpie"
+      ? "nvidia-nim"
+      : configuredLoadout.routes.tts.providerId;
+  const configuredTtsPresent = Boolean(
+    nativeLoadouts &&
+      snapshot?.providers?.some(
+        (item) =>
+          item.providerId === configuredTtsCredentialId &&
+          item.status === "present",
+      ),
+  );
   const selectedSttReadiness: SelectedSttReadiness = {
     ready: Boolean(
       bootstrap.kind === "snapshot" &&
@@ -670,6 +1064,9 @@ export function ProductConsole() {
   const nvidiaPresent = nvidiaProvider?.status === "present";
   const captureDebugAvailable = syntheticReplayCaptureAvailability(
     Boolean(snapshot?.capabilities?.debugSyntheticReplayCapture),
+  );
+  const reviewTargetAvailable = syntheticReviewTargetAvailability(
+    Boolean(snapshot?.capabilities?.debugSyntheticReviewTargetLaunch),
   );
   const activeEvent = turnEvents.at(-1);
   const activeStage =
@@ -707,16 +1104,18 @@ export function ProductConsole() {
   );
 
   const nextSetupStep = async () => {
+    if (setupStep === 1 && !captureProof?.receipt?.verified) {
+      setNotice(
+        "Select the test game and verify its capture before continuing.",
+      );
+      return;
+    }
     if (setupStep < ONBOARDING_STEPS.length - 1) {
       const next = setupStep + 1;
-      const selectedPreferences =
-        setupStep === 2
-          ? { ...preferences, execution: "cloud" as const, localOnly: false }
-          : preferences;
       const saved = await persistSetup(
         false,
         ONBOARDING_STEPS[next].id,
-        selectedPreferences,
+        preferences,
       );
       if (!saved) {
         setNotice(
@@ -725,6 +1124,17 @@ export function ProductConsole() {
         return;
       }
       setSetupStep(next);
+      return;
+    }
+    if (
+      !hasSpokenSetupTurn(deliveredTurn, preferences.subtitles) ||
+      !turnRoute ||
+      turnRoute.configurationChangedAt !== configurationChangedAt.current ||
+      turnRoute.configurationRevision !== configurationRevision
+    ) {
+      setNotice(
+        "Run a spoken test turn first. Setup finishes when the selected voice returns audio and playback completes.",
+      );
       return;
     }
     const saved = await persistSetup(true, "ready");
@@ -759,6 +1169,7 @@ export function ProductConsole() {
       setTurnError("Enter a transcript before starting a turn.");
       return;
     }
+    const requestEpoch = ++turnRequestEpochRef.current;
     setDeliveredTurn(null);
     setTurnEvents([]);
     setRunning(true);
@@ -777,15 +1188,16 @@ export function ProductConsole() {
       ? selectedCharacter.character.displayName
       : "Mara Venn";
     setTurnRoute({
-      loadout: structuredClone(
-        activeBrowserLoadoutFor(turnGameProfileId, turnCharacterId),
-      ),
+      loadout: structuredClone(configuredLoadout),
       capturedAtEpochMs: Date.now(),
+      configurationChangedAt: configurationChangedAt.current,
+      configurationRevision: configurationRevisionRef.current,
     });
     try {
       const started = await startNativeSimulation(
         preferences.execution,
         (event) => {
+          if (turnRequestEpochRef.current !== requestEpoch) return;
           setTurnEvents((current) => [...current, event].slice(-24));
           if (event.type === "completed") {
             setDeliveredTurn(event);
@@ -816,6 +1228,7 @@ export function ProductConsole() {
               enabledSpoilerTiers: [],
             },
       );
+      if (turnRequestEpochRef.current !== requestEpoch) return;
       if (!started) {
         setRunning(false);
         const detail =
@@ -828,6 +1241,7 @@ export function ProductConsole() {
         );
       }
     } catch (error) {
+      if (turnRequestEpochRef.current !== requestEpoch) return;
       setRunning(false);
       const detail =
         error instanceof Error ? error.message : "Turn failed before delivery.";
@@ -843,8 +1257,20 @@ export function ProductConsole() {
   };
 
   const stopTurn = async () => {
-    await cancelNativeSimulation();
-    setRunning(false);
+    const stopEpoch = ++turnRequestEpochRef.current;
+    try {
+      await cancelNativeSimulation();
+    } catch (error) {
+      if (turnRequestEpochRef.current !== stopEpoch) return;
+      const detail =
+        error instanceof Error
+          ? error.message
+          : "The native turn could not be cancelled.";
+      setTurnError(detail);
+      setNotice(detail);
+    } finally {
+      if (turnRequestEpochRef.current === stopEpoch) setRunning(false);
+    }
   };
 
   const applySelectedSttTerminal = (event: SelectedSttTerminal) => {
@@ -1100,8 +1526,10 @@ export function ProductConsole() {
     }
   };
 
-  const verifySyntheticCapture = async () => {
-    if (!captureProof) {
+  const verifySyntheticCaptureFor = async (
+    expected: SyntheticCaptureProof | null,
+  ) => {
+    if (!expected) {
       setNotice("Select the native synthetic target before verifying capture.");
       return;
     }
@@ -1112,14 +1540,14 @@ export function ProductConsole() {
       const evidence = result.capture;
       const exactTargetMatch =
         result.exactPidHwndExecutableMatch &&
-        result.target.processId === captureProof.pid &&
-        result.target.nativeWindow === captureProof.hwnd &&
+        result.target.processId === expected.pid &&
+        result.target.nativeWindow === expected.hwnd &&
         result.target.executableName.toLocaleLowerCase() ===
-          captureProof.executable.toLocaleLowerCase() &&
-        evidence.selectedProcessId === captureProof.pid &&
-        evidence.selectedWindowHandle === captureProof.hwnd &&
+          expected.executable.toLocaleLowerCase() &&
+        evidence.selectedProcessId === expected.pid &&
+        evidence.selectedWindowHandle === expected.hwnd &&
         evidence.selectedExecutableName.toLocaleLowerCase() ===
-          captureProof.executable.toLocaleLowerCase();
+          expected.executable.toLocaleLowerCase();
       const frameSequenceAdvanced = result.frameSequenceAdvanced;
       const verified =
         exactTargetMatch &&
@@ -1158,18 +1586,48 @@ export function ProductConsole() {
     }
   };
 
+  const verifySyntheticCapture = () => verifySyntheticCaptureFor(captureProof);
+  const connectReviewGame = async () => {
+    markConfigurationChanged();
+    setCaptureBusy(true);
+    setNotice(null);
+    try {
+      const target = await prepareSyntheticReviewTarget(reviewTargetAvailable);
+      const expected: SyntheticCaptureProof = {
+        pid: target.targetProcessId,
+        hwnd: target.targetWindowHandle,
+        executable: target.targetExecutableBasename,
+        frames: 0,
+        receipt: null,
+      };
+      setCaptureProof(expected);
+      await verifySyntheticCaptureFor(expected);
+    } catch (error) {
+      setCaptureProof(null);
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Could not start the test game. Open Games & characters and try again.",
+      );
+    } finally {
+      setCaptureBusy(false);
+    }
+  };
+
   const runProviderAction = async (
-    providerId: "elevenlabs" | "nvidia-nim",
-    action: "save" | "validate",
+    providerId: string,
+    action: AccountAction,
   ) => {
     setProviderBusy(providerId);
     try {
       const result =
         action === "save"
           ? await promptAndSaveProviderCredential(providerId)
-          : await testProviderCredential(providerId);
+          : action === "delete"
+            ? await deleteProviderCredential(providerId)
+            : await testProviderCredential(providerId);
       setNotice(result.detail);
-      if (action === "save" && result.status === "present") {
+      if (action !== "validate" && result.outcome !== "cancelled") {
         const health = await loadNativeBootstrapHealth({ maxAttempts: 1 });
         setBootstrap(health);
       }
@@ -1184,7 +1642,11 @@ export function ProductConsole() {
 
   return (
     <div className="product-shell">
-      <aside className="product-rail" aria-label="Primary navigation">
+      <aside
+        className="product-rail"
+        aria-label="Primary navigation"
+        inert={setupOpen}
+      >
         <button
           className="brand-lockup"
           onClick={() => navigate("session")}
@@ -1193,7 +1655,7 @@ export function ProductConsole() {
           <span className="brand-mark">N2</span>
           <span>
             <b>NPC 2.0</b>
-            <small>session instrument</small>
+            <small>Conversation system</small>
           </span>
         </button>
         <nav>
@@ -1202,19 +1664,25 @@ export function ProductConsole() {
               key={item.id}
               className={page === item.id ? "nav-item selected" : "nav-item"}
               onClick={() => navigate(item.id)}
+              aria-current={page === item.id ? "page" : undefined}
             >
-              <span>{item.index}</span>
+              <Icon name={item.icon} size={19} />
               <b>{item.label}</b>
             </button>
           ))}
         </nav>
         <div className="rail-safety">
-          <span className="status-dot good" />
-          Single-player only<small>Anti-cheat modes stay blocked.</small>
+          <Icon name="shield" size={18} />
+          <b>Local review</b>
+          <small>
+            Single-player games
+            <br />
+            Updates disabled
+          </small>
         </div>
       </aside>
 
-      <main className="product-main">
+      <main className="product-main" inert={setupOpen}>
         <header className="product-topbar">
           <div>
             <span className="eyebrow">
@@ -1245,23 +1713,28 @@ export function ProductConsole() {
           </div>
         )}
 
-        <SignalRail
-          activeStage={activeStage}
-          running={running}
-          delivered={Boolean(deliveredTurn)}
-          providerPresent={providerPresent}
-          captureProof={captureProof}
-          selectedCharacter={selectedCharacter}
-          selectedTarget={selectedTarget}
-          turnWorldMode={turnWorldMode}
-        />
+        {page === "session" && (
+          <SignalRail
+            activeStage={activeStage}
+            running={running}
+            delivered={Boolean(deliveredTurn)}
+            providerPresent={providerPresent}
+            captureProof={captureProof}
+            selectedCharacter={selectedCharacter}
+            selectedTarget={selectedTarget}
+            turnWorldMode={turnWorldMode}
+            loadout={configuredLoadout}
+            accounts={snapshot?.providers ?? []}
+            onNavigate={navigate}
+          />
+        )}
 
         {page === "session" && (
           <SessionPage
             running={running}
             deliveredTurn={deliveredTurn}
             events={turnEvents}
-            providerPresent={providerPresent}
+            providerPresent={configuredTtsPresent}
             captureProof={captureProof}
             selectedCharacter={selectedCharacter}
             selectedTarget={selectedTarget}
@@ -1277,10 +1750,21 @@ export function ProductConsole() {
             turnError={turnError}
             turnRoute={turnRoute}
             subtitles={preferences.subtitles}
-            setSubtitles={(subtitles) =>
-              setPreferences((current) => ({ ...current, subtitles }))
+            setSubtitles={(subtitles) => void saveSessionSubtitles(subtitles)}
+            subtitlesBusy={sessionPreferenceBusy}
+            subtitlesError={sessionPreferenceError}
+            subtitlesReady={Boolean(
+              sessionPreferenceSnapshot &&
+                sameProductPreferenceScope(
+                  sessionPreferenceSnapshot.effective.scope,
+                  currentProductPreferenceScope,
+                ),
+            )}
+            subtitleScopeLabel={currentSttScope.characterLabel}
+            nativeAvailable={
+              bootstrap.kind === "snapshot" &&
+              bootstrap.snapshot.runtime.connected
             }
-            nativeAvailable={nativeWorldReady}
             selectedSttReadiness={selectedSttReadiness}
             selectedSttCapture={selectedSttCapture}
             selectedSttStatus={selectedSttStatus}
@@ -1301,6 +1785,10 @@ export function ProductConsole() {
         )}
         {page === "world" && (
           <WorldPage
+            onNavigate={navigate}
+            onConnectReviewGame={connectReviewGame}
+            reviewLaunchAvailable={reviewTargetAvailable.available}
+            captureBusy={captureBusy}
             captureProof={captureProof}
             captureAvailable={captureDebugAvailable.available}
             onCapture={selectSyntheticTarget}
@@ -1323,8 +1811,12 @@ export function ProductConsole() {
             identityEnrollmentError={identityEnrollmentError}
           />
         )}
-        {page === "voice" && (
+        {page === "voice" && !setupOpen && (
           <VoicePage
+            onNativeLoadoutsChange={acceptConfiguredLoadouts}
+            accounts={snapshot?.providers ?? []}
+            gameProfileId={currentSttScope.gameProfileId}
+            characterId={currentSttScope.characterId}
             providerPresent={providerPresent}
             providerDetail={provider?.detail}
             nvidiaPresent={nvidiaPresent}
@@ -1358,9 +1850,14 @@ export function ProductConsole() {
                 execution: "cloud",
                 localOnly: false,
               } satisfies AppPreferences;
-              const saved = await saveOnboarding(
-                nowSnapshot(true, "ready", next),
-              );
+              const saved = await saveOnboarding({
+                ...nowSnapshot(
+                  snapshot?.onboarding?.completed ?? false,
+                  snapshot?.onboarding?.currentStep ?? "scan",
+                  next,
+                ),
+                selectedGameId: selectedGameProfileId,
+              });
               if (!saved) {
                 setNotice(
                   "Open the native desktop app to save the API-first default.",
@@ -1405,7 +1902,7 @@ export function ProductConsole() {
             onSelectAudioInput={chooseAudioInput}
             gameProfileId={selectedGameProfileId}
             characterId={selectedCharacter?.character.id ?? null}
-            onProductPreferenceSnapshot={applyNativeProductPreferences}
+            onProductPreferenceSnapshot={acceptPreferenceWorkspaceSnapshot}
             onSetup={() => {
               setSetupStep(0);
               setSetupOpen(true);
@@ -1419,13 +1916,20 @@ export function ProductConsole() {
 
       {setupOpen && (
         <OnboardingOverlay
+          onConnectReviewGame={connectReviewGame}
+          reviewLaunchAvailable={reviewTargetAvailable.available}
+          captureBusy={captureBusy}
           step={setupStep}
           bootstrap={bootstrap}
           providerPresent={providerPresent}
           nvidiaPresent={nvidiaPresent}
-          loadout={activeBrowserLoadoutFor(
-            selectedCharacter?.gameProfileId ?? selectedGameProfileId,
-            selectedCharacter?.character.id ?? "mara-venn",
+          loadout={configuredLoadout}
+          onNativeLoadoutsChange={acceptConfiguredLoadouts}
+          setupProofCurrent={Boolean(
+            turnRoute &&
+              turnRoute.configurationChangedAt ===
+                configurationChangedAt.current &&
+              turnRoute.configurationRevision === configurationRevision,
           )}
           credentialStates={snapshot?.providers ?? []}
           nativeAvailable={bootstrap.kind === "snapshot"}
@@ -1443,6 +1947,11 @@ export function ProductConsole() {
           onBack={() => setSetupStep((current) => Math.max(0, current - 1))}
           onNext={nextSetupStep}
           onCapture={selectSyntheticTarget}
+          onVerifyCapture={verifySyntheticCapture}
+          accounts={snapshot?.providers ?? []}
+          providerBusy={providerBusy}
+          gameProfileId={currentSttScope.gameProfileId}
+          characterId={currentSttScope.characterId}
           onProviderAction={runProviderAction}
           onRefreshAudioOutputs={refreshAudioOutputs}
           onSelectAudioOutput={chooseAudioOutput}
@@ -1470,11 +1979,14 @@ export function ProductConsole() {
             setTurnInputMode("typed");
           }}
           onRun={runTurn}
-          onClose={
-            snapshot?.onboarding?.completed || query.get("onboarding") === "1"
-              ? () => setSetupOpen(false)
-              : undefined
-          }
+          onClose={() => {
+            setSetupOpen(false);
+            setNotice(
+              snapshot?.onboarding?.completed
+                ? null
+                : "Setup saved for later. Open Setup to continue.",
+            );
+          }}
         />
       )}
     </div>
@@ -1485,11 +1997,13 @@ function SignalRail({
   activeStage,
   running,
   delivered,
-  providerPresent,
   captureProof,
   selectedCharacter,
   selectedTarget,
   turnWorldMode,
+  loadout,
+  accounts,
+  onNavigate,
 }: {
   activeStage: string | null;
   running: boolean;
@@ -1499,6 +2013,9 @@ function SignalRail({
   selectedCharacter: NativeCharacterInspection | null;
   selectedTarget: NativeGameTargetSelection | null;
   turnWorldMode: "syntheticReview" | "selectedWorld";
+  loadout: ProviderLoadout;
+  accounts: NativeProviderCredentialSummary[];
+  onNavigate: (page: ProductPage) => void;
 }) {
   const selectedWorld =
     turnWorldMode === "selectedWorld" && selectedCharacter !== null;
@@ -1522,17 +2039,31 @@ function SignalRail({
       label: "Actor",
       value: selectedWorld
         ? selectedCharacter.character.displayName
-        : "Mara Venn",
-      ready: true,
+        : captureProof
+          ? "Mara Venn · test character"
+          : "Mara Venn · preview",
+      ready: selectedWorld || Boolean(captureProof),
     },
     {
-      label: "TTS vault",
-      value: providerPresent
-        ? "ElevenLabs credential present"
-        : "No credential",
-      ready: providerPresent,
+      label: "Voice service",
+      value: providerFor("tts", loadout.routes.tts.providerId).name,
+      ready: accounts.some(
+        (account) =>
+          account.providerId ===
+            (loadout.routes.tts.providerId === "nvidia-nim-magpie"
+              ? "nvidia-nim"
+              : loadout.routes.tts.providerId) && account.status === "present",
+      ),
     },
-    { label: "Voice", value: "Per-turn authorization", ready: false },
+    {
+      label: "Voice",
+      value: loadout.routes.tts.voiceId
+        ? loadout.routes.tts.voiceId.startsWith("Magpie-")
+          ? (loadout.routes.tts.voiceId.split(".").at(-1) ?? "Configured voice")
+          : "Stock voice configured"
+        : "Choose a stock voice",
+      ready: false,
+    },
     {
       label: "Delivery",
       value: delivered
@@ -1549,7 +2080,15 @@ function SignalRail({
       aria-label="Session signal rail"
     >
       {nodes.map((node, index) => (
-        <div className="signal-node" key={node.label}>
+        <button
+          className="signal-node"
+          key={node.label}
+          onClick={() =>
+            onNavigate(
+              index < 2 ? "world" : index < 4 ? "voice" : "diagnostics",
+            )
+          }
+        >
           <span className={node.ready ? "signal-index ready" : "signal-index"}>
             {String(index + 1).padStart(2, "0")}
           </span>
@@ -1557,7 +2096,7 @@ function SignalRail({
             <small>{node.label}</small>
             <b>{node.value}</b>
           </span>
-        </div>
+        </button>
       ))}
     </section>
   );
@@ -1606,7 +2145,7 @@ function SelectedSttControl({
       <div className="selected-stt-control__heading">
         <div>
           <b>Live push-to-talk</b>
-          <small>Selected AssemblyAI route · physical F8 authority</small>
+          <small>Hold F8 to speak, release to send for transcription</small>
         </div>
         <span
           className={`badge ${terminal?.status === "transcriptReady" && receiptDisposition !== "rejected" ? "good" : active ? "wait" : readiness.ready ? "good" : "bad"}`}
@@ -1630,39 +2169,40 @@ function SelectedSttControl({
                       : "Blocked"}
         </span>
       </div>
-      <dl className="selected-stt-readiness">
-        <div>
-          <dt>Selected route</dt>
-          <dd>
-            {readiness.configuredProviderId} · {readiness.configuredModelId}
-          </dd>
-        </div>
-        <div>
-          <dt>Input endpoint</dt>
-          <dd>
-            {readiness.selectedInput
-              ? `${readiness.selectedInput.resolved.friendlyName} · gen ${readiness.selectedInput.resolved.generation}`
-              : "Not selected"}
-          </dd>
-        </div>
-        <div>
-          <dt>Credential</dt>
-          <dd>
-            {readiness.credentialPresent
-              ? "Native AssemblyAI vault reference present"
-              : "Missing"}
-          </dd>
-        </div>
-        <div>
-          <dt>Fallback</dt>
-          <dd>Automatic fallback false</dd>
-        </div>
-      </dl>
+      <details className="evidence-disclosure stt-connection-details">
+        <summary>Microphone connection details</summary>
+        <dl className="selected-stt-readiness">
+          <div>
+            <dt>Selected route</dt>
+            <dd>
+              {readiness.configuredProviderId} · {readiness.configuredModelId}
+            </dd>
+          </div>
+          <div>
+            <dt>Input endpoint</dt>
+            <dd>
+              {readiness.selectedInput
+                ? `${readiness.selectedInput.resolved.friendlyName} · gen ${readiness.selectedInput.resolved.generation}`
+                : "Not selected"}
+            </dd>
+          </div>
+          <div>
+            <dt>Credential</dt>
+            <dd>
+              {readiness.credentialPresent
+                ? "Native AssemblyAI vault reference present"
+                : "Missing"}
+            </dd>
+          </div>
+          <div>
+            <dt>Fallback</dt>
+            <dd>Automatic fallback false</dd>
+          </div>
+        </dl>
+      </details>
       <p className="selected-stt-physical-note">
-        Click Arm, then press and hold physical F8 within 8 seconds. Speak for
-        up to 10 seconds and release F8. The broker supplies both transitions,
-        endpoint generation, PCM, and provider token; this WebView supplies none
-        of them. VAD is unavailable.
+        Click Arm, then hold F8 within 8 seconds. Speak for up to 10 seconds and
+        release.
       </p>
       <label className="selected-stt-consent">
         <input
@@ -1674,12 +2214,8 @@ function SelectedSttControl({
         <span>
           <b>I approve this AssemblyAI cloud STT attempt</b>
           <small>
-            Captured microphone audio and optional non-secret context are sent
-            to AssemblyAI using the exact selected <code>u3-rt-pro</code> route
-            and native vault credential. Provider handling, retention, and terms
-            may apply. Automatic fallback is false. The transcript stays native
-            and can enter a character turn only through an explicit one-time
-            opaque receipt.
+            Sends microphone audio to AssemblyAI u3-rt-pro. Provider charges and
+            data terms apply.
           </small>
         </span>
       </label>
@@ -1692,13 +2228,15 @@ function SelectedSttControl({
         >
           {busy ? "Requesting native capture…" : "Arm live PTT capture"}
         </button>
-        <button
-          className="stop-action"
-          disabled={!active || (busy && !arming)}
-          onClick={onCancel}
-        >
-          Cancel native capture
-        </button>
+        {active && (
+          <button
+            className="stop-action"
+            disabled={busy && !arming}
+            onClick={onCancel}
+          >
+            Cancel native capture
+          </button>
+        )}
         {terminal?.status === "failed" && terminal.retryable && (
           <button
             className="secondary-action"
@@ -1733,59 +2271,70 @@ function SelectedSttControl({
         </div>
       )}
       {terminal && (
-        <div
-          className={`selected-stt-receipt ${terminal.status === "failed" ? "is-error" : ""}`}
-          role="status"
+        <details
+          open={terminal.status !== "transcriptReady"}
+          className="evidence-disclosure"
         >
-          <b>
-            {terminal.status} · generation {terminal.generation}
-          </b>
-          <span>
-            {terminal.sessionId} · {terminal.turnId}
-            {scope ? ` · ${scope.characterLabel}` : ""}
-          </span>
-          {terminal.status === "transcriptReady" && terminal.route ? (
-            <>
-              <code className="selected-stt-receipt-id">
-                Receipt {terminal.receiptId}
-              </code>
-              <small>
-                {terminal.route.providerId} · {terminal.route.modelId} ·
-                endpoint {terminal.route.inputEndpointId} gen{" "}
-                {terminal.route.inputEndpointGeneration}
-                {" · "}
-                {terminal.chunksSent} chunks · {terminal.pcmBytesSent} PCM bytes
-                · {terminal.route.capturedFrames} captured frames · physical F8
-                press sequence {terminal.route.pttPressTransitionSequence} →
-                release {terminal.route.pttReleaseTransitionSequence} ·{" "}
-                {terminal.partialEvents} partial events · exact native vault
-                reference present · no automatic fallback
-              </small>
-              <small>
-                Transcript text is not exposed to this WebView. Digest{" "}
-                {terminal.receiptSha256}.{" "}
-                {receiptDisposition === "ready"
-                  ? "The next explicit PTT turn action sends only this receipt ID and generation."
-                  : "No further turn action may reuse this receipt."}{" "}
-                Expired, consumed, or replayed receipts require a new capture.
-              </small>
-              {receiptDisposition && receiptDisposition !== "ready" && (
+          <summary>
+            {terminal.status === "transcriptReady"
+              ? "Transcription ready · view details"
+              : "Capture result"}
+          </summary>
+          <div
+            className={`selected-stt-receipt ${terminal.status === "failed" ? "is-error" : ""}`}
+            role="status"
+          >
+            <b>
+              {terminal.status} · generation {terminal.generation}
+            </b>
+            <span>
+              {terminal.sessionId} · {terminal.turnId}
+              {scope ? ` · ${scope.characterLabel}` : ""}
+            </span>
+            {terminal.status === "transcriptReady" && terminal.route ? (
+              <>
+                <code className="selected-stt-receipt-id">
+                  Receipt {terminal.receiptId}
+                </code>
                 <small>
-                  {receiptDisposition === "submitted"
-                    ? "This receipt has already been submitted once and cannot be reused. Capture again for another turn."
-                    : "Native consumption rejected this already-spent receipt. It cannot be replayed; capture again."}
+                  {terminal.route.providerId} · {terminal.route.modelId} ·
+                  endpoint {terminal.route.inputEndpointId} gen{" "}
+                  {terminal.route.inputEndpointGeneration}
+                  {" · "}
+                  {terminal.chunksSent} chunks · {terminal.pcmBytesSent} PCM
+                  bytes · {terminal.route.capturedFrames} captured frames ·
+                  physical F8 press sequence{" "}
+                  {terminal.route.pttPressTransitionSequence} → release{" "}
+                  {terminal.route.pttReleaseTransitionSequence} ·{" "}
+                  {terminal.partialEvents} partial events · exact native vault
+                  reference present · no automatic fallback
                 </small>
-              )}
-            </>
-          ) : (
-            <small>
-              {terminal.errorCode ?? "No receipt was committed."}
-              {terminal.retryable
-                ? " · explicit manual retry available"
-                : " · not retryable"}
-            </small>
-          )}
-        </div>
+                <small>
+                  Transcript text is not exposed to this WebView. Digest{" "}
+                  {terminal.receiptSha256}.{" "}
+                  {receiptDisposition === "ready"
+                    ? "The next explicit PTT turn action sends only this receipt ID and generation."
+                    : "No further turn action may reuse this receipt."}{" "}
+                  Expired, consumed, or replayed receipts require a new capture.
+                </small>
+                {receiptDisposition && receiptDisposition !== "ready" && (
+                  <small>
+                    {receiptDisposition === "submitted"
+                      ? "This receipt has already been submitted once and cannot be reused. Capture again for another turn."
+                      : "Native consumption rejected this already-spent receipt. It cannot be replayed; capture again."}
+                  </small>
+                )}
+              </>
+            ) : (
+              <small>
+                {terminal.errorCode ?? "No receipt was committed."}
+                {terminal.retryable
+                  ? " · explicit manual retry available"
+                  : " · not retryable"}
+              </small>
+            )}
+          </div>
+        </details>
       )}
       {error && (
         <p className="selected-stt-error" role="alert">
@@ -1814,6 +2363,10 @@ function SessionPage({
   turnRoute,
   subtitles,
   setSubtitles,
+  subtitlesBusy,
+  subtitlesError,
+  subtitlesReady,
+  subtitleScopeLabel,
   nativeAvailable,
   selectedSttReadiness,
   selectedSttCapture,
@@ -1844,9 +2397,18 @@ function SessionPage({
   prompt: string;
   setPrompt: (value: string) => void;
   turnError: string | null;
-  turnRoute: { loadout: ProviderLoadout; capturedAtEpochMs: number } | null;
+  turnRoute: {
+    loadout: ProviderLoadout;
+    capturedAtEpochMs: number;
+    configurationChangedAt: number;
+    configurationRevision: number;
+  } | null;
   subtitles: boolean;
   setSubtitles: (value: boolean) => void;
+  subtitlesBusy: "load" | "save" | null;
+  subtitlesError: string | null;
+  subtitlesReady: boolean;
+  subtitleScopeLabel: string;
   nativeAvailable: boolean;
   selectedSttReadiness: SelectedSttReadiness;
   selectedSttCapture: SelectedSttCapturing | null;
@@ -1900,7 +2462,13 @@ function SessionPage({
       <section className="instrument-panel primary-instrument">
         <div className="panel-heading">
           <div>
-            <span className="eyebrow">Selected conversation</span>
+            <span className="eyebrow">
+              {turnWorldMode === "selectedWorld" && selectedCharacter
+                ? "Conversation channel"
+                : captureProof
+                  ? "Local test character"
+                  : "Preview · local test character"}
+            </span>
             <h1>
               {turnWorldMode === "selectedWorld" && selectedCharacter
                 ? selectedCharacter.character.displayName
@@ -1908,54 +2476,55 @@ function SessionPage({
             </h1>
             <p>
               {turnWorldMode === "selectedWorld" && selectedCharacter
-                ? `${selectedCharacter.gameDisplayName} · ${selectedCharacter.character.promptRole} · persisted manual selection`
-                : "Eclipse Harbor · synthetic review fixture · explicit test identity"}
+                ? `${selectedCharacter.gameDisplayName} · ${selectedCharacter.character.promptRole} · selected by you`
+                : "Eclipse Harbor · local test game"}
             </p>
           </div>
-          <span className="identity-seal">MV</span>
+          <span className="identity-seal" aria-hidden="true">
+            {(turnWorldMode === "selectedWorld" && selectedCharacter
+              ? selectedCharacter.character.displayName
+              : "Mara Venn"
+            )
+              .split(/\s+/)
+              .slice(0, 2)
+              .map((word) => word[0])
+              .join("")}
+          </span>
         </div>
         <div className="turn-composer">
-          <div
-            className="segmented-control turn-world-mode"
-            aria-label="Turn world source"
-          >
-            <button
-              className={turnWorldMode === "syntheticReview" ? "active" : ""}
-              aria-pressed={turnWorldMode === "syntheticReview"}
-              onClick={() => setTurnWorldMode("syntheticReview")}
-            >
-              Synthetic review game
-            </button>
-            <button
-              className={turnWorldMode === "selectedWorld" ? "active" : ""}
-              aria-pressed={turnWorldMode === "selectedWorld"}
-              disabled={!selectedCharacter}
-              onClick={() => setTurnWorldMode("selectedWorld")}
-            >
-              Selected native character
-            </button>
-          </div>
-          <small>
-            {turnWorldMode === "syntheticReview"
-              ? "Runnable task-owned review path. It is not a bundled commercial GameProfileV2."
-              : "Uses the selected bundled character and native route. Commercial visual capture remains blocked; failures are reported without fallback claims."}
-          </small>
-          {turnWorldMode === "syntheticReview" && (
-            <div className="authorization-control route-authority-status">
+          <details className="conversation-source">
+            <summary>
               <span>
-                <b>
-                  {captureProof?.receipt?.verified
-                    ? "External lip-sync bridge armed"
-                    : "External lip-sync awaits verified capture"}
-                </b>
-                <small>
-                  {captureProof?.receipt?.verified
-                    ? "The exact static-mouth Mara window can feed OpenSeeFace CPU landmarks and the causal post-WASAPI mouth compositor. Actual presentation is reported only by the completed-turn receipt below."
-                    : "Start the test game, then select and verify its exact WGC window on the World page before speaking."}
-                </small>
+                {turnWorldMode === "selectedWorld" && selectedCharacter
+                  ? selectedCharacter.gameDisplayName
+                  : "Eclipse Harbor"}
               </span>
+              <b>Change conversation</b>
+            </summary>
+            <div
+              className="segmented-control turn-world-mode"
+              aria-label="Turn world source"
+            >
+              <button
+                className={turnWorldMode === "syntheticReview" ? "active" : ""}
+                aria-pressed={turnWorldMode === "syntheticReview"}
+                onClick={() => setTurnWorldMode("syntheticReview")}
+              >
+                Synthetic review game
+              </button>
+              <button
+                className={turnWorldMode === "selectedWorld" ? "active" : ""}
+                aria-pressed={turnWorldMode === "selectedWorld"}
+                disabled={!selectedCharacter}
+                onClick={() => setTurnWorldMode("selectedWorld")}
+              >
+                Selected native character
+              </button>
             </div>
-          )}
+            <button className="text-action" onClick={() => onNavigate("world")}>
+              Choose game & character →
+            </button>
+          </details>
           <div
             className="segmented-control turn-mode"
             aria-label="Turn input mode"
@@ -1972,39 +2541,28 @@ function SessionPage({
               aria-pressed={inputMode === "ptt"}
               onClick={() => setInputMode("ptt")}
             >
-              PTT rehearsal
+              Push-to-talk · F8
             </button>
           </div>
-          <label>
-            <span>
-              {inputMode === "typed"
-                ? "Message transcript"
-                : "PTT native receipt"}
-            </span>
-            <textarea
-              aria-label="Turn transcript"
-              value={
-                inputMode === "ptt"
-                  ? selectedSttTerminal?.status === "transcriptReady"
-                    ? `Receipt generation ${selectedSttTerminal.generation} ready — transcript remains native`
-                    : ""
-                  : prompt
-              }
-              maxLength={500}
-              rows={3}
-              disabled={running || inputMode === "ptt"}
-              onChange={(event) => setPrompt(event.target.value)}
-            />
-          </label>
-          <small>
-            {inputMode === "typed"
-              ? "Sent as the explicit transcript for this bounded turn."
-              : selectedSttTerminal?.status === "transcriptReady"
-                ? "Opaque receipt ready. The transcript is not exposed here; the turn sends only receipt ID and generation for one-time native consumption."
-                : "Arm native capture below, then use physical F8. The WebView cannot supply PCM, provider tokens, a press, or a release event."}
-          </small>
+          {inputMode === "typed" && (
+            <label className="message-field">
+              <span>Your message</span>
+              <textarea
+                aria-label="Turn transcript"
+                value={prompt}
+                maxLength={500}
+                rows={4}
+                disabled={running}
+                onChange={(event) => setPrompt(event.target.value)}
+              />
+              <small>
+                {prompt.length}/500 · Sent to your selected reply provider
+              </small>
+            </label>
+          )}
           {inputMode === "ptt" && (
             <SelectedSttControl
+              compact
               readiness={selectedSttReadiness}
               capture={selectedSttCapture}
               status={selectedSttStatus}
@@ -2024,6 +2582,7 @@ function SessionPage({
             className="primary-action"
             onClick={onRun}
             disabled={
+              !nativeAvailable ||
               running ||
               (inputMode === "ptt" &&
                 (selectedSttTerminal?.status !== "transcriptReady" ||
@@ -2050,27 +2609,36 @@ function SessionPage({
               Cancel generation
             </button>
           )}
-          <div className="authorization-control route-authority-status">
-            <span>
-              <b>Native selected route is authoritative</b>
-              <small>
-                The runtime resolves the persisted loadout and vault references
-                for this turn. No development voice override is sent.
-              </small>
-            </span>
-          </div>
           <label className="subtitle-control">
             <input
               type="checkbox"
               checked={subtitles}
+              disabled={
+                !nativeAvailable || subtitlesBusy !== null || !subtitlesReady
+              }
               onChange={(event) => setSubtitles(event.target.checked)}
             />
             <span>
               <b>Show delivered subtitles</b>
-              <small>Session-only until saved in Settings.</small>
+              <small>
+                {!nativeAvailable
+                  ? "Installed app required"
+                  : subtitlesBusy === "load"
+                    ? "Loading current character…"
+                    : subtitlesBusy === "save"
+                      ? "Saving current character…"
+                      : !subtitlesReady
+                        ? "Current character preference unavailable"
+                        : `For ${subtitleScopeLabel}`}
+              </small>
             </span>
           </label>
         </div>
+        {subtitlesError && (
+          <p className="selected-stt-error" role="alert">
+            {subtitlesError}
+          </p>
+        )}
         {visibleTurnError && (
           <div className="degradation-panel" role="alert">
             <div>
@@ -2106,7 +2674,7 @@ function SessionPage({
             }
           />
           <div>
-            <small>Delivery ledger</small>
+            <small>Conversation</small>
             <b>{completionLabel}</b>
             {deliveredTurn && subtitles ? (
               <p>{deliveredTurn.deliveredText}</p>
@@ -2115,196 +2683,212 @@ function SessionPage({
                 Subtitle text hidden by session preference.
               </p>
             ) : null}
-            <dl className="delivery-channels">
-              <div>
-                <dt>Response text</dt>
-                <dd>
-                  {!deliveredTurn
-                    ? "Not delivered"
-                    : execution?.llmProviderLive
-                      ? "Live LLM provider evidence"
-                      : deliveredTurn.runtimeFixtureOnly
-                        ? "Deterministic runtime fixture"
-                        : "Runtime completion; provider not proven"}
-                </dd>
-              </div>
-              <div>
-                <dt>Subtitle</dt>
-                <dd>
-                  {subtitleDelivered
-                    ? `${execution?.subtitleReceiptCount} committed presentation receipt${execution?.subtitleReceiptCount === 1 ? "" : "s"} · ${subtitleReceiptSurfaceLabel(executionEvidence?.subtitlePresentationReceipts ?? [])} · ${executionEvidence?.subtitlePresentationReceipts.map((receipt) => receipt.receiptId).join(", ")}`
-                    : deliveredTurn && subtitles
-                      ? "Control-app text visible; native overlay not proven"
-                      : "Not reported"}
-                </dd>
-              </div>
-              <div>
-                <dt>Audio</dt>
-                <dd>
-                  {audioDelivered
-                    ? `${execution?.audioReceiptCount} submitted + drained receipt${execution?.audioReceiptCount === 1 ? "" : "s"} · ${executionEvidence?.audioReceipts.map((receipt) => receipt.receiptId).join(", ")} · ${audioReceiptEndpointLabel(executionEvidence?.audioReceipts ?? [])}`
-                    : "Not proven — requires live TTS + submission + drain receipts"}
-                </dd>
-              </div>
-              <div>
-                <dt>Visible speech</dt>
-                <dd>
-                  {!deliveredTurn
-                    ? "Not reported"
-                    : visualPresentation?.presented
-                      ? `${turnWorldMode === "syntheticReview" ? "OpenSeeFace CPU landmarks + local audio-driven mouth overlay" : "Admitted local mouth overlay"} presented on captured frame ${visualPresentation.sourceFrameSequence} · ${visualPresentation.pixelSource ?? "pixel source not reported"} / ${visualPresentation.pixelScope ?? "pixel scope not reported"}`
-                      : visualPresentation
-                        ? `Visual-only bypass — ${visualPresentation.detail}`
-                        : "Not reported — no native visual presentation receipt"}
-                </dd>
-              </div>
-              <div>
-                <dt>Runtime state</dt>
-                <dd>
-                  {executionEvidence?.deliveryState ?? "Not reported"} ·{" "}
-                  {executionEvidence?.commitState ?? "commit not reported"}
-                </dd>
-              </div>
-            </dl>
-            {acceptedSttReceipt && (
-              <section
-                className="accepted-stt-receipt-proof"
-                aria-label="Accepted native STT receipt"
-              >
-                <div>
-                  <small>Native input accepted</small>
-                  <b>
-                    AssemblyAI u3-rt-pro receipt {acceptedSttReceipt.receiptId}
-                  </b>
-                  <code>{acceptedSttReceipt.receiptSha256}</code>
-                </div>
+            {executionEvidence && (
+              <details className="evidence-disclosure">
+                <summary>Delivery & identity details</summary>
                 <dl className="delivery-channels">
                   <div>
-                    <dt>Capture binding</dt>
+                    <dt>Response text</dt>
                     <dd>
-                      generation {acceptedSttReceipt.captureGeneration} ·{" "}
-                      {acceptedSttReceipt.route.inputEndpointId} generation{" "}
-                      {acceptedSttReceipt.route.inputEndpointGeneration}
+                      {!deliveredTurn
+                        ? "Not delivered"
+                        : execution?.llmProviderLive
+                          ? "Live LLM provider evidence"
+                          : deliveredTurn.runtimeFixtureOnly
+                            ? "Deterministic runtime fixture"
+                            : "Runtime completion; provider not proven"}
                     </dd>
                   </div>
                   <div>
-                    <dt>Turn scope</dt>
+                    <dt>Subtitle</dt>
                     <dd>
-                      {acceptedSttReceipt.gameId} /{" "}
-                      {acceptedSttReceipt.characterId ?? "no character"} ·{" "}
-                      {acceptedSttReceipt.sourceLoadoutId}
+                      {subtitleDelivered
+                        ? `${execution?.subtitleReceiptCount} committed presentation receipt${execution?.subtitleReceiptCount === 1 ? "" : "s"} · ${subtitleReceiptSurfaceLabel(executionEvidence?.subtitlePresentationReceipts ?? [])} · ${executionEvidence?.subtitlePresentationReceipts.map((receipt) => receipt.receiptId).join(", ")}`
+                        : deliveredTurn && subtitles
+                          ? "Control-app text visible; native overlay not proven"
+                          : "Not reported"}
                     </dd>
                   </div>
                   <div>
-                    <dt>Physical PTT proof</dt>
+                    <dt>Audio</dt>
                     <dd>
-                      F8 press{" "}
-                      {acceptedSttReceipt.route.pttPressTransitionSequence} →
-                      release{" "}
-                      {acceptedSttReceipt.route.pttReleaseTransitionSequence} ·{" "}
-                      {acceptedSttReceipt.route.capturedFrames} captured frames
+                      {audioDelivered
+                        ? `${execution?.audioReceiptCount} submitted + drained receipt${execution?.audioReceiptCount === 1 ? "" : "s"} · ${executionEvidence?.audioReceipts.map((receipt) => receipt.receiptId).join(", ")} · ${audioReceiptEndpointLabel(executionEvidence?.audioReceipts ?? [])}`
+                        : "Not proven — requires live TTS + submission + drain receipts"}
                     </dd>
                   </div>
                   <div>
-                    <dt>Provider route</dt>
+                    <dt>Visible speech</dt>
                     <dd>
-                      {acceptedSttReceipt.route.providerId} /{" "}
-                      {acceptedSttReceipt.route.modelId} ·{" "}
-                      {acceptedSttReceipt.route.manualRetry
-                        ? "manual retry"
-                        : "initial attempt"}{" "}
-                      · no automatic fallback
+                      {!deliveredTurn
+                        ? "Not reported"
+                        : visualPresentation?.presented
+                          ? `${turnWorldMode === "syntheticReview" ? "OpenSeeFace CPU landmarks + local audio-driven mouth overlay" : "Admitted local mouth overlay"} presented on captured frame ${visualPresentation.sourceFrameSequence} · ${visualPresentation.pixelSource ?? "pixel source not reported"} / ${visualPresentation.pixelScope ?? "pixel scope not reported"}`
+                          : visualPresentation
+                            ? `Visual-only bypass — ${visualPresentation.detail}`
+                            : "Not reported — no native visual presentation receipt"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Runtime state</dt>
+                    <dd>
+                      {executionEvidence?.deliveryState ?? "Not reported"} ·{" "}
+                      {executionEvidence?.commitState ?? "commit not reported"}
                     </dd>
                   </div>
                 </dl>
-                <small>
-                  This completed native event proves the opaque capture receipt
-                  was accepted for this turn. Transcript, microphone audio, and
-                  provider credentials are not exposed here.
-                </small>
-              </section>
-            )}
-            {executionEvidence && executionEvidence.degradations.length > 0 && (
-              <ul className="turn-degradations" aria-label="Turn degradations">
-                {executionEvidence.degradations.map((degradation, index) => (
-                  <li key={`${degradation.type}-${index}`}>
-                    <b>{degradation.type}</b>
-                    <span>{degradation.reason}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {characterContext && (
-              <>
-                <dl className="delivery-channels character-context-proof">
-                  <div>
-                    <dt>Resolved character</dt>
-                    <dd>
-                      {characterContext.profileId} /{" "}
-                      {characterContext.characterId}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Identity source</dt>
-                    <dd>
-                      {characterContext.identitySource} ·{" "}
-                      {characterContext.explicitSelection
-                        ? "explicit selection"
-                        : "not explicit"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Selection outcome</dt>
-                    <dd>
-                      {characterContext.selection?.status ?? "not reported"}
-                      {characterContext.selection?.status === "ambiguous"
-                        ? ` · ${characterContext.selection.candidate_ids.join(", ")}`
-                        : ""}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Prompt authority</dt>
-                    <dd>
-                      {characterContext.prompt
-                        ? `${characterContext.prompt.recordCount} records · ${characterContext.prompt.authorities.join(", ") || "none"}`
-                        : "not reported"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Scoped memory</dt>
-                    <dd>
-                      {characterContext.prompt
-                        ? `${characterContext.prompt.scopedMemoryItemIds.length} items · ${characterContext.prompt.scopedMemoryClasses.join(", ") || "no classes"}`
-                        : "not reported"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Background encounter</dt>
-                    <dd>
-                      {characterContext.encounter
-                        ? `${characterContext.encounter.status} · ${characterContext.encounter.encounter_id}`
-                        : "none reported"}
-                    </dd>
-                  </div>
-                </dl>
-                {characterContext.encounter && (
-                  <EncounterLifecycleControls
-                    nativeAvailable={nativeAvailable}
-                    encounter={characterContext.encounter}
-                    authoredCharacter={
-                      selectedCharacter?.gameProfileId ===
-                      characterContext.encounter.game_profile_id
-                        ? {
-                            gameProfileId: selectedCharacter.gameProfileId,
-                            characterId: selectedCharacter.character.id,
-                            displayName:
-                              selectedCharacter.character.displayName,
-                          }
-                        : null
-                    }
-                  />
+                {acceptedSttReceipt && (
+                  <section
+                    className="accepted-stt-receipt-proof"
+                    aria-label="Accepted native STT receipt"
+                  >
+                    <div>
+                      <small>Native input accepted</small>
+                      <b>
+                        AssemblyAI u3-rt-pro receipt{" "}
+                        {acceptedSttReceipt.receiptId}
+                      </b>
+                      <code>{acceptedSttReceipt.receiptSha256}</code>
+                    </div>
+                    <dl className="delivery-channels">
+                      <div>
+                        <dt>Capture binding</dt>
+                        <dd>
+                          generation {acceptedSttReceipt.captureGeneration} ·{" "}
+                          {acceptedSttReceipt.route.inputEndpointId} generation{" "}
+                          {acceptedSttReceipt.route.inputEndpointGeneration}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Turn scope</dt>
+                        <dd>
+                          {acceptedSttReceipt.gameId} /{" "}
+                          {acceptedSttReceipt.characterId ?? "no character"} ·{" "}
+                          {acceptedSttReceipt.sourceLoadoutId}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Physical PTT proof</dt>
+                        <dd>
+                          F8 press{" "}
+                          {acceptedSttReceipt.route.pttPressTransitionSequence}{" "}
+                          → release{" "}
+                          {
+                            acceptedSttReceipt.route
+                              .pttReleaseTransitionSequence
+                          }{" "}
+                          · {acceptedSttReceipt.route.capturedFrames} captured
+                          frames
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Provider route</dt>
+                        <dd>
+                          {acceptedSttReceipt.route.providerId} /{" "}
+                          {acceptedSttReceipt.route.modelId} ·{" "}
+                          {acceptedSttReceipt.route.manualRetry
+                            ? "manual retry"
+                            : "initial attempt"}{" "}
+                          · no automatic fallback
+                        </dd>
+                      </div>
+                    </dl>
+                    <small>
+                      This completed native event proves the opaque capture
+                      receipt was accepted for this turn. Transcript, microphone
+                      audio, and provider credentials are not exposed here.
+                    </small>
+                  </section>
                 )}
-              </>
+                {executionEvidence &&
+                  executionEvidence.degradations.length > 0 && (
+                    <ul
+                      className="turn-degradations"
+                      aria-label="Turn degradations"
+                    >
+                      {executionEvidence.degradations.map(
+                        (degradation, index) => (
+                          <li key={`${degradation.type}-${index}`}>
+                            <b>{degradation.type}</b>
+                            <span>{degradation.reason}</span>
+                          </li>
+                        ),
+                      )}
+                    </ul>
+                  )}
+                {characterContext && (
+                  <>
+                    <dl className="delivery-channels character-context-proof">
+                      <div>
+                        <dt>Resolved character</dt>
+                        <dd>
+                          {characterContext.profileId} /{" "}
+                          {characterContext.characterId}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Identity source</dt>
+                        <dd>
+                          {characterContext.identitySource} ·{" "}
+                          {characterContext.explicitSelection
+                            ? "explicit selection"
+                            : "not explicit"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Selection outcome</dt>
+                        <dd>
+                          {characterContext.selection?.status ?? "not reported"}
+                          {characterContext.selection?.status === "ambiguous"
+                            ? ` · ${characterContext.selection.candidate_ids.join(", ")}`
+                            : ""}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Prompt authority</dt>
+                        <dd>
+                          {characterContext.prompt
+                            ? `${characterContext.prompt.recordCount} records · ${characterContext.prompt.authorities.join(", ") || "none"}`
+                            : "not reported"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Scoped memory</dt>
+                        <dd>
+                          {characterContext.prompt
+                            ? `${characterContext.prompt.scopedMemoryItemIds.length} items · ${characterContext.prompt.scopedMemoryClasses.join(", ") || "no classes"}`
+                            : "not reported"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Background encounter</dt>
+                        <dd>
+                          {characterContext.encounter
+                            ? `${characterContext.encounter.status} · ${characterContext.encounter.encounter_id}`
+                            : "none reported"}
+                        </dd>
+                      </div>
+                    </dl>
+                    {characterContext.encounter && (
+                      <EncounterLifecycleControls
+                        nativeAvailable={nativeAvailable}
+                        encounter={characterContext.encounter}
+                        authoredCharacter={
+                          selectedCharacter?.gameProfileId ===
+                          characterContext.encounter.game_profile_id
+                            ? {
+                                gameProfileId: selectedCharacter.gameProfileId,
+                                characterId: selectedCharacter.character.id,
+                                displayName:
+                                  selectedCharacter.character.displayName,
+                              }
+                            : null
+                        }
+                      />
+                    )}
+                  </>
+                )}
+              </details>
             )}
           </div>
         </div>
@@ -2313,7 +2897,7 @@ function SessionPage({
       <aside className="session-side">
         <section className="instrument-panel compact-panel">
           <div className="panel-title">
-            <h2>Ready decision</h2>
+            <h2>Connection checklist</h2>
             <span className={providerPresent ? "badge good" : "badge wait"}>
               {providerPresent
                 ? "Credential ready"
@@ -2345,7 +2929,9 @@ function SessionPage({
             </div>
             <div>
               <dt>Input</dt>
-              <dd>Typed transcript or receipt-backed PTT</dd>
+              <dd>
+                {inputMode === "typed" ? "Keyboard" : "Push-to-talk · F8"}
+              </dd>
             </div>
             <div>
               <dt>Subtitles</dt>
@@ -2353,10 +2939,25 @@ function SessionPage({
             </div>
           </dl>
           <button className="text-action" onClick={() => onNavigate("world")}>
-            Inspect world selection →
+            Select game & character →
           </button>
+          <button className="text-action" onClick={() => onNavigate("voice")}>
+            Configure voice & models →
+          </button>
+          <div className="visual-mode-note">
+            <Icon name="presence" size={20} />
+            <span>
+              <b>Audio & subtitles first</b>
+              <small>
+                Moving-mouth animation is experimental and not qualified.
+              </small>
+            </span>
+          </div>
         </section>
-        <section className="instrument-panel trace-panel">
+        <details className="instrument-panel trace-panel evidence-disclosure">
+          <summary>
+            Turn activity <span>{events.length} events</span>
+          </summary>
           <div className="panel-title">
             <h2>Turn trace</h2>
             <span className="mono">{events.length} events</span>
@@ -2382,8 +2983,9 @@ function SessionPage({
               ))}
             </ol>
           )}
-        </section>
-        <section className="instrument-panel route-receipt-panel">
+        </details>
+        <details className="instrument-panel route-receipt-panel evidence-disclosure">
+          <summary>Provider route evidence</summary>
           <div className="panel-title">
             <h2>Route evidence</h2>
             <span className="badge wait">
@@ -2500,13 +3102,17 @@ function SessionPage({
               </p>
             </>
           )}
-        </section>
+        </details>
       </aside>
     </div>
   );
 }
 
 function WorldPage({
+  onNavigate,
+  onConnectReviewGame,
+  reviewLaunchAvailable,
+  captureBusy,
   captureAvailable,
   captureProof,
   onCapture,
@@ -2521,6 +3127,10 @@ function WorldPage({
   identityEnrollmentStatus,
   identityEnrollmentError,
 }: {
+  onNavigate: (page: ProductPage) => void;
+  onConnectReviewGame: () => void;
+  reviewLaunchAvailable: boolean;
+  captureBusy: boolean;
   captureAvailable: boolean;
   captureProof: SyntheticCaptureProof | null;
   onCapture: () => void;
@@ -2535,15 +3145,16 @@ function WorldPage({
   identityEnrollmentStatus: NativeIdentityReferenceEnrollmentStatus | null;
   identityEnrollmentError: string | null;
 }) {
+  const [contentPackRevision, setContentPackRevision] = useState(0);
   return (
     <div className="page-stack">
       <header className="page-heading">
-        <span className="eyebrow">Target and identity boundary</span>
-        <h1>World</h1>
+        <span className="eyebrow">Choose who answers</span>
+        <h1>Games & characters</h1>
         <p>
           {nativeAvailable
-            ? "Select a bundled profile, bind an eligible process instance, and inspect the native-owned character authority used by ordinary turns."
-            : "Preview the synthetic review profile. Bundled game profiles, process binding, and native-owned character authority require the Windows desktop shell."}
+            ? "Find a running game, then select a character from its profile."
+            : "Open the Windows app to find running games and manage their characters."}
         </p>
       </header>
       <GameTargetWorkspace
@@ -2576,14 +3187,12 @@ function WorldPage({
                   : "Debug fixture only"}
             </span>
             <h2>Eclipse Harbor</h2>
-            <p>
-              Synthetic validation target · offline · task-owned GUI executable
-            </p>
+            <p>An original test world for your first conversation</p>
           </div>
         </section>
         <section className="instrument-panel">
           <div className="panel-title">
-            <h2>Capture contract</h2>
+            <h2>Connect the test game</h2>
             <span className="badge">Debug only</span>
           </div>
           <dl className="facts spacious">
@@ -2609,6 +3218,17 @@ function WorldPage({
             </div>
           </dl>
           <div className="capture-verification-actions">
+            <button
+              className="primary-action"
+              disabled={!reviewLaunchAvailable || captureBusy}
+              onClick={onConnectReviewGame}
+            >
+              {captureBusy
+                ? "Connecting…"
+                : captureProof?.receipt?.verified
+                  ? "Reconnect test game"
+                  : "Start & connect test game"}
+            </button>
             <button
               className="secondary-action"
               disabled={!captureAvailable}
@@ -2708,71 +3328,52 @@ function WorldPage({
         </section>
       </div>
       <CharacterDatabase
+        key={`${gameProfileId}:${contentPackRevision}`}
         nativeAvailable={nativeAvailable}
         gameProfileId={gameProfileId}
         onSelectionChange={onCharacterChange}
       />
-      <section className="instrument-panel identity-enrollment-panel">
-        <div className="panel-title">
-          <h2>Private identity reference</h2>
-          <span className="badge wait">
-            {identityEnrollmentStatus?.signedIdentityPackAdmitted
-              ? "Admission ready"
-              : "Unavailable"}
-          </span>
-        </div>
+      <ContentPackWorkspace
+        nativeAvailable={nativeAvailable}
+        gameProfileId={gameProfileId}
+        onApplied={() => setContentPackRevision((current) => current + 1)}
+        onOpenProviders={() => onNavigate("voice")}
+      />
+      <details className="instrument-panel evidence-disclosure identity-enrollment-panel">
+        <summary>
+          Character recognition <span className="badge wait">Unavailable</span>
+        </summary>
         <p className="body-copy">
-          Enroll a user-owned private photo or original synthetic artwork only
-          through the future native picker for the exact selected game and
-          character. File paths, raw pixels, and worker capability never enter
-          this WebView.
+          Automatic recognition is not qualified. Choose the character manually;
+          that selection controls its prompt, voice and memory.
         </p>
-        <dl className="facts spacious">
+        <dl className="facts">
           <div>
-            <dt>Scope</dt>
+            <dt>Selected character</dt>
             <dd>
-              {selectedCharacter
-                ? `${selectedCharacter.gameDisplayName} · ${selectedCharacter.character.displayName}`
-                : "Select an authored character first"}
+              {selectedCharacter?.character.displayName ??
+                "Choose a character above"}
             </dd>
           </div>
           <div>
-            <dt>Accepted rights</dt>
-            <dd>User-private ownership or licensed original synthetic work</dd>
-          </div>
-          <div>
-            <dt>WebView exposure</dt>
+            <dt>Reference status</dt>
             <dd>
-              {identityEnrollmentStatus &&
-              !identityEnrollmentStatus.rawPixelsExposedToWebview &&
-              !identityEnrollmentStatus.workerCapabilityExposedToWebview
-                ? "No raw pixels, paths, or worker tokens"
-                : "No enrollment authority exposed"}
+              {identityEnrollmentError ??
+                identityEnrollmentStatus?.detail ??
+                "No qualified reference pack"}
             </dd>
           </div>
         </dl>
-        <button
-          className="secondary-action"
-          disabled={
-            !selectedCharacter ||
-            !identityEnrollmentStatus?.signedIdentityPackAdmitted
-          }
-          aria-describedby="identity-enrollment-reason"
-        >
-          Choose reference in native picker
-        </button>
-        <small id="identity-enrollment-reason" className="control-reason">
-          {identityEnrollmentError
-            ? `Enrollment status unavailable: ${identityEnrollmentError}`
-            : (identityEnrollmentStatus?.detail ??
-              "A signed, measured identity pack must be admitted before the native picker can open. Cancelling a future picker creates no gallery receipt.")}
-        </small>
-      </section>
+      </details>
     </div>
   );
 }
 
 function VoicePage({
+  onNativeLoadoutsChange,
+  accounts,
+  gameProfileId,
+  characterId,
   providerPresent,
   providerDetail,
   nvidiaPresent,
@@ -2800,6 +3401,10 @@ function VoicePage({
   onProviderAction,
   onSave,
 }: {
+  onNativeLoadoutsChange: (loadouts: ProviderLoadout[]) => void;
+  accounts: NativeProviderCredentialSummary[];
+  gameProfileId: string;
+  characterId: string;
   providerPresent: boolean;
   providerDetail?: string;
   nvidiaPresent: boolean;
@@ -2824,234 +3429,146 @@ function VoicePage({
   onStartSelectedStt: () => void;
   onCancelSelectedStt: () => void;
   onRetrySelectedStt: (generation: number) => void;
-  onProviderAction: (
-    providerId: "elevenlabs" | "nvidia-nim",
-    action: "save" | "validate",
-  ) => void;
+  onProviderAction: (providerId: string, action: AccountAction) => void;
   onSave: () => void;
 }) {
-  const providerCards = [
-    {
-      id: "nvidia-nim" as const,
-      name: "NVIDIA NIM",
-      present: nvidiaPresent,
-      detail: nvidiaDetail,
-      description:
-        "One native NVIDIA credential can cover selected hosted reply, embedding, and Magpie voice routes only inside an eligible private-evaluation namespace with the current terms acknowledged.",
-      data: "Selected text, audio, or memory query by route",
-    },
-    {
-      id: "elevenlabs" as const,
-      name: "ElevenLabs",
-      present: providerPresent,
-      detail: providerDetail,
-      description:
-        "Qualified stock-voice path for the current spoken-turn rehearsal. Voice cloning is not enabled.",
-      data: "Generated reply text only",
-    },
-  ];
+  const [section, setSection] = useState("loadout");
+  const [accountId, setAccountId] = useState("nvidia-nim");
   return (
-    <div className="page-stack">
+    <div className="page-stack voice-workspace">
       <header className="page-heading">
-        <span className="eyebrow">
-          API-first route · local visuals optional
-        </span>
+        <span className="eyebrow">Your conversation pipeline</span>
         <h1>Voice & models</h1>
-        <p>
-          Start with hosted conversation models so the game keeps its GPU. Add a
-          local role only after this PC proves that the complete loadout fits.
-          Credentials remain in the native vault and never enter this WebView.
-        </p>
+        <p>Choose how your character listens, thinks and speaks.</p>
       </header>
-      <p className="source-disclosure">
-        <b>Source:</b> recommended API-first starter, not an active-turn
-        receipt. The Session deck freezes the configured per-turn route
-        separately.
-      </p>
-      <section className="instrument-panel settings-output-panel">
-        <div className="panel-title">
-          <h2>Microphone endpoint</h2>
-          <span className="badge wait">Routing only</span>
-        </div>
-        <AudioInputPicker
-          nativeAvailable={nativeAvailable}
-          inputs={audioInputs}
-          selected={selectedAudioInput}
-          busy={audioInputBusy}
-          error={audioInputError}
-          onRefresh={onRefreshAudioInputs}
-          onSelect={onSelectAudioInput}
-        />
-        <SelectedSttControl
-          compact
-          readiness={selectedSttReadiness}
-          capture={selectedSttCapture}
-          status={selectedSttStatus}
-          terminal={selectedSttTerminal}
-          receiptDisposition={selectedSttReceiptDisposition}
-          scope={selectedSttScope}
-          busy={selectedSttBusy}
-          error={selectedSttError}
-          onStart={onStartSelectedStt}
-          onCancel={onCancelSelectedStt}
-          onRetry={onRetrySelectedStt}
-        />
-      </section>
-      <section
-        className="route-map"
-        aria-label="Recommended API-first starter route"
-      >
-        {[
+      <WorkspaceSections
+        label="Voice workspace"
+        selectedId={section}
+        onSelectionChange={setSection}
+        sections={[
           {
-            role: "Speech in",
-            model: "Configured route",
-            provider:
-              "Consumed only by an exact receipt-backed native PTT turn",
+            id: "loadout",
+            label: "Model loadout",
+            description: "Choose models & stock voice",
+            content: (
+              <ProviderLoadoutEditor
+                onNativeLoadoutsChange={onNativeLoadoutsChange}
+                gameProfileId={gameProfileId}
+                characterId={characterId}
+                gameProfileLabel={
+                  gameProfileId === "eclipse-harbor"
+                    ? "Eclipse Harbor"
+                    : undefined
+                }
+                characterLabel={
+                  characterId === "mara-venn" ? "Mara Venn" : undefined
+                }
+                onManageProvider={(id) => {
+                  setAccountId(id === "nvidia-nim-magpie" ? "nvidia-nim" : id);
+                  setSection("accounts");
+                }}
+              />
+            ),
           },
           {
-            role: "Reply",
-            model: "Streaming hosted LLM",
-            provider: "NVIDIA NIM or another configured API",
+            id: "accounts",
+            label: "Accounts",
+            description: "Connect your providers",
+            content: (
+              <ProviderAccounts
+                selectedProviderId={accountId}
+                onProviderChange={setAccountId}
+                accounts={accounts}
+                nativeAvailable={nativeAvailable}
+                busy={providerBusy}
+                onAction={onProviderAction}
+              />
+            ),
           },
           {
-            role: "Voice out",
-            model: "Stock voice",
-            provider: "NVIDIA Magpie or ElevenLabs · no cloning",
+            id: "microphone",
+            label: "Microphone",
+            description: "Input & push-to-talk",
+            content: (
+              <section className="instrument-panel settings-output-panel">
+                <div className="panel-title">
+                  <h2>Microphone & push-to-talk</h2>
+                  <span className="badge">F8</span>
+                </div>
+                <AudioInputPicker
+                  nativeAvailable={nativeAvailable}
+                  inputs={audioInputs}
+                  selected={selectedAudioInput}
+                  busy={audioInputBusy}
+                  error={audioInputError}
+                  onRefresh={onRefreshAudioInputs}
+                  onSelect={onSelectAudioInput}
+                />
+                <SelectedSttControl
+                  compact
+                  readiness={selectedSttReadiness}
+                  capture={selectedSttCapture}
+                  status={selectedSttStatus}
+                  terminal={selectedSttTerminal}
+                  receiptDisposition={selectedSttReceiptDisposition}
+                  scope={selectedSttScope}
+                  busy={selectedSttBusy}
+                  error={selectedSttError}
+                  onStart={onStartSelectedStt}
+                  onCancel={onCancelSelectedStt}
+                  onRetry={onRetrySelectedStt}
+                />
+              </section>
+            ),
           },
           {
-            role: "Lip-sync",
-            model: "Off by default",
-            provider:
-              "A future qualified local pack will require explicit install and whole-loadout admission",
-          },
-        ].map((route) => (
-          <article key={route.role} className="route-card">
-            <span>{route.role}</span>
-            <h2>{route.model}</h2>
-            <p>{route.provider}</p>
-          </article>
-        ))}
-      </section>
-      <div className="provider-grid" aria-label="Provider accounts">
-        {providerCards.map((account) => (
-          <section
-            className="instrument-panel provider-account"
-            key={account.id}
-          >
-            <div className="panel-title">
-              <h2>{account.name}</h2>
-              <span className={account.present ? "badge good" : "badge bad"}>
-                {account.present ? "Credential present" : "Credential missing"}
-              </span>
-            </div>
-            <p className="body-copy">{account.description}</p>
-            <dl className="facts spacious">
-              <div>
-                <dt>Data sent</dt>
-                <dd>{account.data}</dd>
-              </div>
-              <div>
-                <dt>Vault</dt>
-                <dd>{account.detail ?? "Native status unavailable"}</dd>
-              </div>
-            </dl>
-            <div className="provider-actions">
-              <button
-                className="secondary-action"
-                disabled={!nativeAvailable || providerBusy !== null}
-                onClick={() => onProviderAction(account.id, "save")}
-              >
-                {providerBusy === account.id
-                  ? "Native prompt open…"
-                  : account.present
-                    ? "Replace credential"
-                    : "Add credential securely"}
-              </button>
-              <button
-                className="quiet-button"
-                disabled={!account.present || providerBusy !== null}
-                onClick={() => onProviderAction(account.id, "validate")}
-              >
-                Validate vault binding
-              </button>
-            </div>
-          </section>
-        ))}
-      </div>
-      <div className="voice-layout">
-        <section className="instrument-panel">
-          <div className="panel-title">
-            <h2>API-first starter</h2>
-            <span className="badge good">Recommended</span>
-          </div>
-          <p className="body-copy">
-            Cloud execution is preferred, while the selected six-role loadout
-            remains independently configured and validated. This action does not
-            create routes or imply that LLM, STT, or TTS credentials exist.
-          </p>
-          <button
-            className="secondary-action route-save"
-            disabled={!nativeAvailable}
-            onClick={onSave}
-          >
-            Save cloud execution preference
-          </button>
-          <small className="control-reason">
-            NVIDIA trial routes are private-evaluation services with provider-
-            and model-specific limits, not production entitlement.
-          </small>
-        </section>
-        <section className="instrument-panel">
-          <div className="panel-title">
-            <h2>Local model inventory</h2>
-            <span className="badge">
-              {models.length || "No"} catalog entries
-            </span>
-          </div>
-          {models.length > 0 ? (
-            <div className="model-inventory">
-              {models.slice(0, 6).map((model) => (
-                <article key={model.id}>
-                  <div>
-                    <b>{model.displayName}</b>
-                    <small>{model.purpose}</small>
+            id: "local",
+            label: "Local models",
+            description: "Inventory & PC budget",
+            content: (
+              <>
+                <section className="instrument-panel">
+                  <div className="panel-title">
+                    <h2>Execution preference</h2>
+                    <span className="badge">API first</span>
                   </div>
-                  <span className="badge wait">{model.lifecycle}</span>
-                  <p>
-                    {model.qualificationNote ??
-                      "No measured install and device-fit evidence is available."}
+                  <p className="body-copy">
+                    Hosted models leave your GPU available for the game. Each
+                    account has its own charges, limits and data policy.
                   </p>
-                </article>
-              ))}
-            </div>
-          ) : (
-            <div className="blocked-state">
-              <b>Local visual packs not qualified</b>
-              <span>No download or enable control is shown yet.</span>
-            </div>
-          )}
-          <div className="blocked-state">
-            <b>Activation requires a complete fit result</b>
-            <span>
-              Game reserve + resident models + p99 workspace + safety margin
-              must fit. Unknown measurements are treated as a conflict.
-            </span>
-          </div>
-        </section>
-      </div>
-      <details className="advanced-profiles">
-        <summary>
-          <span>
-            <b>Advanced profiles</b>
-            <small>
-              Named global, game, and character routes · swaps begin next turn
-            </small>
-          </span>
-          <span className="badge">6 roles</span>
-        </summary>
-        <ProviderLoadoutEditor />
-      </details>
-      <LocalResourcePlanner models={models} nativeAvailable={nativeAvailable} />
+                  <button
+                    className="secondary-action"
+                    disabled={!nativeAvailable}
+                    onClick={onSave}
+                  >
+                    Save cloud execution preference
+                  </button>
+                  <details className="evidence-disclosure">
+                    <summary>Connected account status</summary>
+                    <p>
+                      ElevenLabs:{" "}
+                      {providerPresent ? "key present" : "key needed"}.{" "}
+                      {providerDetail}
+                    </p>
+                    <p>
+                      NVIDIA NIM: {nvidiaPresent ? "key present" : "key needed"}
+                      . {nvidiaDetail}
+                    </p>
+                    <p>
+                      NVIDIA trial routes require an eligible private evaluation
+                      and are not unlimited production services.
+                    </p>
+                  </details>
+                </section>
+                <LocalResourcePlanner
+                  models={models}
+                  nativeAvailable={nativeAvailable}
+                />
+              </>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }
@@ -3136,11 +3653,11 @@ function DiagnosticsPage({
     <div className="page-stack">
       <header className="page-heading split">
         <div>
-          <span className="eyebrow">Native truth, timestamped</span>
+          <span className="eyebrow">System health</span>
           <h1>Diagnostics</h1>
           <p>
-            No illustrative CPU, GPU, latency, or provider values are rendered
-            here.
+            Check connections, investigate a failed turn, or export a local
+            report.
           </p>
         </div>
         <div className="diagnostic-actions">
@@ -3182,20 +3699,22 @@ function DiagnosticsPage({
         <article>
           <span>Evidence class</span>
           <b>
-            {diagnostics?.measurements.currentResultsAreReleaseEvidence
-              ? "Release"
-              : "Not release"}
+            {diagnosticsMatrix
+              ? `${diagnosticsMatrix.checks.filter((check) => check.status === "ok").length} / ${diagnosticsMatrix.checks.length}`
+              : "Not measured"}
           </b>
           <small>
-            {diagnostics?.measurements.reason ?? "No diagnostic summary"}
+            {diagnostics?.generatedAtEpochMs
+              ? new Date(diagnostics.generatedAtEpochMs).toLocaleString()
+              : "Run checks in the desktop application"}
           </small>
         </article>
       </div>
       <section className="instrument-panel diagnostic-matrix-panel">
         <div className="panel-title">
           <div>
-            <span className="eyebrow">Canonical 15-check matrix</span>
-            <h2>Product readiness matrix</h2>
+            <span className="eyebrow">Connections & capabilities</span>
+            <h2>System checks</h2>
           </div>
           <span className="badge">
             {diagnosticsMatrix
@@ -3204,9 +3723,8 @@ function DiagnosticsPage({
           </span>
         </div>
         <p className="source-disclosure">
-          Measured means the named native probe ran; it does not imply broader
-          capability. Every missing producer remains an explicit unmeasured row
-          instead of disappearing or inheriting a fixture value.
+          Run checks after changing a game, device or provider. Expand a result
+          for its source and timestamp.
         </p>
         <label className="diagnostic-verbosity-control">
           <span>LOCAL EVENT DETAIL</span>
@@ -3233,10 +3751,7 @@ function DiagnosticsPage({
         {!diagnosticsMatrix ? (
           <div className="empty-state">
             <b>No native matrix loaded</b>
-            <p>
-              Refresh native checks. Browser preview does not construct the 15
-              rows or credential-presence state.
-            </p>
+            <p>Open the Windows app and refresh checks to inspect this PC.</p>
           </div>
         ) : (
           <>
@@ -3253,9 +3768,13 @@ function DiagnosticsPage({
                 <span>No provider credential references reported.</span>
               )}
             </div>
-            <div className="diagnostic-matrix-list" role="table">
+            <div
+              className="diagnostic-matrix-list"
+              role="list"
+              aria-label="System check results"
+            >
               {diagnosticsMatrix.checks.map((check) => (
-                <article key={check.checkId} role="row">
+                <article key={check.checkId} role="listitem">
                   <div>
                     <span>{check.category}</span>
                     <b>{check.checkId}</b>
@@ -3290,7 +3809,8 @@ function DiagnosticsPage({
           </>
         )}
       </section>
-      <section className="instrument-panel diagnostics-v2-panel">
+      <details className="instrument-panel diagnostics-v2-panel evidence-disclosure">
+        <summary>Local event history & recovery</summary>
         <div className="panel-title">
           <div>
             <span className="eyebrow">Bounded local event store</span>
@@ -3379,9 +3899,10 @@ function DiagnosticsPage({
             exposed to the WebView.
           </p>
         )}
-      </section>
+      </details>
       <div className="diagnostic-detail-grid">
-        <section className="instrument-panel check-table">
+        <details className="instrument-panel check-table evidence-disclosure">
+          <summary>Service checks & exact results</summary>
           <div className="panel-title">
             <h2>Current checks</h2>
             <span className="mono">
@@ -3399,9 +3920,9 @@ function DiagnosticsPage({
               </p>
             </div>
           ) : (
-            <div role="table">
+            <div role="list" aria-label="Service check results">
               {checks.map((check) => (
-                <div className="check-row" role="row" key={check.id}>
+                <div className="check-row" role="listitem" key={check.id}>
                   <span className={`check-status ${check.status}`} />
                   <div>
                     <b>{check.title}</b>
@@ -3413,7 +3934,7 @@ function DiagnosticsPage({
               ))}
             </div>
           )}
-        </section>
+        </details>
         <section className="instrument-panel turn-performance">
           <div className="panel-title">
             <div>
@@ -3527,106 +4048,132 @@ function SettingsPage({
   return (
     <div className="page-stack">
       <header className="page-heading">
-        <span className="eyebrow">Persisted support only</span>
-        <h1>Settings & guide</h1>
-        <p>
-          Every control below has a native persistence effect or a direct
-          product destination.
-        </p>
+        <span className="eyebrow">Make it yours</span>
+        <h1>Settings & help</h1>
+        <p>Adjust your defaults, audio devices and subtitle style.</p>
       </header>
-      <div className="settings-layout">
-        <ProductPreferencesWorkspace
-          nativeAvailable={nativeAvailable}
-          gameProfileId={gameProfileId}
-          characterId={characterId}
-          onSnapshot={onProductPreferenceSnapshot}
-        />
-        <section className="instrument-panel settings-output-panel">
-          <div className="panel-title">
-            <h2>Playback destination</h2>
-            <span className="badge">Native broker</span>
-          </div>
-          <AudioOutputPicker
-            nativeAvailable={nativeAvailable}
-            outputs={audioOutputs}
-            selected={selectedAudioOutput}
-            busy={audioOutputBusy}
-            error={audioOutputError}
-            onRefresh={onRefreshAudioOutputs}
-            onSelect={onSelectAudioOutput}
-          />
-          <AudioInputPicker
-            nativeAvailable={nativeAvailable}
-            inputs={audioInputs}
-            selected={selectedAudioInput}
-            busy={audioInputBusy}
-            error={audioInputError}
-            onRefresh={onRefreshAudioInputs}
-            onSelect={onSelectAudioInput}
-          />
-        </section>
-        <section className="instrument-panel guide-list">
-          <div className="panel-title">
-            <h2>Reviewed in-app guide</h2>
-            <span className="badge good">{SUPPORT_GUIDES.length} topics</span>
-          </div>
-          <label className="guide-search">
-            <span>Search the bundled guide</span>
-            <input
-              type="search"
-              value={guideQuery}
-              placeholder="Privacy, voice, game, overlay…"
-              onChange={(event) => setGuideQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && filteredGuides[0]) {
-                  event.preventDefault();
-                  setActiveGuideId(filteredGuides[0].id);
-                }
-              }}
-            />
-          </label>
-          <div className="guide-results" aria-label="Guide search results">
-            {filteredGuides.length > 0 ? (
-              filteredGuides.map((guide, index) => (
-                <button
-                  key={guide.id}
-                  aria-pressed={activeGuide.id === guide.id}
-                  onClick={() => setActiveGuideId(guide.id)}
+      <WorkspaceSections
+        label="Settings workspace"
+        sections={[
+          {
+            id: "preferences",
+            label: "Preferences",
+            description: "Defaults & subtitle style",
+            content: (
+              <ProductPreferencesWorkspace
+                nativeAvailable={nativeAvailable}
+                gameProfileId={gameProfileId}
+                characterId={characterId}
+                onSnapshot={onProductPreferenceSnapshot}
+              />
+            ),
+          },
+          {
+            id: "devices",
+            label: "Audio devices",
+            description: "Microphone & playback",
+            content: (
+              <section className="instrument-panel settings-output-panel">
+                <div className="panel-title">
+                  <h2>Playback destination</h2>
+                  <span className="badge">Native broker</span>
+                </div>
+                <AudioOutputPicker
+                  nativeAvailable={nativeAvailable}
+                  outputs={audioOutputs}
+                  selected={selectedAudioOutput}
+                  busy={audioOutputBusy}
+                  error={audioOutputError}
+                  onRefresh={onRefreshAudioOutputs}
+                  onSelect={onSelectAudioOutput}
+                />
+                <AudioInputPicker
+                  nativeAvailable={nativeAvailable}
+                  inputs={audioInputs}
+                  selected={selectedAudioInput}
+                  busy={audioInputBusy}
+                  error={audioInputError}
+                  onRefresh={onRefreshAudioInputs}
+                  onSelect={onSelectAudioInput}
+                />
+              </section>
+            ),
+          },
+          {
+            id: "help",
+            label: "Help",
+            description: "Search the local guide",
+            content: (
+              <section className="instrument-panel guide-list">
+                <div className="panel-title">
+                  <h2>Reviewed in-app guide</h2>
+                  <span className="badge good">
+                    {SUPPORT_GUIDES.length} topics
+                  </span>
+                </div>
+                <label className="guide-search">
+                  <span>Search the bundled guide</span>
+                  <input
+                    type="search"
+                    value={guideQuery}
+                    placeholder="Privacy, voice, game, overlay…"
+                    onChange={(event) => setGuideQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && filteredGuides[0]) {
+                        event.preventDefault();
+                        setActiveGuideId(filteredGuides[0].id);
+                      }
+                    }}
+                  />
+                </label>
+                <div
+                  className="guide-results"
+                  aria-label="Guide search results"
                 >
-                  <span>{String(index + 1).padStart(2, "0")}</span>
-                  <div>
-                    <b>{guide.title}</b>
-                    <small>{guide.summary}</small>
-                  </div>
-                  <i>→</i>
-                </button>
-              ))
-            ) : (
-              <p className="guide-empty" role="status">
-                No reviewed guide topic matches “{guideQuery}”. Try privacy,
-                voice, game, overlay, setup, or diagnostics.
-              </p>
-            )}
-          </div>
-          <div
-            className="guide-note guide-detail"
-            aria-live="polite"
-            aria-label="Selected guide topic"
-          >
-            <span className="eyebrow">
-              Bundled review · {activeGuide.reviewedRevision}
-            </span>
-            <b>{activeGuide.title}</b>
-            <p>{activeGuide.detail}</p>
-            <button
-              className="secondary-action"
-              onClick={() => runGuideAction(activeGuide)}
-            >
-              {activeGuide.actionLabel}
-            </button>
-          </div>
-        </section>
-      </div>
+                  {filteredGuides.length > 0 ? (
+                    filteredGuides.map((guide, index) => (
+                      <button
+                        key={guide.id}
+                        aria-pressed={activeGuide.id === guide.id}
+                        onClick={() => setActiveGuideId(guide.id)}
+                      >
+                        <span>{String(index + 1).padStart(2, "0")}</span>
+                        <div>
+                          <b>{guide.title}</b>
+                          <small>{guide.summary}</small>
+                        </div>
+                        <i>→</i>
+                      </button>
+                    ))
+                  ) : (
+                    <p className="guide-empty" role="status">
+                      No reviewed guide topic matches “{guideQuery}”. Try
+                      privacy, voice, game, overlay, setup, or diagnostics.
+                    </p>
+                  )}
+                </div>
+                <div
+                  className="guide-note guide-detail"
+                  aria-live="polite"
+                  aria-label="Selected guide topic"
+                >
+                  <span className="eyebrow">
+                    Bundled review · {activeGuide.reviewedRevision}
+                  </span>
+                  <b>{activeGuide.title}</b>
+                  <p>{activeGuide.detail}</p>
+                  <button
+                    className="secondary-action"
+                    onClick={() => runGuideAction(activeGuide)}
+                  >
+                    {activeGuide.actionLabel}
+                  </button>
+                </div>
+              </section>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }
@@ -3863,12 +4410,19 @@ function AudioInputPicker({
 }
 
 function OnboardingOverlay({
+  setupProofCurrent,
+  onConnectReviewGame,
+  reviewLaunchAvailable,
+  captureBusy,
+  onNativeLoadoutsChange,
+  onVerifyCapture,
+  accounts,
+  providerBusy,
+  gameProfileId,
+  characterId,
   step,
   bootstrap,
-  providerPresent,
-  nvidiaPresent,
   loadout,
-  credentialStates,
   nativeAvailable,
   audioOutputs,
   selectedAudioOutput,
@@ -3908,6 +4462,16 @@ function OnboardingOverlay({
   onRun,
   onClose,
 }: {
+  setupProofCurrent: boolean;
+  onConnectReviewGame: () => void;
+  reviewLaunchAvailable: boolean;
+  captureBusy: boolean;
+  onNativeLoadoutsChange: (loadouts: ProviderLoadout[]) => void;
+  onVerifyCapture: () => void;
+  accounts: NativeProviderCredentialSummary[];
+  providerBusy: string | null;
+  gameProfileId: string;
+  characterId: string;
   step: number;
   bootstrap: NativeBootstrapHealth;
   providerPresent: boolean;
@@ -3935,10 +4499,7 @@ function OnboardingOverlay({
   onBack: () => void;
   onNext: () => void;
   onCapture: () => void;
-  onProviderAction: (
-    providerId: "elevenlabs" | "nvidia-nim",
-    action: "save" | "validate",
-  ) => void;
+  onProviderAction: (providerId: string, action: AccountAction) => void;
   onRefreshAudioOutputs: () => Promise<void>;
   onSelectAudioOutput: (selection: NativeAudioOutputSelection) => Promise<void>;
   onRefreshAudioInputs: () => Promise<void>;
@@ -3958,47 +4519,59 @@ function OnboardingOverlay({
   onRun: () => void;
   onClose?: () => void;
 }) {
-  const onboardingRoles = ROLE_ORDER.map((role) => {
-    const route = loadout.routes[role];
-    const routeProvider = providerFor(role, route.providerId);
-    const credentialId =
-      route.providerId === "nvidia-nim-magpie"
-        ? "nvidia-nim"
-        : route.providerId;
-    const credential = credentialStates.find(
-      (item) => item.providerId === credentialId,
-    );
-    const skipped = routeProvider.execution === "Off";
-    const configuredInactive =
-      role === "stt" || role === "embeddings" || role === "vision";
-    const ready =
-      skipped ||
-      routeProvider.execution === "Local" ||
-      credential?.status === "present";
-    return {
-      role,
-      route,
-      routeProvider,
-      credentialId,
-      credential,
-      skipped,
-      configuredInactive,
-      ready,
+  const [voiceSection, setVoiceSection] = useState("accounts");
+  const [accountId, setAccountId] = useState("nvidia-nim");
+  const dialogRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const previous = document.activeElement;
+    dialogRef.current?.focus();
+    return () => {
+      if (previous instanceof HTMLElement) previous.focus();
     };
-  });
-  const preferredCredentialProvider = onboardingRoles.some(
-    (item) => item.credentialId === "nvidia-nim",
-  )
-    ? ("nvidia-nim" as const)
-    : ("elevenlabs" as const);
-  const preferredCredentialPresent =
-    preferredCredentialProvider === "nvidia-nim"
-      ? nvidiaPresent
-      : providerPresent;
+  }, []);
+  useEffect(() => {
+    dialogRef.current?.querySelector<HTMLElement>("h1")?.focus();
+  }, [step]);
   return (
     <div className="setup-scrim" role="presentation">
       <section
         className="setup-dialog"
+        ref={dialogRef}
+        tabIndex={-1}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && onClose) {
+            event.preventDefault();
+            onClose();
+          }
+          if (event.key !== "Tab") return;
+          const focusable = Array.from(
+            dialogRef.current?.querySelectorAll<HTMLElement>(
+              'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]',
+            ) ?? [],
+          ).filter(
+            (element) =>
+              !element.closest("[hidden]") &&
+              element.getClientRects().length > 0,
+          );
+          const first = focusable[0];
+          const last = focusable.at(-1);
+          if (!first) {
+            event.preventDefault();
+            dialogRef.current?.focus();
+            return;
+          }
+          if (
+            event.shiftKey &&
+            (document.activeElement === first ||
+              document.activeElement === dialogRef.current)
+          ) {
+            event.preventDefault();
+            last?.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }}
         role="dialog"
         aria-modal="true"
         aria-labelledby="setup-title"
@@ -4008,12 +4581,12 @@ function OnboardingOverlay({
             <span className="brand-mark">N2</span>
             <span>
               <b>Guided setup</b>
-              <small>Real state only</small>
+              <small>Your first conversation</small>
             </span>
           </div>
           {onClose && (
             <button onClick={onClose} aria-label="Close setup">
-              ×
+              Finish later
             </button>
           )}
         </header>
@@ -4034,10 +4607,12 @@ function OnboardingOverlay({
           {step === 0 && (
             <>
               <span className="eyebrow">01 / system</span>
-              <h1 id="setup-title">Prove the native boundary</h1>
+              <h1 id="setup-title" tabIndex={-1}>
+                Let’s get you connected
+              </h1>
               <p>
-                NPC 2.0 needs its authenticated runtime and media broker before
-                it can select a window or deliver audio.
+                Start with the local test game, connect a voice, then try your
+                first conversation.
               </p>
               <div className="setup-check">
                 <span
@@ -4056,15 +4631,18 @@ function OnboardingOverlay({
                   </small>
                 </div>
               </div>
+              <SetupSystemCheck nativeAvailable={nativeAvailable} />
             </>
           )}
           {step === 1 && (
             <>
               <span className="eyebrow">02 / world</span>
-              <h1 id="setup-title">Select the safe test world</h1>
+              <h1 id="setup-title" tabIndex={-1}>
+                Meet Mara at Eclipse Harbor
+              </h1>
               <p>
-                The first run uses only the task-owned Eclipse Harbor window.
-                Online games and detected anti-cheat remain blocked.
+                Use the included test game to check capture and audio before
+                choosing another game.
               </p>
               <div className="setup-selection selected">
                 <span>EH</span>
@@ -4077,8 +4655,19 @@ function OnboardingOverlay({
                 <i>{captureProof ? `PID ${captureProof.pid}` : "Configured"}</i>
               </div>
               <button
+                className="primary-action setup-inline-action"
+                disabled={!reviewLaunchAvailable || captureBusy}
+                onClick={onConnectReviewGame}
+              >
+                {captureBusy
+                  ? "Connecting…"
+                  : captureProof?.receipt?.verified
+                    ? "Reconnect test game"
+                    : "Start & connect test game"}
+              </button>
+              <button
                 className="secondary-action setup-inline-action"
-                disabled={!captureAvailable}
+                disabled={!captureAvailable || captureBusy}
                 onClick={onCapture}
               >
                 {captureProof
@@ -4087,16 +4676,29 @@ function OnboardingOverlay({
                     ? "Select running synthetic target"
                     : "Native debug capture unavailable"}
               </button>
+              <button
+                className="quiet-button setup-inline-action"
+                disabled={!captureProof}
+                onClick={onVerifyCapture}
+              >
+                Verify live capture
+              </button>
+              <p className="control-reason">
+                {captureProof?.receipt?.verified
+                  ? `Connected · frame ${captureProof.frames} · capture is advancing`
+                  : "Select the test game, then verify that its captured frames advance."}
+              </p>
             </>
           )}
           {step === 2 && (
             <>
               <span className="eyebrow">03 / voice</span>
-              <h1 id="setup-title">Start API-first</h1>
+              <h1 id="setup-title" tabIndex={-1}>
+                Choose your voice & models
+              </h1>
               <p>
-                Hosted conversation models leave the game GPU free for play and
-                optional local mouth motion. Advanced mixed-local profiles are
-                available after setup, once every model has a measured fit.
+                Connect the accounts your loadout uses. Select a reply model and
+                a stock voice, then choose where you’ll hear the character.
               </p>
               <div className="setup-selection selected">
                 <span>API</span>
@@ -4123,52 +4725,53 @@ function OnboardingOverlay({
                   Use cloud execution preference
                 </button>
               )}
-              <div
-                className="onboarding-role-grid"
-                aria-label="Selected loadout readiness"
-              >
-                {onboardingRoles.map((item) => (
-                  <div className="setup-check" key={item.role}>
-                    <span
-                      className={
-                        item.ready
-                          ? "check-status passed"
-                          : "check-status warning"
-                      }
-                    />
-                    <div>
-                      <b>
-                        {ROLE_META[item.role].short} · {item.routeProvider.name}
-                      </b>
-                      <small>
-                        {item.skipped
-                          ? "Skipped by this selected route."
-                          : item.configuredInactive
-                            ? `${item.ready ? "Configured" : "Blocked"}, but inactive in the typed-turn vertical slice.`
-                            : item.ready
-                              ? item.routeProvider.execution === "Local"
-                                ? "Configured locally; runtime evidence is still required."
-                                : "Required native vault reference is present."
-                              : `Blocked: ${item.credential?.detail ?? `credential state for ${item.credentialId} is unavailable`}`}
-                      </small>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <button
-                className="secondary-action setup-inline-action"
-                disabled={!nativeAvailable}
-                onClick={() =>
-                  onProviderAction(
-                    preferredCredentialProvider,
-                    preferredCredentialPresent ? "validate" : "save",
-                  )
-                }
-              >
-                {preferredCredentialPresent
-                  ? `Validate ${preferredCredentialProvider} vault binding`
-                  : `Add ${preferredCredentialProvider} credential securely`}
-              </button>
+              <WorkspaceSections
+                label="Setup voice configuration"
+                selectedId={voiceSection}
+                onSelectionChange={setVoiceSection}
+                sections={[
+                  {
+                    id: "accounts",
+                    label: "Connect accounts",
+                    content: (
+                      <ProviderAccounts
+                        selectedProviderId={accountId}
+                        onProviderChange={setAccountId}
+                        accounts={accounts}
+                        nativeAvailable={nativeAvailable}
+                        busy={providerBusy}
+                        onAction={onProviderAction}
+                      />
+                    ),
+                  },
+                  {
+                    id: "models",
+                    label: "Choose models",
+                    content: (
+                      <ProviderLoadoutEditor
+                        onNativeLoadoutsChange={onNativeLoadoutsChange}
+                        gameProfileId={gameProfileId}
+                        characterId={characterId}
+                        gameProfileLabel={
+                          gameProfileId === "eclipse-harbor"
+                            ? "Eclipse Harbor"
+                            : undefined
+                        }
+                        characterLabel={
+                          characterId === "mara-venn" ? "Mara Venn" : undefined
+                        }
+                        mode="onboarding"
+                        onManageProvider={(id) => {
+                          setAccountId(
+                            id === "nvidia-nim-magpie" ? "nvidia-nim" : id,
+                          );
+                          setVoiceSection("accounts");
+                        }}
+                      />
+                    ),
+                  },
+                ]}
+              />
               <AudioOutputPicker
                 compact
                 nativeAvailable={nativeAvailable}
@@ -4209,12 +4812,13 @@ function OnboardingOverlay({
           {step === 3 && (
             <>
               <span className="eyebrow">04 / test</span>
-              <h1 id="setup-title">Prove one delivered turn</h1>
+              <h1 id="setup-title" tabIndex={-1}>
+                Try your first conversation
+              </h1>
               <p>
-                A live provider transcript stays inside the native runtime. The
-                explicit next action sends only its opaque receipt ID and
-                generation for one-time consumption, or you can use a typed
-                setup turn.
+                Ask Mara about the old lighthouse. Use push-to-talk or send the
+                sample question. Setup completes after the selected voice
+                returns audio and playback finishes.
               </p>
               {preferences.ptt && (
                 <>
@@ -4326,9 +4930,13 @@ function OnboardingOverlay({
                   nativeAvailable &&
                   (!selectedAudioOutput ||
                     (preferences.ptt && !selectedAudioInput))) ||
+                (step === 1 &&
+                  nativeAvailable &&
+                  !captureProof?.receipt?.verified) ||
                 (step === ONBOARDING_STEPS.length - 1 &&
                   nativeAvailable &&
-                  !deliveredTurn)
+                  (!hasSpokenSetupTurn(deliveredTurn, preferences.subtitles) ||
+                    !setupProofCurrent))
               }
             >
               {step === ONBOARDING_STEPS.length - 1

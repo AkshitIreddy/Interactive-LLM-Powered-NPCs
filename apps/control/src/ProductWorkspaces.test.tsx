@@ -33,6 +33,7 @@ const bridge = vi.hoisted(() => ({
   optionalLifecycle: vi.fn(),
   mutateOptional: vi.fn(),
   cancelOptional: vi.fn(),
+  activateOptional: vi.fn(),
   benchmarkStatus: vi.fn(),
   benchmarkStart: vi.fn(),
   benchmarkCancel: vi.fn(),
@@ -71,6 +72,7 @@ vi.mock("./tauriBridge", async (importOriginal) => ({
   readTrustedOptionalPackLifecycle: bridge.optionalLifecycle,
   mutateTrustedOptionalPack: bridge.mutateOptional,
   cancelTrustedOptionalPackDownload: bridge.cancelOptional,
+  activateTrustedOptionalPack: bridge.activateOptional,
   readThisPcBenchmarkStatus: bridge.benchmarkStatus,
   startThisPcBenchmark: bridge.benchmarkStart,
   cancelThisPcBenchmark: bridge.benchmarkCancel,
@@ -465,7 +467,7 @@ describe("native product workspaces", () => {
           identityStrategy: "explicit",
         },
       ],
-      editableAuthoredData: false,
+      editableAuthoredData: true,
     });
     bridge.inspect.mockResolvedValue(inspection);
     bridge.settings.mockResolvedValue(settings);
@@ -476,6 +478,20 @@ describe("native product workspaces", () => {
     bridge.optionalLifecycle.mockResolvedValue(optionalLifecycle);
     bridge.mutateOptional.mockResolvedValue(optionalLifecycle);
     bridge.cancelOptional.mockResolvedValue(true);
+    bridge.activateOptional.mockResolvedValue({
+      schemaVersion: 1,
+      receipt: {
+        schemaVersion: 1,
+        identity: { pack_id: "local.llm.qwen", revision: "r1" },
+        manifestSha256: "a".repeat(64),
+        installedContentTreeSha256: "b".repeat(64),
+        attestationSha256: "c".repeat(64),
+        providerLoadDurationMillis: 184,
+        trustDomain: "local_review_dev_only",
+        detail: "The exact packaged provider loaded in a fresh worker.",
+      },
+      lifecycle: optionalLifecycle,
+    });
     bridge.saveSettings.mockImplementation(async (value) => value);
     bridge.selectCharacter.mockResolvedValue({
       gameProfileId: "skyrim-special-edition",
@@ -717,7 +733,7 @@ describe("native product workspaces", () => {
     );
     expect(
       await screen.findByRole("heading", {
-        name: "Local memory backup & erasure",
+        name: "Back up or delete memory",
       }),
     ).toBeVisible();
     expect(bridge.memoryStatus).toHaveBeenCalledWith(
@@ -1033,7 +1049,7 @@ describe("native product workspaces", () => {
       "href",
       "https://www.apache.org/licenses/LICENSE-2.0",
     );
-    expect(screen.getByText("Unmeasured")).toBeInTheDocument();
+    expect(screen.getByText("Not measured")).toBeInTheDocument();
     expect(
       screen.getByText(/Non-production review trust/i),
     ).toBeInTheDocument();
@@ -1056,15 +1072,15 @@ describe("native product workspaces", () => {
     });
     expect(install).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: "Repair from signed catalog" }),
-    ).toBeDisabled();
+      screen.queryByRole("button", { name: "Repair from signed catalog" }),
+    ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Remove exact pack" }),
-    ).toBeDisabled();
+      screen.queryByRole("button", { name: "Remove exact pack" }),
+    ).not.toBeInTheDocument();
 
     await user.click(
       screen.getByRole("checkbox", {
-        name: /confirm exact signed-catalog mutation/i,
+        name: /allow changes to this local model/i,
       }),
     );
     expect(install).toBeEnabled();
@@ -1092,7 +1108,7 @@ describe("native product workspaces", () => {
     await screen.findByRole("heading", { name: "Qwen local conversation" });
     await user.click(
       screen.getByRole("checkbox", {
-        name: /confirm exact signed-catalog mutation/i,
+        name: /allow changes to this local model/i,
       }),
     );
     await user.click(
@@ -1112,6 +1128,198 @@ describe("native product workspaces", () => {
     ).toHaveAttribute("role", "status");
     finishInstall?.(optionalLifecycle);
     await waitFor(() => expect(bridge.mutateOptional).toHaveBeenCalledTimes(1));
+  });
+
+  it("activates a selected installed pack through a setup-only provider-load self-test", async () => {
+    const user = userEvent.setup();
+    const admittedSelection = {
+      ...selectedLoadout,
+      roles: [
+        {
+          role: "language_model" as const,
+          identity: { pack_id: "local.llm.qwen", revision: "r1" },
+          preferred_residency: "cpu_resident_gpu_cold" as const,
+        },
+      ],
+    };
+    const awaitingLifecycle = {
+      ...optionalLifecycle,
+      packs: [
+        {
+          ...optionalLifecycle.packs[0],
+          phase: "installed_inactive_awaiting_self_test" as const,
+          canInstall: false,
+          canRemove: true,
+          detail: "Installed and awaiting an attested provider-load self-test.",
+        },
+      ],
+    };
+    const activeLifecycle = {
+      ...awaitingLifecycle,
+      packs: [
+        {
+          ...awaitingLifecycle.packs[0],
+          phase: "active" as const,
+          detail: "Active after the attested provider-load self-test.",
+        },
+      ],
+    };
+    bridge.loadoutPlanner.mockResolvedValue({
+      schemaVersion: 1,
+      ready: true,
+      detail: "Exact local selection is ready for a measured check.",
+      selected: admittedSelection,
+      planner: {
+        schema: "npc.selected-loadout-admission/v1",
+        trusted_measurement_streams: 1,
+        active_evidence: [admittedSelection.roles[0].identity],
+        pending_work: 0,
+        pending_by_kind: {},
+      },
+    });
+    bridge.optionalLifecycle.mockResolvedValue(awaitingLifecycle);
+    bridge.activateOptional.mockResolvedValue({
+      schemaVersion: 1,
+      receipt: {
+        schemaVersion: 1,
+        identity: admittedSelection.roles[0].identity,
+        manifestSha256: "a".repeat(64),
+        installedContentTreeSha256: "b".repeat(64),
+        attestationSha256: "c".repeat(64),
+        providerLoadDurationMillis: 184,
+        trustDomain: "local_review_dev_only",
+        detail: "The exact packaged provider loaded in a fresh worker.",
+      },
+      lifecycle: activeLifecycle,
+    });
+
+    render(<LocalResourcePlanner models={[]} nativeAvailable />);
+    await screen.findByRole("heading", { name: "Qwen local conversation" });
+    const activate = screen.getByRole("button", {
+      name: "Test & activate",
+    });
+    expect(activate).toBeEnabled();
+    expect(
+      screen.getByText(/no game needs to be running/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/loads and unloads the model on this PC/i),
+    ).toBeInTheDocument();
+    await user.click(activate);
+
+    await waitFor(() =>
+      expect(bridge.activateOptional).toHaveBeenCalledWith(
+        admittedSelection.roles[0].identity,
+        admittedSelection,
+      ),
+    );
+    expect(await screen.findByText("Install check passed")).toBeInTheDocument();
+    expect(screen.getByText("184 ms")).toBeInTheDocument();
+    expect(
+      screen.getByText(/animation quality is not rated by this check/i),
+    ).toBeInTheDocument();
+  });
+
+  it("refreshes the lifecycle after a provider-load activation error", async () => {
+    const user = userEvent.setup();
+    const admittedSelection = {
+      ...selectedLoadout,
+      roles: [
+        {
+          role: "language_model" as const,
+          identity: { pack_id: "local.llm.qwen", revision: "r1" },
+          preferred_residency: "cpu_resident_gpu_cold" as const,
+        },
+      ],
+    };
+    const awaitingLifecycle = {
+      ...optionalLifecycle,
+      packs: [
+        {
+          ...optionalLifecycle.packs[0],
+          phase: "installed_inactive_awaiting_self_test" as const,
+          canInstall: false,
+          canRemove: true,
+        },
+      ],
+    };
+    const activeLifecycle = {
+      ...awaitingLifecycle,
+      packs: [
+        {
+          ...awaitingLifecycle.packs[0],
+          phase: "active" as const,
+          detail: "The model is already active.",
+        },
+      ],
+    };
+    bridge.loadoutPlanner.mockResolvedValue({
+      schemaVersion: 1,
+      ready: true,
+      detail: "Exact local selection is ready for a measured check.",
+      selected: admittedSelection,
+      planner: null,
+    });
+    bridge.optionalLifecycle
+      .mockResolvedValueOnce(awaitingLifecycle)
+      .mockResolvedValueOnce(activeLifecycle);
+    bridge.activateOptional.mockRejectedValue(
+      new Error("The model became active before the receipt returned."),
+    );
+
+    render(<LocalResourcePlanner models={[]} nativeAvailable />);
+    await user.click(
+      await screen.findByRole("button", { name: "Test & activate" }),
+    );
+
+    expect(
+      await screen.findByText(/became active before the receipt returned/i),
+    ).toHaveAttribute("role", "alert");
+    expect(bridge.optionalLifecycle).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Installed and active.")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Test & activate" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps provider-load activation blocked when the selected draft duplicates the exact pack", async () => {
+    const exactRole = {
+      role: "language_model" as const,
+      identity: { pack_id: "local.llm.qwen", revision: "r1" },
+      preferred_residency: "cpu_resident_gpu_cold" as const,
+    };
+    bridge.loadoutPlanner.mockResolvedValue({
+      schemaVersion: 1,
+      ready: true,
+      detail: "The selected draft contains a duplicate exact pack.",
+      selected: {
+        ...selectedLoadout,
+        roles: [exactRole, { ...exactRole, role: "other" as const }],
+      },
+      planner: null,
+    });
+    bridge.optionalLifecycle.mockResolvedValue({
+      ...optionalLifecycle,
+      packs: [
+        {
+          ...optionalLifecycle.packs[0],
+          phase: "installed_inactive_awaiting_self_test" as const,
+          canInstall: false,
+          canRemove: true,
+        },
+      ],
+    });
+
+    render(<LocalResourcePlanner models={[]} nativeAvailable />);
+    await screen.findByRole("heading", { name: "Qwen local conversation" });
+
+    expect(
+      screen.getByRole("button", {
+        name: "Test & activate",
+      }),
+    ).toBeDisabled();
+    expect(screen.getByText(/select this model once/i)).toBeInTheDocument();
+    expect(bridge.activateOptional).not.toHaveBeenCalled();
   });
 
   it("passes only the exact native-selected snake-case loadout into admission", async () => {

@@ -1,4 +1,5 @@
 import "./product.css";
+import "./review.css";
 import { ProductConsole } from "./ProductConsole";
 import { ThemeSpecimen } from "./ThemeSpecimen";
 

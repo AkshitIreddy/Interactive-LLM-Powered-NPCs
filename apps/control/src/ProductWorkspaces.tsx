@@ -1,9 +1,28 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  readCharacterContentOverride,
+  resetCharacterContentOverride,
+  saveCharacterContentOverride,
+  type CharacterContentOverrideSnapshot,
+} from "./characterContentOverrides";
+import {
+  disableCharacterMouthPack,
+  enableCharacterMouthPack,
+  importCharacterMouthPack,
+  inspectCharacterMouthPack,
+  readCharacterMouthPackState,
+  readMouthPackFiles,
+  type CharacterMouthPackFiles,
+  type CharacterMouthPackPreview,
+  type CharacterMouthPackState,
+  type InstalledCharacterMouthPack,
+} from "./characterMouthPacks";
 import type {
   NativeGameProfileSummary,
   NativeModelSummary,
 } from "./tauriBridge";
 import {
+  activateTrustedOptionalPack,
   admitSelectedLocalLoadout,
   backupAllLocalMemory,
   cancelManualActorPicker,
@@ -60,6 +79,7 @@ import {
   type NativeSelectedLoadoutPlannerResult,
   type NativeTelemetryObservation,
   type NativeTrustedLocalPackCatalog,
+  type NativeTrustedOptionalPackActivationReceipt,
   type NativeTrustedOptionalPackLifecycle,
 } from "./tauriBridge";
 
@@ -145,8 +165,8 @@ export function GameTargetWorkspace({
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState(
     nativeAvailable
-      ? "Loading the current native-session process binding."
-      : "Browser preview cannot enumerate or bind Windows game processes.",
+      ? "Checking this session for a selected game."
+      : "Game discovery is available in the installed Windows app.",
   );
   const [actorPicker, setActorPicker] =
     useState<NativeManualActorPickerPresentation>({
@@ -168,8 +188,8 @@ export function GameTargetWorkspace({
         setCandidates({ kind: "empty" });
         setNotice(
           value
-            ? "Current-session process-instance binding loaded. It is intentionally cleared by app restart; visual capture remains governed separately."
-            : "No game process is selected in this native session. Discover eligible running windows.",
+            ? `Connected to ${value.target.title} for this session.`
+            : "No game process is selected in this native session. Start the game, then find its window.",
         );
       })
       .catch((error) => {
@@ -214,12 +234,12 @@ export function GameTargetWorkspace({
       if (!value?.length) {
         setCandidates({ kind: "empty" });
         setNotice(
-          "No eligible running window matched this bundled game profile.",
+          `No matching window found. Start ${gameProfiles.find((profile) => profile.id === gameProfileId)?.displayName ?? "the selected game"}, then try again.`,
         );
       } else {
         setCandidates({ kind: "ready", value });
         setNotice(
-          `${value.length} eligible process-instance candidate${value.length === 1 ? "" : "s"} found.`,
+          `${value.length} matching game window${value.length === 1 ? "" : "s"} found. Choose the one you are playing.`,
         );
       }
     } catch (error) {
@@ -255,7 +275,7 @@ export function GameTargetWorkspace({
       setSelected(null);
       onSelectionChange(null);
       setNotice(
-        "Native process binding cleared. Audio/subtitle-only conversation remains available.",
+        "Game window disconnected. You can reconnect without changing the selected profile or character.",
       );
     } catch (error) {
       setNotice(errorText(error, "Game target could not be cleared."));
@@ -303,27 +323,26 @@ export function GameTargetWorkspace({
     }
   };
 
+  const selectedProfile = gameProfiles.find(
+    (profile) => profile.id === gameProfileId,
+  );
+
   return (
     <section
       className="instrument-panel native-target-workspace"
       aria-labelledby="target-workspace-title"
     >
-      <div className="panel-title">
+      <div className="panel-title workspace-heading">
         <div>
-          <span className="eyebrow">Native process-instance boundary</span>
-          <h2 id="target-workspace-title">Game target</h2>
+          <span className="eyebrow">Step 1 · Choose and connect</span>
+          <h2 id="target-workspace-title">Your game</h2>
         </div>
         <span className={selected ? "badge wait" : "badge"}>
-          {selected ? "Bound · capture blocked" : "Not selected"}
+          {selected ? "Connected this session" : "Not connected"}
         </span>
       </div>
-      <p className="source-disclosure">
-        {nativeAvailable
-          ? "Source: live Windows process/window enumeration and current-session selection. PID/HWND bindings never survive app restart. A checkbox is not trusted offline or anti-cheat proof, so commercial visual capture remains blocked."
-          : "Source: browser preview. Process discovery and current-session binding require the native Windows shell."}
-      </p>
-      <div className="target-toolbar">
-        <label>
+      <div className="workspace-step workspace-step--profile">
+        <label className="workspace-primary-field">
           <span>
             {nativeAvailable
               ? "Bundled game profile"
@@ -345,132 +364,226 @@ export function GameTargetWorkspace({
             )}
           </select>
         </label>
-        <button
-          className="secondary-action"
-          disabled={!nativeAvailable || busy}
-          onClick={discover}
+        <dl
+          className="facts profile-quick-facts"
+          aria-label="Selected game profile"
         >
-          {busy ? "Working…" : "Discover running windows"}
-        </button>
-        <button
-          className="quiet-button"
-          disabled={!selected || busy}
-          onClick={clear}
-        >
-          Clear binding
-        </button>
-      </div>
-      <label className="authorization-control">
-        <input
-          type="checkbox"
-          checked={confirmed}
-          disabled={!nativeAvailable || busy}
-          onChange={(event) => setConfirmed(event.target.checked)}
-        />
-        <span>
-          <b>I am using offline single-player</b>
-          <small>
-            This records an operator statement only. It does not authorize
-            visual capture.
-          </small>
-        </span>
-      </label>
-      {selected && (
-        <article className="selected-target-card">
           <div>
-            <b>{selected.target.title}</b>
-            <small>
-              {selected.target.executableName} · PID {selected.target.processId}{" "}
-              · HWND {selected.target.nativeWindow}
-            </small>
+            <dt>Game</dt>
+            <dd>
+              <strong>{selectedProfile?.displayName ?? gameProfileId}</strong>
+            </dd>
           </div>
-          <span className="badge bad">{selected.safetyState}</span>
-          <p>{selected.safetyDetail}</p>
+          <div>
+            <dt>Profile</dt>
+            <dd>
+              {selectedProfile
+                ? `${selectedProfile.catalogState === "bundled" ? "Bundled" : "Missing from bundle"} · ${selectedProfile.safety === "offlineOnly" ? "Offline only" : "Single-player only"}`
+                : nativeAvailable
+                  ? "Details unavailable"
+                  : "Browser preview"}
+            </dd>
+          </div>
+          {selectedProfile?.defaultFallback && (
+            <div>
+              <dt>Fallback</dt>
+              <dd>{selectedProfile.defaultFallback}</dd>
+            </div>
+          )}
+        </dl>
+      </div>
+
+      <div className="workspace-step workspace-step--connect">
+        <div className="workspace-step__heading">
+          <div>
+            <span className="eyebrow">Step 2 · Find the running window</span>
+            <h3>Connect this session</h3>
+          </div>
           <button
-            className="quiet-button"
-            disabled
-            aria-describedby="ordinary-capture-blocked-reason"
+            className="secondary-action"
+            disabled={!nativeAvailable || busy}
+            onClick={discover}
           >
-            Verify ordinary game capture
+            {busy ? "Working…" : "Discover running windows"}
           </button>
-          <small id="ordinary-capture-blocked-reason">
-            Disabled: the native safety boundary has no trusted offline and
-            protection evidence for this commercial target. The task-owned
-            synthetic fixture uses a separate review-only verifier below.
-          </small>
+        </div>
+
+        {!nativeAvailable && (
+          <div className="empty-state compact">
+            <b>Open the installed app to find a running game</b>
+            <p>The browser preview cannot inspect Windows game processes.</p>
+          </div>
+        )}
+
+        {candidates.kind === "loading" && (
+          <div className="empty-state compact" aria-live="polite">
+            <b>Checking running game windows…</b>
+          </div>
+        )}
+        {candidates.kind === "error" && (
+          <div className="empty-state error">
+            <b>Could not read running game windows</b>
+            <p>{candidates.detail}</p>
+            <button className="quiet-button" onClick={() => void discover()}>
+              Try again
+            </button>
+          </div>
+        )}
+        {candidates.kind === "empty" && nativeAvailable && !selected && (
+          <div className="empty-state compact">
+            <b>No running game selected</b>
+            <p>
+              Start {selectedProfile?.displayName ?? "the selected game"}, then
+              choose Discover running windows.
+            </p>
+          </div>
+        )}
+        {candidates.kind === "ready" && (
+          <div
+            className="target-candidate-list"
+            aria-label="Eligible game windows"
+          >
+            {candidates.value.map((candidate) => (
+              <article key={`${candidate.processId}-${candidate.nativeWindow}`}>
+                <div>
+                  <b>{candidate.title}</b>
+                  <small>
+                    {candidate.executableName} · {candidate.clientWidth}×
+                    {candidate.clientHeight}
+                  </small>
+                </div>
+                <button
+                  disabled={busy || !confirmed}
+                  onClick={() => void choose(candidate)}
+                >
+                  Bind this process
+                </button>
+              </article>
+            ))}
+          </div>
+        )}
+
+        <label className="authorization-control">
+          <input
+            type="checkbox"
+            checked={confirmed}
+            disabled={!nativeAvailable || busy}
+            onChange={(event) => setConfirmed(event.target.checked)}
+          />
+          <span>
+            <b>I am using offline single-player</b>
+            <small>
+              Required to connect a process. Visual capture still uses a
+              separate safety check.
+            </small>
+          </span>
+        </label>
+      </div>
+
+      {selected && (
+        <article className="selected-target-card selected-target-card--primary">
+          <header>
+            <div>
+              <span className="eyebrow">Current session</span>
+              <b>{selected.target.title}</b>
+              <small>{selected.target.executableName}</small>
+            </div>
+            <span className="badge wait">Game window selected</span>
+          </header>
+          <p className="control-reason">
+            Visual capture is not available for this target yet. Conversation
+            can continue with audio and subtitles.
+          </p>
+          <div className="target-toolbar">
+            <button className="quiet-button" disabled={busy} onClick={clear}>
+              Clear binding
+            </button>
+          </div>
+          <details className="technical-disclosure">
+            <summary>Connection and safety details</summary>
+            <dl className="facts">
+              <div>
+                <dt>Process</dt>
+                <dd>PID {selected.target.processId}</dd>
+              </div>
+              <div>
+                <dt>Window</dt>
+                <dd>HWND {selected.target.nativeWindow}</dd>
+              </div>
+              <div>
+                <dt>Safety state</dt>
+                <dd>{selected.safetyState}</dd>
+              </div>
+            </dl>
+            <p>{selected.safetyDetail}</p>
+            <button
+              className="quiet-button"
+              disabled
+              aria-describedby="ordinary-capture-blocked-reason"
+            >
+              Verify ordinary game capture
+            </button>
+            <small id="ordinary-capture-blocked-reason">
+              Disabled: the native safety boundary has no trusted offline and
+              protection evidence for this commercial target. The task-owned
+              synthetic fixture uses a separate review-only verifier.
+            </small>
+          </details>
         </article>
       )}
-      {candidates.kind === "loading" && (
-        <div className="empty-state">
-          <b>Loading native target state…</b>
+
+      <details className="technical-disclosure actor-picker-disclosure">
+        <summary>In-game character targeting</summary>
+        <p>
+          Use the native picker after connecting a game window. This targets a
+          visible actor; it does not change the authored character selected for
+          dialogue.
+        </p>
+        <div className="target-toolbar manual-actor-picker-controls">
+          <button
+            className="secondary-action"
+            disabled={
+              !nativeAvailable ||
+              !selected ||
+              busy ||
+              actorPicker.state === "waiting"
+            }
+            onClick={startActorPicker}
+          >
+            Select character in game
+          </button>
+          <button
+            className="quiet-button"
+            disabled={busy || actorPicker.state !== "waiting"}
+            onClick={cancelActorPicker}
+          >
+            Cancel character selection
+          </button>
+          <span
+            className={
+              actorPicker.state === "selected" ? "badge good" : "badge wait"
+            }
+          >
+            {actorPicker.state === "waiting"
+              ? "Waiting for native click"
+              : actorPicker.state === "selected"
+                ? "Character selected"
+                : actorPicker.state === "cancelled"
+                  ? "Selection cancelled"
+                  : "Selection unavailable"}
+          </span>
         </div>
-      )}
-      {candidates.kind === "error" && (
-        <div className="empty-state error">
-          <b>Target state unavailable</b>
-          <p>{candidates.detail}</p>
-        </div>
-      )}
-      {candidates.kind === "ready" && (
-        <div
-          className="target-candidate-list"
-          aria-label="Eligible game windows"
-        >
-          {candidates.value.map((candidate) => (
-            <article key={`${candidate.processId}-${candidate.nativeWindow}`}>
-              <div>
-                <b>{candidate.title}</b>
-                <small>
-                  {candidate.executableName} · PID {candidate.processId} ·{" "}
-                  {candidate.clientWidth}×{candidate.clientHeight}
-                </small>
-              </div>
-              <button disabled={busy} onClick={() => void choose(candidate)}>
-                Bind this process
-              </button>
-            </article>
-          ))}
-        </div>
-      )}
-      <div className="target-toolbar manual-actor-picker-controls">
-        <button
-          className="secondary-action"
-          disabled={
-            !nativeAvailable ||
-            !selected ||
-            busy ||
-            actorPicker.state === "waiting"
-          }
-          onClick={startActorPicker}
-        >
-          Select character in game
-        </button>
-        <button
-          className="quiet-button"
-          disabled={busy || actorPicker.state !== "waiting"}
-          onClick={cancelActorPicker}
-        >
-          Cancel character selection
-        </button>
-        <span
-          className={
-            actorPicker.state === "selected" ? "badge good" : "badge wait"
-          }
-        >
-          {actorPicker.state === "waiting"
-            ? "Waiting for native click"
-            : actorPicker.state === "selected"
-              ? "Character selected"
-              : actorPicker.state === "cancelled"
-                ? "Selection cancelled"
-                : "Selection unavailable"}
-        </span>
-      </div>
-      <p className="source-disclosure">
-        {actorPicker.detail} Captured pixels, detected regions, pointer
-        coordinates, native handles, and receipt proof remain outside this
-        interface.
-      </p>
+        <p className="source-disclosure">{actorPicker.detail}</p>
+      </details>
+
+      <details className="technical-disclosure">
+        <summary>How game connections are verified</summary>
+        <p className="source-disclosure">
+          {nativeAvailable
+            ? "The native app enumerates Windows processes and windows for the selected bundled profile. A binding lasts only for this app session and is revalidated before use."
+            : "Process discovery and current-session binding require the native Windows shell."}
+        </p>
+      </details>
       <p className="inline-status" role="status">
         {notice}
       </p>
@@ -496,16 +609,20 @@ export function CharacterDatabase({
       : { kind: "ready", value: BROWSER_CHARACTER },
   );
   const [busy, setBusy] = useState(false);
+  const onSelectionChangeRef = useRef(onSelectionChange);
   const [notice, setNotice] = useState(
     nativeAvailable
-      ? "Loading native-owned profile selection and delivered-memory scope."
-      : "Browser preview fixture only. There are no editable or persisted native character controls here.",
+      ? "Loading this game's character selection and saved-turn count."
+      : "Browser preview only. Character changes are unavailable here.",
   );
+  useEffect(() => {
+    onSelectionChangeRef.current = onSelectionChange;
+  }, [onSelectionChange]);
   const inspect = useCallback(
     async (requestedId?: string) => {
       if (!nativeAvailable) {
         setState({ kind: "ready", value: BROWSER_CHARACTER });
-        onSelectionChange?.(BROWSER_CHARACTER);
+        onSelectionChangeRef.current?.(BROWSER_CHARACTER);
         return;
       }
       setState({ kind: "loading" });
@@ -520,17 +637,15 @@ export function CharacterDatabase({
           );
         setCatalog(nextCatalog);
         setState({ kind: "ready", value });
-        onSelectionChange?.(value);
-        setNotice(
-          "Canonical profile, authored knowledge, provenance, and delivered memory loaded from native authority.",
-        );
+        onSelectionChangeRef.current?.(value);
+        setNotice("Character profile and saved turns loaded.");
       } catch (error) {
         const detail = errorText(error, "Character inspection failed.");
         setState({ kind: "error", detail });
         setNotice(detail);
       }
     },
-    [gameProfileId, nativeAvailable, onSelectionChange],
+    [gameProfileId, nativeAvailable],
   );
   useEffect(() => {
     void inspect();
@@ -560,54 +675,67 @@ export function CharacterDatabase({
       className="instrument-panel character-database"
       aria-labelledby="character-db-title"
     >
-      <header className="panel-title character-database__title">
+      <header className="panel-title character-database__title workspace-heading">
         <div>
-          <span className="eyebrow">Game-scoped native authority</span>
-          <h2 id="character-db-title">Character database</h2>
+          <span className="eyebrow">Step 3 · Choose who answers</span>
+          <h2 id="character-db-title">Characters in this game</h2>
         </div>
         <span className={nativeAvailable ? "badge good" : "badge wait"}>
-          {nativeAvailable ? "Native inspection" : "Browser fixture"}
+          {nativeAvailable ? "Game-scoped roster" : "Browser fixture"}
         </span>
       </header>
       <p className="source-disclosure">
         {nativeAvailable
-          ? "Bundled profiles are immutable. This view lists and inspects canonical authored records and persists only the selected character ID; no edit command is exposed."
-          : "One synthetic preview record is shown so the layout remains inspectable. It is not runtime character authority and cannot be edited or selected natively."}
+          ? "Choose a character from the selected game. Opening a profile does not change who answers; use the selection button to save that choice."
+          : "One synthetic preview record keeps this layout inspectable. It cannot be edited or selected natively."}
       </p>
       {catalog && (
-        <aside
-          className="native-character-list"
-          aria-label={`${catalog.gameDisplayName} characters`}
-        >
-          {catalog.characters.length === 0 ? (
-            <p>No canonical characters in this profile.</p>
-          ) : (
-            catalog.characters.map((entry) => (
-              <button
-                key={entry.id}
-                className={value?.character.id === entry.id ? "selected" : ""}
-                aria-pressed={value?.character.id === entry.id}
-                disabled={busy}
-                onClick={() => void inspect(entry.id)}
-              >
-                <span>{entry.displayName.slice(0, 2).toUpperCase()}</span>
-                <span>
-                  <b>{entry.displayName}</b>
-                  <small>
-                    {entry.backgroundNpc
-                      ? "Background archetype"
-                      : entry.identityStrategy}
-                  </small>
-                </span>
-                <i>
-                  {catalog.selectedCharacterId === entry.id
-                    ? "Selected"
-                    : entry.id}
-                </i>
-              </button>
-            ))
-          )}
-        </aside>
+        <div className="character-roster-block">
+          <div className="workspace-step__heading">
+            <div>
+              <span className="eyebrow">{catalog.gameDisplayName}</span>
+              <h3>Available characters</h3>
+            </div>
+            <span className="badge">{catalog.characters.length}</span>
+          </div>
+          <aside
+            className="native-character-list"
+            aria-label={`${catalog.gameDisplayName} characters`}
+          >
+            {catalog.characters.length === 0 ? (
+              <div className="empty-state compact">
+                <b>No authored characters in this profile</b>
+                <p>Choose another bundled game profile.</p>
+              </div>
+            ) : (
+              catalog.characters.map((entry) => (
+                <button
+                  key={entry.id}
+                  className={value?.character.id === entry.id ? "selected" : ""}
+                  aria-pressed={value?.character.id === entry.id}
+                  disabled={busy}
+                  onClick={() => void inspect(entry.id)}
+                >
+                  <span>{entry.displayName.slice(0, 2).toUpperCase()}</span>
+                  <span>
+                    <b>{entry.displayName}</b>
+                    <small>
+                      {entry.voiceDescription ||
+                        (entry.backgroundNpc
+                          ? "Background character"
+                          : "Voice not described")}
+                    </small>
+                  </span>
+                  <i>
+                    {catalog.selectedCharacterId === entry.id
+                      ? "Selected for turns"
+                      : "Open"}
+                  </i>
+                </button>
+              ))
+            )}
+          </aside>
+        </div>
       )}
       {state.kind === "loading" && (
         <div className="empty-state">
@@ -618,15 +746,18 @@ export function CharacterDatabase({
         <div className="empty-state error">
           <b>Character record unavailable</b>
           <p>{state.detail}</p>
-          <button onClick={() => void inspect()}>Retry profile default</button>
+          <button onClick={() => void inspect()}>Try again</button>
         </div>
       )}
       {value && (
         <div className="character-native-record">
-          <div className="character-record__heading">
+          <div className="character-record__heading character-record__hero">
             <div>
               <span className="eyebrow">
-                {value.gameDisplayName} · {value.character.id}
+                {value.gameDisplayName} ·{" "}
+                {value.character.backgroundNpc
+                  ? "Background character"
+                  : "Authored character"}
               </span>
               <h3>{value.character.displayName}</h3>
               <p>{value.character.promptRole}</p>
@@ -645,52 +776,99 @@ export function CharacterDatabase({
                 : "Use for ordinary turns"}
             </button>
           </div>
-          <dl className="facts spacious character-native-facts">
+          <dl className="facts spacious character-native-facts character-summary-grid">
             <div>
-              <dt>Biography</dt>
-              <dd>{value.character.biography || "No biography authored"}</dd>
-            </div>
-            <div>
-              <dt>Personality</dt>
+              <dt>Voice</dt>
               <dd>
-                {value.character.personality || "No personality authored"}
+                {value.character.voice.description || "No voice description"}
               </dd>
             </div>
             <div>
-              <dt>Dialogue style</dt>
-              <dd>
-                {value.character.dialogueStyle || "No dialogue style authored"}
-              </dd>
+              <dt>Language</dt>
+              <dd>{value.character.voice.locale || "Not specified"}</dd>
             </div>
             <div>
-              <dt>Identity</dt>
-              <dd>
-                No face or demographic inference. Strategy:{" "}
-                {value.character.identity.strategy} · automatic face recognition
-                claimed:{" "}
-                {value.character.identity.automaticFaceRecognitionClaimed
-                  ? "yes"
-                  : "no"}
-              </dd>
+              <dt>Identity fallback</dt>
+              <dd>{value.character.identity.fallback.replaceAll("_", " ")}</dd>
             </div>
             <div>
-              <dt>Memory scope</dt>
+              <dt>Delivered turns</dt>
               <dd>
-                {value.memoryScope.gameId} / {value.memoryScope.characterId} ·
-                cross-game widening{" "}
-                {value.memoryScope.crossGameWideningAllowed
-                  ? "allowed"
-                  : "blocked"}
-              </dd>
-            </div>
-            <div>
-              <dt>Delivered memory</dt>
-              <dd>
-                {value.deliveredMemory.length} delivered turn
+                {value.deliveredMemory.length} saved turn
                 {value.deliveredMemory.length === 1 ? "" : "s"}
               </dd>
             </div>
           </dl>
+          <details className="character-profile-disclosure">
+            <summary>Character profile</summary>
+            <dl className="facts spacious">
+              <div>
+                <dt>Biography</dt>
+                <dd>{value.character.biography || "No biography authored"}</dd>
+              </div>
+              <div>
+                <dt>Personality</dt>
+                <dd>
+                  {value.character.personality || "No personality authored"}
+                </dd>
+              </div>
+              <div>
+                <dt>Dialogue style</dt>
+                <dd>
+                  {value.character.dialogueStyle ||
+                    "No dialogue style authored"}
+                </dd>
+              </div>
+            </dl>
+          </details>
+          <CharacterContentOverrideEditor
+            nativeAvailable={nativeAvailable}
+            editable={catalog?.editableAuthoredData ?? nativeAvailable}
+            inspection={value}
+            onChanged={() => inspect(value.character.id)}
+          />
+          <CharacterMouthPackWorkspace
+            key={`${value.gameProfileId}/${value.character.id}`}
+            nativeAvailable={nativeAvailable}
+            gameProfileId={value.gameProfileId}
+            characterId={value.character.id}
+          />
+          <details className="technical-disclosure">
+            <summary>Identity, voice, and memory scope</summary>
+            <dl className="facts spacious">
+              <div>
+                <dt>Identity method</dt>
+                <dd>
+                  {value.character.identity.strategy.replaceAll("_", " ")}
+                </dd>
+              </div>
+              <div>
+                <dt>Automatic face recognition</dt>
+                <dd>
+                  {value.character.identity.automaticFaceRecognitionClaimed
+                    ? "Claimed by profile"
+                    : "Not claimed"}
+                </dd>
+              </div>
+              <div>
+                <dt>Voice binding</dt>
+                <dd>
+                  {value.character.voice.providerVoiceId ??
+                    "Resolved by the selected provider loadout"}
+                </dd>
+              </div>
+              <div>
+                <dt>Memory scope</dt>
+                <dd>
+                  {value.memoryScope.gameId} / {value.memoryScope.characterId} ·
+                  cross-game widening{" "}
+                  {value.memoryScope.crossGameWideningAllowed
+                    ? "allowed"
+                    : "blocked"}
+                </dd>
+              </div>
+            </dl>
+          </details>
           <details>
             <summary>
               Authored knowledge · {value.authoredKnowledge.length}
@@ -765,6 +943,544 @@ export function CharacterDatabase({
         {notice}
       </p>
     </section>
+  );
+}
+
+const CHARACTER_NAME_LIMIT = 160;
+const CHARACTER_BIOGRAPHY_LIMIT = 16 * 1024;
+const CHARACTER_PROMPT_CONTEXT_LIMIT = 1024;
+const textBytes = (value: string) => new TextEncoder().encode(value).byteLength;
+
+export function CharacterContentOverrideEditor({
+  nativeAvailable,
+  editable,
+  inspection,
+  onChanged,
+}: {
+  nativeAvailable: boolean;
+  editable: boolean;
+  inspection: NativeCharacterInspection;
+  onChanged: () => Promise<void>;
+}) {
+  const { character, gameProfileId } = inspection;
+  const [snapshot, setSnapshot] =
+    useState<CharacterContentOverrideSnapshot | null>(null);
+  const [displayName, setDisplayName] = useState(character.displayName);
+  const [biography, setBiography] = useState(character.biography);
+  const [promptContext, setPromptContext] = useState("");
+  const [busy, setBusy] = useState<"load" | "save" | "reset" | null>(null);
+  const [notice, setNotice] = useState(
+    nativeAvailable
+      ? "Open the editor to load this character's player-authored layer."
+      : "Browser preview is read-only. Editing is available in the installed Windows app.",
+  );
+
+  const load = useCallback(async () => {
+    if (!nativeAvailable) {
+      setSnapshot(null);
+      setDisplayName(character.displayName);
+      setBiography(character.biography);
+      setPromptContext("");
+      return;
+    }
+    setBusy("load");
+    try {
+      const next = await readCharacterContentOverride(
+        gameProfileId,
+        character.id,
+      );
+      setSnapshot(next);
+      setDisplayName(next?.saved?.displayName ?? character.displayName);
+      setBiography(next?.saved?.biography ?? character.biography);
+      setPromptContext(next?.saved?.promptContext ?? "");
+      setNotice(
+        next?.detail ?? "The current content pack supplies these fields.",
+      );
+    } catch (error) {
+      setNotice(errorText(error, "Character customization could not load."));
+    } finally {
+      setBusy(null);
+    }
+  }, [
+    character.biography,
+    character.displayName,
+    character.id,
+    gameProfileId,
+    nativeAvailable,
+  ]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const validation = (() => {
+    if (!displayName.trim()) return "Enter a character name.";
+    if (textBytes(displayName) > CHARACTER_NAME_LIMIT)
+      return "Character name exceeds 160 bytes.";
+    if (!biography.trim()) return "Enter a backstory or biography.";
+    if (textBytes(biography) > CHARACTER_BIOGRAPHY_LIMIT)
+      return "Backstory exceeds 16 KiB.";
+    if (textBytes(promptContext) > CHARACTER_PROMPT_CONTEXT_LIMIT)
+      return "Prompt context exceeds 1,024 bytes.";
+    return null;
+  })();
+
+  const save = async () => {
+    if (validation) {
+      setNotice(validation);
+      return;
+    }
+    setBusy("save");
+    try {
+      const result = await saveCharacterContentOverride({
+        gameProfileId,
+        characterId: character.id,
+        displayName: displayName.trim(),
+        biography: biography.trim(),
+        promptContext: promptContext.trim(),
+      });
+      if (!result.persisted || !result.saved)
+        throw new Error("Native override save did not return persisted state.");
+      setSnapshot({
+        schemaVersion: 1,
+        gameProfileId,
+        characterId: character.id,
+        saved: result.saved,
+        detail: result.detail,
+      });
+      setNotice(result.detail);
+      await onChanged();
+    } catch (error) {
+      setNotice(
+        errorText(error, "Character customization could not be saved."),
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const reset = async () => {
+    setBusy("reset");
+    try {
+      const result = await resetCharacterContentOverride(
+        gameProfileId,
+        character.id,
+      );
+      if (!result.persisted || result.saved)
+        throw new Error("Native override reset did not return cleared state.");
+      setSnapshot({
+        schemaVersion: 1,
+        gameProfileId,
+        characterId: character.id,
+        saved: null,
+        detail: result.detail,
+      });
+      setPromptContext("");
+      setNotice(result.detail);
+      await onChanged();
+    } catch (error) {
+      setNotice(
+        errorText(error, "Character customization could not be reset."),
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const disabled = !nativeAvailable || !editable || busy !== null;
+  return (
+    <details className="character-content-editor technical-disclosure">
+      <summary>
+        <span>Customize this character</span>
+        <span className={snapshot?.saved ? "badge good" : "badge"}>
+          {snapshot?.saved ? "Player layer active" : "Pack values"}
+        </span>
+      </summary>
+      <p className="source-disclosure">
+        Your changes stay in place when this pack updates. Reset restores the
+        latest pack defaults.
+      </p>
+      <div className="character-content-editor__fields">
+        <label>
+          <span>Character name</span>
+          <input
+            value={displayName}
+            disabled={disabled}
+            maxLength={CHARACTER_NAME_LIMIT}
+            onChange={(event) => setDisplayName(event.target.value)}
+          />
+          <small>
+            {textBytes(displayName)} / {CHARACTER_NAME_LIMIT} bytes
+          </small>
+        </label>
+        <label>
+          <span>Backstory / biography</span>
+          <textarea
+            value={biography}
+            disabled={disabled}
+            rows={6}
+            maxLength={CHARACTER_BIOGRAPHY_LIMIT}
+            onChange={(event) => setBiography(event.target.value)}
+          />
+          <small>
+            {textBytes(biography).toLocaleString()} /{" "}
+            {CHARACTER_BIOGRAPHY_LIMIT.toLocaleString()} bytes
+          </small>
+        </label>
+        <label>
+          <span>Extra prompt context</span>
+          <textarea
+            value={promptContext}
+            disabled={disabled}
+            rows={4}
+            maxLength={CHARACTER_PROMPT_CONTEXT_LIMIT}
+            placeholder="Optional relationship, roleplay, or situation guidance for this character."
+            onChange={(event) => setPromptContext(event.target.value)}
+          />
+          <small>
+            Used when this character responds · {textBytes(promptContext)} /{" "}
+            {CHARACTER_PROMPT_CONTEXT_LIMIT} bytes
+          </small>
+        </label>
+      </div>
+      <div className="character-content-editor__actions">
+        <button
+          className="primary-action"
+          disabled={disabled || validation !== null}
+          onClick={() => void save()}
+        >
+          {busy === "save" ? "Saving…" : "Save changes"}
+        </button>
+        <button
+          className="secondary-action"
+          disabled={disabled || !snapshot?.saved}
+          onClick={() => void reset()}
+        >
+          {busy === "reset" ? "Resetting…" : "Reset to pack values"}
+        </button>
+      </div>
+      {validation && nativeAvailable && (
+        <p className="field-error">{validation}</p>
+      )}
+      <p className="inline-status" aria-live="polite">
+        {notice}
+      </p>
+    </details>
+  );
+}
+
+export function CharacterMouthPackWorkspace({
+  nativeAvailable,
+  gameProfileId,
+  characterId,
+}: {
+  nativeAvailable: boolean;
+  gameProfileId: string;
+  characterId: string;
+}) {
+  const [atlasFile, setAtlasFile] = useState<File | null>(null);
+  const [textureFile, setTextureFile] = useState<File | null>(null);
+  const [reviewedFiles, setReviewedFiles] =
+    useState<CharacterMouthPackFiles | null>(null);
+  const [preview, setPreview] = useState<CharacterMouthPackPreview | null>(
+    null,
+  );
+  const [installed, setInstalled] =
+    useState<InstalledCharacterMouthPack | null>(null);
+  const [registry, setRegistry] = useState<CharacterMouthPackState | null>(
+    null,
+  );
+  const [busy, setBusy] = useState<
+    "review" | "import" | "enable" | "disable" | null
+  >(null);
+  const [notice, setNotice] = useState(
+    nativeAvailable
+      ? "Choose the prepared atlas.json and its .bin texture. You can review and import while the game is closed; enabling requires the matching current native actor."
+      : "Browser preview is read-only. Review and import require the installed Windows app.",
+  );
+
+  const refresh = useCallback(async () => {
+    try {
+      setRegistry(await readCharacterMouthPackState());
+    } catch (error) {
+      setNotice(errorText(error, "Mouth-pack state could not load."));
+    }
+  }, []);
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const clearReview = () => {
+    setReviewedFiles(null);
+    setPreview(null);
+    setInstalled(null);
+  };
+  const review = async () => {
+    if (!atlasFile || !textureFile) {
+      setNotice("Choose both atlas.json and the .bin texture it names.");
+      return;
+    }
+    setBusy("review");
+    try {
+      const files = await readMouthPackFiles(
+        gameProfileId,
+        atlasFile,
+        textureFile,
+      );
+      const next = await inspectCharacterMouthPack(files);
+      if (
+        next.gameProfileId !== gameProfileId ||
+        next.characterId !== characterId
+      )
+        throw new Error(
+          "Native mouth-pack review returned a different selected character scope.",
+        );
+      setReviewedFiles(files);
+      setPreview(next);
+      setInstalled(null);
+      setNotice(
+        "Exact manifest and texture bytes passed schema and enrollment-binding checks. Inspect the result yourself before importing it.",
+      );
+    } catch (error) {
+      clearReview();
+      setNotice(errorText(error, "Mouth-pack review failed."));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const importReviewed = async () => {
+    if (!reviewedFiles || !preview) return;
+    setBusy("import");
+    try {
+      const result = await importCharacterMouthPack(
+        reviewedFiles,
+        preview.contentSha256,
+      );
+      setInstalled(result);
+      setNotice(
+        "Reviewed revision imported locally. Enable it explicitly while the same selected actor remains current.",
+      );
+      await refresh();
+    } catch (error) {
+      setNotice(errorText(error, "Mouth-pack import failed."));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const enable = async (requestedDigest?: string) => {
+    const digest =
+      requestedDigest ?? installed?.contentSha256 ?? preview?.contentSha256;
+    if (!digest) return;
+    setBusy("enable");
+    try {
+      await enableCharacterMouthPack(gameProfileId, digest);
+      setNotice(
+        "Mouth pack enabled for this selected character. The visual runtime will admit it only with the matching native actor and enrollment binding.",
+      );
+      await refresh();
+    } catch (error) {
+      setNotice(errorText(error, "Mouth-pack enable failed."));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const disable = async () => {
+    if (!scopedEnabled) return;
+    setBusy("disable");
+    try {
+      await disableCharacterMouthPack(
+        gameProfileId,
+        scopedEnabled.contentSha256,
+      );
+      setNotice(
+        "Mouth pack disabled for this character. Its reviewed local revision remains installed.",
+      );
+      await refresh();
+    } catch (error) {
+      setNotice(errorText(error, "Mouth-pack disable failed."));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const scopedInstalled =
+    registry?.installed.filter(
+      (entry) =>
+        entry.gameProfileId === gameProfileId &&
+        entry.characterId === characterId,
+    ) ?? [];
+  const scopedEnabled = registry?.enabled.find(
+    (entry) =>
+      entry.gameProfileId === gameProfileId &&
+      entry.characterId === characterId,
+  );
+
+  return (
+    <details className="character-mouth-pack technical-disclosure">
+      <summary>
+        <span>Character mouth pack</span>
+        <span className={scopedEnabled ? "badge good" : "badge wait"}>
+          {scopedEnabled
+            ? "Enabled"
+            : scopedInstalled.length
+              ? `${scopedInstalled.length} installed`
+              : "Optional"}
+        </span>
+      </summary>
+      <p className="source-disclosure">
+        Import a prepared mouth pack for this character. You can enable it when
+        the character is tracked in the game.
+      </p>
+      <div className="character-mouth-pack__files">
+        <label>
+          <span>Atlas manifest</span>
+          <input
+            aria-label="Choose mouth atlas JSON"
+            type="file"
+            accept=".json,application/json"
+            disabled={!nativeAvailable || busy !== null}
+            onChange={(event) => {
+              setAtlasFile(event.target.files?.[0] ?? null);
+              clearReview();
+            }}
+          />
+          <small>atlas.json · up to 64 KiB</small>
+        </label>
+        <label>
+          <span>Atlas texture</span>
+          <input
+            aria-label="Choose mouth atlas texture"
+            type="file"
+            accept=".bin,application/octet-stream"
+            disabled={!nativeAvailable || busy !== null}
+            onChange={(event) => {
+              setTextureFile(event.target.files?.[0] ?? null);
+              clearReview();
+            }}
+          />
+          <small>.bin file named by atlas.json · up to 16 MiB</small>
+        </label>
+      </div>
+      <button
+        className="secondary-action character-mouth-pack__review"
+        disabled={
+          !nativeAvailable || !atlasFile || !textureFile || busy !== null
+        }
+        onClick={() => void review()}
+      >
+        {busy === "review" ? "Reviewing exact files…" : "Review mouth pack"}
+      </button>
+      {preview && (
+        <section
+          className="character-mouth-pack__preview"
+          aria-label="Reviewed mouth pack"
+        >
+          <div>
+            <span className="eyebrow">Binding checks passed</span>
+            <h4>
+              {preview.gameProfileId} / {preview.characterId}
+            </h4>
+          </div>
+          <dl className="facts spacious">
+            <div>
+              <dt>Atlas</dt>
+              <dd>
+                schema {preview.atlasSchemaVersion} · identity revision{" "}
+                {preview.identityRevision}
+              </dd>
+            </div>
+            <div>
+              <dt>Texture</dt>
+              <dd>
+                {preview.textureFileName} ·{" "}
+                {(preview.textureSizeBytes / 1024).toFixed(1)} KiB
+              </dd>
+            </div>
+            <div>
+              <dt>Reviewed content</dt>
+              <dd>
+                <code>{preview.contentSha256.slice(0, 16)}…</code>
+              </dd>
+            </div>
+            <div>
+              <dt>Private review evidence</dt>
+              <dd>
+                {preview.privateReviewBindingValidated
+                  ? "Enrollment digest present · "
+                  : "Binding missing · "}
+                <code>{preview.enrollmentBindingSha256.slice(0, 16)}…</code>
+              </dd>
+            </div>
+          </dl>
+          <div className="character-mouth-pack__actions">
+            <button
+              className="primary-action"
+              disabled={busy !== null || installed !== null}
+              onClick={() => void importReviewed()}
+            >
+              {installed
+                ? "Reviewed revision imported"
+                : busy === "import"
+                  ? "Importing…"
+                  : "Import reviewed pack"}
+            </button>
+            <button
+              className="secondary-action"
+              disabled={busy !== null || installed === null}
+              onClick={() => void enable()}
+            >
+              {busy === "enable" ? "Enabling…" : "Enable for selected actor"}
+            </button>
+          </div>
+        </section>
+      )}
+      {scopedInstalled.length > 0 && (
+        <div
+          className="character-mouth-pack__installed"
+          aria-label="Installed mouth-pack revisions"
+        >
+          <div>
+            <b>Installed revisions</b>
+            <small>
+              Kept locally until a future explicit removal workflow.
+            </small>
+          </div>
+          {scopedInstalled.map((entry) => {
+            const active = scopedEnabled?.contentSha256 === entry.contentSha256;
+            return (
+              <article key={entry.contentSha256}>
+                <span>
+                  <code>{entry.contentSha256.slice(0, 16)}…</code>
+                  <small>
+                    identity revision {entry.identityRevision} ·{" "}
+                    {entry.textureFileName}
+                  </small>
+                </span>
+                <button
+                  className="secondary-action"
+                  disabled={busy !== null || active}
+                  onClick={() => void enable(entry.contentSha256)}
+                >
+                  {active ? "Enabled" : "Enable with current actor"}
+                </button>
+              </article>
+            );
+          })}
+          {scopedEnabled && (
+            <button
+              className="quiet-button danger"
+              disabled={busy !== null}
+              onClick={() => void disable()}
+            >
+              Disable mouth pack
+            </button>
+          )}
+        </div>
+      )}
+      <p className="inline-status" aria-live="polite">
+        {notice}
+      </p>
+    </details>
   );
 }
 
@@ -973,8 +1689,8 @@ function CharacterMemoryLifecycle({
     >
       <header>
         <div>
-          <span className="eyebrow">Native-owned SQLite lifecycle</span>
-          <h3>Local memory backup & erasure</h3>
+          <span className="eyebrow">Saved conversation tools</span>
+          <h3>Back up or delete memory</h3>
         </div>
         <span className={status?.integrityOk ? "badge good" : "badge wait"}>
           {nativeAvailable
@@ -987,16 +1703,15 @@ function CharacterMemoryLifecycle({
         </span>
       </header>
       <p className="source-disclosure">
-        Native authority owns the database path, local principal, session, and
-        integrity checks. The WebView submits only the selected game/character
-        IDs and explicit confirmations; paths and raw database data never enter
-        this control.
+        These actions apply to the selected game and character. Backups and
+        removal always require confirmation.
       </p>
       {!nativeAvailable && (
         <div className="empty-state">
-          <b>No browser memory actions</b>
+          <b>Open the installed app</b>
           <p>
-            Backup, listing, deletion, and erasure require the installed app.
+            The Windows app can create backups or delete saved conversation
+            memory.
           </p>
         </div>
       )}
@@ -2014,6 +2729,10 @@ export function LocalResourcePlanner({
     key: string;
     detail: string;
   } | null>(null);
+  const [optionalActivationReceipt, setOptionalActivationReceipt] = useState<{
+    key: string;
+    value: NativeTrustedOptionalPackActivationReceipt;
+  } | null>(null);
 
   const refresh = useCallback(async () => {
     if (!nativeAvailable) {
@@ -2178,6 +2897,59 @@ export function LocalResourcePlanner({
       setError(
         errorText(cause, "Optional-pack cancellation did not complete."),
       );
+    }
+  };
+  const activateOptional = async (identity: {
+    pack_id: string;
+    revision: string;
+  }) => {
+    const key = `${identity.pack_id}@${identity.revision}`;
+    const selection = loadoutPlanner?.selected;
+    if (
+      !selection ||
+      selection.roles.filter(
+        (role) =>
+          role.identity.pack_id === identity.pack_id &&
+          role.identity.revision === identity.revision,
+      ).length !== 1
+    )
+      return;
+    setBusy(`optional-activate-${key}`);
+    setError(null);
+    try {
+      const result = await activateTrustedOptionalPack(identity, selection);
+      if (!result?.receipt || !result.lifecycle)
+        throw new Error("Native provider-load self-test returned no receipt.");
+      if (
+        result.receipt.identity.pack_id !== identity.pack_id ||
+        result.receipt.identity.revision !== identity.revision
+      )
+        throw new Error(
+          "Native provider-load self-test returned a different pack identity.",
+        );
+      setOptionalLifecycle(result.lifecycle);
+      setOptionalActivationReceipt({ key, value: result.receipt });
+      setOptionalConsent(null);
+      setOptionalLicenseAccepted(false);
+    } catch (cause) {
+      let message = errorText(
+        cause,
+        "Provider-load self-test did not complete.",
+      );
+      try {
+        const latestLifecycle = await readTrustedOptionalPackLifecycle();
+        if (!latestLifecycle)
+          throw new Error("Native local model status returned no state.");
+        setOptionalLifecycle(latestLifecycle);
+      } catch (refreshCause) {
+        message = `${message} ${errorText(
+          refreshCause,
+          "Latest local model status could not be refreshed.",
+        )}`;
+      }
+      setError(message);
+    } finally {
+      setBusy(null);
     }
   };
   const admitLoadout = async () => {
@@ -2397,77 +3169,84 @@ export function LocalResourcePlanner({
             >
               {busy === "save" ? "Saving…" : "Save native resource policy"}
             </button>
-            <div className="telemetry-grid">
-              <article>
-                <span>Exact target PID</span>
-                <b>{telemetry.snapshot.selected_game_pid ?? "Not selected"}</b>
-                <small>Native GameTargetManager authority</small>
-              </article>
-              <article>
-                <span>Adapter</span>
-                <b>
-                  {adapter?.availability === "available"
-                    ? adapter.value.description
-                    : "Unavailable"}
-                </b>
-                <small>{adapter?.provenance.source ?? "No observation"}</small>
-              </article>
-              <article>
-                <span>Dedicated VRAM</span>
-                <b>
-                  {observationLabel(telemetry.snapshot.dedicated_vram_bytes)}
-                </b>
-              </article>
-              <article>
-                <span>OS local budget</span>
-                <b>
-                  {observationLabel(
-                    telemetry.snapshot.os_local_vram_budget_bytes,
-                  )}
-                </b>
-              </article>
-              <article>
-                <span>Game VRAM</span>
-                <b>
-                  {observationLabel(
-                    telemetry.snapshot.selected_game_vram_bytes,
-                  )}
-                </b>
-              </article>
-              <article>
-                <span>Game working set</span>
-                <b>
-                  {observationLabel(
-                    telemetry.snapshot.selected_game_working_set_bytes,
-                  )}
-                </b>
-              </article>
-              <article>
-                <span>Control-process VRAM</span>
-                <b>
-                  {observationLabel(
-                    telemetry.snapshot.current_process_local_vram_bytes,
-                  )}
-                </b>
-              </article>
-              <article>
-                <span>Total device pressure</span>
-                <b>
-                  {observationLabel(
-                    telemetry.snapshot.total_device_pressure_vram_bytes,
-                  )}
-                </b>
-              </article>
-              <article>
-                <span>Available RAM</span>
-                <b>
-                  {observationLabel(telemetry.snapshot.available_ram_bytes)}
-                </b>
-              </article>
-            </div>
-            <p className="inline-status" role="status">
-              {telemetry.admissionDetail}
-            </p>
+            <details className="technical-disclosure resource-telemetry-disclosure">
+              <summary>Hardware readings and provenance</summary>
+              <div className="telemetry-grid">
+                <article>
+                  <span>Exact target PID</span>
+                  <b>
+                    {telemetry.snapshot.selected_game_pid ?? "Not selected"}
+                  </b>
+                  <small>Native GameTargetManager authority</small>
+                </article>
+                <article>
+                  <span>Adapter</span>
+                  <b>
+                    {adapter?.availability === "available"
+                      ? adapter.value.description
+                      : "Unavailable"}
+                  </b>
+                  <small>
+                    {adapter?.provenance.source ?? "No observation"}
+                  </small>
+                </article>
+                <article>
+                  <span>Dedicated VRAM</span>
+                  <b>
+                    {observationLabel(telemetry.snapshot.dedicated_vram_bytes)}
+                  </b>
+                </article>
+                <article>
+                  <span>OS local budget</span>
+                  <b>
+                    {observationLabel(
+                      telemetry.snapshot.os_local_vram_budget_bytes,
+                    )}
+                  </b>
+                </article>
+                <article>
+                  <span>Game VRAM</span>
+                  <b>
+                    {observationLabel(
+                      telemetry.snapshot.selected_game_vram_bytes,
+                    )}
+                  </b>
+                </article>
+                <article>
+                  <span>Game working set</span>
+                  <b>
+                    {observationLabel(
+                      telemetry.snapshot.selected_game_working_set_bytes,
+                    )}
+                  </b>
+                </article>
+                <article>
+                  <span>Control-process VRAM</span>
+                  <b>
+                    {observationLabel(
+                      telemetry.snapshot.current_process_local_vram_bytes,
+                    )}
+                  </b>
+                </article>
+                <article>
+                  <span>Total device pressure</span>
+                  <b>
+                    {observationLabel(
+                      telemetry.snapshot.total_device_pressure_vram_bytes,
+                    )}
+                  </b>
+                </article>
+                <article>
+                  <span>Available RAM</span>
+                  <b>
+                    {observationLabel(telemetry.snapshot.available_ram_bytes)}
+                  </b>
+                </article>
+              </div>
+              <p className="inline-status" role="status">
+                {telemetry.admissionDetail}
+              </p>
+            </details>
             {loadoutPlanner && (
               <section
                 className="selected-loadout-admission"
@@ -2508,20 +3287,23 @@ export function LocalResourcePlanner({
                       </div>
                       <span className="badge">Persisted selection</span>
                     </div>
-                    <ol className="selected-loadout-roles">
-                      {loadoutPlanner.selected.roles.map((role) => (
-                        <li
-                          key={`${role.role}-${role.identity.pack_id}-${role.identity.revision}`}
-                        >
-                          <span>{humanizeBenchmarkKey(role.role)}</span>
-                          <b>{role.identity.pack_id}</b>
-                          <small>
-                            {role.identity.revision} ·{" "}
-                            {humanizeBenchmarkKey(role.preferred_residency)}
-                          </small>
-                        </li>
-                      ))}
-                    </ol>
+                    <details className="technical-disclosure">
+                      <summary>Exact pack identities and residency</summary>
+                      <ol className="selected-loadout-roles">
+                        {loadoutPlanner.selected.roles.map((role) => (
+                          <li
+                            key={`${role.role}-${role.identity.pack_id}-${role.identity.revision}`}
+                          >
+                            <span>{humanizeBenchmarkKey(role.role)}</span>
+                            <b>{role.identity.pack_id}</b>
+                            <small>
+                              {role.identity.revision} ·{" "}
+                              {humanizeBenchmarkKey(role.preferred_residency)}
+                            </small>
+                          </li>
+                        ))}
+                      </ol>
+                    </details>
                   </>
                 ) : (
                   <div className="empty-state compact">
@@ -2534,22 +3316,25 @@ export function LocalResourcePlanner({
                   </div>
                 )}
                 {loadoutPlanner.planner && (
-                  <dl className="benchmark-facts">
-                    <div>
-                      <dt>Trusted measurement streams</dt>
-                      <dd>
-                        {loadoutPlanner.planner.trusted_measurement_streams}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Active measured evidence</dt>
-                      <dd>{loadoutPlanner.planner.active_evidence.length}</dd>
-                    </div>
-                    <div>
-                      <dt>Pending native work</dt>
-                      <dd>{loadoutPlanner.planner.pending_work}</dd>
-                    </div>
-                  </dl>
+                  <details className="technical-disclosure">
+                    <summary>Planner evidence</summary>
+                    <dl className="benchmark-facts">
+                      <div>
+                        <dt>Trusted measurement streams</dt>
+                        <dd>
+                          {loadoutPlanner.planner.trusted_measurement_streams}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Active measured evidence</dt>
+                        <dd>{loadoutPlanner.planner.active_evidence.length}</dd>
+                      </div>
+                      <div>
+                        <dt>Pending native work</dt>
+                        <dd>{loadoutPlanner.planner.pending_work}</dd>
+                      </div>
+                    </dl>
+                  </details>
                 )}
                 <button
                   className="secondary-action"
@@ -2585,132 +3370,147 @@ export function LocalResourcePlanner({
                           : "Planner unavailable")}
                     </b>
                     <p>{loadoutAdmission.detail}</p>
-                    {loadoutAdmission.decision?.reason_code && (
-                      <code>{loadoutAdmission.decision.reason_code}</code>
+                    {(loadoutAdmission.decision?.reason_code ||
+                      loadoutAdmission.decision?.admission_receipt ||
+                      loadoutAdmission.decision?.residency_decisions.length ||
+                      loadoutAdmission.decision?.pressure_cancellations
+                        .length) && (
+                      <details className="technical-disclosure">
+                        <summary>
+                          Admission receipt and resource arithmetic
+                        </summary>
+                        {loadoutAdmission.decision?.reason_code && (
+                          <code>{loadoutAdmission.decision.reason_code}</code>
+                        )}
+                        {loadoutAdmission.decision?.admission_receipt && (
+                          <dl>
+                            <div>
+                              <dt>Projected VRAM</dt>
+                              <dd>
+                                {bytesToGiB(
+                                  loadoutAdmission.decision.admission_receipt
+                                    .projected_total_vram_bytes,
+                                ).toFixed(2)}{" "}
+                                GiB
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>VRAM ceiling</dt>
+                              <dd>
+                                {bytesToGiB(
+                                  loadoutAdmission.decision.admission_receipt
+                                    .vram_soft_ceiling_bytes,
+                                ).toFixed(2)}{" "}
+                                GiB
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>Desktop + protected game VRAM</dt>
+                              <dd>
+                                {bytesToGiB(
+                                  loadoutAdmission.decision.admission_receipt
+                                    .protected_desktop_and_game_vram_bytes,
+                                ).toFixed(2)}{" "}
+                                GiB
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>Selected resident + transient VRAM</dt>
+                              <dd>
+                                {bytesToGiB(
+                                  loadoutAdmission.decision.admission_receipt
+                                    .selected_peak_vram_bytes,
+                                ).toFixed(2)}{" "}
+                                GiB
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>VRAM safety margin</dt>
+                              <dd>
+                                {bytesToGiB(
+                                  loadoutAdmission.decision.admission_receipt
+                                    .vram_safety_bytes,
+                                ).toFixed(2)}{" "}
+                                GiB
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>Selected peak RAM</dt>
+                              <dd>
+                                {bytesToGiB(
+                                  loadoutAdmission.decision.admission_receipt
+                                    .selected_peak_ram_bytes,
+                                ).toFixed(2)}{" "}
+                                GiB
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>RAM ceiling</dt>
+                              <dd>
+                                {bytesToGiB(
+                                  loadoutAdmission.decision.admission_receipt
+                                    .ram_soft_ceiling_bytes,
+                                ).toFixed(2)}{" "}
+                                GiB
+                              </dd>
+                            </div>
+                          </dl>
+                        )}
+                        {loadoutAdmission.decision?.residency_decisions
+                          .length ? (
+                          <div className="loadout-residency-decisions">
+                            <b>Measured idle policy</b>
+                            <ol>
+                              {loadoutAdmission.decision.residency_decisions.map(
+                                (decision) => (
+                                  <li
+                                    key={`${decision.role}-${decision.identity.pack_id}-${decision.identity.revision}`}
+                                  >
+                                    <span>
+                                      {humanizeBenchmarkKey(decision.role)} ·{" "}
+                                      {humanizeBenchmarkKey(
+                                        decision.disposition,
+                                      )}
+                                    </span>
+                                    <small>
+                                      Expected idle{" "}
+                                      {decision.expected_idle_millis} ms ·
+                                      measured reload p99{" "}
+                                      {decision.compared_p99_reload_millis} ms ·{" "}
+                                      {humanizeBenchmarkKey(
+                                        decision.evidence_placement,
+                                      )}
+                                    </small>
+                                  </li>
+                                ),
+                              )}
+                            </ol>
+                          </div>
+                        ) : null}
+                        {loadoutAdmission.decision?.pressure_cancellations
+                          .length ? (
+                          <p className="control-reason">
+                            Pressure shed{" "}
+                            {
+                              loadoutAdmission.decision.pressure_cancellations
+                                .length
+                            }{" "}
+                            queued operation
+                            {loadoutAdmission.decision.pressure_cancellations
+                              .length === 1
+                              ? ""
+                              : "s"}
+                            :{" "}
+                            {loadoutAdmission.decision.pressure_cancellations
+                              .map(
+                                (cancellation) =>
+                                  `${cancellation.work_id} (${humanizeBenchmarkKey(cancellation.reason)})`,
+                              )
+                              .join(" · ")}
+                          </p>
+                        ) : null}
+                      </details>
                     )}
-                    {loadoutAdmission.decision?.admission_receipt && (
-                      <dl>
-                        <div>
-                          <dt>Projected VRAM</dt>
-                          <dd>
-                            {bytesToGiB(
-                              loadoutAdmission.decision.admission_receipt
-                                .projected_total_vram_bytes,
-                            ).toFixed(2)}{" "}
-                            GiB
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>VRAM ceiling</dt>
-                          <dd>
-                            {bytesToGiB(
-                              loadoutAdmission.decision.admission_receipt
-                                .vram_soft_ceiling_bytes,
-                            ).toFixed(2)}{" "}
-                            GiB
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>Desktop + protected game VRAM</dt>
-                          <dd>
-                            {bytesToGiB(
-                              loadoutAdmission.decision.admission_receipt
-                                .protected_desktop_and_game_vram_bytes,
-                            ).toFixed(2)}{" "}
-                            GiB
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>Selected resident + transient VRAM</dt>
-                          <dd>
-                            {bytesToGiB(
-                              loadoutAdmission.decision.admission_receipt
-                                .selected_peak_vram_bytes,
-                            ).toFixed(2)}{" "}
-                            GiB
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>VRAM safety margin</dt>
-                          <dd>
-                            {bytesToGiB(
-                              loadoutAdmission.decision.admission_receipt
-                                .vram_safety_bytes,
-                            ).toFixed(2)}{" "}
-                            GiB
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>Selected peak RAM</dt>
-                          <dd>
-                            {bytesToGiB(
-                              loadoutAdmission.decision.admission_receipt
-                                .selected_peak_ram_bytes,
-                            ).toFixed(2)}{" "}
-                            GiB
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>RAM ceiling</dt>
-                          <dd>
-                            {bytesToGiB(
-                              loadoutAdmission.decision.admission_receipt
-                                .ram_soft_ceiling_bytes,
-                            ).toFixed(2)}{" "}
-                            GiB
-                          </dd>
-                        </div>
-                      </dl>
-                    )}
-                    {loadoutAdmission.decision?.residency_decisions.length ? (
-                      <div className="loadout-residency-decisions">
-                        <b>Measured idle policy</b>
-                        <ol>
-                          {loadoutAdmission.decision.residency_decisions.map(
-                            (decision) => (
-                              <li
-                                key={`${decision.role}-${decision.identity.pack_id}-${decision.identity.revision}`}
-                              >
-                                <span>
-                                  {humanizeBenchmarkKey(decision.role)} ·{" "}
-                                  {humanizeBenchmarkKey(decision.disposition)}
-                                </span>
-                                <small>
-                                  Expected idle {decision.expected_idle_millis}{" "}
-                                  ms · measured reload p99{" "}
-                                  {decision.compared_p99_reload_millis} ms ·{" "}
-                                  {humanizeBenchmarkKey(
-                                    decision.evidence_placement,
-                                  )}
-                                </small>
-                              </li>
-                            ),
-                          )}
-                        </ol>
-                      </div>
-                    ) : null}
-                    {loadoutAdmission.decision?.pressure_cancellations
-                      .length ? (
-                      <p className="control-reason">
-                        Pressure shed{" "}
-                        {
-                          loadoutAdmission.decision.pressure_cancellations
-                            .length
-                        }{" "}
-                        queued operation
-                        {loadoutAdmission.decision.pressure_cancellations
-                          .length === 1
-                          ? ""
-                          : "s"}
-                        :{" "}
-                        {loadoutAdmission.decision.pressure_cancellations
-                          .map(
-                            (cancellation) =>
-                              `${cancellation.work_id} (${humanizeBenchmarkKey(cancellation.reason)})`,
-                          )
-                          .join(" · ")}
-                      </p>
-                    ) : null}
                   </div>
                 )}
               </section>
@@ -2774,6 +3574,29 @@ export function LocalResourcePlanner({
               );
               const lifecycleKey = `${candidate.identity.pack_id}@${candidate.identity.revision}`;
               const lifecycleConfirmed = optionalConsent === lifecycleKey;
+              const selectedDraftMatches =
+                loadoutPlanner?.selected?.roles.filter(
+                  (role) =>
+                    role.identity.pack_id === candidate.identity.pack_id &&
+                    role.identity.revision === candidate.identity.revision,
+                ).length ?? 0;
+              const exactSetupDraftReady = Boolean(
+                loadoutPlanner?.ready &&
+                  loadoutPlanner.selected &&
+                  selectedDraftMatches === 1,
+              );
+              const awaitingProviderLoadSelfTest =
+                lifecycleState?.phase ===
+                "installed_inactive_awaiting_self_test";
+              const lifecycleSummary =
+                lifecycleState?.phase ===
+                "installed_inactive_awaiting_self_test"
+                  ? "Installed and ready to test."
+                  : lifecycleState?.phase === "active"
+                    ? "Installed and active."
+                    : (lifecycleState?.detail ??
+                      optionalLifecycle?.detail ??
+                      "Local model status is unavailable.");
               return (
                 <article
                   className="trusted-pack-card"
@@ -2786,17 +3609,13 @@ export function LocalResourcePlanner({
                         {humanizeBenchmarkKey(candidate.capability.scope)}
                       </span>
                       <h3>{candidate.display_name}</h3>
-                      <small>
-                        {candidate.identity.pack_id} ·{" "}
-                        {candidate.identity.revision}
-                      </small>
                     </div>
                     <span className={measured ? "badge good" : "badge wait"}>
                       {measured
                         ? trustedCatalog.productionTrust
-                          ? "Production-qualified"
-                          : "Review-qualified"
-                        : "Unmeasured"}
+                          ? "Resources qualified"
+                          : "Resources measured"
+                        : "Not measured"}
                     </span>
                   </header>
                   <p>{candidate.description}</p>
@@ -2805,153 +3624,194 @@ export function LocalResourcePlanner({
                     {candidate.recommendation_reason ??
                       "No signed product recommendation is attached."}
                   </p>
-                  <dl>
-                    <div>
-                      <dt>Runtime / backend</dt>
-                      <dd>
-                        {candidate.runtime}
-                        {candidate.runtime_revision
-                          ? ` ${candidate.runtime_revision}`
-                          : " · revision not reported"}
-                        {" · "}
-                        {candidate.backends.length
-                          ? candidate.backends.join(" / ")
-                          : "backend unavailable"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Download / installed</dt>
-                      <dd>
-                        {formatPackBytes(
-                          candidate.exact_artifact_download_bytes,
-                        )}{" "}
-                        / {formatPackBytes(candidate.installed_bytes)}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>License</dt>
-                      <dd>
-                        <a
-                          href={candidate.license.license_url}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          {candidate.license.spdx_expression ??
-                            candidate.license.license_name}
-                        </a>
-                        {" · "}
-                        {candidate.license.redistributable
-                          ? "redistributable"
-                          : "not redistributable"}
-                        {candidate.license.acceptance_required
-                          ? " · acceptance required"
-                          : ""}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Residency candidates</dt>
-                      <dd>
-                        {candidate.allowed_residencies.length
-                          ? candidate.allowed_residencies
-                              .map(humanizeBenchmarkKey)
-                              .join(" · ")
-                          : "None admitted"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Lifecycle</dt>
-                      <dd>
-                        {humanizeBenchmarkKey(
-                          candidate.lifecycle.install_strategy,
-                        )}
-                        {" · "}
-                        {candidate.lifecycle.explicit_download_required
-                          ? "explicit download"
-                          : "download policy not explicit"}
-                        {" · "}
-                        {candidate.lifecycle.automatic_download_allowed
-                          ? "automatic download allowed"
-                          : "no automatic download"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Admission</dt>
-                      <dd>
-                        {humanizeBenchmarkKey(candidate.admission_state)} ·{" "}
-                        {candidate.admission_reason}
-                      </dd>
-                    </div>
-                  </dl>
-                  <p className="pack-measurement-detail">
-                    {candidate.measurement_detail} · qualified envelopes{" "}
-                    {candidate.qualified_envelope_count} · non-qualifying review
-                    evidence {candidate.non_qualifying_review_evidence_count}
-                  </p>
-                  {measured && measurement && (
-                    <div className="pack-measurement-receipt">
-                      <b>
-                        {trustedCatalog.productionTrust
-                          ? "Production-trusted current-device envelope"
-                          : "Non-production review-bootstrap current-device envelope"}{" "}
-                        · {measurement.sample_count} samples
-                      </b>
-                      <small>
-                        {measurement.runtime} {measurement.runtime_revision} ·{" "}
-                        {measurement.backend} · report {measurement.report_id}
-                      </small>
-                      <dl>
-                        {Object.entries(measurement.placements).map(
-                          ([placement, values]) =>
-                            values ? (
-                              <div key={placement}>
-                                <dt>{humanizeBenchmarkKey(placement)}</dt>
-                                <dd>
-                                  RAM resident/p99{" "}
-                                  {formatPackBytes(values.resident_ram_bytes)} /{" "}
-                                  {formatPackBytes(values.p99_total_ram_bytes)}{" "}
-                                  · VRAM resident/workspace{" "}
-                                  {formatPackBytes(values.resident_vram_bytes)}{" "}
-                                  /{" "}
-                                  {formatPackBytes(
-                                    values.p99_workspace_vram_bytes,
-                                  )}
-                                  {" · "}load/reload/operation p99{" "}
-                                  {values.p99_load_millis}/
-                                  {values.p99_reload_millis}/
-                                  {values.p99_operation_millis} ms
-                                </dd>
-                              </div>
-                            ) : null,
-                        )}
-                      </dl>
-                    </div>
-                  )}
-                  <div className="trusted-pack-lifecycle-controls">
-                    <p className="control-reason">
-                      {lifecycleState?.detail ??
-                        optionalLifecycle?.detail ??
-                        "Native optional-pack lifecycle is unavailable."}
+                  <details className="technical-disclosure pack-technical-disclosure">
+                    <summary>Runtime, license, and measurement details</summary>
+                    <dl>
+                      <div>
+                        <dt>Pack identity</dt>
+                        <dd>
+                          {candidate.identity.pack_id} ·{" "}
+                          {candidate.identity.revision}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Runtime / backend</dt>
+                        <dd>
+                          {candidate.runtime}
+                          {candidate.runtime_revision
+                            ? ` ${candidate.runtime_revision}`
+                            : " · revision not reported"}
+                          {" · "}
+                          {candidate.backends.length
+                            ? candidate.backends.join(" / ")
+                            : "backend unavailable"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Download / installed</dt>
+                        <dd>
+                          {formatPackBytes(
+                            candidate.exact_artifact_download_bytes,
+                          )}{" "}
+                          / {formatPackBytes(candidate.installed_bytes)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>License</dt>
+                        <dd>
+                          <a
+                            href={candidate.license.license_url}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {candidate.license.spdx_expression ??
+                              candidate.license.license_name}
+                          </a>
+                          {" · "}
+                          {candidate.license.redistributable
+                            ? "redistributable"
+                            : "not redistributable"}
+                          {candidate.license.acceptance_required
+                            ? " · acceptance required"
+                            : ""}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Residency candidates</dt>
+                        <dd>
+                          {candidate.allowed_residencies.length
+                            ? candidate.allowed_residencies
+                                .map(humanizeBenchmarkKey)
+                                .join(" · ")
+                            : "None admitted"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Lifecycle</dt>
+                        <dd>
+                          {humanizeBenchmarkKey(
+                            candidate.lifecycle.install_strategy,
+                          )}
+                          {" · "}
+                          {candidate.lifecycle.explicit_download_required
+                            ? "explicit download"
+                            : "download policy not explicit"}
+                          {" · "}
+                          {candidate.lifecycle.automatic_download_allowed
+                            ? "automatic download allowed"
+                            : "no automatic download"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Admission</dt>
+                        <dd>
+                          {humanizeBenchmarkKey(candidate.admission_state)} ·{" "}
+                          {candidate.admission_reason}
+                        </dd>
+                      </div>
+                    </dl>
+                    <p className="pack-measurement-detail">
+                      {candidate.measurement_detail} · qualified envelopes{" "}
+                      {candidate.qualified_envelope_count} · non-qualifying
+                      review evidence{" "}
+                      {candidate.non_qualifying_review_evidence_count}
                     </p>
-                    <label className="authorization-control">
-                      <input
-                        type="checkbox"
-                        checked={lifecycleConfirmed}
-                        disabled={!nativeAvailable || !lifecycleState}
-                        onChange={(event) =>
-                          setOptionalConsent(
-                            event.target.checked ? lifecycleKey : null,
-                          )
-                        }
-                      />
-                      <span>
-                        <b>Confirm exact signed-catalog mutation</b>
+                    {measured && measurement && (
+                      <div className="pack-measurement-receipt">
+                        <b>
+                          {trustedCatalog.productionTrust
+                            ? "Production-trusted current-device envelope"
+                            : "Non-production review-bootstrap current-device envelope"}{" "}
+                          · {measurement.sample_count} samples
+                        </b>
                         <small>
-                          No silent download. Identity, URLs, sizes, hashes,
-                          license, and lifecycle come from the verified native
-                          catalog.
+                          {measurement.runtime} {measurement.runtime_revision} ·{" "}
+                          {measurement.backend} · report {measurement.report_id}
                         </small>
-                      </span>
-                    </label>
+                        <dl>
+                          {Object.entries(measurement.placements).map(
+                            ([placement, values]) =>
+                              values ? (
+                                <div key={placement}>
+                                  <dt>{humanizeBenchmarkKey(placement)}</dt>
+                                  <dd>
+                                    RAM resident/p99{" "}
+                                    {formatPackBytes(values.resident_ram_bytes)}{" "}
+                                    /{" "}
+                                    {formatPackBytes(
+                                      values.p99_total_ram_bytes,
+                                    )}{" "}
+                                    · VRAM resident/workspace{" "}
+                                    {formatPackBytes(
+                                      values.resident_vram_bytes,
+                                    )}{" "}
+                                    /{" "}
+                                    {formatPackBytes(
+                                      values.p99_workspace_vram_bytes,
+                                    )}
+                                    {" · "}load/reload/operation p99{" "}
+                                    {values.p99_load_millis}/
+                                    {values.p99_reload_millis}/
+                                    {values.p99_operation_millis} ms
+                                  </dd>
+                                </div>
+                              ) : null,
+                          )}
+                        </dl>
+                      </div>
+                    )}
+                  </details>
+                  <div className="trusted-pack-lifecycle-controls">
+                    <p className="control-reason">{lifecycleSummary}</p>
+                    {awaitingProviderLoadSelfTest && (
+                      <>
+                        <div className="pack-actions">
+                          <button
+                            className="primary-action"
+                            disabled={busy !== null || !exactSetupDraftReady}
+                            aria-describedby={`provider-load-self-test-reason-${candidate.identity.pack_id}`}
+                            onClick={() =>
+                              void activateOptional(candidate.identity)
+                            }
+                          >
+                            {busy === `optional-activate-${lifecycleKey}`
+                              ? "Loading model…"
+                              : "Test & activate"}
+                          </button>
+                        </div>
+                        <p
+                          id={`provider-load-self-test-reason-${candidate.identity.pack_id}`}
+                          className="control-reason provider-load-self-test-reason"
+                        >
+                          {exactSetupDraftReady
+                            ? "Loads and unloads the model on this PC. No game needs to be running."
+                            : "Select this model once in the local loadout above before testing."}
+                        </p>
+                      </>
+                    )}
+                    {(lifecycleState?.canInstall ||
+                      lifecycleState?.canRepair ||
+                      lifecycleState?.canRemove) && (
+                      <label className="authorization-control">
+                        <input
+                          type="checkbox"
+                          checked={lifecycleConfirmed}
+                          disabled={!nativeAvailable || !lifecycleState}
+                          onChange={(event) =>
+                            setOptionalConsent(
+                              event.target.checked ? lifecycleKey : null,
+                            )
+                          }
+                        />
+                        <span>
+                          <b>Allow changes to this local model</b>
+                          <small>
+                            Required for the install, repair, or remove actions
+                            shown below.
+                          </small>
+                        </span>
+                      </label>
+                    )}
                     {lifecycleState?.licenseAcceptanceRequired &&
                       lifecycleConfirmed && (
                         <label className="authorization-control">
@@ -2971,48 +3831,48 @@ export function LocalResourcePlanner({
                         </label>
                       )}
                     <div className="pack-actions">
-                      <button
-                        disabled={
-                          busy !== null ||
-                          !lifecycleConfirmed ||
-                          !lifecycleState?.canInstall ||
-                          (lifecycleState.licenseAcceptanceRequired &&
-                            !optionalLicenseAccepted)
-                        }
-                        onClick={() =>
-                          void mutateOptional("install", candidate.identity)
-                        }
-                      >
-                        {busy === `optional-install-${lifecycleKey}`
-                          ? "Downloading…"
-                          : "Install exact optional pack"}
-                      </button>
-                      <button
-                        disabled={
-                          busy !== null ||
-                          !lifecycleConfirmed ||
-                          !lifecycleState?.canRepair ||
-                          (lifecycleState.licenseAcceptanceRequired &&
-                            !optionalLicenseAccepted)
-                        }
-                        onClick={() =>
-                          void mutateOptional("repair", candidate.identity)
-                        }
-                      >
-                        Repair from signed catalog
-                      </button>
-                      <button
-                        disabled={
-                          busy !== null ||
-                          !lifecycleConfirmed ||
-                          !lifecycleState?.canRemove
-                        }
-                        onClick={() =>
-                          void mutateOptional("remove", candidate.identity)
-                        }
-                      >
-                        Remove exact pack
-                      </button>
+                      {lifecycleState?.canInstall && (
+                        <button
+                          disabled={
+                            busy !== null ||
+                            !lifecycleConfirmed ||
+                            (lifecycleState.licenseAcceptanceRequired &&
+                              !optionalLicenseAccepted)
+                          }
+                          onClick={() =>
+                            void mutateOptional("install", candidate.identity)
+                          }
+                        >
+                          {busy === `optional-install-${lifecycleKey}`
+                            ? "Downloading…"
+                            : "Install exact optional pack"}
+                        </button>
+                      )}
+                      {lifecycleState?.canRepair && (
+                        <button
+                          disabled={
+                            busy !== null ||
+                            !lifecycleConfirmed ||
+                            (lifecycleState.licenseAcceptanceRequired &&
+                              !optionalLicenseAccepted)
+                          }
+                          onClick={() =>
+                            void mutateOptional("repair", candidate.identity)
+                          }
+                        >
+                          Repair from signed catalog
+                        </button>
+                      )}
+                      {lifecycleState?.canRemove && (
+                        <button
+                          disabled={busy !== null || !lifecycleConfirmed}
+                          onClick={() =>
+                            void mutateOptional("remove", candidate.identity)
+                          }
+                        >
+                          Remove exact pack
+                        </button>
+                      )}
                       {(busy === `optional-install-${lifecycleKey}` ||
                         busy === `optional-repair-${lifecycleKey}` ||
                         lifecycleState?.phase === "downloading" ||
@@ -3031,6 +3891,90 @@ export function LocalResourcePlanner({
                       <p className="control-reason" role="status">
                         {optionalCancelReceipt.detail}
                       </p>
+                    )}
+                    {optionalActivationReceipt?.key === lifecycleKey && (
+                      <div
+                        className="provider-load-self-test-receipt"
+                        role="status"
+                      >
+                        <div>
+                          <b>Install check passed</b>
+                          <span className="badge good">
+                            {optionalActivationReceipt.value.providerLoadDurationMillis.toLocaleString()}{" "}
+                            ms
+                          </span>
+                        </div>
+                        <p>The model loaded successfully.</p>
+                        <small>
+                          Animation quality is not rated by this check.
+                        </small>
+                        <details className="technical-disclosure">
+                          <summary>Technical receipt details</summary>
+                          <dl>
+                            <div>
+                              <dt>Pack identity</dt>
+                              <dd>
+                                {
+                                  optionalActivationReceipt.value.identity
+                                    .pack_id
+                                }{" "}
+                                ·{" "}
+                                {
+                                  optionalActivationReceipt.value.identity
+                                    .revision
+                                }
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>Native result</dt>
+                              <dd>{optionalActivationReceipt.value.detail}</dd>
+                            </div>
+                            <div>
+                              <dt>Scope</dt>
+                              <dd>
+                                Confirms the packaged provider loaded from its
+                                installed files. It does not rate inference,
+                                lip-sync, frame rate, or game coexistence.
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>Trust domain</dt>
+                              <dd>
+                                {humanizeBenchmarkKey(
+                                  optionalActivationReceipt.value.trustDomain,
+                                )}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>Manifest</dt>
+                              <dd>
+                                {optionalActivationReceipt.value.manifestSha256.slice(
+                                  0,
+                                  16,
+                                )}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>Installed tree</dt>
+                              <dd>
+                                {optionalActivationReceipt.value.installedContentTreeSha256.slice(
+                                  0,
+                                  16,
+                                )}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>Attestation</dt>
+                              <dd>
+                                {optionalActivationReceipt.value.attestationSha256.slice(
+                                  0,
+                                  16,
+                                )}
+                              </dd>
+                            </div>
+                          </dl>
+                        </details>
+                      </div>
                     )}
                   </div>
                 </article>
@@ -3070,10 +4014,8 @@ export function LocalResourcePlanner({
           </span>
         </div>
         <p className="source-disclosure">
-          This optional experimental OpenSeeFace visual-signal dependency is not
-          a complete lip-sync model. Installation is explicit, SHA-256 pinned,
-          and debug/local-review only. Activation remains fail-closed without a
-          signed current-device envelope.
+          Developer review tool. This visual-signal dependency is not a complete
+          lip-sync model and is unavailable to normal product sessions.
         </p>
         {pack ? (
           <article className="native-pack-card">
@@ -3084,24 +4026,27 @@ export function LocalResourcePlanner({
               </div>
               <span className="badge wait">revision {pack.revision}</span>
             </header>
-            <p>{pack.detail}</p>
-            <dl>
-              <div>
-                <dt>Complete lip-sync model</dt>
-                <dd>{pack.completeLipSyncModel ? "Yes" : "No"}</dd>
-              </div>
-              <div>
-                <dt>Installed artifacts</dt>
-                <dd>{pack.installedArtifactSha256.length}</dd>
-              </div>
-              <div>
-                <dt>Related native inventory</dt>
-                <dd>
-                  {inventoryCount} catalog entr
-                  {inventoryCount === 1 ? "y" : "ies"}
-                </dd>
-              </div>
-            </dl>
+            <details className="technical-disclosure">
+              <summary>Experimental pack evidence</summary>
+              <p>{pack.detail}</p>
+              <dl>
+                <div>
+                  <dt>Complete lip-sync model</dt>
+                  <dd>{pack.completeLipSyncModel ? "Yes" : "No"}</dd>
+                </div>
+                <div>
+                  <dt>Installed artifacts</dt>
+                  <dd>{pack.installedArtifactSha256.length}</dd>
+                </div>
+                <div>
+                  <dt>Related native inventory</dt>
+                  <dd>
+                    {inventoryCount} catalog entr
+                    {inventoryCount === 1 ? "y" : "ies"}
+                  </dd>
+                </div>
+              </dl>
+            </details>
             <label className="authorization-control">
               <input
                 type="checkbox"
@@ -3162,7 +4107,8 @@ export function LocalResourcePlanner({
                 Remove local pack
               </button>
             </div>
-            <div className="pack-unavailable-reasons">
+            <details className="technical-disclosure pack-unavailable-reasons">
+              <summary>Why actions are available or blocked</summary>
               <p id="pack-install-reason">
                 Install:{" "}
                 {actionReason ??
@@ -3195,7 +4141,7 @@ export function LocalResourcePlanner({
                     : "ready after confirmation")}
                 .
               </p>
-            </div>
+            </details>
           </article>
         ) : (
           <div className="empty-state">

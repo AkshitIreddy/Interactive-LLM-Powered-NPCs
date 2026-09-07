@@ -1,7 +1,11 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { NativeSimulationEvent } from "./tauriBridge";
+import type {
+  NativeProductPreferenceScope,
+  NativeProductPreferenceSnapshot,
+  NativeSimulationEvent,
+} from "./tauriBridge";
 
 const bridge = vi.hoisted(() => ({
   callback: null as ((event: NativeSimulationEvent) => void) | null,
@@ -23,6 +27,8 @@ const bridge = vi.hoisted(() => ({
   inputSelected: vi.fn(),
   inputSelect: vi.fn(),
   identityEnrollmentStatus: vi.fn(),
+  readPreferences: vi.fn(),
+  savePreferences: vi.fn(),
   captureSelect: vi.fn(),
   captureVerify: vi.fn(),
 }));
@@ -32,6 +38,10 @@ const selectedStt = vi.hoisted(() => ({
   status: vi.fn(),
   cancel: vi.fn(),
   terminal: null as ((event: Record<string, unknown>) => void) | null,
+}));
+
+const nativeLoadouts = vi.hoisted(() => ({
+  snapshot: vi.fn(),
 }));
 
 vi.mock("./tauriBridge", async (importOriginal) => ({
@@ -55,6 +65,8 @@ vi.mock("./tauriBridge", async (importOriginal) => ({
   readSelectedAudioInput: bridge.inputSelected,
   selectAudioInput: bridge.inputSelect,
   readIdentityReferenceEnrollmentStatus: bridge.identityEnrollmentStatus,
+  readProductPreferences: bridge.readPreferences,
+  saveProductPreferences: bridge.savePreferences,
   syntheticReplayCaptureAvailability: () => ({
     available: true,
     commandName: "debug_select",
@@ -69,8 +81,12 @@ vi.mock("./selectedSttBridge", () => ({
   cancelSelectedSttPushToTalk: selectedStt.cancel,
 }));
 
+vi.mock("./providerLoadoutBridge", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./providerLoadoutBridge")>()),
+  nativeSnapshot: nativeLoadouts.snapshot,
+}));
+
 import { App } from "./App";
-import { readBrowserLoadouts, writeBrowserLoadouts } from "./providerLoadouts";
 
 const preferences = {
   execution: "cloud" as const,
@@ -137,8 +153,141 @@ const authenticatedBootstrap = {
         detail: "Credential reference present.",
       },
     ],
+    gameProfiles: [
+      {
+        id: "eclipse-harbor",
+        displayName: "Eclipse Harbor",
+        wave: "review",
+        safety: "singlePlayerOnly" as const,
+        catalogState: "bundled" as const,
+        defaultFallback: "audioOnly" as const,
+      },
+    ],
     capabilities: { debugSyntheticReplayCapture: true },
   },
+};
+
+const sessionPreferenceScope: NativeProductPreferenceScope = {
+  kind: "character",
+  gameProfileId: "eclipse-harbor",
+  characterId: "mara-venn",
+};
+
+function nativePreferenceSnapshot(
+  subtitles: boolean,
+  revision = 1,
+): NativeProductPreferenceSnapshot {
+  const effective = <T,>(value: T) => ({
+    value,
+    sourceScope: sessionPreferenceScope,
+    sourceKind: "override" as const,
+  });
+  return {
+    schemaVersion: 1,
+    revision,
+    entries: [
+      {
+        scope: sessionPreferenceScope,
+        executionPreset: "cloud",
+        performancePreset: "balanced",
+        overrides: {
+          verbosity: "standard",
+          inputMode: "ptt",
+          subtitles,
+          overlay: false,
+        },
+      },
+    ],
+    effective: {
+      scope: sessionPreferenceScope,
+      executionPreset: effective("cloud"),
+      performancePreset: effective("balanced"),
+      verbosity: effective("standard"),
+      creativity: effective(50),
+      responseLength: effective("medium"),
+      interruptionMode: effective("finishSentence"),
+      inputMode: effective("ptt"),
+      subtitles: effective(subtitles),
+      overlay: effective(false),
+      memory: effective(true),
+      emotion: effective(false),
+      vision: effective(false),
+      webcamPresence: effective(false),
+      egress: {
+        transcript: effective("selectedProviderRoute"),
+        microphoneAudio: effective("selectedProviderRoute"),
+        capturedGameImage: effective("denied"),
+        localMemoryContext: effective("denied"),
+      },
+      automaticProviderFallback: false,
+    },
+    migration: {
+      state: "current",
+      fromSchemaVersion: null,
+      detail: "Current preference document.",
+    },
+    routeSnapshot: null,
+    resourceSnapshot: {
+      selectionId: null,
+      admissionStatus: null,
+      admissionReceiptPresent: false,
+      exactTargetPid: null,
+      activationPerformed: false,
+    },
+    automaticProviderFallback: false,
+    mutationActivatedRoutesOrPacks: false,
+  };
+}
+
+const nativeLoadoutSnapshot = {
+  document: {
+    format: "npc-provider-loadouts" as const,
+    schema_version: 1 as const,
+    loadouts: {
+      "native-balanced-api": {
+        id: "native-balanced-api",
+        name: "Balanced API",
+        scope: { kind: "global" as const },
+        parent: null,
+        roles: {
+          stt: {
+            mode: "route" as const,
+            route: {
+              primary: {
+                provider_id: "assemblyai",
+                model_id: "u3-rt-pro",
+                voice_id: null,
+                credential: {
+                  provider_id: "assemblyai",
+                  reference_id: "providers/assemblyai",
+                },
+                disclosure: {
+                  catalog_revision: 7,
+                  execution: "hosted" as const,
+                  egress: "provider_cloud" as const,
+                  privacy_summary: "Microphone audio is sent to AssemblyAI.",
+                  cost_summary: "Provider charges and limits apply.",
+                  transmitted_data: ["microphone_audio" as const],
+                },
+                explicit_user_selection: true,
+              },
+              fallbacks: [],
+            },
+          },
+        },
+      },
+    },
+    activation: {
+      global: "native-balanced-api",
+      games: {},
+      characters: {},
+    },
+  },
+  catalogRevision: 7,
+  persistenceHealth: "healthy" as const,
+  detail: "Loaded native provider routes.",
+  credentialsChecked: false as const,
+  networkRequestPerformed: false as const,
 };
 
 describe("native evidence in the product console", () => {
@@ -146,6 +295,9 @@ describe("native evidence in the product console", () => {
     window.localStorage.clear();
     window.history.replaceState(null, "", "/");
     bridge.callback = null;
+    nativeLoadouts.snapshot
+      .mockReset()
+      .mockResolvedValue(nativeLoadoutSnapshot);
     bridge.cancel.mockReset().mockResolvedValue(true);
     bridge.loadBootstrap.mockReset().mockResolvedValue(authenticatedBootstrap);
     bridge.saveOnboarding.mockReset().mockResolvedValue(null);
@@ -355,6 +507,17 @@ describe("native evidence in the product console", () => {
       rawPixelsExposedToWebview: false,
       workerCapabilityExposedToWebview: false,
     });
+    bridge.readPreferences
+      .mockReset()
+      .mockResolvedValue(nativePreferenceSnapshot(true));
+    bridge.savePreferences
+      .mockReset()
+      .mockImplementation(async (expectedRevision, entry) =>
+        nativePreferenceSnapshot(
+          entry.overrides.subtitles ?? true,
+          expectedRevision + 1,
+        ),
+      );
     bridge.captureSelect.mockReset().mockResolvedValue({
       targetProcessId: 7331,
       targetWindowHandle: 880055,
@@ -468,13 +631,17 @@ describe("native evidence in the product console", () => {
   });
 
   it("shows authenticated health and native selected-route authority", async () => {
+    const user = userEvent.setup();
     render(<App />);
     expect(
       await screen.findByText("Runtime and media broker authenticated"),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Native selected route is authoritative"),
+      await screen.findByLabelText("Selected AssemblyAI push-to-talk"),
     ).toBeInTheDocument();
+    await waitFor(() => expect(nativeLoadouts.snapshot).toHaveBeenCalledOnce());
+    await user.click(screen.getByText("Microphone connection details"));
+    expect(screen.getByText(/assemblyai · u3-rt-pro/i)).toBeInTheDocument();
     expect(
       screen.queryByRole("checkbox", { name: /Authorize one live/i }),
     ).not.toBeInTheDocument();
@@ -484,7 +651,8 @@ describe("native evidence in the product console", () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
-    await user.click(screen.getByRole("button", { name: /Settings & guide/i }));
+    await user.click(screen.getByRole("button", { name: "Settings & help" }));
+    await user.click(screen.getByRole("button", { name: /Audio devices/i }));
 
     const output = await screen.findByRole("combobox", {
       name: "Audio output route",
@@ -498,8 +666,8 @@ describe("native evidence in the product console", () => {
       endpoint_id: "windows-speakers-7",
     });
     expect(
-      await screen.findByText(/Saved exact endpoint: Desk speakers/i),
-    ).toBeInTheDocument();
+      await screen.findAllByText(/Saved exact endpoint: Desk speakers/i),
+    ).not.toHaveLength(0);
 
     bridge.audioSelect.mockRejectedValueOnce(
       new Error("selected endpoint is no longer present"),
@@ -517,7 +685,8 @@ describe("native evidence in the product console", () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
-    await user.click(screen.getByRole("button", { name: /Settings & guide/i }));
+    await user.click(screen.getByRole("button", { name: "Settings & help" }));
+    await user.click(screen.getByRole("button", { name: /Audio devices/i }));
 
     const input = await screen.findByRole("combobox", {
       name: "Audio input route",
@@ -533,8 +702,8 @@ describe("native evidence in the product console", () => {
       endpoint_id: "windows-microphone-4",
     });
     expect(
-      await screen.findByText(/Saved exact endpoint: Desk microphone/i),
-    ).toBeInTheDocument();
+      await screen.findAllByText(/Saved exact endpoint: Desk microphone/i),
+    ).not.toHaveLength(0);
     expect(screen.getAllByText("Not measured")).toHaveLength(4);
     expect(document.body).toHaveTextContent(
       /Endpoint selection does not prove microphone allocation, physical PTT, audio frames, speech recognition, or a final transcript/i,
@@ -558,20 +727,6 @@ describe("native evidence in the product console", () => {
   });
 
   it("arms selected AssemblyAI STT and submits only its opaque one-time receipt", async () => {
-    const loadouts = readBrowserLoadouts();
-    writeBrowserLoadouts(
-      loadouts.map((loadout, index) =>
-        index === 0
-          ? {
-              ...loadout,
-              routes: {
-                ...loadout.routes,
-                stt: { providerId: "assemblyai", modelId: "u3-rt-pro" },
-              },
-            }
-          : loadout,
-      ),
-    );
     bridge.inputSelected.mockResolvedValue({
       schemaVersion: 1,
       selection: {
@@ -595,13 +750,14 @@ describe("native evidence in the product console", () => {
     });
     await waitFor(() => expect(arm).toBeDisabled());
     expect(document.body).toHaveTextContent(
-      /Captured microphone audio and optional non-secret context are sent to AssemblyAI/i,
+      /Sends microphone audio to AssemblyAI/i,
     );
     expect(document.body).toHaveTextContent(/u3-rt-pro/i);
     expect(document.body).toHaveTextContent(
-      /Provider handling, retention, and terms may apply/i,
+      /Provider charges and data terms apply/i,
     );
-    expect(document.body).toHaveTextContent(/Automatic fallback is false/i);
+    await user.click(screen.getByText("Microphone connection details"));
+    expect(document.body).toHaveTextContent(/Automatic fallback false/i);
 
     await user.click(
       screen.getByRole("checkbox", {
@@ -657,10 +813,9 @@ describe("native evidence in the product console", () => {
         retryable: false,
       });
     });
-    expect(screen.getByLabelText("Turn transcript")).toHaveValue(
-      "Receipt generation 21 ready — transcript remains native",
-    );
-    expect(screen.getByLabelText("Turn transcript")).toBeDisabled();
+    await user.click(screen.getByText(/Transcription ready · view details/i));
+    expect(document.body).toHaveTextContent(/Receipt ready/i);
+    expect(document.body).toHaveTextContent(/generation 21/i);
     expect(document.body).toHaveTextContent(
       /Transcript text is not exposed to this WebView/i,
     );
@@ -677,9 +832,6 @@ describe("native evidence in the product console", () => {
     });
     expect(bridge.start.mock.calls.at(-1)?.[2]).not.toHaveProperty(
       "transcript",
-    );
-    expect(screen.getByLabelText("Turn transcript")).toHaveValue(
-      "Receipt generation 21 ready — transcript remains native",
     );
     expect(document.body).toHaveTextContent(
       /This receipt has already been submitted once and cannot be reused/i,
@@ -774,20 +926,6 @@ describe("native evidence in the product console", () => {
   });
 
   it("shows the native arming window and keeps cancellation reachable before F8", async () => {
-    const loadouts = readBrowserLoadouts();
-    writeBrowserLoadouts(
-      loadouts.map((loadout, index) =>
-        index === 0
-          ? {
-              ...loadout,
-              routes: {
-                ...loadout.routes,
-                stt: { providerId: "assemblyai", modelId: "u3-rt-pro" },
-              },
-            }
-          : loadout,
-      ),
-    );
     bridge.inputSelected.mockResolvedValue({
       schemaVersion: 1,
       selection: { mode: "systemDefault" },
@@ -867,12 +1005,18 @@ describe("native evidence in the product console", () => {
       persistence: { health: "healthy", detail: "Saved." },
     }));
     render(<App />);
-    await screen.findByRole("dialog", { name: "Prove the native boundary" });
+    await screen.findByRole("dialog", { name: /get you connected/i });
 
     await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(
+      screen.getByRole("button", { name: "Select running synthetic target" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Verify live capture" }),
+    );
     await user.click(screen.getByRole("button", { name: "Continue" }));
     expect(
-      screen.getByRole("heading", { name: "Start API-first" }),
+      screen.getByRole("heading", { name: "Choose your voice & models" }),
     ).toBeInTheDocument();
     expect(screen.getByText(/does not silently assume/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
@@ -891,13 +1035,155 @@ describe("native evidence in the product console", () => {
     expect(
       await screen.findByRole("button", { name: "Continue" }),
     ).toBeEnabled();
-  });
+  }, 10_000);
+
+  it("finishes onboarding only after a current live reply, drained audio, and subtitle receipt", async () => {
+    const user = userEvent.setup();
+    window.history.replaceState(null, "", "/?onboarding=1");
+    bridge.saveOnboarding.mockImplementation(async (onboarding) => ({
+      onboarding,
+      persistence: { health: "healthy", detail: "Saved." },
+    }));
+    render(<App />);
+    await screen.findByRole("dialog", { name: /get you connected/i });
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(
+      screen.getByRole("button", { name: "Select running synthetic target" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Verify live capture" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Audio output route" }),
+      "systemDefault",
+    );
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Audio input route" }),
+      "systemDefault",
+    );
+    await user.click(await screen.findByRole("button", { name: "Continue" }));
+    await user.click(
+      screen.getByRole("button", { name: "Use a typed setup turn instead" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Run bounded typed turn" }),
+    );
+
+    act(() =>
+      bridge.callback?.({
+        type: "completed",
+        simulationId: "setup-fixture",
+        generation: 1,
+        sequence: 8,
+        fixtureFirstAudioMs: null,
+        runtimeFixtureOnly: true,
+        deliveredText: "Fixture text completed.",
+      }),
+    );
+    expect(screen.getByRole("button", { name: "Finish setup" })).toBeDisabled();
+    expect(document.body).toHaveTextContent(
+      /live providers and audible speech were not claimed/i,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Run the turn again" }),
+    );
+    act(() =>
+      bridge.callback?.({
+        type: "completed",
+        simulationId: "setup-live",
+        generation: 2,
+        sequence: 8,
+        fixtureFirstAudioMs: 310,
+        runtimeFixtureOnly: false,
+        deliveredText: "A live reply reached the selected output.",
+        turnExecution: {
+          consumedRoute: {
+            schemaVersion: 1,
+            sourceLoadoutId: "native-balanced-api",
+            generation: 9,
+            sha256: "setup-live-route",
+            llm: {
+              providerId: "openai",
+              modelId: "gpt-4.1-mini",
+              voiceId: null,
+            },
+            tts: {
+              providerId: "elevenlabs",
+              modelId: "eleven_flash_v2_5",
+              voiceId: "EXAVITQu4vr4xnSDxMaL",
+            },
+          },
+          deliveryState: "delivered",
+          commitState: "committed",
+          degradations: [],
+          success: {
+            llmProviderLive: true,
+            ttsProviderLive: true,
+            sttSkipped: true,
+            subtitleDelivered: true,
+            subtitleReceiptCount: 1,
+            audioSubmitted: true,
+            audioDrained: true,
+            audioReceiptCount: 1,
+          },
+          audioReceipts: [
+            {
+              receiptId: "setup-audio-1",
+              submitted: true,
+              drained: true,
+              outputSelectionMode: "systemDefault",
+              outputEndpointId: "windows-speakers-7",
+              outputEndpointGeneration: 12,
+            },
+          ],
+          subtitlePresentationReceipts: [
+            {
+              receiptId: "setup-subtitle-1",
+              sentenceId: 1,
+              provenance: "trustedNativeCapture",
+              presentationId: 7,
+              targetGeometryEpoch: 3,
+              captureSequence: 8,
+              graphicsGeneration: 2,
+              layerHashHex: "abcd",
+              presentedQpcTicks: "1100",
+              desktopXPx: 320,
+              desktopYPx: 610,
+              widthPx: 640,
+              heightPx: 72,
+              dpiX: 96,
+              dpiY: 96,
+              direction: "leftToRight",
+              bidiShapingApplied: true,
+              graphemeClustersPreserved: true,
+              usedBottomCenterFallback: false,
+              colorTreatment: "sdrPremultipliedSourceOver",
+              committed: true,
+            },
+          ],
+        },
+      }),
+    );
+
+    const finish = screen.getByRole("button", { name: "Finish setup" });
+    expect(finish).toBeEnabled();
+    await user.click(finish);
+    expect(bridge.saveOnboarding).toHaveBeenLastCalledWith(
+      expect.objectContaining({ completed: true, currentStep: "ready" }),
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  }, 10_000);
 
   it("requires an explicit second native call before claiming synthetic WGC proof", async () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
-    await user.click(screen.getByRole("button", { name: /World$/ }));
+    await user.click(
+      screen.getByRole("button", { name: "Games & characters" }),
+    );
     expect(
       screen.getByRole("button", { name: "Verify live capture" }),
     ).toBeDisabled();
@@ -945,18 +1231,17 @@ describe("native evidence in the product console", () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
-    await user.click(screen.getByRole("button", { name: /World$/ }));
-
-    const picker = await screen.findByRole("button", {
-      name: "Choose reference in native picker",
-    });
-    expect(picker).toBeDisabled();
+    await user.click(
+      screen.getByRole("button", { name: "Games & characters" }),
+    );
+    await user.click(screen.getByText("Character recognition"));
     expect(document.body).toHaveTextContent(
       "Identity reference enrollment is blocked until the signed identity pack is admitted.",
     );
-    expect(document.body).toHaveTextContent(
-      "No raw pixels, paths, or worker tokens",
-    );
+    expect(
+      screen.queryByRole("button", { name: /Choose reference/i }),
+    ).not.toBeInTheDocument();
+    expect(bridge.identityEnrollmentStatus).toHaveBeenCalledOnce();
   });
 
   it("rejects full-display pixels as exact selected-window capture proof", async () => {
@@ -974,7 +1259,9 @@ describe("native evidence in the product console", () => {
     });
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
-    await user.click(screen.getByRole("button", { name: /World$/ }));
+    await user.click(
+      screen.getByRole("button", { name: "Games & characters" }),
+    );
     await user.click(
       screen.getByRole("button", { name: "Select synthetic target" }),
     );
@@ -999,7 +1286,9 @@ describe("native evidence in the product console", () => {
     );
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
-    await user.click(screen.getByRole("button", { name: /World$/ }));
+    await user.click(
+      screen.getByRole("button", { name: "Games & characters" }),
+    );
     await user.click(
       screen.getByRole("button", { name: "Select synthetic target" }),
     );
@@ -1045,7 +1334,7 @@ describe("native evidence in the product console", () => {
   it("sends an ordinary selected-route request without a development TTS override", async () => {
     const user = userEvent.setup();
     render(<App />);
-    await screen.findByText("Native selected route is authoritative");
+    await screen.findByLabelText("Selected AssemblyAI push-to-talk");
     await user.click(screen.getByRole("button", { name: "Typed message" }));
     await user.click(screen.getByRole("button", { name: /Send typed turn/i }));
     expect(bridge.start).toHaveBeenCalledWith(
@@ -1199,11 +1488,37 @@ describe("native evidence in the product console", () => {
         fixtureFirstAudioMs: 120,
         runtimeFixtureOnly: false,
         deliveredText: "Runtime text without an exposed receipt.",
+        turnExecution: {
+          consumedRoute: {
+            schemaVersion: 1,
+            sourceLoadoutId: "native-balanced-api",
+            generation: 8,
+            sha256: "unproven-audio-route",
+            llm: null,
+            tts: null,
+          },
+          deliveryState: "delivered",
+          commitState: "committed",
+          degradations: [],
+          success: {
+            llmProviderLive: false,
+            ttsProviderLive: false,
+            sttSkipped: true,
+            subtitleDelivered: false,
+            subtitleReceiptCount: 0,
+            audioSubmitted: false,
+            audioDrained: false,
+            audioReceiptCount: 0,
+          },
+          audioReceipts: [],
+          subtitlePresentationReceipts: [],
+        },
       }),
     );
     expect(
       screen.getByText(/audio delivery not proven by this event/i),
     ).toBeInTheDocument();
+    await user.click(screen.getByText("Delivery & identity details"));
     expect(
       screen.getByText(/requires live TTS \+ submission \+ drain receipts/i),
     ).toBeInTheDocument();
@@ -1411,12 +1726,12 @@ describe("native evidence in the product console", () => {
     expect(document.body).toHaveTextContent("no automatic provider switch");
   });
 
-  it("sends the authored transcript, labels browser preference separately, and honors subtitle state", async () => {
+  it("sends the authored transcript and honors the persisted character subtitle state", async () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
-    const transcript = screen.getByLabelText("Turn transcript");
     await user.click(screen.getByRole("button", { name: "Typed message" }));
+    const transcript = screen.getByLabelText("Turn transcript");
     await user.clear(transcript);
     await user.type(transcript, "What is beyond the breakwater?");
     await user.click(screen.getByRole("button", { name: /Send typed turn/i }));
@@ -1440,9 +1755,26 @@ describe("native evidence in the product console", () => {
       screen.getByText(/not consumed; no frame adapter is active/i),
     ).toBeInTheDocument();
 
-    await user.click(
-      screen.getByRole("checkbox", { name: /Show delivered subtitles/i }),
+    const subtitles = screen.getByRole("checkbox", {
+      name: /Show delivered subtitles/i,
+    });
+    await waitFor(() => expect(subtitles).toBeEnabled());
+    await user.click(subtitles);
+    await waitFor(() =>
+      expect(bridge.savePreferences).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({
+          scope: sessionPreferenceScope,
+          executionPreset: "cloud",
+          performancePreset: "balanced",
+          overrides: expect.objectContaining({
+            inputMode: "ptt",
+            subtitles: false,
+          }),
+        }),
+      ),
     );
+    await waitFor(() => expect(subtitles).not.toBeChecked());
     act(() =>
       bridge.callback?.({
         type: "completed",

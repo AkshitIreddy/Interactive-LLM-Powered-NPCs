@@ -19,11 +19,11 @@ describe("NPC 2.0 product console", () => {
       "Eclipse Harbor",
     );
     for (const label of [
-      "01 Session deck",
-      "02 World",
-      "03 Voice & models",
-      "04 Diagnostics",
-      "05 Settings & guide",
+      "Session",
+      "Games & characters",
+      "Voice & models",
+      "Diagnostics",
+      "Settings & help",
     ]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
@@ -35,10 +35,12 @@ describe("NPC 2.0 product console", () => {
   it("maps a saved legacy Characters route to World", () => {
     window.history.replaceState(null, "", "/?page=characters");
     render(<App />);
-    expect(screen.getByRole("heading", { name: "World" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Games & characters" }),
+    ).toBeInTheDocument();
     expect(
       screen.getByText(
-        /Process discovery and current-session binding require the native Windows shell/i,
+        /Open the Windows app to find running games and manage their characters/i,
       ),
     ).toBeInTheDocument();
   });
@@ -46,30 +48,32 @@ describe("NPC 2.0 product console", () => {
   it("navigates without a reload and updates the owned route", async () => {
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: /Voice & models/i }));
+    await user.click(screen.getByRole("button", { name: "Voice & models" }));
     expect(
       screen.getByRole("heading", { name: "Voice & models" }),
     ).toBeInTheDocument();
     expect(window.location.search).toBe("?page=voice");
   });
 
-  it("makes the API-first account and advanced profile controls reachable", async () => {
+  it("keeps accounts and scoped model profiles reachable through progressive sections", async () => {
     const user = userEvent.setup();
     window.history.replaceState(null, "", "/?page=voice");
     render(<App />);
 
+    expect(screen.getByLabelText("Voice workspace")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Accounts/i }));
     expect(
-      screen.getByRole("heading", { name: "NVIDIA NIM" }),
+      screen.getByRole("heading", { name: "Provider accounts" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Save cloud execution preference" }),
+      screen.getByRole("button", { name: "Connect account" }),
     ).toBeDisabled();
 
-    await user.click(screen.getByText("Advanced profiles"));
+    await user.click(screen.getByRole("button", { name: /Model loadout/i }));
     expect(screen.getAllByText("Balanced API").length).toBeGreaterThan(0);
     expect(
       screen.getByRole("heading", {
-        name: "Build a route for every kind of turn.",
+        name: /Choose the route for the next conversation/i,
       }),
     ).toBeInTheDocument();
     await user.click(
@@ -82,7 +86,7 @@ describe("NPC 2.0 product console", () => {
     window.history.replaceState(null, "", "/?onboarding=1");
     render(<App />);
     expect(
-      screen.getByRole("dialog", { name: "Prove the native boundary" }),
+      screen.getByRole("dialog", { name: /get you connected/i }),
     ).toBeInTheDocument();
     expect(screen.getByText("Step 1 of 4")).toBeInTheDocument();
     expect(
@@ -94,9 +98,7 @@ describe("NPC 2.0 product console", () => {
     const user = userEvent.setup();
     window.history.replaceState(null, "", "/?onboarding=1");
     render(<App />);
-    const dialog = screen.getByRole("dialog", {
-      name: "Prove the native boundary",
-    });
+    const dialog = screen.getByRole("dialog", { name: /get you connected/i });
 
     await user.click(screen.getByRole("button", { name: "Continue" }));
     expect(dialog).toHaveTextContent(
@@ -127,7 +129,7 @@ describe("NPC 2.0 product console", () => {
     {
       query: "onboarding",
       action: "Rerun guided setup",
-      destination: "Prove the native boundary",
+      destination: /get you connected/i,
       role: "dialog" as const,
     },
     {
@@ -151,7 +153,7 @@ describe("NPC 2.0 product console", () => {
     {
       query: "process",
       action: "Open World",
-      destination: "World",
+      destination: "Games & characters",
       role: "heading" as const,
     },
     {
@@ -166,6 +168,8 @@ describe("NPC 2.0 product console", () => {
       const user = userEvent.setup();
       window.history.replaceState(null, "", "/?page=settings");
       render(<App />);
+
+      await user.click(screen.getByRole("button", { name: /^Help/i }));
 
       const search = screen.getByRole("searchbox", {
         name: "Search the bundled guide",

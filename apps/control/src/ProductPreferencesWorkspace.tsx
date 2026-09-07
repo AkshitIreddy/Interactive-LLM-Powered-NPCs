@@ -71,6 +71,13 @@ function inheritedLabel<T>(value: NativeEffectivePreference<T>) {
   return `${value.sourceKind} from ${scopeLabel(value.sourceScope)}`;
 }
 
+function readableIdentifier(value: string) {
+  return value
+    .replaceAll("_", " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 export function ProductPreferencesWorkspace({
   nativeAvailable,
   gameProfileId,
@@ -224,19 +231,18 @@ export function ProductPreferencesWorkspace({
   return (
     <div className="product-preferences-stack">
       <section className="instrument-panel product-preferences-workspace">
-        <div className="panel-title">
+        <div className="panel-title workspace-heading">
           <div>
-            <span className="eyebrow">Native intent · revision locked</span>
-            <h2>Experience & privacy presets</h2>
+            <span className="eyebrow">Apply defaults by scope</span>
+            <h2>Conversation defaults</h2>
           </div>
           <span className={nativeAvailable ? "badge good" : "badge wait"}>
             {nativeAvailable ? "Native store" : "Preview only"}
           </span>
         </div>
         <p className="source-disclosure">
-          Presets resolve conversation behavior and per-data-class egress. They
-          snapshot current route/resource authority, but never activate a route,
-          pack, automatic fallback, or hidden network permission.
+          Start globally, then override only the selected game or character.
+          Saving defaults never installs a model or changes provider routes.
         </p>
 
         <div className="preference-scope-tabs" aria-label="Preference scope">
@@ -261,6 +267,9 @@ export function ProductPreferencesWorkspace({
             </button>
           ))}
         </div>
+        <p className="preference-scope-context" role="status">
+          Editing <strong>{scopeLabel(scope)}</strong>
+        </p>
 
         {!nativeAvailable && (
           <div className="empty-state">
@@ -287,7 +296,7 @@ export function ProductPreferencesWorkspace({
 
         {snapshot && draft && effective && (
           <>
-            <div className="preference-preset-grid">
+            <div className="preference-preset-grid preference-preset-grid--primary">
               <PreferenceSelect
                 label="Execution preset"
                 value={draft.executionPreset ?? ""}
@@ -331,10 +340,10 @@ export function ProductPreferencesWorkspace({
             </div>
 
             <div className="preference-overrides">
-              <h3>Explicit field overrides</h3>
+              <h3>How conversations behave</h3>
               <p>
-                Choose Inherit to remove this scope’s override. The effective
-                value and its winning source remain visible beside every field.
+                “Inherit” follows the broader scope. Each field shows the value
+                that will win after you save.
               </p>
               <div className="preference-field-grid">
                 <PreferenceSelect
@@ -410,32 +419,6 @@ export function ProductPreferencesWorkspace({
                     ["vad", "Voice activity detection"],
                   ]}
                 />
-                {(
-                  [
-                    ["subtitles", "Subtitles", effective.subtitles],
-                    ["overlay", "Overlay", effective.overlay],
-                    ["memory", "Memory", effective.memory],
-                    ["emotion", "Emotion", effective.emotion],
-                    ["vision", "Vision", effective.vision],
-                    [
-                      "webcamPresence",
-                      "Webcam presence intent",
-                      effective.webcamPresence,
-                    ],
-                  ] as const
-                ).map(([key, label, value]) => (
-                  <BooleanPreference
-                    key={key}
-                    label={label}
-                    value={draft.overrides[key]}
-                    inherited={value}
-                    onChange={(next) => setOverride(key, next)}
-                  />
-                ))}
-                <p className="preference-control-note">
-                  Webcam presence is consent intent only. No camera producer,
-                  capture permission, or route is activated by this setting.
-                </p>
                 <label className="preference-control creativity-control">
                   <span>Creativity</span>
                   <select
@@ -475,64 +458,142 @@ export function ProductPreferencesWorkspace({
                     {inheritedLabel(effective.creativity)}
                   </small>
                 </label>
+                <BooleanPreference
+                  label="Subtitles"
+                  value={draft.overrides.subtitles}
+                  inherited={effective.subtitles}
+                  onChange={(next) => setOverride("subtitles", next)}
+                />
+                <BooleanPreference
+                  label="Overlay request"
+                  value={draft.overrides.overlay}
+                  inherited={effective.overlay}
+                  onChange={(next) => setOverride("overlay", next)}
+                />
               </div>
-            </div>
-
-            <div className="preference-proof-grid">
-              <article>
-                <span>Route authority snapshot</span>
-                <b>
-                  {snapshot.routeSnapshot?.sourceLoadoutId ?? "No active route"}
-                </b>
-                <small>
-                  {snapshot.routeSnapshot
-                    ? `sha256 ${snapshot.routeSnapshot.sha256.slice(0, 12)}… · generation ${snapshot.routeSnapshot.generation ?? "unreported"}`
-                    : "No route receipt was available for this scope."}
-                </small>
-              </article>
-              <article>
-                <span>Local resource authority</span>
-                <b>
-                  {snapshot.resourceSnapshot.admissionReceiptPresent
-                    ? (snapshot.resourceSnapshot.admissionStatus ??
-                      "Admission receipt present")
-                    : "No admission receipt"}
-                </b>
-                <small>
-                  {snapshot.resourceSnapshot.selectionId ??
-                    "No selected local loadout"}
-                </small>
-              </article>
-              <article>
-                <span>Mutation safety</span>
-                <b>Intent only</b>
-                <small>
-                  Automatic fallback off · route/pack activation false
-                </small>
-              </article>
-            </div>
-
-            <div className="preference-egress" aria-label="Effective egress">
-              <h3>Effective data egress</h3>
-              {(
-                [
-                  ["Transcript", effective.egress.transcript],
-                  ["Microphone audio", effective.egress.microphoneAudio],
-                  ["Captured game image", effective.egress.capturedGameImage],
-                  ["Local memory context", effective.egress.localMemoryContext],
-                ] as const
-              ).map(([label, value]) => (
-                <div key={label}>
-                  <span>{label}</span>
-                  <b>
-                    {value.value === "denied"
-                      ? "Denied"
-                      : "Selected provider route only"}
-                  </b>
-                  <small>{inheritedLabel(value)}</small>
+              <p className="preference-control-note">
+                An overlay request is saved here. Presentation still waits for a
+                trusted native game target and capture-exclusion evidence.
+              </p>
+              <details className="technical-disclosure optional-capability-disclosure">
+                <summary>Optional memory, vision, and presence</summary>
+                <div className="preference-field-grid">
+                  {(
+                    [
+                      ["memory", "Memory", effective.memory],
+                      ["emotion", "Emotion", effective.emotion],
+                      ["vision", "Vision", effective.vision],
+                      [
+                        "webcamPresence",
+                        "Webcam presence intent",
+                        effective.webcamPresence,
+                      ],
+                    ] as const
+                  ).map(([key, label, value]) => (
+                    <BooleanPreference
+                      key={key}
+                      label={label}
+                      value={draft.overrides[key]}
+                      inherited={value}
+                      onChange={(next) => setOverride(key, next)}
+                    />
+                  ))}
                 </div>
-              ))}
+              </details>
+              <p className="preference-control-note">
+                Webcam presence is consent intent only. No camera producer,
+                capture permission, or route is activated by this setting.
+              </p>
             </div>
+
+            <details className="technical-disclosure preference-technical-disclosure">
+              <summary>
+                <span>Privacy and routing details</span>
+                {" · "}
+                <span className="preference-technical-summary">
+                  <span>
+                    {snapshot.routeSnapshot?.sourceLoadoutId ??
+                      "No active route"}
+                  </span>
+                  {" · "}
+                  <span>
+                    {snapshot.resourceSnapshot.admissionReceiptPresent
+                      ? (snapshot.resourceSnapshot.admissionStatus ??
+                        "Admission receipt present")
+                      : "No admission receipt"}
+                  </span>
+                  {" · "}
+                  <span>
+                    <span>Captured game image</span>{" "}
+                    <b>
+                      {effective.egress.capturedGameImage.value === "denied"
+                        ? "Denied"
+                        : "Selected provider route only"}
+                    </b>
+                  </span>
+                </span>
+              </summary>
+
+              <div className="preference-proof-grid">
+                <article>
+                  <span>Route authority snapshot</span>
+                  <b>
+                    Loadout {snapshot.routeSnapshot?.sourceLoadoutId ?? "none"}
+                  </b>
+                  <small>
+                    {snapshot.routeSnapshot
+                      ? `sha256 ${snapshot.routeSnapshot.sha256.slice(0, 12)}… · generation ${snapshot.routeSnapshot.generation ?? "unreported"}`
+                      : "No route receipt was available for this scope."}
+                  </small>
+                </article>
+                <article>
+                  <span>Local resource authority</span>
+                  <b>
+                    Admission:{" "}
+                    {snapshot.resourceSnapshot.admissionReceiptPresent
+                      ? (snapshot.resourceSnapshot.admissionStatus ??
+                        "receipt present")
+                      : "no receipt"}
+                  </b>
+                  <small>
+                    {snapshot.resourceSnapshot.selectionId ??
+                      "No selected local loadout"}
+                  </small>
+                </article>
+                <article>
+                  <span>Mutation safety</span>
+                  <b>Intent only</b>
+                  <small>
+                    Automatic fallback off · route/pack activation false
+                  </small>
+                </article>
+              </div>
+
+              <div className="preference-egress" aria-label="Effective egress">
+                <h3>Data allowed for the selected route</h3>
+                {(
+                  [
+                    ["Transcript", effective.egress.transcript],
+                    ["Microphone audio", effective.egress.microphoneAudio],
+                    ["Game image capture", effective.egress.capturedGameImage],
+                    [
+                      "Local memory context",
+                      effective.egress.localMemoryContext,
+                    ],
+                  ] as const
+                ).map(([label, value]) => (
+                  <div key={label}>
+                    <span>{label}</span>
+                    <b>
+                      {value.value === "denied"
+                        ? "Denied"
+                        : "Selected provider route only"}
+                    </b>
+                    <small>{inheritedLabel(value)}</small>
+                  </div>
+                ))}
+              </div>
+            </details>
 
             <div className="preference-migration">
               <b>
@@ -568,7 +629,7 @@ export function ProductPreferencesWorkspace({
                 disabled={busy !== null}
                 onClick={() => void load()}
               >
-                Refresh
+                Reload saved values
               </button>
             </div>
           </>
@@ -734,6 +795,9 @@ function SubtitlePreferencesPanel({
   };
 
   const effective = snapshot?.effective;
+  const effectiveStyle = snapshot?.availableStyles.find(
+    (style) => style.styleId === effective?.selectedStyleId.value,
+  );
   const hasDraftMutation = Boolean(
     draft?.selectedStyleId ||
       (draft && Object.keys(draft.overrides).length > 0),
@@ -741,19 +805,18 @@ function SubtitlePreferencesPanel({
 
   return (
     <section className="instrument-panel subtitle-preferences-workspace">
-      <div className="panel-title">
+      <div className="panel-title workspace-heading">
         <div>
-          <span className="eyebrow">Native presenter · bounded fields</span>
-          <h2>Subtitle style & rendering</h2>
+          <span className="eyebrow">In-game presentation</span>
+          <h2>Subtitle look</h2>
         </div>
         <span className={nativeAvailable ? "badge good" : "badge wait"}>
           {nativeAvailable ? "Validated assets" : "Preview only"}
         </span>
       </div>
       <p className="source-disclosure">
-        The native subtitle manager owns this state. Only style, safe area,
-        scale, backplate, and opacity are mutable; colors, fonts, HDR,
-        animation, and downloads are not WebView inputs.
+        Choose a validated look, then adjust its safe area, scale, backplate,
+        and opacity. These values are pinned into the next native turn.
       </p>
 
       {!nativeAvailable && (
@@ -774,7 +837,7 @@ function SubtitlePreferencesPanel({
         <>
           <div className="subtitle-preference-grid">
             <label className="preference-control">
-              <span>Bundled subtitle style</span>
+              <span>Subtitle look and typography</span>
               <select
                 aria-label="Bundled subtitle style"
                 value={draft.selectedStyleId ?? ""}
@@ -792,14 +855,20 @@ function SubtitlePreferencesPanel({
                 <option value="">Inherit validated default</option>
                 {snapshot.availableStyles.map((style) => (
                   <option key={style.styleId} value={style.styleId}>
-                    {style.styleId}
+                    {readableIdentifier(style.styleId)}
                   </option>
                 ))}
               </select>
               <small>
-                Effective {effective.selectedStyleId.value} ·{" "}
-                {subtitleSourceLabel(effective.selectedStyleId.source)}
+                Effective {readableIdentifier(effective.selectedStyleId.value)}{" "}
+                · {subtitleSourceLabel(effective.selectedStyleId.source)}
               </small>
+              {effectiveStyle && (
+                <small>
+                  Body font role {effectiveStyle.bodyFontRole} · speaker font
+                  role {effectiveStyle.speakerFontRole}
+                </small>
+              )}
             </label>
             <SubtitleNumberPreference
               label="Safe area (dp)"
@@ -866,16 +935,16 @@ function SubtitlePreferencesPanel({
             <span>Validated renderer parameters</span>
             <b>{effective.rendererParameters.styleId}</b>
             <small>
-              Safe area {effective.rendererParameters.safeAreaDp} dp · body{" "}
-              {effective.rendererParameters.bodySizeDp} dp · speaker{" "}
+              Next turn · safe area {effective.rendererParameters.safeAreaDp} dp
+              · body {effective.rendererParameters.bodySizeDp} dp · speaker{" "}
               {effective.rendererParameters.speakerSizeDp} dp · backplate{" "}
               {effective.rendererParameters.backplateEnabled ? "on" : "off"} ·
               opacity {effective.rendererParameters.globalOpacity}
             </small>
           </div>
 
-          <details className="subtitle-asset-disclosure">
-            <summary>Font fallback and license disclosure</summary>
+          <details className="subtitle-asset-disclosure technical-disclosure">
+            <summary>Font fallback and licenses</summary>
             <p>{snapshot.assets.generatedAssetPolicy}</p>
             <p>
               Font binaries bundled:{" "}
@@ -898,17 +967,20 @@ function SubtitlePreferencesPanel({
             ))}
           </details>
 
-          <div className="preference-migration">
-            <b>
-              Subtitle schema v{snapshot.schemaVersion} · revision{" "}
-              {snapshot.revision}
-            </b>
-            <span>{snapshot.migration.state.replace(/([A-Z])/g, " $1")}</span>
-            <small>
-              {snapshot.migration.detail} · supported fields{" "}
-              {snapshot.supportedOverrideFields.join(", ")}
-            </small>
-          </div>
+          <details className="technical-disclosure subtitle-technical-disclosure">
+            <summary>Renderer revision and supported fields</summary>
+            <div className="preference-migration">
+              <b>
+                Subtitle schema v{snapshot.schemaVersion} · revision{" "}
+                {snapshot.revision}
+              </b>
+              <span>{snapshot.migration.state.replace(/([A-Z])/g, " $1")}</span>
+              <small>
+                {snapshot.migration.detail} · supported fields{" "}
+                {snapshot.supportedOverrideFields.join(", ")}
+              </small>
+            </div>
+          </details>
           <div className="preference-actions">
             <button
               className="primary-action small"
@@ -933,7 +1005,7 @@ function SubtitlePreferencesPanel({
               disabled={busy !== null}
               onClick={() => void load()}
             >
-              Refresh subtitle state
+              Reload subtitle values
             </button>
           </div>
         </>
@@ -1060,17 +1132,17 @@ function EffectiveConfigurationInspector({
 
   return (
     <section className="instrument-panel effective-configuration-inspector">
-      <div className="panel-title">
+      <div className="panel-title workspace-heading">
         <div>
-          <span className="eyebrow">Read-only native projection</span>
-          <h2>What is effective right now?</h2>
+          <span className="eyebrow">Resolved configuration</span>
+          <h2>What the next turn will use</h2>
         </div>
         <span className="badge">{snapshot?.entries.length ?? 0} entries</span>
       </div>
       <p className="source-disclosure">
-        This inspector combines existing preference, provider-loadout, and
-        resource-manager authority. It cannot save, activate, admit, or add a
-        fallback.
+        Open a row to see where its value comes from. Change conversation and
+        subtitle defaults above; provider routes and local models have their own
+        workspaces.
       </p>
       {!nativeAvailable && (
         <div className="empty-state compact">
