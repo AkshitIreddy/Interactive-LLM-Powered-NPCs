@@ -1,8 +1,16 @@
 # Independent local review rebuild — 2026-09-05, reconciled 2026-09-07
 
+**Owner-requested pause:** the authoritative continuation checkpoint is
+[PAUSED_PROGRESS_2026-09-07.md](../../PAUSED_PROGRESS_2026-09-07.md).
+Final native tests pass 12/12; the exact reviewed Mara join passed at r7.
+The video needs a final-binary rerender and v18 remains unbuilt. Earlier
+receipt details below retain their original scope and are not final-binary
+visual qualification.
+
 Status: independent implementation and headless review evidence recorded. The
-fresh v17 test game and 2-of-2 signed private review catalog are complete. The
-v17 application is built only after the final source freeze; its generated
+verified v17 test game remains the current synthetic target, and the 2-of-2
+signed private review catalog is complete. A fresh v18 application build is
+pending the post-schema-4 source freeze; its generated
 `REVIEW-MANIFEST.json`, rather than this prose, is authoritative for build
 completion and exact identity. The isolated real-worker optional-pack activation
 qualification is complete and recorded below. This file is not a release
@@ -30,11 +38,15 @@ September 5. Follow-up source and evidence supersede several of their uses of
 - The owner rejected the September 7 Cyberpunk/Misty moderate-OH comparison as
   cheap-looking. It preserves the recorded native admission events and
   containment, but its full-lip photometric paste remains visibly separate from
-  the game frame. Its immutable files and receipts remain regression evidence,
-  not an accepted local-review renderer. A newer private Misty/Claire/Johnny
-  current-pixel/oral-only experiment remains offline and unqualified; Johnny is
-  partially visible and serves only as a stress case.
-- The v17 test game is verified. A v17 application package is complete only if
+  the game frame. Its immutable files and receipts remain regression evidence.
+  The owner later accepted the private Misty/Claire/Johnny current-pixel v10
+  comparison as a material offline visual improvement. That review does not
+  qualify general anatomy, a live route, or Johnny's native landmark coverage.
+- The real Rust schema-4 parser/native-worker boundary, cancellation ownership,
+  hidden test-game self-test, and test-owned D3D service smoke now pass. This
+  does not prove a production actor lock, commercial-game WGC capture, WASAPI
+  delivery, broker presentation, or live-game visual quality.
+- The v17 test game is verified. A v18 application package is complete only if
   its generated complete-source receipt records successful staged and final
   verification; this source report does not predict that later build outcome.
 
@@ -181,15 +193,56 @@ The follow-up private prototype keeps current-frame lip pixels and inserts only
 newly exposed oral interior. Its current study covers Misty, Claire, and Johnny;
 Johnny is partially visible and provides a stress case rather than a clean
 qualification. Two built-in image-generation calls prepared the Claire and
-Johnny oral-interior enrollment references. The prototype remains an offline,
-unqualified experiment and has not passed the future five-character production
-acceptance matrix.
+Johnny oral-interior enrollment references. The owner accepted the final v10
+side-by-side video as a material **offline** improvement over the pasted-lip
+approach. The generated/private anatomy remains experimental, Claire's dark
+mouth does not qualify natural teeth or tongue detail, and the comparison has
+not passed the future five-character production acceptance matrix.
 
 The retained [current-pixel three-character comparison](../research/current-pixel-mouth-study-2026-09-07.md)
 records the subsequent source-edge/contact correction, continuous offline cue
 trajectory, rejected Johnny reference, manual smoke exclusions, exact final
 video identity, and bounded CPU timing. This is benchmark evidence; it is not
-included in or a qualification of the immutable v17 native application.
+itself native-runtime or live-game qualification.
+
+The subsequent [native current-pixel integration](../research/native-current-pixel-integration-2026-09-07.md)
+replayed exact full-66 LM1 packets through the native 15 Hz signal-admission
+path, schema-4 `ReferenceMouthWorker`, current-pixel compositor, and CPU
+composition:
+
+| Character | Native residuals | Changed frames | Worker + composition p95 | Disposition |
+| --- | ---: | ---: | ---: | --- |
+| Misty | 45/45 | 39 | 10.303 ms | Offline native component pass |
+| Claire | 45/45 | 39 | 6.024 ms | Offline native component pass |
+| Johnny | 0/45 | 0 | Not applicable | Rejected: low LM1 confidence; all 45 frames stayed source-exact |
+| Mara | 21/21 | 20 | 16.369 ms | Offline synthetic-character component pass |
+
+Every admitted output stayed inside its declared residual support, and contact
+frames returned to exact bilabial closure. These p95 values exclude landmark
+inference, audio decoding, capture, presentation, game load, and file writing.
+The 15 Hz replay cadence is the native admission cadence, not 30 or 60 FPS live
+presentation evidence. Misty and Claire therefore establish bounded offline
+native component behavior for these source sequences; Mara establishes the
+same mechanical boundary for the fictional test character. Johnny remains a
+native qualification failure rather than a hidden success.
+
+The real cross-language schema-4 join is recorded at
+`E:\temp\InteractiveNPCs\schema4-native-join-proof-20260907-r5\schema4-native-join-receipt.json`
+(`428a02dcf6a0814e6fc5e7ae15171152d258ee0d88c1210ed7d5369e282c5dfa`).
+Rust encoded a 131,556-byte schema-4 atlas wire payload
+(`5688a7d3ceaa17365f635e49d0254babb6b02f6b9192a73ce5b1736583059306`),
+and the fresh authenticated native worker accepted exact install and next-
+generation replacement while the owning layers rejected malformed wire,
+changed texture content, a foreign semantic identity, and cancelled-generation
+replay. A fresh hidden command-10 provider load/unload completed in 313 ms in
+that run. The hidden synthetic-game self-test and test-owned D3D native service
+smoke also passed without desktop capture or audio playback.
+
+That receipt uses a mechanical test-only atlas with the historical short
+character ID `misty`; it was neither installed nor enabled as a selectable
+canonical character pack. It does not establish production selected-character
+actor authority, a fresh target-PID runtime admission, commercial-game WGC,
+WASAPI playback, broker overlay presentation, or live-game lip-sync quality.
 
 ### v14 baseline
 
@@ -377,6 +430,7 @@ game coexistence.
 - [Hosted speech comparison, free plans, and exact protocols](../../scripts/provider-timing-alternatives/README.md)
 - [Executable speech transport audit](hosted-tts-transport-audit-2026-09-05.md)
 - [Moving-character methods and measured comparisons](../research/independent-moving-lipsync-2026-09-05.md)
+- [Native current-pixel schema-4 integration](../research/native-current-pixel-integration-2026-09-07.md)
 - [Acceptance map for this rebuild](review-rebuild-contract-2026-09-05.md)
 - [Installer-free review packaging](../development/packaging.md)
 
@@ -436,8 +490,14 @@ test passed separately against the private catalog. The final frontend suite
 passed 162 tests, plus typecheck, production build, formatting, and wide/logical-
 320 headless inspection with no overflow or browser errors.
 
+Those counts identify the earlier v17 source freeze. The later schema-4 source
+and native integration require a fresh v18 full-suite and package run. Focused
+schema-4 protocol, worker, cancellation, hidden test-game, and owned-D3D checks
+are recorded above; they do not substitute for the generated v18 package
+receipt.
+
 The intended fresh installer-free review destination is
-`E:\temp\InteractiveNPCs\review-v17`. Its sibling test game is already verified
+`E:\temp\InteractiveNPCs\review-v18`. Its sibling test game is already verified
 at
 `E:\temp\InteractiveNPCs\review-game-v17-stable\local-app-data\test-game`.
 The application executable and `REVIEW-MANIFEST.json` do not count as complete
