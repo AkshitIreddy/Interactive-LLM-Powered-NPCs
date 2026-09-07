@@ -31,6 +31,7 @@ compile_commands.json
 **/Cargo.lock
 !/Cargo.lock
 !/apps/control/src-tauri/Cargo.lock
+!/scripts/provider-timing-alternatives/rust-adapter-qualification/Cargo.lock
 
 # Python / local model workers
 .venv/
