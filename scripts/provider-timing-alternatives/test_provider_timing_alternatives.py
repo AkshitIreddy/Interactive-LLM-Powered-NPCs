@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import base64
 import json
+import http.client
+import socketserver
 import struct
 import tempfile
+import threading
+import time
 import unittest
 import wave
 from io import BytesIO
@@ -114,6 +118,43 @@ class ArtifactTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 timing.write_new_bytes(path, b"second")
             self.assertEqual(path.read_bytes(), b"first")
+
+
+class DeadlineTests(unittest.TestCase):
+    def test_absolute_deadline_interrupts_trickling_response_headers(self) -> None:
+        release = threading.Event()
+
+        class TricklingHeaderHandler(socketserver.BaseRequestHandler):
+            def handle(self) -> None:
+                self.request.recv(4096)
+                self.request.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: audio/pcm\r\n")
+                release.wait(2)
+
+        server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), TricklingHeaderHandler)
+        server.daemon_threads = True
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+        host, port = server.server_address
+        connection = http.client.HTTPConnection(host, port, timeout=2)
+        started = time.perf_counter()
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                result = timing.run_once(
+                    timing.PROFILES[0],
+                    "local-only-secret",
+                    connection,
+                    Path(directory),
+                    1,
+                    0.1,
+                )
+                run_elapsed = time.perf_counter() - started
+        finally:
+            release.set()
+            server.shutdown()
+            server.server_close()
+            server_thread.join(timeout=1)
+        self.assertEqual(result["status"], "operation-deadline-exceeded")
+        self.assertLess(run_elapsed, 1.0)
 
 
 if __name__ == "__main__":

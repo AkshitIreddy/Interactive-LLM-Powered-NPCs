@@ -20,7 +20,9 @@ import re
 import ssl
 import struct
 import sys
+import threading
 import time
+import socket
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Protocol
@@ -552,9 +554,17 @@ def sanitize_transport_error(error: BaseException) -> str:
     return "unexpected-local-error"
 
 
-def run_once(profile: Profile, key: str, connection: http.client.HTTPSConnection, output_dir: Path, ordinal: int) -> dict[str, Any]:
+def run_once(
+    profile: Profile,
+    key: str,
+    connection: http.client.HTTPSConnection,
+    output_dir: Path,
+    ordinal: int,
+    timeout: float,
+) -> dict[str, Any]:
     spec = request_spec(profile, key)
     started = time.perf_counter()
+    deadline = started + timeout
     first_body_at: float | None = None
     first_pcm_at: float | None = None
     first_playable_at: float | None = None
@@ -569,16 +579,39 @@ def run_once(profile: Profile, key: str, connection: http.client.HTTPSConnection
     smallest_decoded_audio_fragment_bytes: int | None = None
     largest_decoded_audio_fragment_bytes = 0
     response_status: int | None = None
+    deadline_expired = threading.Event()
+
+    def abort_at_deadline() -> None:
+        deadline_expired.set()
+        active_socket = connection.sock
+        if active_socket is not None:
+            try:
+                active_socket.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        connection.close()
+
+    watchdog = threading.Timer(timeout, abort_at_deadline)
+    watchdog.daemon = True
+    watchdog.start()
+
+    def apply_remaining_socket_deadline() -> None:
+        remaining = deadline - time.perf_counter()
+        if remaining <= 0:
+            raise TimeoutError("operation-deadline-exceeded")
+        connection.timeout = remaining
+        if connection.sock is not None:
+            connection.sock.settimeout(remaining)
+
     try:
+        apply_remaining_socket_deadline()
         connection.request("POST", spec.path, body=spec.body, headers=spec.headers)
+        apply_remaining_socket_deadline()
         response = connection.getresponse()
         headers_at = time.perf_counter()
         response_status = response.status
         if not 200 <= response.status < 300:
-            while response.read(4096):
-                wire_bytes += 1
-                if wire_bytes >= 16:
-                    break
+            response.close()
             return {
                 "ordinal": ordinal,
                 "warmConnection": ordinal > 1,
@@ -591,6 +624,9 @@ def run_once(profile: Profile, key: str, connection: http.client.HTTPSConnection
                 "requestToCompleteMs": round((time.perf_counter() - started) * 1000, 1),
             }
         while True:
+            if time.perf_counter() > deadline:
+                raise TimeoutError("operation-deadline-exceeded")
+            apply_remaining_socket_deadline()
             # read1 returns the next transport chunk without waiting to fill the
             # requested size, preserving time-to-first-body/audio evidence.
             chunk = response.read1(4096)
@@ -665,7 +701,11 @@ def run_once(profile: Profile, key: str, connection: http.client.HTTPSConnection
         return {
             "ordinal": ordinal,
             "warmConnection": ordinal > 1,
-            "status": sanitize_transport_error(error),
+            "status": (
+                "operation-deadline-exceeded"
+                if deadline_expired.is_set()
+                else sanitize_transport_error(error)
+            ),
             "httpStatus": response_status,
             "requestToHeadersMs": round((headers_at - started) * 1000, 1) if headers_at else None,
             "requestToFirstBodyByteMs": round((first_body_at - started) * 1000, 1) if first_body_at else None,
@@ -673,6 +713,8 @@ def run_once(profile: Profile, key: str, connection: http.client.HTTPSConnection
             "requestToFirst20msPcmMs": round((first_playable_at - started) * 1000, 1) if first_playable_at else None,
             "requestToCompleteMs": round((time.perf_counter() - started) * 1000, 1),
         }
+    finally:
+        watchdog.cancel()
 
 
 def run_profile(profile: Profile, key: str, output_dir: Path, repeat: int, timeout: float) -> dict[str, Any]:
@@ -680,7 +722,7 @@ def run_profile(profile: Profile, key: str, output_dir: Path, repeat: int, timeo
     connection = http.client.HTTPSConnection(request_spec(profile, key).host, timeout=timeout, context=ssl.create_default_context())
     try:
         for ordinal in range(1, repeat + 1):
-            runs.append(run_once(profile, key, connection, output_dir, ordinal))
+            runs.append(run_once(profile, key, connection, output_dir, ordinal, timeout))
             if runs[-1]["status"] != "usable-audio":
                 break
     finally:
