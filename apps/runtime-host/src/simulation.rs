@@ -4138,6 +4138,7 @@ mod tests {
             turn_id: "turn-1".into(),
             game_id: "skyrim-special-edition".into(),
             character_id: None,
+            effective_game_profile: None,
             native_identity_decision: None,
             enabled_spoiler_tiers: Vec::new(),
             generic_selection: None,
@@ -4145,7 +4146,6 @@ mod tests {
             application_namespace: None,
             transcript: "Can you hear me?".into(),
             locale: "en-US".into(),
-            effective_game_profile: None,
             execution_mode: route.as_ref().map(|_| SimulationExecutionMode::Hybrid),
             dev_live_tts: route,
             route_snapshot: None,
@@ -4157,13 +4157,6 @@ mod tests {
         }
     }
 
-    fn allowed_route() -> DevLiveTtsRequest {
-        DevLiveTtsRequest {
-            provider_id: DEV_LIVE_TTS_PROVIDER_ID.into(),
-            model_id: DEV_LIVE_TTS_MODEL_ID.into(),
-            voice_id: DEV_LIVE_TTS_STOCK_VOICE_IDS[0].into(),
-            explicit_user_authorization: true,
-        }
     #[test]
     fn trusted_effective_profile_reaches_normal_turn_prompt_and_cannot_weaken_detection() {
         let bundled = npc_game_profile::load_profile(include_bytes!(
@@ -4226,6 +4219,13 @@ mod tests {
         assert!(validate_effective_profile(&bundled, &weakened).is_err());
     }
 
+    fn allowed_route() -> DevLiveTtsRequest {
+        DevLiveTtsRequest {
+            provider_id: DEV_LIVE_TTS_PROVIDER_ID.into(),
+            model_id: DEV_LIVE_TTS_MODEL_ID.into(),
+            voice_id: DEV_LIVE_TTS_STOCK_VOICE_IDS[0].into(),
+            explicit_user_authorization: true,
+        }
     }
 
     #[test]
