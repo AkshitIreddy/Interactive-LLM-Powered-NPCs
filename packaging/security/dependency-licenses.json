@@ -29,6 +29,7 @@
     "pkg:cargo/nom@7.1.3": "MIT",
     "pkg:cargo/npc-character-db@2.0.0-alpha.1": "MIT",
     "pkg:cargo/npc-identity-engine@2.0.0-alpha.1": "MIT",
+    "pkg:cargo/npc-local-tts-native@2.0.0-alpha.1": "MIT",
     "pkg:cargo/npc-product-benchmark@2.0.0-alpha.1": "MIT",
     "pkg:cargo/npc-subtitle-engine@2.0.0-alpha.1": "MIT",
     "pkg:cargo/npc-system-telemetry@2.0.0-alpha.1": "MIT",

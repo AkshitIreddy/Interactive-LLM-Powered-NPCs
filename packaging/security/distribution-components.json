@@ -216,6 +216,16 @@
       "source_reference": "packaging/model-packs/openseeface-mnv3-lm1-mouth-signal.json",
       "notice_reference": "downloaded-pack/LICENSE"
     },
+    "optional:openseeface-yunet640-lm1": {
+      "name": "YuNet 640 detector and OpenSeeFace LM1 mouth-signal models",
+      "spdx": "MIT AND BSD-2-Clause",
+      "distribution_class": "optional-user-download",
+      "redistributed": false,
+      "scopes": ["optional-user-download"],
+      "hash_policy": "signed-catalog-and-manifest-pinned-artifact-sha256",
+      "source_reference": "packaging/model-packs/openseeface-yunet640-lm1-mouth-signal.json",
+      "notice_reference": "downloaded-pack/licenses"
+    },
     "optional:onnxruntime-1.22.1-cpu": {
       "name": "ONNX Runtime 1.22.1 CPU runtime for OpenSeeFace signal pack",
       "spdx": "MIT",
@@ -277,7 +287,7 @@
   ],
   "static_files": [
     {"path": "LICENSE", "install_path": "product-audit/legal/LICENSE.txt", "sha256": "8703e8c956a5accb5322bf6160ae4b5612683d680d8803a2288ff0a95f834ce8", "component_id": "project:legal-resources"},
-    {"path": "catalog/v1/catalog.json", "install_path": "catalog/v1/catalog.json", "sha256": "cafb0a2239e5f17c4e1b8704f01c6b0716898793a87a19e09969f121709fffd5", "component_id": "project:static-resources"},
+    {"path": "catalog/v1/catalog.json", "install_path": "catalog/v1/catalog.json", "sha256": "877b1e8750aeb534c1fa2619e56273f75db8af78fd56bb3cba0b54eede7fa039", "component_id": "project:static-resources"},
     {"path": "apps/control/src-tauri/icons/icon.ico", "install_path": "icon-resource-in-executable", "sha256": "fa29a7c87754d8a624c6ef0d68711277bc17e65ae75186119b7d0eb2c26093cb", "component_id": "project:static-resources"},
     {"path": "assets/subtitles/fonts.v1.json", "install_path": "product-audit/assets/subtitles/fonts.v1.json", "sha256": "ea6f4d6363f680e66745cf7115a32d270feb4d8f679a9f97b7207034371b7136", "component_id": "project:static-resources"},
     {"path": "assets/subtitles/licenses.v1.json", "install_path": "product-audit/assets/subtitles/licenses.v1.json", "sha256": "eba39e198c8a74db4ef0c1e8385f43a68001125494d91c484049fed06c63c0ba", "component_id": "project:static-resources"},
@@ -308,6 +318,7 @@
     {"path": "packaging/model-packs/moonshine-v2-medium-streaming-en-win-x64-v0.1.5.json", "sha256": "2eaef47dc00c7594c1466358f5e063b741a674e5fb0f9f3a6157ca1c32554a97", "component_id": "project:static-resources"},
     {"path": "packaging/model-packs/opencv-yunet-sface-private-evaluation.json", "sha256": "a4af4874af77c4dc517fe41990371e96e68a4469ee6817102876b7b074302e67", "component_id": "project:static-resources"},
     {"path": "packaging/model-packs/openseeface-mnv3-lm1-mouth-signal.json", "sha256": "2d10e01c1b1ab5177d594375f94dbc62ccd926b4fa82f75b35cda33c27e38dae", "component_id": "project:static-resources"},
+    {"path": "packaging/model-packs/openseeface-yunet640-lm1-mouth-signal.json", "sha256": "139dd993da6239bdc28a4ed76d0a27d768301e7303d704eabf7daf2380bc9fc2", "component_id": "project:static-resources"},
     {"path": "packaging/model-packs/qual/bdb0f3c44183f8956eb3ac51f39eac16a6881df691832406a2d88d1e03a3811d.json", "sha256": "bdb0f3c44183f8956eb3ac51f39eac16a6881df691832406a2d88d1e03a3811d", "component_id": "project:static-resources"},
     {"path": "packaging/model-packs/qual/bge-small-import-context.v1.json", "sha256": "a6b999242f2e0420ee70ef0defc0edd8eaf19cab8e0372501b3251761dfc33b2", "component_id": "project:static-resources"},
     {"path": "packaging/model-packs/qual/00cd2e723d3eae1687f075e2d811c821302850c2370f06d75c57f0e5705d8235.json", "sha256": "00cd2e723d3eae1687f075e2d811c821302850c2370f06d75c57f0e5705d8235", "component_id": "project:static-resources"},

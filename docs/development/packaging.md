@@ -12,6 +12,77 @@ From a configured Windows x64 environment:
 
 The command runs checks, requests an NSIS bundle from the pinned Tauri toolchain, copies the one fresh expected installer under `artifacts/package/<UTC timestamp>-<operation nonce>/`, and writes `package-manifest.json` with SHA-256 hashes. It clears only validated repository-owned NSIS output roots first, so stale installers cannot be attributed to the current build. `-SkipChecks` is unsuitable for an RC.
 
+## Installer-free local review directory
+
+The private review handoff can be built as one co-located directory without
+running an installer or launching the desktop application:
+
+```powershell
+$env:NPC_LARGE_ARTIFACT_ROOT = 'E:\temp\InteractiveNPCs'
+./scripts/windows/prepare-portable-review.ps1 `
+  -DestinationRoot 'E:\temp\InteractiveNPCs\review-v17' `
+  -StableTestGameDirectory `
+    'E:\temp\InteractiveNPCs\review-game-v17-stable\local-app-data\test-game' `
+  -PrivateReviewModelCatalogDirectory `
+    'E:\temp\InteractiveNPCs\private-review-catalog-yunet-20260907-r3'
+```
+
+Run the non-mutating preflight while source or vertical-slice work is still in
+progress:
+
+```powershell
+./scripts/windows/prepare-portable-review.ps1 `
+  -DestinationRoot 'E:\temp\InteractiveNPCs\review-v17' `
+  -StableTestGameDirectory `
+    'E:\temp\InteractiveNPCs\review-game-v17-stable\local-app-data\test-game' `
+  -PrivateReviewModelCatalogDirectory `
+    'E:\temp\InteractiveNPCs\private-review-catalog-yunet-20260907-r3' `
+  -PreflightOnly
+```
+
+The builder compiles a fresh Debug review-namespace shell with Tauri's
+`--no-bundle` path, audits the four GUI-subsystem sidecars, stages the exact
+legal/SBOM resource corpus, and copies the independently built, verified
+six-file synthetic-game package from
+`E:\temp\InteractiveNPCs\review-game-v17-stable\local-app-data\test-game`.
+That closed world contains one hash-bound project-owned `.inpcseq` camera
+sequence and no codec/runtime binary. The separate two-file
+`review-mouth-atlas` is copied from
+`E:\temp\InteractiveNPCs\review-mouth-atlas-v80-native-compatible`, hash-pinned
+to the private synthetic Mara fixture, and contains no model weights. The
+pipeline also copies the consolidated engineering
+review into `review-evidence`, rewriting its source-relative links to absolute
+checkout paths before binding the result in the outer manifest. It scans the
+current tracked and untracked source
+without traversing the known legacy history, records the complete dirty-file
+manifest and content hashes, and never starts an executable. It refuses to
+replace an existing destination.
+
+`-PrivateReviewModelCatalogDirectory` is an opt-in local-review overlay. The
+builder accepts only the independently verified YuNet v17 receipt and its exact
+four-file loader closed world: the review trust root, signed catalog, canonical
+YuNet manifest, and signed current-device measurement envelope. It places those
+files at `packaging/model-packs`, where the app's normal catalog resolver reads
+them, instead of merging them with the repository catalog. The verification
+receipt and import context remain under `review-evidence`; model weights,
+runtime libraries, signing material, installed state, and activation state are
+not copied. The overlay is two-of-two signed, has production trust disabled,
+requires rotation before release, and supports neither promotion nor
+publication. Omit the parameter to stage the checked repository bootstrap
+metadata.
+
+Independently verify the closed-world file and directory lists, hashes,
+alternate-data-stream absence, PE subsystem, blocked model/runtime payloads,
+source identity, private-catalog boundary, and synthetic-game provenance with:
+
+```powershell
+./scripts/windows/verify-portable-review.ps1 `
+  -Directory 'E:\temp\InteractiveNPCs\review-v17'
+```
+
+This is unsigned, installer-free, local-review evidence. It is not installed
+distribution, desktop presentation, live-game, signing, or release evidence.
+
 Review and release overlays disable Tauri's inherited bare-Corepack
 `beforeBuildCommand`. `package.ps1` builds the frontend once through the exact
 hidden `node.exe + corepack.js` invocation, or a resolved checked
@@ -69,7 +140,7 @@ The build runs twice and fails unless both executable hashes are identical. The
 target generates moving GDI frames and loop-safe PCM in memory; it bundles no
 video, codec, model, voice, captured game material, or third-party binary.
 
-The prepared folder contains exactly five files. `REVIEW-FIXTURE-MANIFEST.json`
+The prepared folder contains exactly six files. `REVIEW-FIXTURE-MANIFEST.json`
 enumerates every other file with SHA-256, component ID, SPDX expression,
 distribution scope/class, source reference, and notice reference, and records
 its explicit circular-self-hash exclusion. `review-test-game.cdx.json` and
