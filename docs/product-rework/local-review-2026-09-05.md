@@ -185,6 +185,12 @@ Johnny oral-interior enrollment references. The prototype remains an offline,
 unqualified experiment and has not passed the future five-character production
 acceptance matrix.
 
+The retained [current-pixel three-character comparison](../research/current-pixel-mouth-study-2026-09-07.md)
+records the subsequent source-edge/contact correction, continuous offline cue
+trajectory, rejected Johnny reference, manual smoke exclusions, exact final
+video identity, and bounded CPU timing. This is benchmark evidence; it is not
+included in or a qualification of the immutable v17 native application.
+
 ### v14 baseline
 
 The three-second Cyberpunk/Misty v14 replay remains the exact baseline:
