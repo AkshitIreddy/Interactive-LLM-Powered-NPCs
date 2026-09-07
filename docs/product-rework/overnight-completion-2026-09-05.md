@@ -6,19 +6,19 @@ by this continuation. Existing display-safety restrictions remain active.
 
 ## Actionable work
 
-- [x] Replace the v5/v66 mouth output with the schema-3 Cyberpunk/Misty v14
-  replay and inspect the enlarged board. Teeth and rounded articulation improve;
-  the exaggerated open mouth and lighting/reference seam remain explicitly
-  unqualified.
+- [x] Replace the v5/v66 mouth output, then supersede the v14 baseline with the
+  September 7 schema-3 moderate-OH comparison. Its rounded articulation is more
+  restrained; the generated anatomy and photometric/pasted seam remain
+  explicitly unqualified.
 - [x] Validate schema-2 oral and schema-3 photometric atlases through the
   application loader with semantic identity, representation, hash and bounds
   checks.
 - [x] Complete data-only game/character pack configuration, persistent user
   overrides, and private character mouth-pack binding; do not distribute the
   user's source media.
-- [ ] Finish the real-worker provider-load self-test and explicit activation
-  transition for the measured private YuNet/LM1 pack. A signed catalog alone is
-  not an active inventory.
+- [x] Finish the real-worker provider-load self-test and explicit activation
+  transition for the measured private YuNet/LM1 pack in an isolated review
+  state. A signed catalog alone remains insufficient.
 - [x] Verify provider cues and PCM timing through the normal headless runtime
   route. Separate first decoded PCM from physical speaker latency.
 - [x] Audit the UI/provider/runtime gaps and commit the coherent backend groups
@@ -34,19 +34,21 @@ by this continuation. Existing display-safety restrictions remain active.
 
 - Integrated: periodic YuNet tracking, schema-3 compositor, content/override/mouth
   pack workflows, hosted route selection, cue/PCM clock binding, and v17 test game.
-- In progress: nonce-scoped activation retry, fresh authenticated worker
-  provider-load self-test, activation UI, and final visual variant review.
+- Integrated: nonce-scoped activation retry, fresh authenticated worker
+  provider-load self-test, activation UI, and moderate-OH local-review visual.
 - Final gate: rerun the full source/UI/native/security suites, freeze source,
   build `review-v17`, and verify its generated manifest.
 
 ## Current findings
 
-- Schema-3 full-lip references improve Misty's teeth and rounded articulation;
-  a visible lighting seam remains. Generated references are disclosed as
-  hypothetical anatomy. They are private experiments, not observed game assets
-  or a natural-lip-sync qualification. Initial opacity/EMA and rounded-reference
-  scaling variants introduced double contours or spoke artifacts and were
-  rejected.
+- Schema-3 full-lip references improve Misty's teeth and rounded articulation.
+  The retained September 7 moderate-OH state is less exaggerated than v14 while
+  preserving the exact native admission digest, source-identical frames, and
+  dynamic containment. A visible photometric/pasted seam remains. Generated
+  references are disclosed as hypothetical anatomy; they are not observed game
+  assets or a natural-lip-sync qualification. Initial opacity/EMA and
+  rounded-reference scaling variants introduced double contours or spoke
+  artifacts and were rejected.
 - The reusable exporter reproduces the prototype texture exactly. It validates
   shared registration in physical pixels, common alpha, neutral contact, and
   semantic enrollment bindings. Twelve focused tests pass.
@@ -67,7 +69,15 @@ by this continuation. Existing display-safety restrictions remain active.
   load, 299.530 ms p99 reload, 102.274 ms worst inference p99, and 86,331,392
   bytes absolute process-RAM p99. OS disk cache and game contention were not
   controlled. The 2-of-2 ephemeral signed review catalog retains
-  `productionTrust=false`; the pack remains uninstalled and inactive.
+  `productionTrust=false`. A later isolated activation test recovered from a
+  deliberate missing-worker failure, loaded/unloaded the exact provider through
+  a fresh hidden authenticated worker, activated the exact
+  17,849,614-byte inventory matching the attested tree, rejected duplicate
+  activation, and kept stale runtime
+  admission revoked. It did not alter normal user state or authorize live
+  rendering. The earlier r4 load receipt measured 785 ms and the final persisted
+  r5 receipt 302 ms; these are setup observations, not a percentile or universal
+  cold-load benchmark.
 
 ## Existing evidence
 

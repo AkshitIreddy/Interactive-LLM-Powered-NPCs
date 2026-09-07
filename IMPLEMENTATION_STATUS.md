@@ -3,6 +3,20 @@
 This file is the durable source of truth for the local 2.0 overhaul. A checked
 item requires implementation evidence; prose progress alone does not count.
 
+## Independent local review rebuild — 2026-09-05, reconciled 2026-09-07
+
+The current source contains the independently audited UI, native, provider, and
+moving-mouth rebuild. See [the current review record](docs/product-rework/local-review-2026-09-05.md)
+for measured findings, final headless checks, artifact receipt paths, and exact
+remaining gates. Historical checked items below
+retain their original scope and dates; they do not qualify the changed UI,
+moving-mouth renderer, newly staged artifacts, or current provider performance.
+No new release, installed-app, live-game, natural-lip-sync, or physical
+audio-delivery acceptance is implied by this rebuild. The September 5 audit
+documents are dated snapshots. Their unresolved Cartesia route, every-frame
+face-detector, pre-redesign UI, and earlier renderer findings are superseded by
+the follow-up evidence summarized here and in the current review record.
+
 ## Safety and workspace invariants
 
 - [x] Keep this nested checkout as the canonical repository root.
@@ -42,7 +56,7 @@ item requires implementation evidence; prose progress alone does not count.
 - [x] Rewrite README and documentation; add ADRs, diagrams, troubleshooting, legal/provenance, and contributor setup.
 - [x] Generate and visually inspect the copyright-safe Gifsmith simulated demo.
 - [x] Stage and smoke-test a local unsigned Debug installer on this development machine. Its manifest permanently classifies it as an `unchecked-development-package`; it is not RC evidence.
-- [ ] Reconcile a future local review installer with the source-preserving lip-sync build only after that route is qualified. The prior v9 package passed closed-world reconciliation but its mouth compositor was later rejected visually. The clean-source `573f84a` Debug-review installer and v13 loose review directory contain the older stronger-jaw worker, not the v53 generated-reference prototype or current source-preserving native work. Neither v13 artifact was launched or installed, so it remains unchecked development/package-build evidence rather than current lip-sync, installed-distribution, or desktop-presentation evidence.
+- [ ] Finish and reconcile the fresh installer-free `review-v17` application after the source freeze. The source-built v17 sibling test game is already verified, but the application package and final manifest remain pending. Older v9, v13, v15, and v16 artifacts are historical evidence for earlier source and renderer states; none qualifies the current renderer, installed desktop behavior, or physical presentation.
 - [ ] Produce a source-identified local RC and pass or explicitly defer every RC gate.
 
 ## Benchmark environment note
@@ -53,10 +67,45 @@ results remain valid. No elapsed build/test time from this pass is a performance
 or release benchmark. Canonical runs must record the Windows/G-Helper profile,
 boost state, temperatures, clocks, driver, power source, and competing workload.
 
-## Latest local verification snapshot
+## 2026-09-07 reconciliation snapshot
+
+These are source-freeze checks, not the final package receipt. The generated
+`review-v17` manifest is authoritative for the later application build.
+
+- [x] The final locked/offline Rust workspace run passed 712 tests across 71
+  groups, with 16 explicitly gated tests ignored and no failures. Root and
+  nested formatting passed, followed by locked/offline all-target, all-feature
+  Clippy with warnings denied.
+- [x] The source freeze passed the credential scan across 1,110 tracked and
+  untracked files and all 40 packaging security tests.
+- [x] The final nested Tauri library run passed 244 tests with one env-gated
+  real-catalog activation test ignored by default; that exact opt-in test passed
+  separately against the private catalog. The final frontend suite passed 162
+  tests, plus typecheck, production build, formatting, and wide/logical-320
+  headless inspection with no overflow or browser errors.
+
+- [x] The four reconciled control-backend groups passed 238 cumulative nested
+  Tauri tests before commit; the effective-profile forwarding regression passed
+  again after its source correction.
+- [x] The pre-activation integrated Rust workspace passed 709 tests across 70
+  test groups, with 16 explicitly gated tests ignored; strict all-target,
+  all-feature Clippy passed.
+- [x] The frontend suite passed 158 tests across 21 files before the final
+  activation-control edit. Wide and logical-320 headless render audits passed
+  after correcting Diagnostics overflow. Final UI tests and renders remain due
+  after that edit.
+- [x] The earlier integrated source passed the credential scan across 1,071
+  files, source-hygiene validation, and 40 packaging security tests; the final
+  1,110-file scan is recorded above.
+- [x] The existing Release native build passed all eight non-GUI CTest suites.
+  The final native source-freeze run also passed all eight suites.
+- [x] The v17 synthetic test-game pack rebuilt byte-for-byte with SHA-256
+  `92cdd41c1a451a0dcdbeb1eb05f7a2292b59b418bd89804cdc51398c9f114918`.
+
+## Historical 2026-09-03 verification snapshot
 
 The 2026-09-03 local pass produced the following functional evidence. Counts
-refer to the current development tree and do not satisfy live-game, clean-VM,
+refer to that dated source snapshot and do not satisfy live-game, clean-VM,
 performance, display-matrix, model-pack, or production-signing gates:
 
 - [x] Full locked Rust workspace tests pass; root formatting and strict Clippy pass.
@@ -78,11 +127,43 @@ performance, display-matrix, model-pack, or production-signing gates:
 - [x] Run bounded hosted-provider smoke tests with maintainer-supplied Cohere, ElevenLabs, and AssemblyAI credentials; no credential values are present in this repository or tracked artifacts.
 - [x] Run bounded synthetic NVIDIA NIM smoke tests for chat, 2048-dimensional embeddings, and stock-voice Magpie HTTP TTS with a maintainer-supplied key; these are functional probes, not latency, quality, reliability, or release benchmarks.
 - [x] Live-qualify the concrete fixed-origin NVIDIA Magpie Riva gRPC transport with authorized stock Aria synthesis: TLS 105 ms, discovery 261 ms/86 voices, first audio 816 ms, 948 ms total, and 59,392 non-silent unclipped PCM bytes. Normal app-turn selection, physical endpoint delivery, reliability, entitlement, and game-load behavior remain separate gates.
+- [x] Live-qualify one production-adapter speech-first chain: selected Groq
+  `qwen/qwen3.6-27b` reached a validated spoken field in 252.777 ms and selected
+  Cartesia Sonic 3.6/Greg reached `RuntimeTtsBridge` first PCM at 492.964 ms from
+  the original LLM request. The run produced 172,800 PCM bytes in 40 chunks and
+  55 alignment events. This is not microphone/STT, normal `HostState`, native
+  broker drain, OS speaker, physical audibility, or provider-wide latency proof.
 - [ ] Live-qualify NVIDIA Nemotron streaming ASR over gRPC before that experimental route becomes selectable; keep hosted reranking unavailable until an eligible route passes.
-- [ ] Qualify the source-preserving lip-sync route that replaces the rejected v8, v16, v32, and v37/v5 visual evidence. The current v53 headless prototype uses the stock male Jason fixture, moving Mara source frames, current-frame lip geometry, and an enrollment-generated open-mouth reference whose pixels are admitted only into the oral interior. Its stricter audit passed with 33 material frames, `0.085686` p95 / `0.095730` maximum changed share outside the expanded lip contour, `0.996700` requested/rendered aperture correlation, corner-width ratios from `0.981984` to `1.018927`, and `0.619820°` p95 mouth-roll error. The manifest remains `rendered-not-qualified`: the fixture is RMS-aperture-only, so it does not prove phoneme sync or a full viseme atlas. Separately, all 6 native CTest suites passed. The latest 1920×1080, 250-iteration CPU run measured `6.402 ms` geometric mean, `6.323 ms` direct-atlas mean, and `4.612 ms` mean / `4.682 ms` p50 / `7.004 ms` p95 / `7.264 ms` p99 for atlas worker select-and-compose, with 0 GPU VRAM. The subsequent v66 realistic native render is rejected: it failed with `0.532468` maximum upper-lip darkening and visibly produced a dark oval, missing teeth, and distorted lip surfaces. Native generated-reference parity, WGC/broker/DirectComposition presentation, selectable-pack activation, broader face/camera quality, representative game-load testing, installer qualification, and live-game certification remain open. The general local visual route stays disabled and fails open.
+- [ ] Qualify the source-preserving lip-sync route that replaces the rejected v8,
+  v16, v32, v37/v5, v66, and later experiments. The September 7
+  Cyberpunk/Misty moderate-OH comparison is accepted as the latest local-review
+  artifact. It preserves v14's exact recorded native admission-event digest,
+  all 20 source-identical frames, and zero changes outside dynamic residual
+  bounds. Schema 3 selects its atlas state from smoothed coefficients with
+  contact/silence resets; state 7 alone uses a more restrained generated
+  same-identity reference, while states 0–6 and every alpha byte remain exact.
+  The result replaces the fish-like open circle with a modest oval/teeth
+  opening, but a visible photometric/pasted seam remains. The anatomy is a
+  private generated hypothesis, not teeth observed in the game. This is an
+  experimental offline replay, not natural animation, installed-app behavior,
+  live capture, game-load, or end-to-end latency proof. The optional YuNet/LM1
+  pack has a strict measured manifest. An isolated real activation run imported
+  the exact private catalog, recovered from a deliberate missing-worker failure,
+  then used a fresh hidden authenticated worker to load/unload the provider and
+  activate the exact 17,849,614-byte inventory matching the attested tree. The
+  first r4 receipt measured 785 ms and the final persisted r5 receipt measured
+  302 ms; neither is a p99 or universal cold-load result. This proves the
+  provider-load lifecycle only; it does not install the pack in normal user
+  state or authorize live rendering. Ordinary visual targets remain disabled
+  and fail open.
 - [x] Preserve exact provider viseme timing through ordinary playback. TTS duration metadata is normalized to eleven canonical classes, bounded to 128 ordered cues, authenticated as producer command 5 without consuming audio frames, stored under exact stream identity, carried additively in command 29, and resolved against the playback sample clock with 50 ms anticipation and 80 ms release. Invalid or absent visual metadata leaves audio accounting unchanged and falls back to local PCM drive.
 - [ ] Complete cross-process D3D-handle/ACL synchronization, OS shared-memory mapping, audio-format conversion, and qualified HDR shaders for the final media transport.
-- [ ] Provision approved TUF roots/catalog metadata and wire the Model Manager lifecycle into the Response Console; public pack endpoints remain disabled.
+- [x] Implement the explicit provider-load self-test and activation UI, then
+  prove inactive import, nonce-scoped failure/retry, fresh authenticated hidden
+  worker load/unload, exact active inventory, duplicate rejection, and stale
+  runtime-admission revocation against the private YuNet/LM1 catalog in an
+  isolated review state. This does not authorize live rendering. Public pack
+  endpoints and production trust remain disabled.
 - [ ] Qualify eligible generic local lip-sync packs and expose an explicit user choice with exact model/revision, download/storage size, RAM/VRAM, backend, license, measured quality, game impact, and experimental caveats. No pack is bundled, available, downloaded, or activated automatically; activation requires attestation and user choice, never a default, dependency, migration, game/profile requirement, or fallback.
 - [ ] Obtain live-game evidence for external capture, manual/generic target selection, subtitles, and any advertised generic screen-space visual capability. No current profile claims live certification.
 - [ ] Run clean Windows 10/11 VM install, repair, upgrade, rollback, and uninstall certification.

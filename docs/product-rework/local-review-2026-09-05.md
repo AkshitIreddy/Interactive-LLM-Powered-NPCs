@@ -2,9 +2,11 @@
 
 Status: independent implementation and headless review evidence recorded. The
 fresh v17 test game and 2-of-2 signed private review catalog are complete. The
-v17 application and real-worker optional-pack activation receipt are still
-pending the final source freeze. This file is not a release approval or a claim
-that every product gate is closed.
+v17 application is built only after the final source freeze; its generated
+`REVIEW-MANIFEST.json`, rather than this prose, is authoritative for build
+completion and exact identity. The isolated real-worker optional-pack activation
+qualification is complete and recorded below. This file is not a release
+approval or a claim that every product gate is closed.
 
 ## Reconciliation note
 
@@ -25,12 +27,15 @@ September 5. Follow-up source and evidence supersede several of their uses of
   character override, and character mouth-pack flows. The old `Pages.tsx` and
   standalone `Onboarding.tsx` remain unreachable source specimens, not the
   mounted application.
-- The current Cyberpunk/Misty v14 replay is newer than the Mara/v80–v83 and v66
-  findings. It improves teeth and rounded articulation but still shows an
-  exaggerated open mouth and a lighting/reference seam. It remains experimental
-  and visually unqualified.
-- The v17 test game is verified. The v17 application package and its generated
-  complete-source receipt must not be claimed until the final build finishes.
+- The September 7 Cyberpunk/Misty moderate-OH comparison supersedes v14 as the
+  latest local-review artifact. It uses the same recorded native admission
+  events, schema-3 smoothed state selection, and one generated same-identity
+  state-7 reference. The rounded articulation is materially more restrained,
+  but a photometric/pasted seam remains. It is accepted for local review only,
+  not as natural or production-qualified lip-sync.
+- The v17 test game is verified. A v17 application package is complete only if
+  its generated complete-source receipt records successful staged and final
+  verification; this source report does not predict that later build outcome.
 
 ## Source and scope
 
@@ -126,7 +131,53 @@ No game window or audio output was created during these checks. Evidence is at:
 
 ## Native moving-mouth replacement
 
-The newest reviewable visual is the three-second Cyberpunk/Misty v14 replay:
+The latest retained comparison is the September 7 moderate-OH, smoothed-state
+artifact:
+
+- labeled source/v14/new comparison for viewing:
+  `E:\temp\InteractiveNPCs\user-cyberpunk-lipsync-20260907\moderate-oh-reference-v1\final-three-way-v3\misty-source-v14-moderate-oh-final.mp4`
+  (`ea7c231c81af23fd95a4da6d689b4e3d42f55f29dd5ed27600a1fb605d0620bf`);
+- video:
+  `E:\temp\InteractiveNPCs\user-cyberpunk-lipsync-20260907\moderate-oh-reference-v1\misty-moderate-oh-smoothed-selection-v1.mp4`
+  (`034a6d43f1a9f54af6d8852e851f0ae660607427346d7237c5e6f946f68954cc`);
+- board:
+  `E:\temp\InteractiveNPCs\user-cyberpunk-lipsync-20260907\moderate-oh-reference-v1\native-moderate-oh-dynamic-board.png`
+  (`461a828a406b55de8b917ae5932c4141632f45e15e50e815c1678e8644355f68`);
+- component receipt:
+  `E:\temp\InteractiveNPCs\user-cyberpunk-lipsync-20260907\moderate-oh-reference-v1\native-comparison-receipt.json`
+  (`0c88a06f0cf0eb1fa4495e4a7ee9e8fd9981854a8a428209125f5ea499ca74b5`).
+
+The importable private pack is
+`E:\temp\InteractiveNPCs\user-cyberpunk-lipsync-20260907\moderate-oh-reference-v1\misty-moderate-oh-private-pack-v1`.
+Its manifest, texture, and provenance SHA-256 values are respectively
+`6cb17fe26b9e1b6074d54cc9bbc894554bdcabf6a8315b9e8c6f74486a5afd2a`,
+`1c9c58de2f1812cda7084a3c77f7d557c5aa231e414a7c7f0d939a370581ff63`,
+and `cd691f889b4b332ff2103fe48f5a9e9757e1a2b1d060f50060b8970941308106`.
+The final verification receipt is
+`E:\temp\InteractiveNPCs\user-cyberpunk-lipsync-20260907\moderate-oh-reference-v1\final-verification-receipt.json`
+(`0f561212082d099dcc13cf9428022179fb6f3fe29785aaf1603c97e31399aa13`).
+
+Its recorded native admission-event digest is byte-identical to v14. All 20
+source-identical frames remain source-identical and no pixels change outside
+the dynamic residual bounds. The atlas changes only state 7; states 0–6 and
+the alpha plane are byte-exact. Schema 3 now selects the atlas state from the
+smoothed coefficients while retaining explicit contact/silence resets.
+All 90 native outputs are byte-exact to verified sequence
+`bada6e00cec63493bec823d055bf7b7bef71a1165e0bc7de27dfe7a1b6ad27a0`.
+The replay measured 4.7075 ms compositor p95. That number excludes the detector,
+capture, presentation, game load, and live frame-rate behavior.
+
+Root visual review accepts the more restrained OH articulation as materially
+better than v14 for local review. A visible photometric/pasted seam remains, and
+the state-7 anatomy is a private generated hypothesis rather than teeth observed
+in the game. **Offline recorded native admission replay only; not live app, live
+game, installed-provider, audible-quality, or latency proof.** Containment and
+replay identity do not qualify arbitrary characters/poses, natural quality, or
+production readiness.
+
+### v14 baseline
+
+The three-second Cyberpunk/Misty v14 replay remains the exact baseline:
 
 - video:
   `E:\temp\InteractiveNPCs\user-cyberpunk-lipsync-20260905\misty-photometric-native-admission-comparison-v14-final.mp4`
@@ -148,13 +199,17 @@ only the final 18 native mouth landmarks drive composition. This is an offline
 component replay, not installed-provider, live-capture, live-game, or latency
 evidence.
 
-Visual inspection found clearer teeth and rounded articulation than v66. The
-open-mouth shape is still exaggerated and the generated reference does not
-fully match the source lighting. It therefore does not establish natural
-speech, broad character/pose coverage, or a product-qualified renderer.
-Smoothing and same-topology geometry calibration remain open; attempted
-opacity/EMA and rounded-reference scaling variants produced double contours or
-spoke artifacts and were rejected rather than promoted.
+Visual inspection found clearer teeth and rounded articulation than v66, but
+its open-mouth volume was exaggerated and the generated reference did not fully
+match source lighting. It remains useful baseline evidence rather than the
+latest retained comparison.
+
+The September 7 rejection board and receipt are under
+`E:\temp\InteractiveNPCs\user-cyberpunk-lipsync-20260907\misty-smoothing-study\rounded-reference-v5`.
+The clean landmark morph was only a marginal offline improvement and was not
+integrated. Those warp/blend experiments remain rejected; the later generated
+moderate-OH reference and schema-3 smoothed selection are the accepted
+local-review successor described above.
 
 ### Earlier synthetic Mara evidence
 
@@ -261,9 +316,38 @@ The private review catalog under
 `E:\temp\InteractiveNPCs\private-review-catalog-yunet-20260907-r3` uses a 2-of-2
 ephemeral signature threshold. Its metadata explicitly records
 `productionTrust=false`, required rotation, and disabled promotion/publication.
-Native inference qualification is recorded; provider-load activation self-test
-is false. At this point the pack is neither installed nor active. A signed
-catalog is eligibility evidence, not an activation receipt.
+Native inference qualification is recorded separately from provider load. The
+catalog by itself is only eligibility evidence; the following isolated
+activation run supplies the missing provider-load receipt.
+
+The env-gated real activation test imported the private r3 catalog and cached
+official YuNet/LM1/ORT tuple into an isolated `E:\temp` lifecycle root. It first
+proved there was no active pointer, deliberately failed with a missing worker,
+cleaned the exact challenge nonce, and retried. A fresh hidden authenticated
+mouth worker then loaded and unloaded the exact provider. The earlier r4
+receipt measured 785 ms; the final persisted r5 receipt measured 302 ms. The
+lifecycle became Active, active inventory matched the attested tree, duplicate
+activation was rejected, and stale runtime admission remained revoked.
+
+The final test passed 1/1 in 18.90 seconds. Its evidence is
+`E:\temp\InteractiveNPCs\activation-proof-20260907-r5\real-provider-activation-evidence.json`:
+
+- manifest SHA-256:
+  `192235cca52148087337678d4e6427a69c922d053f4792a9ba62ef35f914418b`;
+- tree SHA-256:
+  `6c5decaa7421a4350c84a68907491fe4647f176c8c5d1cbb16db3d09a9e28d1c`;
+- attestation SHA-256:
+  `ac319573f8853859127312a50edfc7b66b72fc27f664e164e9a830a3697745ea`.
+
+The exact active inventory contains 17,849,614 bytes across the pinned models,
+licenses, and official runtime files. The two setup observations are not a p99
+or universal cold-load benchmark; OS cache state was uncontrolled.
+
+This proves provider load, authenticated worker shutdown, retry, and exact
+inventory activation in an isolated test state. It does not install or activate
+the pack in the user's normal app state, authorize live rendering, prove
+inference/tracking/visual quality, satisfy whole-loadout admission, or measure
+game coexistence.
 
 ## Evidence index
 
@@ -324,6 +408,18 @@ tests across 21 files, strict Clippy, the 1,071-file secret scan, source hygiene
 component/source checks. Activation changes and the final source freeze require
 a new full rerun.
 
+At the final source freeze, the locked/offline all-target, all-feature Rust
+workspace run passed 712 tests across 71 groups, with 16 explicitly gated tests
+ignored and no failures. Root and nested formatting passed. The source freeze
+also passed the credential scan across 1,110 tracked and untracked files and all
+40 packaging security tests. Locked/offline all-target, all-feature Clippy with
+warnings denied passed, and the final native mouth-worker run passed all eight
+non-GUI CTest suites. The final nested Tauri library run passed 244 tests with
+one env-gated real-catalog activation test ignored by default; that exact opt-in
+test passed separately against the private catalog. The final frontend suite
+passed 162 tests, plus typecheck, production build, formatting, and wide/logical-
+320 headless inspection with no overflow or browser errors.
+
 The intended fresh installer-free review destination is
 `E:\temp\InteractiveNPCs\review-v17`. Its sibling test game is already verified
 at
@@ -337,7 +433,7 @@ The remaining product gates are generic-game moving-mouth quality, real
 occlusion coverage, tracking under game contention, physical overlay recapture,
 and actual audio-endpoint delivery. Private character atlases are identity-bound
 review inputs; ordinary targets keep unqualified visuals disabled. The YuNet/LM1
-optional pack still requires a real provider-load self-test, authenticated
-activation receipt, and active inventory before it can be described as active.
-Public catalog and production trust remain disabled.
+provider-load lifecycle is qualified in an isolated test state, while live
+rendering authority, whole-loadout admission, normal user-state installation,
+public catalog, and production trust remain disabled.
 No push, release, or update-feed activation is part of this review.
