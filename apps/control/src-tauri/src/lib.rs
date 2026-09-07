@@ -22,6 +22,8 @@ mod runtime_router;
 mod selected_stt;
 pub mod sidecar_protocol;
 pub mod sidecar_supervisor;
+#[cfg(debug_assertions)]
+mod synthetic_review_target;
 pub mod visual_runtime;
 
 use commands::AppState;
@@ -133,6 +135,8 @@ pub fn run() {
             commands::reset_subtitle_preferences,
             commands::save_product_preferences,
             commands::reset_product_preferences,
+            #[cfg(debug_assertions)]
+            commands::prepare_synthetic_review_target,
             #[cfg(debug_assertions)]
             commands::debug_select_synthetic_replay_capture_target,
             #[cfg(debug_assertions)]

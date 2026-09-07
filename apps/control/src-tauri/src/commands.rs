@@ -66,6 +66,8 @@ use crate::sidecar_protocol::{
     NativeTtsVoiceDiscoveryRequest, NativeTtsVoiceDiscoveryResult,
 };
 use crate::sidecar_supervisor::{RuntimeLaunchConfig, RuntimeSupervisor};
+#[cfg(debug_assertions)]
+use crate::synthetic_review_target::SyntheticReviewTargetLauncher;
 use crate::visual_runtime::{MouthWorkerLaunchConfig, MouthWorkerSupervisor, VisualCoordinator};
 use interactive_npcs_credential_vault::SecretValue;
 use interactive_npcs_diagnostics::{
@@ -188,6 +190,8 @@ pub struct AppState {
     pub(crate) provider_loadouts: ProviderLoadoutManager,
     character_workspace: CharacterWorkspace,
     game_targets: GameTargetManager,
+    #[cfg(debug_assertions)]
+    synthetic_review_target: SyntheticReviewTargetLauncher,
     pub(crate) local_resources: Arc<LocalResourceManager>,
     diagnostics_v2: Arc<DiagnosticsV2Manager>,
     product_benchmark: BenchmarkManager,
@@ -247,6 +251,14 @@ impl AppState {
             &config_directory,
         )
         .map_err(|error| error.to_string())?;
+        #[cfg(debug_assertions)]
+        let synthetic_review_target = SyntheticReviewTargetLauncher::new(
+            std::env::current_exe()
+                .map_err(|error| format!("control executable path is unavailable: {error}"))?,
+            resource_root.clone(),
+            media_launch.debug_synthetic_metadata_path.clone(),
+            runtime_supervisor.clone(),
+        );
         let media_broker = MediaBrokerSupervisor::new(media_launch, runtime_supervisor.clone());
         let visual_runtime = MouthWorkerSupervisor::new(
             MouthWorkerLaunchConfig::from_application(
@@ -327,6 +339,8 @@ impl AppState {
             provider_loadouts,
             character_workspace,
             game_targets: GameTargetManager::default(),
+            #[cfg(debug_assertions)]
+            synthetic_review_target,
             local_resources,
             diagnostics_v2,
             product_benchmark,
@@ -677,6 +691,17 @@ pub async fn start_simulation(
             message: "selected_stt_capture_active: finish or cancel push-to-talk capture before starting a response".into(),
         });
     }
+    let synthetic_capture_verified = if request.game_profile_id.as_deref() == Some("eclipse-harbor")
+    {
+        state
+            .game_targets
+            .verify_capture(&state.media_broker)
+            .await
+            .map_err(product_error)?;
+        true
+    } else {
+        false
+    };
     if let Some(game_profile_id) = request
         .game_profile_id
         .as_deref()
@@ -732,7 +757,8 @@ pub async fn start_simulation(
         None
     };
     let application_namespace = state.provider_loadouts.application_namespace().to_owned();
-    let safety_context = trusted_turn_safety_context(&request, &state.resources);
+    let safety_context =
+        trusted_turn_safety_context(&request, &state.resources, synthetic_capture_verified);
     // Pin the effective subtitle renderer state atomically after canonical
     // character selection and before dispatch. The WebView never supplies this
     // authority, and save/reset races can only affect a later turn.
@@ -776,8 +802,9 @@ pub async fn start_simulation(
 fn trusted_turn_safety_context(
     request: &StartSimulationRequest,
     resources: &ResourceCatalog,
+    synthetic_capture_verified: bool,
 ) -> NativeSimulationSafetyContext {
-    if request.game_profile_id.as_deref() == Some("eclipse-harbor") {
+    if request.game_profile_id.as_deref() == Some("eclipse-harbor") && synthetic_capture_verified {
         return NativeSimulationSafetyContext {
             evidence_state: NativeSafetyEvidenceState::VerifiedSafe,
             profile_policy: NativeProfileSafetyPolicy::SyntheticFixture,
@@ -2419,6 +2446,13 @@ fn map_debug_synthetic_capture_error(error: crate::media_broker::MediaBrokerErro
 pub async fn debug_select_synthetic_replay_capture_target(
     state: State<'_, AppState>,
 ) -> Result<crate::media_broker::DebugSyntheticReplayCaptureSnapshot, CommandError> {
+    select_synthetic_replay_capture_target(&state).await
+}
+
+#[cfg(debug_assertions)]
+async fn select_synthetic_replay_capture_target(
+    state: &AppState,
+) -> Result<crate::media_broker::DebugSyntheticReplayCaptureSnapshot, CommandError> {
     let snapshot = state
         .media_broker
         .debug_select_synthetic_replay_capture_target()
@@ -2469,6 +2503,79 @@ pub async fn debug_select_synthetic_replay_capture_target(
         )
         .map_err(product_error)?;
     Ok(snapshot)
+}
+
+#[cfg(debug_assertions)]
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreparedSyntheticReviewTarget {
+    pub schema_version: u32,
+    pub launched: bool,
+    pub executable_path: String,
+    pub target_process_id: u32,
+    pub target_window_handle: u64,
+    pub target_executable_basename: String,
+    pub fixture_motion_mode: String,
+}
+
+/// Resolves and starts only the manifest-attested, co-located local-review
+/// target, then binds the exact process/window through the native broker.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub async fn prepare_synthetic_review_target(
+    state: State<'_, AppState>,
+) -> Result<PreparedSyntheticReviewTarget, CommandError> {
+    let executable_path = state
+        .synthetic_review_target
+        .executable_path()
+        .map_err(product_error)?;
+    if let Ok(snapshot) = select_synthetic_replay_capture_target(&state).await {
+        return Ok(PreparedSyntheticReviewTarget {
+            schema_version: 1,
+            launched: false,
+            executable_path: executable_path.to_string_lossy().into_owned(),
+            target_process_id: snapshot.target_process_id,
+            target_window_handle: snapshot.target_window_handle,
+            target_executable_basename: snapshot.target_executable_basename,
+            fixture_motion_mode: snapshot.fixture_motion_mode,
+        });
+    }
+
+    let mut launched = state
+        .synthetic_review_target
+        .launch()
+        .map_err(product_error)?;
+    let launched_process_id = launched.child.id();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match select_synthetic_replay_capture_target(&state).await {
+            Ok(snapshot) if snapshot.target_process_id == launched_process_id => {
+                return Ok(PreparedSyntheticReviewTarget {
+                    schema_version: 1,
+                    launched: true,
+                    executable_path: launched.executable_path.to_string_lossy().into_owned(),
+                    target_process_id: snapshot.target_process_id,
+                    target_window_handle: snapshot.target_window_handle,
+                    target_executable_basename: snapshot.target_executable_basename,
+                    fixture_motion_mode: snapshot.fixture_motion_mode,
+                });
+            }
+            Ok(_) | Err(_) => {}
+        }
+        if tokio::time::Instant::now() >= deadline {
+            let _ = launched.child.kill();
+            let _ = launched.child.wait();
+            return Err(CommandError::Runtime {
+                message: "the manifest-attested synthetic target did not publish metadata for its own capturable PID/HWND within 10 seconds".into(),
+            });
+        }
+        if launched.child.try_wait().map_err(product_error)?.is_some() {
+            return Err(CommandError::Runtime {
+                message: "the synthetic target exited before its window became capturable".into(),
+            });
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
 }
 
 /// Debug-only receipt probe for qualifying the project-owned review path.
@@ -2712,6 +2819,10 @@ fn build_bootstrap(state: &AppState) -> BootstrapSnapshot {
     capabilities.insert("screenCapture".into(), false);
     capabilities.insert("microphoneCapture".into(), false);
     capabilities.insert("debugSyntheticReplayCapture".into(), cfg!(debug_assertions));
+    capabilities.insert(
+        "debugSyntheticReviewTargetLaunch".into(),
+        cfg!(debug_assertions),
+    );
 
     BootstrapSnapshot {
         contract_version: CONTROL_CONTRACT_VERSION,
@@ -2949,6 +3060,12 @@ mod tests {
             snapshot.capabilities.get("debugSyntheticReplayCapture"),
             Some(&cfg!(debug_assertions))
         );
+        assert_eq!(
+            snapshot
+                .capabilities
+                .get("debugSyntheticReviewTargetLaunch"),
+            Some(&cfg!(debug_assertions))
+        );
         assert!(!snapshot.safety.credential_values_exposed_to_webview);
         assert_eq!(
             state.identity_actor_locks.snapshot(),
@@ -2975,7 +3092,8 @@ mod tests {
     #[test]
     fn authored_profile_console_turn_is_isolated_without_game_awareness() {
         let resources = ResourceCatalog::new(None);
-        let synthetic = trusted_turn_safety_context(&StartSimulationRequest::default(), &resources);
+        let synthetic =
+            trusted_turn_safety_context(&StartSimulationRequest::default(), &resources, true);
         assert_eq!(
             synthetic.evidence_state,
             NativeSafetyEvidenceState::VerifiedSafe
@@ -2991,6 +3109,7 @@ mod tests {
                 ..StartSimulationRequest::default()
             },
             &resources,
+            false,
         );
         assert_eq!(
             real.evidence_state,
@@ -3010,9 +3129,18 @@ mod tests {
                 ..StartSimulationRequest::default()
             },
             &resources,
+            false,
         );
         assert_eq!(unknown.evidence_state, NativeSafetyEvidenceState::Unknown);
         assert_eq!(unknown.profile_policy, NativeProfileSafetyPolicy::Unknown);
+
+        let unverified_synthetic =
+            trusted_turn_safety_context(&StartSimulationRequest::default(), &resources, false);
+        assert_eq!(
+            unverified_synthetic.evidence_state,
+            NativeSafetyEvidenceState::Unknown
+        );
+        assert!(!unverified_synthetic.visuals_allowed);
     }
 
     #[test]

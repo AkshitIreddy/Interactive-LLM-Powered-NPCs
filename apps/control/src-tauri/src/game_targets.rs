@@ -58,6 +58,8 @@ pub struct GameCaptureVerification {
     pub exact_pid_hwnd_executable_match: bool,
     pub frame_sequence_advanced: bool,
     pub content_changed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub review_fixture_motion_mode: Option<String>,
     pub safety_state: String,
 }
 
@@ -172,15 +174,8 @@ impl GameTargetManager {
 
     pub fn snapshot(&self) -> Result<Option<GameTargetSelection>, GameTargetError> {
         let selected = self.selected.lock().map_err(|_| GameTargetError::State)?;
-        Ok(selected.as_ref().map(|selected| GameTargetSelection {
-            schema_version: 1,
-            game_profile_id: selected.game_profile_id.clone(),
-            target: candidate_from_binding(&selected.binding),
-            process_instance_bound: true,
-            user_confirmed_offline_single_player: selected.user_confirmed_offline,
-            capture_authorized: false,
-            safety_state: "unverified".into(),
-            safety_detail: "Visual capture remains fail-closed until trusted runtime safety evidence is available.".into(),
+        Ok(selected.as_ref().map(|selected| {
+            selection_snapshot(selected, candidate_from_binding(&selected.binding))
         }))
     }
 
@@ -192,7 +187,7 @@ impl GameTargetManager {
         &self,
         resources: &ResourceCatalog,
     ) -> Result<Option<GameTargetSelection>, GameTargetError> {
-        let (game_profile_id, binding, user_confirmed_offline) = {
+        let (game_profile_id, binding, user_confirmed_offline, capture_verified) = {
             let selected = self.selected.lock().map_err(|_| GameTargetError::State)?;
             let Some(selected) = selected.as_ref() else {
                 return Ok(None);
@@ -201,6 +196,7 @@ impl GameTargetManager {
                 selected.game_profile_id.clone(),
                 selected.binding.clone(),
                 selected.user_confirmed_offline,
+                selected.broker_bound && selected.verified_capture.is_some(),
             )
         };
         let (rules, excluded_titles) = profile_policy(resources, &game_profile_id)?;
@@ -216,9 +212,17 @@ impl GameTargetManager {
             target: candidate(current),
             process_instance_bound: true,
             user_confirmed_offline_single_player: user_confirmed_offline,
-            capture_authorized: false,
-            safety_state: "unverified".into(),
-            safety_detail: "The exact selected target passed a fresh PID/HWND/process-instance/executable revalidation. Visual capture remains fail-closed without trusted offline and anti-cheat evidence.".into(),
+            capture_authorized: capture_verified,
+            safety_state: if capture_verified {
+                "verified_synthetic_fixture".into()
+            } else {
+                "unverified".into()
+            },
+            safety_detail: if capture_verified {
+                "The exact selected synthetic target passed fresh PID/HWND/process-instance/executable revalidation and has advancing exact-window broker evidence.".into()
+            } else {
+                "The exact selected target passed a fresh PID/HWND/process-instance/executable revalidation. Visual capture remains fail-closed without trusted runtime evidence.".into()
+            },
         }))
     }
 
@@ -291,7 +295,10 @@ impl GameTargetManager {
                     GameTargetError::Broker("synthetic capture evidence is unavailable".into())
                 })?;
                 let observations = observe_running_windows()?;
-                return self.verify_evidence_from_observations(&observations, evidence);
+                let mut verification =
+                    self.verify_evidence_from_observations(&observations, evidence)?;
+                verification.review_fixture_motion_mode = Some(snapshot.fixture_motion_mode);
+                return Ok(verification);
             }
         }
         let _ = broker;
@@ -336,6 +343,8 @@ impl GameTargetManager {
         let current = policy
             .revalidate(&selected.binding, observations)
             .map_err(revalidation_error)?;
+        let content_changed = evidence.content_hash_changes > 0
+            || evidence.initial_content_hash != evidence.latest_content_hash;
         if evidence.selected_process_id != selected.binding.pid
             || evidence.selected_window_handle != selected.binding.hwnd
             || !evidence
@@ -346,6 +355,7 @@ impl GameTargetManager {
             || evidence.pixel_scope != CapturePixelScope::ExactSelectedWindow
             || !evidence.external_display_overlay_pixels_excluded
             || !evidence.desktop_luminance_excluded_from_pixel_evidence
+            || !content_changed
         {
             return Err(GameTargetError::Revalidation(
                 "broker evidence does not match the immutable target or did not advance".into(),
@@ -357,13 +367,39 @@ impl GameTargetManager {
             schema_version: 1,
             game_profile_id: selected.game_profile_id.clone(),
             target: candidate(current),
-            content_changed: evidence.content_hash_changes > 0
-                || evidence.initial_content_hash != evidence.latest_content_hash,
+            content_changed,
             frame_sequence_advanced: true,
             exact_pid_hwnd_executable_match: true,
             capture: evidence,
+            review_fixture_motion_mode: None,
             safety_state: "verified_synthetic_fixture".into(),
         })
+    }
+}
+
+fn selection_snapshot(
+    selected: &SelectedTarget,
+    target: GameTargetCandidate,
+) -> GameTargetSelection {
+    let capture_verified = selected.broker_bound && selected.verified_capture.is_some();
+    GameTargetSelection {
+        schema_version: 1,
+        game_profile_id: selected.game_profile_id.clone(),
+        target,
+        process_instance_bound: true,
+        user_confirmed_offline_single_player: selected.user_confirmed_offline,
+        capture_authorized: capture_verified,
+        safety_state: if capture_verified {
+            "verified_synthetic_fixture".into()
+        } else {
+            "unverified".into()
+        },
+        safety_detail: if capture_verified {
+            "The task-owned synthetic target has advancing exact-window broker evidence bound to this PID/HWND/process instance.".into()
+        } else {
+            "Visual capture remains fail-closed until trusted runtime safety evidence is available."
+                .into()
+        },
     }
 }
 
@@ -709,6 +745,65 @@ mod tests {
         assert!(manager
             .verify_evidence_from_observations(&[observation], display_evidence)
             .is_err());
+    }
+
+    #[test]
+    fn unchanged_synthetic_pixels_cannot_satisfy_advancing_capture_proof() {
+        let manager = GameTargetManager::default();
+        let observation = observation(7, 22, "fixture.exe");
+        manager
+            .select_from_observations(
+                "fixture",
+                vec![ProcessWindowRule {
+                    executable: "fixture.exe".into(),
+                    required: true,
+                    window_title_regex: None,
+                }],
+                vec![],
+                std::slice::from_ref(&observation),
+            )
+            .expect("select");
+        let mut unchanged = evidence(7, 22, "fixture.exe", 3);
+        unchanged.latest_content_hash = unchanged.initial_content_hash;
+        unchanged.content_hash_changes = 0;
+        assert!(manager
+            .verify_evidence_from_observations(&[observation], unchanged)
+            .is_err());
+    }
+
+    #[test]
+    fn verified_broker_bound_capture_is_reflected_in_selection_snapshot() {
+        let manager = GameTargetManager::default();
+        let observation = observation(7, 22, "fixture.exe");
+        manager
+            .select_from_observations(
+                "fixture",
+                vec![ProcessWindowRule {
+                    executable: "fixture.exe".into(),
+                    required: true,
+                    window_title_regex: None,
+                }],
+                vec![],
+                std::slice::from_ref(&observation),
+            )
+            .expect("select");
+        manager
+            .selected
+            .lock()
+            .expect("target state")
+            .as_mut()
+            .expect("selected target")
+            .broker_bound = true;
+        manager
+            .verify_evidence_from_observations(
+                std::slice::from_ref(&observation),
+                evidence(7, 22, "fixture.exe", 2),
+            )
+            .expect("capture verification");
+
+        let snapshot = manager.snapshot().expect("snapshot").expect("selection");
+        assert!(snapshot.capture_authorized);
+        assert_eq!(snapshot.safety_state, "verified_synthetic_fixture");
     }
 
     #[test]

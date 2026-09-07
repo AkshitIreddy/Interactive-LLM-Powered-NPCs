@@ -46,6 +46,12 @@ const DEBUG_SYNTHETIC_PORTRAIT_SHA256: &str =
 #[cfg(debug_assertions)]
 const DEBUG_SYNTHETIC_VISUAL_SOURCE: &str =
     "embedded-original-generated-photorealistic-portrait-v1";
+#[cfg(debug_assertions)]
+const DEBUG_SYNTHETIC_MOVING_VISUAL_SOURCE: &str =
+    "verified-sibling-project-owned-mara-camera-sequence-v1";
+#[cfg(debug_assertions)]
+const DEBUG_SYNTHETIC_SOURCE_SEQUENCE_SHA256: &str =
+    "22022d1564ba8f74137fe8b6813dd1d22dc47b00fa013632c6f6bbbc60bb265d";
 
 #[derive(Clone, PartialEq, Message)]
 struct BrokerEnvelope {
@@ -1982,6 +1988,24 @@ struct DebugSyntheticTargetIdentity {
     process_id: u32,
     executable_basename: String,
     portrait_sha256: String,
+    qualification_mode: DebugSyntheticQualificationMode,
+}
+
+#[cfg(debug_assertions)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DebugSyntheticQualificationMode {
+    StaticCompatibility,
+    MovingSourceControlledIdle,
+}
+
+#[cfg(debug_assertions)]
+impl DebugSyntheticQualificationMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::StaticCompatibility => "static_compatibility_v1",
+            Self::MovingSourceControlledIdle => "moving_source_controlled_idle_v2",
+        }
+    }
 }
 
 #[cfg(debug_assertions)]
@@ -1999,7 +2023,38 @@ struct DebugSyntheticTargetMetadata {
     decoded_frames: u64,
     visual_source: String,
     portrait_sha256: String,
-    source_mouth_motion: bool,
+    #[serde(default)]
+    source_mouth_motion: Option<bool>,
+    #[serde(default)]
+    source_sequence_sha256: Option<String>,
+    #[serde(default)]
+    source_frame_count: Option<u32>,
+    #[serde(default)]
+    source_frame_width: Option<u32>,
+    #[serde(default)]
+    source_frame_height: Option<u32>,
+    #[serde(default)]
+    source_frame_rate: Option<u32>,
+    #[serde(default)]
+    source_frame_motion: Option<bool>,
+    #[serde(default)]
+    source_actor_motion: Option<bool>,
+    #[serde(default)]
+    rendered_actor_motion: Option<bool>,
+    #[serde(default)]
+    rendered_blink_motion: Option<bool>,
+    #[serde(default)]
+    rendered_breathing_motion: Option<bool>,
+    #[serde(default)]
+    source_mouth_articulation: Option<bool>,
+    #[serde(default)]
+    product_lip_sync: Option<bool>,
+    #[serde(default)]
+    visual_mode: Option<String>,
+    #[serde(default)]
+    content_frame_index: Option<u32>,
+    #[serde(default)]
+    content_frame_sha256: Option<String>,
 }
 
 #[cfg(debug_assertions)]
@@ -2009,6 +2064,7 @@ pub struct DebugSyntheticReplayCaptureSnapshot {
     pub target_process_id: u32,
     pub target_window_handle: u64,
     pub target_executable_basename: String,
+    pub fixture_motion_mode: String,
     pub diagnostics: MediaBrokerDiagnostics,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capture_evidence: Option<NativeCaptureEvidence>,
@@ -3731,6 +3787,7 @@ fn validate_debug_synthetic_target(
     process_id: u32,
     executable_basename: &str,
     portrait_sha256: &str,
+    qualification_mode: DebugSyntheticQualificationMode,
 ) -> Result<DebugSyntheticTargetIdentity, MediaBrokerError> {
     if native_window == 0 || usize::try_from(native_window).is_err() {
         return Err(MediaBrokerError::DebugSyntheticTargetInvalid);
@@ -3746,6 +3803,7 @@ fn validate_debug_synthetic_target(
         process_id,
         executable_basename: executable_basename.into(),
         portrait_sha256: portrait_sha256.into(),
+        qualification_mode,
     })
 }
 
@@ -3779,25 +3837,54 @@ fn decode_debug_synthetic_target_metadata(
 ) -> Result<DebugSyntheticTargetIdentity, MediaBrokerError> {
     let metadata: DebugSyntheticTargetMetadata = serde_json::from_slice(bytes)
         .map_err(|_| MediaBrokerError::DebugSyntheticMetadataInvalid)?;
-    if metadata.schema_version != 1
-        || metadata.fixture_kind != "synthetic-original-video-replay"
+    if metadata.fixture_kind != "synthetic-original-video-replay"
         || metadata.state != "playing"
         || metadata.decoded_frames == 0
         || metadata.pid != metadata.process_id
         || metadata.hwnd != metadata.window_handle
         || metadata.window_handle <= 0
         || metadata.exe_basename != metadata.executable_basename
-        || metadata.visual_source != DEBUG_SYNTHETIC_VISUAL_SOURCE
         || metadata.portrait_sha256 != DEBUG_SYNTHETIC_PORTRAIT_SHA256
-        || metadata.source_mouth_motion
     {
         return Err(MediaBrokerError::DebugSyntheticMetadataInvalid);
     }
+    let qualification_mode = match metadata.schema_version {
+        1 if metadata.visual_source == DEBUG_SYNTHETIC_VISUAL_SOURCE
+            && metadata.source_mouth_motion == Some(false) =>
+        {
+            DebugSyntheticQualificationMode::StaticCompatibility
+        }
+        2 if metadata.visual_source == DEBUG_SYNTHETIC_MOVING_VISUAL_SOURCE
+            && metadata.source_sequence_sha256.as_deref()
+                == Some(DEBUG_SYNTHETIC_SOURCE_SEQUENCE_SHA256)
+            && metadata.source_frame_count == Some(42)
+            && metadata.source_frame_width == Some(960)
+            && metadata.source_frame_height == Some(720)
+            && metadata.source_frame_rate == Some(30)
+            && metadata.source_frame_motion == Some(true)
+            && metadata.source_actor_motion == Some(false)
+            && metadata.rendered_actor_motion == Some(true)
+            && metadata.rendered_blink_motion == Some(true)
+            && metadata.rendered_breathing_motion == Some(true)
+            && metadata.source_mouth_articulation == Some(false)
+            && metadata.product_lip_sync == Some(false)
+            && metadata.visual_mode.as_deref() == Some("moving-source-controlled-idle-v2")
+            && metadata.content_frame_index.is_some_and(|index| index < 42)
+            && metadata
+                .content_frame_sha256
+                .as_deref()
+                .is_some_and(valid_lower_sha256) =>
+        {
+            DebugSyntheticQualificationMode::MovingSourceControlledIdle
+        }
+        _ => return Err(MediaBrokerError::DebugSyntheticMetadataInvalid),
+    };
     validate_debug_synthetic_target(
         metadata.window_handle as u64,
         metadata.process_id,
         &metadata.executable_basename,
         &metadata.portrait_sha256,
+        qualification_mode,
     )
 }
 
@@ -3811,6 +3898,7 @@ fn debug_synthetic_capture_snapshot(
         target_process_id: identity.process_id,
         target_window_handle: identity.native_window,
         target_executable_basename: identity.executable_basename,
+        fixture_motion_mode: identity.qualification_mode.as_str().into(),
         diagnostics,
         capture_evidence,
     }
@@ -6954,6 +7042,7 @@ mod tests {
             77,
             "interactive-npcs-synthetic-target.exe",
             DEBUG_SYNTHETIC_PORTRAIT_SHA256,
+            DebugSyntheticQualificationMode::StaticCompatibility,
         )
         .expect("dedicated fixture accepted");
         assert_eq!(accepted.native_window, 0x1234);
@@ -6968,6 +7057,7 @@ mod tests {
             77,
             DEBUG_SYNTHETIC_TARGET_BASENAME,
             DEBUG_SYNTHETIC_PORTRAIT_SHA256,
+            DebugSyntheticQualificationMode::StaticCompatibility,
         )
         .is_err());
         assert!(validate_debug_synthetic_target(
@@ -6975,6 +7065,7 @@ mod tests {
             0,
             DEBUG_SYNTHETIC_TARGET_BASENAME,
             DEBUG_SYNTHETIC_PORTRAIT_SHA256,
+            DebugSyntheticQualificationMode::StaticCompatibility,
         )
         .is_err());
         assert!(validate_debug_synthetic_target(
@@ -6982,6 +7073,7 @@ mod tests {
             77,
             "Cyberpunk2077.exe",
             DEBUG_SYNTHETIC_PORTRAIT_SHA256,
+            DebugSyntheticQualificationMode::StaticCompatibility,
         )
         .is_err());
         assert!(validate_debug_synthetic_target(
@@ -6989,6 +7081,7 @@ mod tests {
             77,
             "C:\\fixtures\\interactive-npcs-synthetic-target.exe",
             DEBUG_SYNTHETIC_PORTRAIT_SHA256,
+            DebugSyntheticQualificationMode::StaticCompatibility,
         )
         .is_err());
         assert!(validate_debug_synthetic_target(
@@ -6996,6 +7089,7 @@ mod tests {
             77,
             DEBUG_SYNTHETIC_TARGET_BASENAME,
             "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            DebugSyntheticQualificationMode::StaticCompatibility,
         )
         .is_err());
     }
@@ -7058,6 +7152,79 @@ mod tests {
         assert!(
             read_debug_synthetic_target(&directory.path().join("capture-target.json")).is_err()
         );
+    }
+
+    #[test]
+    fn moving_synthetic_metadata_requires_the_exact_attested_source_and_rendered_motion() {
+        let fixture = serde_json::json!({
+            "schema_version": 2,
+            "fixture_kind": "synthetic-original-video-replay",
+            "state": "playing",
+            "pid": 77,
+            "process_id": 77,
+            "window_handle": 4660,
+            "hwnd": 4660,
+            "executable_basename": DEBUG_SYNTHETIC_TARGET_BASENAME,
+            "exe_basename": DEBUG_SYNTHETIC_TARGET_BASENAME,
+            "decoded_frames": 3,
+            "visual_source": DEBUG_SYNTHETIC_MOVING_VISUAL_SOURCE,
+            "portrait_sha256": DEBUG_SYNTHETIC_PORTRAIT_SHA256,
+            "source_sequence_sha256": DEBUG_SYNTHETIC_SOURCE_SEQUENCE_SHA256,
+            "source_frame_count": 42,
+            "source_frame_width": 960,
+            "source_frame_height": 720,
+            "source_frame_rate": 30,
+            "source_frame_motion": true,
+            "source_actor_motion": false,
+            "rendered_actor_motion": true,
+            "rendered_blink_motion": true,
+            "rendered_breathing_motion": true,
+            "source_mouth_articulation": false,
+            "product_lip_sync": false,
+            "visual_mode": "moving-source-controlled-idle-v2",
+            "content_frame_index": 7,
+            "content_frame_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        });
+        let accepted = decode_debug_synthetic_target_metadata(
+            &serde_json::to_vec(&fixture).expect("serialize moving metadata"),
+        )
+        .expect("exact moving metadata is accepted");
+        assert_eq!(
+            accepted.qualification_mode,
+            DebugSyntheticQualificationMode::MovingSourceControlledIdle
+        );
+
+        for (field, replacement) in [
+            ("source_sequence_sha256", serde_json::json!("bad")),
+            ("source_frame_count", serde_json::json!(41)),
+            ("source_frame_width", serde_json::json!(1280)),
+            ("source_frame_height", serde_json::json!(719)),
+            ("source_frame_rate", serde_json::json!(60)),
+            ("source_frame_motion", serde_json::json!(false)),
+            ("source_actor_motion", serde_json::json!(true)),
+            ("rendered_actor_motion", serde_json::json!(false)),
+            ("rendered_blink_motion", serde_json::json!(false)),
+            ("rendered_breathing_motion", serde_json::json!(false)),
+            ("source_mouth_articulation", serde_json::json!(true)),
+            ("product_lip_sync", serde_json::json!(true)),
+            ("content_frame_index", serde_json::json!(42)),
+            (
+                "content_frame_sha256",
+                serde_json::json!(
+                    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                ),
+            ),
+        ] {
+            let mut invalid = fixture.clone();
+            invalid[field] = replacement;
+            assert!(
+                decode_debug_synthetic_target_metadata(
+                    &serde_json::to_vec(&invalid).expect("serialize invalid moving metadata")
+                )
+                .is_err(),
+                "field {field} must fail closed"
+            );
+        }
     }
 
     #[test]
