@@ -1,9 +1,11 @@
 [CmdletBinding()]
 param(
-    [string]$DestinationRoot = 'E:\temp\InteractiveNPCs\review-v17',
+    [string]$DestinationRoot = 'E:\temp\InteractiveNPCs\review-v18',
     [string]$ArtifactRoot = 'E:\temp\InteractiveNPCs',
     [string]$StableTestGameDirectory = 'E:\temp\InteractiveNPCs\review-game-v17-stable\local-app-data\test-game',
     [string]$MouthAtlasDirectory = 'E:\temp\InteractiveNPCs\review-mouth-atlas-v80-native-compatible',
+    [string]$ReviewedMouthAtlasReceiptPath = '',
+    [string[]]$ReviewedCharacterMouthPackReceiptPaths = @(),
     [string]$PrivateReviewModelCatalogDirectory = '',
     [switch]$PreflightOnly
 )
@@ -14,6 +16,7 @@ $global:LASTEXITCODE = 0
 
 . (Join-Path $PSScriptRoot 'node-tooling.ps1')
 . (Join-Path $PSScriptRoot 'product-resource-paths.ps1')
+. (Join-Path $PSScriptRoot 'reviewed-mouth-atlas-receipt.ps1')
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $destination = [System.IO.Path]::GetFullPath($DestinationRoot).TrimEnd('\')
@@ -42,7 +45,6 @@ $targetDirectory = [System.IO.Path]::GetFullPath(
     [string](($metadataProcess.StandardOutput | ConvertFrom-Json).target_directory))
 $controlBinary = Join-Path $targetDirectory 'debug/interactive-npcs-control.exe'
 $stableTestGame = [System.IO.Path]::GetFullPath($StableTestGameDirectory).TrimEnd('\')
-$mouthAtlas = [System.IO.Path]::GetFullPath($MouthAtlasDirectory).TrimEnd('\')
 $engineeringReviewSource = Join-Path $repoRoot 'docs/product-rework/local-review-2026-09-05.md'
 $privateModelCatalog = $null
 $privateCatalogReceipt = $null
@@ -151,6 +153,40 @@ function Get-EngineeringReviewWithAbsoluteLinks {
     return $rewritten
 }
 
+if (-not [string]::IsNullOrWhiteSpace($ReviewedMouthAtlasReceiptPath) -and
+    $PSBoundParameters.ContainsKey('MouthAtlasDirectory')) {
+    throw 'Use ReviewedMouthAtlasReceiptPath or the legacy MouthAtlasDirectory lookup, not both.'
+}
+$reviewedMouthAtlasReceipt = if (-not [string]::IsNullOrWhiteSpace($ReviewedMouthAtlasReceiptPath)) {
+    [System.IO.Path]::GetFullPath($ReviewedMouthAtlasReceiptPath)
+} else {
+    $legacyAtlasRoot = [System.IO.Path]::GetFullPath($MouthAtlasDirectory).TrimEnd('\')
+    Join-Path $legacyAtlasRoot 'reviewed-artifact-receipt.v1.json'
+}
+$reviewedMouthAtlas = Get-NpcReviewedMouthAtlasReceipt -ReceiptPath $reviewedMouthAtlasReceipt
+$mouthAtlas = [string]$reviewedMouthAtlas.artifact_root
+$atlasPayloadFiles = @(
+    [string]$reviewedMouthAtlas.atlas_file_name,
+    [string]$reviewedMouthAtlas.texture_file_name
+)
+$reviewedCharacterMouthPacks = @()
+$reviewedCharacterPackKeys = @{}
+foreach ($characterReceiptPath in $ReviewedCharacterMouthPackReceiptPaths) {
+    $characterPack = Get-NpcReviewedMouthAtlasReceipt -ReceiptPath $characterReceiptPath
+    if ([string]$characterPack.classification -ne 'reviewed-private-character-pack') {
+        throw 'Optional character mouth packs must have reviewed-private-character-pack receipts.'
+    }
+    $key = '{0}/{1}' -f $characterPack.game_profile_id, $characterPack.character_id
+    if ($reviewedCharacterPackKeys.ContainsKey($key)) {
+        throw "Optional character mouth-pack receipt is duplicated: $key"
+    }
+    if ($key -eq ('{0}/{1}' -f $reviewedMouthAtlas.game_profile_id, $reviewedMouthAtlas.character_id)) {
+        throw "Optional character mouth pack duplicates the main review atlas: $key"
+    }
+    $reviewedCharacterPackKeys[$key] = $true
+    $reviewedCharacterMouthPacks += $characterPack
+}
+
 if (-not [string]::IsNullOrWhiteSpace($PrivateReviewModelCatalogDirectory)) {
     $privateModelCatalog = [System.IO.Path]::GetFullPath($PrivateReviewModelCatalogDirectory).TrimEnd('\')
     Assert-NormalClosedWorldDirectory -Path $privateModelCatalog `
@@ -204,23 +240,6 @@ if (-not [string]::IsNullOrWhiteSpace($PrivateReviewModelCatalogDirectory)) {
     }
 }
 
-$atlasExpected = @('atlas-bgra8-premultiplied.bin', 'atlas.json')
-Assert-NormalClosedWorldDirectory -Path $mouthAtlas -ExpectedFiles $atlasExpected -Label 'Private review mouth atlas'
-if ((Get-Item -LiteralPath (Join-Path $mouthAtlas 'atlas.json')).Length -ne 3991 -or
-    (Get-LowerSha256 -Path (Join-Path $mouthAtlas 'atlas.json')) -cne 'c4270c252f382502aa5218f5bb0c6b30b01f2db24988b0fde6b2f9d36ef65757' -or
-    (Get-Item -LiteralPath (Join-Path $mouthAtlas 'atlas-bgra8-premultiplied.bin')).Length -ne 1413984 -or
-    (Get-LowerSha256 -Path (Join-Path $mouthAtlas 'atlas-bgra8-premultiplied.bin')) -cne '420e518d3a1552cdf6407a59e78f5d14225a2c461c624cac3049509a8bef5ad1') {
-    throw 'Private review mouth atlas identity is not the qualified v80 native-compatible pack.'
-}
-$atlasMetadata = Get-Content -LiteralPath (Join-Path $mouthAtlas 'atlas.json') -Raw | ConvertFrom-Json
-if ($atlasMetadata.schemaVersion -ne 1 -or $atlasMetadata.identityRevision -ne 14018431763358334153 -or
-    $atlasMetadata.texture.file -ne 'atlas-bgra8-premultiplied.bin' -or
-    $atlasMetadata.texture.stateCount -ne 12 -or $atlasMetadata.texture.width -ne 206 -or
-    $atlasMetadata.texture.height -ne 143 -or $atlasMetadata.texture.strideBytes -ne 824 -or
-    $atlasMetadata.texture.stateBytes -ne 117832) {
-    throw 'Private review mouth atlas metadata contract is invalid.'
-}
-
 if (-not (Test-Path -LiteralPath $engineeringReviewSource -PathType Leaf)) {
     throw "Engineering review source is missing: $engineeringReviewSource"
 }
@@ -258,7 +277,16 @@ $preflight = [ordered]@{
     stable_test_game_source = $stableTestGame
     stable_test_game_sha256 = [string]$stableGameVerification.executable_sha256
     mouth_atlas_source = $mouthAtlas
-    mouth_atlas_identity_revision = [string]$atlasMetadata.identityRevision
+    mouth_atlas_receipt = [string]$reviewedMouthAtlas.receipt_path
+    mouth_atlas_receipt_sha256 = [string]$reviewedMouthAtlas.receipt_sha256
+    mouth_atlas_schema_version = [uint32]$reviewedMouthAtlas.schema_version
+    mouth_atlas_identity_revision = [string]$reviewedMouthAtlas.identity_revision
+    mouth_atlas_game_profile_id = [string]$reviewedMouthAtlas.game_profile_id
+    mouth_atlas_character_id = [string]$reviewedMouthAtlas.character_id
+    reviewed_character_mouth_pack_count = $reviewedCharacterMouthPacks.Count
+    reviewed_character_mouth_packs = @($reviewedCharacterMouthPacks | ForEach-Object {
+        '{0}/{1} schema {2}' -f $_.game_profile_id, $_.character_id, $_.schema_version
+    })
     engineering_review_source = $engineeringReviewSource
     engineering_review_absolute_link_count = $rewrittenEngineeringLinkCount
     engineering_review_relative_link_count = $remainingRelativeEngineeringLinks
@@ -412,8 +440,33 @@ try {
 
     $atlasTarget = Join-Path $stage 'review-mouth-atlas'
     New-Item -ItemType Directory -Path $atlasTarget -Force | Out-Null
-    foreach ($atlasFile in $atlasExpected) {
+    foreach ($atlasFile in $atlasPayloadFiles) {
         Copy-Item -LiteralPath (Join-Path $mouthAtlas $atlasFile) -Destination (Join-Path $atlasTarget $atlasFile)
+    }
+    $stagedCharacterMouthPacks = @()
+    foreach ($characterPack in $reviewedCharacterMouthPacks) {
+        $relativeRoot = 'review-character-mouth-packs/{0}/{1}' -f
+            $characterPack.game_profile_id, $characterPack.character_id
+        $targetRoot = Join-Path $stage $relativeRoot
+        New-Item -ItemType Directory -Path $targetRoot -Force | Out-Null
+        foreach ($source in @(
+                [string]$characterPack.receipt_path,
+                [string]$characterPack.atlas_path,
+                [string]$characterPack.texture_path
+            )) {
+            Copy-Item -LiteralPath $source -Destination (Join-Path $targetRoot ([System.IO.Path]::GetFileName($source)))
+        }
+        $stagedReceipt = Join-Path $targetRoot ([System.IO.Path]::GetFileName([string]$characterPack.receipt_path))
+        $stagedValidation = Get-NpcReviewedMouthAtlasReceipt -ReceiptPath $stagedReceipt
+        if ([string]$stagedValidation.receipt_sha256 -cne [string]$characterPack.receipt_sha256) {
+            throw "Reviewed character mouth pack changed while staging: $relativeRoot"
+        }
+        $stagedCharacterMouthPacks += [pscustomobject]@{
+            source = $characterPack
+            relative_root = $relativeRoot
+            root = $targetRoot
+            receipt = $stagedReceipt
+        }
     }
 
     $reviewEvidence = Join-Path $stage 'review-evidence'
@@ -428,6 +481,12 @@ try {
     Copy-Item -LiteralPath $sourceEvidencePath -Destination (Join-Path $reviewEvidence 'source-evidence.json')
     Copy-Item -LiteralPath ([string]$sidecars.manifest_path) -Destination (Join-Path $reviewEvidence 'sidecar-manifest.v1.json')
     Copy-Item -LiteralPath ([string]$resources.manifest_path) -Destination (Join-Path $reviewEvidence 'resource-manifest.v1.json')
+    $mouthAtlasReceiptTarget = Join-Path $reviewEvidence 'reviewed-mouth-atlas-receipt.v1.json'
+    Copy-Item -LiteralPath ([string]$reviewedMouthAtlas.receipt_path) -Destination $mouthAtlasReceiptTarget
+    if ((Get-LowerSha256 -Path $mouthAtlasReceiptTarget) -cne
+        [string]$reviewedMouthAtlas.receipt_sha256) {
+        throw 'Reviewed mouth-atlas receipt changed while it was staged.'
+    }
     if ($null -ne $privateModelCatalog) {
         Copy-Item -LiteralPath (Join-Path $privateModelCatalog 'evidence/catalog-verification-receipt.json') `
             -Destination (Join-Path $reviewEvidence 'private-model-catalog-verification.json')
@@ -452,6 +511,11 @@ whole-loadout admission pass.
     else {
         'This review contains the checked repository model catalog metadata.'
     }
+    $characterPackReviewNote = if ($stagedCharacterMouthPacks.Count -eq 0) {
+        'No separately reviewed character mouth packs are staged in this review.'
+    } else {
+        "Reviewed character mouth packs are staged under review-character-mouth-packs. They remain disabled until imported and enabled through the character workspace. Packaging their reviewed receipts does not qualify or activate them."
+    }
 
     $readme = @"
 # Interactive NPCs local review
@@ -468,13 +532,17 @@ Review root: $destination
 4. Choose the model and stock voice you intend to review, then follow the setup
    checks. Provider charges and limits may apply.
 
-The sibling review-mouth-atlas can be selected only for the private synthetic
-Mara fixture. Ordinary game targets cannot select that atlas. Directly starting
+The sibling review-mouth-atlas is bound by its reviewed-artifact receipt to
+$($reviewedMouthAtlas.game_profile_id)/$($reviewedMouthAtlas.character_id). Its review classification is
+$($reviewedMouthAtlas.classification); natural-quality qualification is $($reviewedMouthAtlas.natural_quality_qualified).
+Ordinary game targets cannot select that atlas. Directly starting
 local-app-data\test-game\interactive-npcs-synthetic-target.exe is an optional
 standalone fixture check; it does not perform the review launch contract or
 connect itself to the control app.
 
 $modelCatalogReviewNote
+
+$characterPackReviewNote
 
 Build outcome: passed (fresh installer-free debug build). The packaging verifier
 runs on the staged directory and again after its atomic move to the review root.
@@ -597,12 +665,24 @@ by the builder.
         }
         mouth_atlas = [ordered]@{
             relative_root = 'review-mouth-atlas'
-            scope = 'private-synthetic-mara-only'
-            qualification = 'experimental private fixture; natural-quality and moving-tracking gates open'
-            ordinary_targets_enabled = $false
+            scope = [string]$reviewedMouthAtlas.classification
+            qualification = [string]$reviewedMouthAtlas.qualification
+            review_status = [string]$reviewedMouthAtlas.review_status
+            natural_quality_qualified = [bool]$reviewedMouthAtlas.natural_quality_qualified
+            ordinary_targets_enabled = [bool]$reviewedMouthAtlas.ordinary_targets_enabled
             model_weights_included = $false
-            identity_revision = [string]$atlasMetadata.identityRevision
-            files = @($atlasExpected | Sort-Object | ForEach-Object {
+            schema_version = [uint32]$reviewedMouthAtlas.schema_version
+            identity_revision = [string]$reviewedMouthAtlas.identity_revision
+            representation = [string]$reviewedMouthAtlas.representation
+            game_profile_id = [string]$reviewedMouthAtlas.game_profile_id
+            character_id = [string]$reviewedMouthAtlas.character_id
+            enrollment_binding_sha256 = $reviewedMouthAtlas.enrollment_binding_sha256
+            review_evidence_sha256 = [string]$reviewedMouthAtlas.review_evidence_sha256
+            receipt = [ordered]@{
+                relative_path = 'review-evidence/reviewed-mouth-atlas-receipt.v1.json'
+                sha256 = Get-LowerSha256 -Path $mouthAtlasReceiptTarget
+            }
+            files = @($atlasPayloadFiles | Sort-Object | ForEach-Object {
                 $atlasPath = Join-Path $atlasTarget $_
                 [ordered]@{
                     path = 'review-mouth-atlas/' + $_
@@ -611,6 +691,33 @@ by the builder.
                 }
             })
         }
+        character_mouth_packs = @($stagedCharacterMouthPacks | ForEach-Object {
+            $stagedPack = $_
+            $sourcePack = $stagedPack.source
+            [ordered]@{
+                relative_root = [string]$stagedPack.relative_root
+                receipt_path = ([string]$stagedPack.relative_root + '/' +
+                    [System.IO.Path]::GetFileName([string]$stagedPack.receipt))
+                receipt_sha256 = Get-LowerSha256 -Path ([string]$stagedPack.receipt)
+                schema_version = [uint32]$sourcePack.schema_version
+                identity_revision = [string]$sourcePack.identity_revision
+                representation = [string]$sourcePack.representation
+                game_profile_id = [string]$sourcePack.game_profile_id
+                character_id = [string]$sourcePack.character_id
+                enrollment_binding_sha256 = [string]$sourcePack.enrollment_binding_sha256
+                review_evidence_sha256 = [string]$sourcePack.review_evidence_sha256
+                natural_quality_qualified = [bool]$sourcePack.natural_quality_qualified
+                enabled = $false
+                files = @(Get-ChildItem -LiteralPath ([string]$stagedPack.root) -File -Force |
+                    Sort-Object Name | ForEach-Object {
+                        [ordered]@{
+                            path = ([string]$stagedPack.relative_root + '/' + $_.Name)
+                            size_bytes = [int64]$_.Length
+                            sha256 = Get-LowerSha256 -Path $_.FullName
+                        }
+                    })
+            }
+        })
         engineering_review = [ordered]@{
             relative_path = 'review-evidence/engineering-review.md'
             source_path = $engineeringReviewSource

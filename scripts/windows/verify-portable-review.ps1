@@ -9,6 +9,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+. (Join-Path $PSScriptRoot 'reviewed-mouth-atlas-receipt.ps1')
 $root = [System.IO.Path]::GetFullPath($Directory).TrimEnd('\')
 $allowedRoot = [System.IO.Path]::GetFullPath($ArtifactRoot).TrimEnd('\')
 if (-not $root.StartsWith("$allowedRoot\", [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -130,10 +131,32 @@ if ([string]$manifest.test_game.absolute_path -ne
     throw 'Portable review test-game absolute path is invalid.'
 }
 $blockedExtensions = @('.onnx', '.pt', '.pth', '.safetensors', '.gguf', '.bin')
-$permittedPrivateAtlasBinary = 'review-mouth-atlas/atlas-bgra8-premultiplied.bin'
+$permittedPrivateAtlasBinaries = @($manifest.mouth_atlas.files |
+    ForEach-Object { [string]$_.path } |
+    Where-Object {
+        $_.StartsWith('review-mouth-atlas/', [System.StringComparison]::Ordinal) -and
+        [System.IO.Path]::GetExtension($_) -ceq '.bin'
+    })
+$characterMouthPackEntries = @(if (
+        $manifest.PSObject.Properties.Name -contains 'character_mouth_packs') {
+        @($manifest.character_mouth_packs)
+    })
+foreach ($pack in $characterMouthPackEntries) {
+    $packBinaries = @($pack.files | ForEach-Object { [string]$_.path } | Where-Object {
+            $_.StartsWith('review-character-mouth-packs/', [System.StringComparison]::Ordinal) -and
+            [System.IO.Path]::GetExtension($_) -ceq '.bin'
+        })
+    if ($packBinaries.Count -ne 1) {
+        throw 'Each reviewed character mouth pack must bind exactly one texture binary.'
+    }
+    $permittedPrivateAtlasBinaries += $packBinaries
+}
+if ($permittedPrivateAtlasBinaries.Count -ne (1 + $characterMouthPackEntries.Count)) {
+    throw 'Portable review private mouth-atlas binary allowlist is invalid.'
+}
 if (@($actual | Where-Object {
             $blockedExtensions -contains [System.IO.Path]::GetExtension($_).ToLowerInvariant() -and
-            $_ -cne $permittedPrivateAtlasBinary
+            $_ -cnotin $permittedPrivateAtlasBinaries
         }).Count -ne 0) {
     throw 'Portable base review contains model weights or binary model payloads.'
 }
@@ -347,20 +370,8 @@ if (@($actual | Where-Object { [System.IO.Path]::GetExtension($_) -ieq '.inpcseq
 }
 
 $atlasRoot = Join-Path $root 'review-mouth-atlas'
-$expectedAtlasFiles = @('atlas-bgra8-premultiplied.bin', 'atlas.json')
 $actualAtlasFiles = @(Get-ChildItem -LiteralPath $atlasRoot -File -Force -Recurse |
     ForEach-Object { $_.FullName.Substring($atlasRoot.Length + 1).Replace('\', '/') } | Sort-Object)
-if (($actualAtlasFiles -join "`n") -cne (($expectedAtlasFiles | Sort-Object) -join "`n") -or
-    [string]$manifest.mouth_atlas.scope -ne 'private-synthetic-mara-only' -or
-    @(
-        'visual improvement demonstrated; moving tracking performance gate open',
-        'experimental private fixture; natural-quality and moving-tracking gates open'
-    ) -notcontains [string]$manifest.mouth_atlas.qualification -or
-    [bool]$manifest.mouth_atlas.ordinary_targets_enabled -ne $false -or
-    [bool]$manifest.mouth_atlas.model_weights_included -ne $false -or
-    [string]$manifest.mouth_atlas.identity_revision -ne '14018431763358334153') {
-    throw 'Portable review private mouth-atlas boundary is invalid.'
-}
 $recordedAtlasFiles = @($manifest.mouth_atlas.files)
 if ($recordedAtlasFiles.Count -ne 2) { throw 'Portable review mouth-atlas file allowlist is invalid.' }
 foreach ($entry in $recordedAtlasFiles) {
@@ -370,13 +381,97 @@ foreach ($entry in $recordedAtlasFiles) {
         throw "Portable review mouth atlas disagrees with manifest: $($entry.path)"
     }
 }
-if ((Get-LowerSha256 -Path (Join-Path $atlasRoot 'atlas.json')) -cne
+if ($manifest.mouth_atlas.PSObject.Properties.Name -contains 'receipt') {
+    $receiptPath = Join-Path $root ([string]$manifest.mouth_atlas.receipt.relative_path)
+    if ([string]$manifest.mouth_atlas.receipt.relative_path -ne
+            'review-evidence/reviewed-mouth-atlas-receipt.v1.json' -or
+        (Get-LowerSha256 -Path $receiptPath) -cne [string]$manifest.mouth_atlas.receipt.sha256) {
+        throw 'Portable review mouth-atlas receipt binding is invalid.'
+    }
+    $reviewedAtlas = Get-NpcReviewedMouthAtlasReceipt -ReceiptPath $receiptPath `
+        -ArtifactRoot $atlasRoot
+    $expectedAtlasFiles = @(
+        [string]$reviewedAtlas.atlas_file_name,
+        [string]$reviewedAtlas.texture_file_name
+    ) | Sort-Object
+    if (($actualAtlasFiles -join "`n") -cne ($expectedAtlasFiles -join "`n") -or
+        [string]$manifest.mouth_atlas.scope -ne [string]$reviewedAtlas.classification -or
+        [string]$manifest.mouth_atlas.qualification -ne [string]$reviewedAtlas.qualification -or
+        [string]$manifest.mouth_atlas.review_status -ne [string]$reviewedAtlas.review_status -or
+        [bool]$manifest.mouth_atlas.natural_quality_qualified -ne
+            [bool]$reviewedAtlas.natural_quality_qualified -or
+        [bool]$manifest.mouth_atlas.ordinary_targets_enabled -ne
+            [bool]$reviewedAtlas.ordinary_targets_enabled -or
+        [bool]$manifest.mouth_atlas.model_weights_included -or
+        [uint32]$manifest.mouth_atlas.schema_version -ne [uint32]$reviewedAtlas.schema_version -or
+        [string]$manifest.mouth_atlas.identity_revision -ne [string]$reviewedAtlas.identity_revision -or
+        [string]$manifest.mouth_atlas.representation -ne [string]$reviewedAtlas.representation -or
+        [string]$manifest.mouth_atlas.game_profile_id -ne [string]$reviewedAtlas.game_profile_id -or
+        [string]$manifest.mouth_atlas.character_id -ne [string]$reviewedAtlas.character_id -or
+        [string]$manifest.mouth_atlas.enrollment_binding_sha256 -ne
+            [string]$reviewedAtlas.enrollment_binding_sha256 -or
+        [string]$manifest.mouth_atlas.review_evidence_sha256 -ne
+            [string]$reviewedAtlas.review_evidence_sha256) {
+        throw 'Portable review mouth-atlas disagrees with its reviewed-artifact receipt.'
+    }
+}
+elseif (($actualAtlasFiles -join "`n") -cne
+        ((@('atlas-bgra8-premultiplied.bin', 'atlas.json') | Sort-Object) -join "`n") -or
+    [string]$manifest.mouth_atlas.scope -ne 'private-synthetic-mara-only' -or
+    @(
+        'visual improvement demonstrated; moving tracking performance gate open',
+        'experimental private fixture; natural-quality and moving-tracking gates open'
+    ) -notcontains [string]$manifest.mouth_atlas.qualification -or
+    [bool]$manifest.mouth_atlas.ordinary_targets_enabled -or
+    [bool]$manifest.mouth_atlas.model_weights_included -or
+    [string]$manifest.mouth_atlas.identity_revision -ne '14018431763358334153' -or
+    (Get-LowerSha256 -Path (Join-Path $atlasRoot 'atlas.json')) -cne
         'c4270c252f382502aa5218f5bb0c6b30b01f2db24988b0fde6b2f9d36ef65757' -or
-    (Get-Item -LiteralPath (Join-Path $atlasRoot 'atlas.json')).Length -ne 3991 -or
     (Get-LowerSha256 -Path (Join-Path $atlasRoot 'atlas-bgra8-premultiplied.bin')) -cne
-        '420e518d3a1552cdf6407a59e78f5d14225a2c461c624cac3049509a8bef5ad1' -or
-    (Get-Item -LiteralPath (Join-Path $atlasRoot 'atlas-bgra8-premultiplied.bin')).Length -ne 1413984) {
-    throw 'Portable review mouth atlas is not the pinned v80 native-compatible pack.'
+        '420e518d3a1552cdf6407a59e78f5d14225a2c461c624cac3049509a8bef5ad1') {
+    throw 'Portable review legacy mouth atlas is not the exact v80 Mara fixture.'
+}
+
+$characterPackKeys = @{}
+foreach ($pack in $characterMouthPackEntries) {
+    $key = '{0}/{1}' -f [string]$pack.game_profile_id, [string]$pack.character_id
+    $expectedRoot = 'review-character-mouth-packs/{0}/{1}' -f
+        [string]$pack.game_profile_id, [string]$pack.character_id
+    if ($characterPackKeys.ContainsKey($key) -or
+        $key -eq ('{0}/{1}' -f [string]$manifest.mouth_atlas.game_profile_id,
+            [string]$manifest.mouth_atlas.character_id) -or
+        [string]$pack.relative_root -ne $expectedRoot -or [bool]$pack.enabled -or
+        @($pack.files).Count -ne 3) {
+        throw "Portable review character mouth-pack identity is invalid: $key"
+    }
+    $characterPackKeys[$key] = $true
+    foreach ($entry in @($pack.files)) {
+        $path = Join-Path $root ([string]$entry.path)
+        if (-not ([string]$entry.path).StartsWith("$expectedRoot/", [System.StringComparison]::Ordinal) -or
+            (Get-LowerSha256 -Path $path) -cne [string]$entry.sha256 -or
+            (Get-Item -LiteralPath $path).Length -ne [int64]$entry.size_bytes) {
+            throw "Portable review character mouth-pack file binding is invalid: $key"
+        }
+    }
+    $packRoot = Join-Path $root $expectedRoot
+    $receiptPath = Join-Path $root ([string]$pack.receipt_path)
+    if (-not ([string]$pack.receipt_path).StartsWith("$expectedRoot/", [System.StringComparison]::Ordinal) -or
+        (Get-LowerSha256 -Path $receiptPath) -cne [string]$pack.receipt_sha256) {
+        throw "Portable review character mouth-pack receipt binding is invalid: $key"
+    }
+    $reviewedPack = Get-NpcReviewedMouthAtlasReceipt -ReceiptPath $receiptPath
+    if ([string]$reviewedPack.classification -ne 'reviewed-private-character-pack' -or
+        [uint32]$pack.schema_version -ne [uint32]$reviewedPack.schema_version -or
+        [string]$pack.identity_revision -ne [string]$reviewedPack.identity_revision -or
+        [string]$pack.representation -ne [string]$reviewedPack.representation -or
+        [string]$pack.game_profile_id -ne [string]$reviewedPack.game_profile_id -or
+        [string]$pack.character_id -ne [string]$reviewedPack.character_id -or
+        [string]$pack.enrollment_binding_sha256 -ne
+            [string]$reviewedPack.enrollment_binding_sha256 -or
+        [string]$pack.review_evidence_sha256 -ne [string]$reviewedPack.review_evidence_sha256 -or
+        [bool]$pack.natural_quality_qualified -ne [bool]$reviewedPack.natural_quality_qualified) {
+        throw "Portable review character mouth pack disagrees with its reviewed receipt: $key"
+    }
 }
 
 $engineeringReviewPath = Join-Path $root 'review-evidence/engineering-review.md'
@@ -404,7 +499,24 @@ if ($engineeringReviewText -match '\]\((?![<#]|(?i:https?|mailto|file):)[^)]+\)'
     executable_count = $actualExecutables.Count
     application_sha256 = [string]$manifest.application.sha256
     test_game_sha256 = [string]$testGame.executable_sha256
+    mouth_atlas_schema_version = if (
+        $manifest.mouth_atlas.PSObject.Properties.Name -contains 'schema_version') {
+        [uint32]$manifest.mouth_atlas.schema_version
+    } else { 1 }
     mouth_atlas_identity_revision = [string]$manifest.mouth_atlas.identity_revision
+    mouth_atlas_game_profile_id = if (
+        $manifest.mouth_atlas.PSObject.Properties.Name -contains 'game_profile_id') {
+        [string]$manifest.mouth_atlas.game_profile_id
+    } else { 'eclipse-harbor' }
+    mouth_atlas_character_id = if (
+        $manifest.mouth_atlas.PSObject.Properties.Name -contains 'character_id') {
+        [string]$manifest.mouth_atlas.character_id
+    } else { 'mara-venn' }
+    mouth_atlas_receipt_sha256 = if (
+        $manifest.mouth_atlas.PSObject.Properties.Name -contains 'receipt') {
+        [string]$manifest.mouth_atlas.receipt.sha256
+    } else { $null }
+    reviewed_character_mouth_pack_count = $characterMouthPackEntries.Count
     model_catalog_scope = if ($manifest.PSObject.Properties.Name -contains 'model_catalog') {
         [string]$manifest.model_catalog.scope
     } else {

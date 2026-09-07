@@ -20,9 +20,11 @@ running an installer or launching the desktop application:
 ```powershell
 $env:NPC_LARGE_ARTIFACT_ROOT = 'E:\temp\InteractiveNPCs'
 ./scripts/windows/prepare-portable-review.ps1 `
-  -DestinationRoot 'E:\temp\InteractiveNPCs\review-v17' `
+  -DestinationRoot 'E:\temp\InteractiveNPCs\review-v18' `
   -StableTestGameDirectory `
     'E:\temp\InteractiveNPCs\review-game-v17-stable\local-app-data\test-game' `
+  -ReviewedMouthAtlasReceiptPath `
+    'E:\temp\InteractiveNPCs\review-mouth-atlas-v80-native-compatible\reviewed-artifact-receipt.v1.json' `
   -PrivateReviewModelCatalogDirectory `
     'E:\temp\InteractiveNPCs\private-review-catalog-yunet-20260907-r3'
 ```
@@ -32,9 +34,11 @@ progress:
 
 ```powershell
 ./scripts/windows/prepare-portable-review.ps1 `
-  -DestinationRoot 'E:\temp\InteractiveNPCs\review-v17' `
+  -DestinationRoot 'E:\temp\InteractiveNPCs\review-v18' `
   -StableTestGameDirectory `
     'E:\temp\InteractiveNPCs\review-game-v17-stable\local-app-data\test-game' `
+  -ReviewedMouthAtlasReceiptPath `
+    'E:\temp\InteractiveNPCs\review-mouth-atlas-v80-native-compatible\reviewed-artifact-receipt.v1.json' `
   -PrivateReviewModelCatalogDirectory `
     'E:\temp\InteractiveNPCs\private-review-catalog-yunet-20260907-r3' `
   -PreflightOnly
@@ -47,9 +51,17 @@ six-file synthetic-game package from
 `E:\temp\InteractiveNPCs\review-game-v17-stable\local-app-data\test-game`.
 That closed world contains one hash-bound project-owned `.inpcseq` camera
 sequence and no codec/runtime binary. The separate two-file
-`review-mouth-atlas` is copied from
-`E:\temp\InteractiveNPCs\review-mouth-atlas-v80-native-compatible`, hash-pinned
-to the private synthetic Mara fixture, and contains no model weights. The
+`review-mouth-atlas` payload is accepted only through
+`-ReviewedMouthAtlasReceiptPath`. The receipt binds the exact atlas and texture
+sizes and SHA-256 values, supported schema/representation pair, identity
+revision, game profile, character, enrollment status, and honest quality
+boundary. It is copied to `review-evidence` while only the two bound payload
+files enter the runtime atlas directory. The existing v80 receipt classifies
+the exact Eclipse Harbor/Mara atlas as a legacy private fixture with natural
+quality still open. It cannot be relabeled for Misty or another character. A
+schema 4 receipt must use `normalized-oral-strip-v1` and include a
+`reviewed-private` semantic enrollment plus matching review-evidence digest;
+the package check does not qualify an unreviewed atlas. The
 pipeline also copies the consolidated engineering
 review into `review-evidence`, rewriting its source-relative links to absolute
 checkout paths before binding the result in the outer manifest. It scans the
@@ -57,6 +69,25 @@ current tracked and untracked source
 without traversing the known legacy history, records the complete dirty-file
 manifest and content hashes, and never starts an executable. It refuses to
 replace an existing destination.
+
+`-MouthAtlasDirectory` remains as a compatibility input for older automation.
+It resolves `reviewed-artifact-receipt.v1.json` inside that directory and then
+runs the same receipt validation. Passing it together with
+`-ReviewedMouthAtlasReceiptPath` is rejected. Run the receipt contract checks
+without creating or deleting files using:
+
+```powershell
+./scripts/windows/test-reviewed-mouth-atlas-receipt.ps1
+```
+
+After a character-specific atlas has a reviewed-private receipt, pass one or
+more receipt paths through `-ReviewedCharacterMouthPackReceiptPaths`. Each pack
+is staged as an independent three-file closed world under
+`review-character-mouth-packs/<game>/<character>`. Duplicate identities, a
+duplicate of the main fixture atlas, legacy receipts, unreviewed enrollment,
+and missing or extra files are rejected. These files are supplied for the
+ordinary character-workspace import flow; packaging records `enabled: false`
+and does not activate or qualify them.
 
 `-PrivateReviewModelCatalogDirectory` is an opt-in local-review overlay. The
 builder accepts only the independently verified YuNet v17 receipt and its exact
@@ -77,7 +108,7 @@ source identity, private-catalog boundary, and synthetic-game provenance with:
 
 ```powershell
 ./scripts/windows/verify-portable-review.ps1 `
-  -Directory 'E:\temp\InteractiveNPCs\review-v17'
+  -Directory 'E:\temp\InteractiveNPCs\review-v18'
 ```
 
 This is unsigned, installer-free, local-review evidence. It is not installed
