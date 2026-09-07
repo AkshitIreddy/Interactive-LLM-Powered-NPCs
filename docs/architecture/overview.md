@@ -1,118 +1,186 @@
 # Interactive LLM Powered NPCs 2.0 architecture
 
-Status: accepted target architecture  
-Primary platform: Windows 10 22H2 and Windows 11 x64  
-Product boundary: single-player games; protected online/anti-cheat contexts are blocked
+Status: accepted target architecture with partially integrated vertical slice
 
-## Goals
+Primary platform: Windows 10 22H2 and Windows 11 x64
 
-The architecture optimizes for low time-to-first-audio beside a GPU-intensive game, safe failure isolation, ordinary-user installation, explicit hosted-provider choice, deterministic testing, and replaceable API adapters. It does not preserve v1 implementation compatibility.
+Product boundary: external integration with single-player games; protected online and
+anti-cheat contexts fail closed
+
+## Reading this document
+
+**Integrated** means a source path exists in the current application. It does not imply
+installed-app, physical-device, visual-quality, performance, or commercial-game proof.
+**Target** means the contract is accepted but one or more production joins or
+qualification gates remain open. Fixtures and component tests are never product proof.
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
-│ Tauri 2 Response Console                                   │
+│ Tauri 2 Response Console                                    │
 │ React/TypeScript · onboarding · configuration · diagnostics │
 └────────────────────────────┬────────────────────────────────┘
-                             │ commands/channels (control only)
+                             │ bounded commands/status only
 ┌────────────────────────────▼────────────────────────────────┐
-│ Rust NPC runtime                                            │
-│ sessions · turn state · policy · providers · memory · QoS   │
-└──────────────┬────────────────────┬───────────────────┬──────┘
-               │ Protobuf/named pipe│                   │
-┌──────────────▼──────────┐ ┌───────▼────────┐
-│ C++/WinRT media broker │ │ Inference       │
-│ WASAPI · WGC · D3D11   │ │ workers/packs   │
-│ hotkeys · overlay      │ │ native/Python   │
-└─────────────────────────┘ └────────────────┘
-       shared-memory PCM / shared D3D handles where qualified
+│ Rust control + runtime host                                │
+│ sessions · routes · memory · policy · timing · cancellation │
+└──────────────┬─────────────────────┬─────────────────────────┘
+               │ named pipe          │ optional pack workers
+               │ protobuf envelope   │ after measured admission
+               │ + JSON payload      │
+┌──────────────▼──────────┐  ┌───────▼─────────────────┐
+│ C++/WinRT media broker │  │ Native/local workers    │
+│ WASAPI · WGC · D3D11   │  │ LLM/STT/TTS/embed/     │
+│ hotkeys · overlay      │  │ vision/lip-sync roles  │
+└─────────────────────────┘  └─────────────────────────┘
 ```
 
-## Component responsibilities
+Shared-memory PCM and shared D3D handles are used only by implemented and qualified
+producer/consumer pairs. They are not a general worker entitlement.
+
+## Component truth
 
 ### Response Console
 
-Tauri 2 hosts a React/TypeScript UI using the Windows WebView2 Evergreen runtime. It owns onboarding, Home, Games, Characters, Conversation, Presence, Performance, Models, Diagnostics, Settings and Help. It may send bounded commands and receive ordered status channels, but continuous PCM, captured frames, D3D textures, raw API keys, or model tensors never enter the WebView.
+Tauri hosts React/TypeScript in WebView2. The WebView may issue bounded commands and
+receive redacted state. Continuous PCM, captured pixels, D3D textures, credential values,
+and model tensors remain native-only.
 
-The visible Response Spine is driven by measured runtime events:
+The mounted product has five job-oriented workspaces: Home, Games & characters, Voice &
+intelligence, Appearance, and Health & support, plus bounded content, character-override,
+and character-mouth-pack flows. Older `Pages.tsx` and standalone `Onboarding.tsx`
+specimens remain unreachable from `App.tsx`; their fixtures are not product state. Only
+state backed by native commands, persistence, and receipts may be presented as live.
 
-`Listening → Transcribing → Identifying → Remembering → Responding → Voicing → Animating`
+### Rust control and runtime host
 
-A stage can be skipped, degraded, failed, cancelled or completed; the UI never invents progress from timers.
+The integrated runtime owns sessions, cancellation generations, provider-route snapshots,
+prompt assembly, delivery receipts, local SQLite memory, structured timing, and fail-open
+optional work. The process protocol uses a length-delimited protobuf envelope; current
+business requests and responses are versioned JSON within that envelope. See
+`process-model.md` for the exact boundary.
 
-### Rust runtime
+Hosted LLM execution is integrated for a bounded set of provider-specific routes,
+including fixed-origin Mistral and OpenRouter routes. The normal selected STT bridge
+currently accepts AssemblyAI `u3-rt-pro`. Fixed-origin Cartesia, Deepgram, Inworld,
+ElevenLabs, and NVIDIA Magpie TTS construction exists. A production Groq Qwen → Cartesia
+component chain reached bridge PCM in 492.964 ms, but a complete microphone-to-physical-
+speaker selected turn is not qualified. NVIDIA embedding retrieval has an integrated
+bridge. Catalog entries and provider traits must not be read as executable-route support.
 
-A custom Tokio state machine is the source of truth for sessions and turns. It enforces deadlines, cancellation generations, provider policy, privacy/egress decisions, memory transactions, resource leases, degradation, structured logs and end-to-end timing. The bounded conversational workflow does not require LangChain, LangGraph, or a general-purpose agent framework.
+`NpcEffectsV1` remains a validated proposal schema. The current ordinary simulation path
+constructs fixture effects; it does not actuate a game. Malformed, late, or unsupported
+proposals are neutral no-ops and cannot delay speech.
 
-The runtime exposes versioned interfaces:
+### Resource admission
 
-- `EnvelopeV1` for process messages;
-- `StreamingRecognizer`, `LanguageModelProvider` and `TtsSession` for capabilities and streams;
-- `NpcEffectsV1` for independently validated non-spoken effects;
-- `GameProfileV2` for data-only supported-game behavior;
-- `ModelPackManifestV1` for optional immutable generic lip-sync packs.
+`crates/runtime-core` contains a ResourceBroker and an opt-in TurnSupervisor admission
+path using a host-supplied measured whole-turn plan. It can reject reserve shortfalls and
+release leases on completion or cancellation. This is integrated core policy, not yet a
+production runtime-host claim: the host does not yet receive a trusted, native-stamped
+selected-game budget plus qualified whole-turn model envelope.
+
+Model Manager separately implements signed pack lifecycle policy, measured whole-loadout
+preflight, and RAM/VRAM/game-reserve reasoning. Both layers must be joined to native
+telemetry before local execution is production-admitted.
 
 ### Media broker
 
-A C++20/WinRT process owns Windows-native real-time media: event-driven WASAPI, system hotkeys, Windows Graphics Capture by HWND, D3D11 resources, DirectComposition presentation, per-monitor DPI/HDR transforms and qualified DXGI Desktop Duplication fallback. It uses shared memory for PCM and shared D3D handles only where the consuming backend has passed interop and lifetime tests.
+The C++20/WinRT broker implements WASAPI transport, system hotkeys, Windows Graphics
+Capture by HWND, D3D11 resources, DirectComposition presentation, native target geometry,
+and Desktop Duplication fallback policy. It has no credential, prompt, lore, memory, or
+network authority.
 
-The broker has no provider credentials, prompt content, memory database access or authority to make online requests.
+The native implementation still needs installed physical proof across display modes,
+DPI/HDR, move/resize, device loss, one/multiple monitors, and real games. Its existence
+does not qualify normal commercial-game capture.
 
-### Inference workers
+### Optional local workers and packs
 
-Conversation uses hosted LLM, STT, TTS, and retrieval adapters. Local inference workers are reserved for optional generic screen-space lip-sync packs selected by the user. A downloadable CPython 3.12 runtime may accompany a qualified lip-sync pack only when that candidate's strongest supported Windows runtime requires it. Workers receive typed, bounded requests; they do not read global configuration or credentials and cannot execute profile or model output.
+The base installer remains API-first and model-free. After an explicit user choice, the
+pack architecture may support generic language-model, speech-recognition,
+speech-synthesis, embedding, vision, and lip-sync roles. Every role requires immutable
+provenance, license, signature, measured p99 resource/latency envelope, whole-loadout
+admission, and a safe fallback. No pack is silently downloaded, activated, substituted,
+or represented as available because a catalog candidate exists.
 
-### External game integration and profiles
+The supervised local LLM worker is an integrated route, but its current sample pack is
+not admissible production evidence. Other role catalogs and workers remain candidates
+until independently qualified.
 
-Profiles are signed, data-only capability declarations containing lore, characters, prompts, detection, capture hints, safety rules, diagnostics, and troubleshooting. They never install or require a mod, script extender, hook, DLL, injected code, or per-game native-rig adapter.
+### Profiles, game targeting, identity, and visuals
 
-The supported integration is deliberately game-agnostic:
+Profiles are data-only declarations. They never install or require a mod, hook, injected
+DLL, script extender, game-memory reader, or native-rig adapter. A profile can be
+data-complete without being capture-, identity-, subtitle-, or animation-qualified.
 
-1. select a capturable single-player game window with WGC or qualified DXGI fallback;
-2. select/name the intended character manually, with optional read-only OCR/screen evidence only after independent qualification;
-3. deliver conversation through audio and subtitles;
-4. optionally add generic, reversible screen-space lip-sync after it passes the visual/resource gates.
+The rights-cleared Eclipse Harbor profile and project-owned moving review game are the
+current synthetic safe targets. Authored
+non-synthetic profiles deliberately run as console-isolated conversations with no game
+interaction or visuals. Normal commercial-game capture and overlay remain unqualified.
 
-Anti-cheat, protected content, online mode, or ambiguous shared executables fail closed. Audio/subtitles may continue only when policy permits and without capture or overlay. Community and built-in profiles use the same data-only boundary.
+Identity contracts, a native worker bridge, manual-picker states, sticky tracks, and
+actor-lock epochs exist. A private 2-of-2 signed YuNet/LM1 catalog binds fresh measured
+CPU evidence. Its isolated activation qualification proved a fresh authenticated hidden
+worker, exact active inventory, and retry cleanup. Setup activation still cannot authorize
+live rendering, and normal user-state installation/whole-loadout admission are not
+qualified. The production actor-lock bus therefore starts unqualified, and the moving-
+character visual route cannot be called integrated product behavior.
+
+Generic screen-space lip-sync remains optional and fail-open. Keep the actor/frame/audio
+clock, current-frame, mask, freshness, and cancellation contracts. The September 7
+schema-3 Cyberpunk/Misty moderate-OH replay preserves the native admission digest and
+containment while making rounded articulation more restrained. A photometric/pasted seam
+remains, and its generated anatomy is not observed game anatomy. It is accepted for local
+review only, not as natural-animation, installed-provider, live-game, or latency proof,
+and must not be advertised or made a dependency of audio/subtitles.
 
 ## System invariants
 
 1. The foreground game has resource priority.
-2. No subsystem silently crosses the user’s configured local/cloud boundary.
-3. Optional visual/effect failures cannot stop audio conversation.
+2. No subsystem silently crosses the configured local/cloud boundary.
+3. Optional vision, lip-sync, and effects cannot stop audio/subtitles.
 4. Only delivered dialogue is committed as heard history.
-5. Profile/model/LLM content is data, never code.
-6. Every cross-process stream is ordered, bounded, cancellable and versioned.
-7. Derived embeddings and indexes are rebuildable; authoritative text/state is transactional.
-8. Stale visual output restores untouched game presentation within one displayed frame.
-9. Capture/overlay is disabled under online/anti-cheat ambiguity; injection and bypass are out of scope.
-10. Public release actions require explicit user approval.
+5. Profile, model, and provider output is data, never executable code.
+6. Cross-process messages are bounded, ordered, versioned, cancellable, and validated at
+   both the envelope and business-payload layers.
+7. Derived embeddings and indexes are rebuildable; authoritative text/state is
+   transactional.
+8. Rejected or stale visual work leaves the untouched game presentation visible within
+   one displayed frame.
+9. Capture/overlay fails closed under online, anti-cheat, protected-content, or target
+   ambiguity. Injection and bypass are out of scope.
+10. No demographic inference is part of the product flow.
+11. Catalog presence, fixtures, or synthetic receipts do not establish availability.
+12. Push, publication, and release remain separate approval-gated actions.
 
 ## Deployment units
 
-| Unit | In base installer | Update strategy |
+| Unit | Base installer | Current qualification |
 | --- | --- | --- |
-| Tauri UI/runtime executable | Yes | Signed app update, inactive until release approval |
-| C++ media broker | Yes | Same signed app bundle |
-| Minimal deterministic simulation/fixtures | Yes | Same bundle |
-| Optional generic lip-sync models/runtime | No | Explicit user-selected, TUF-protected pack install after qualification; never automatic |
-| Built-in data-only profiles | Yes | Signed/profile-versioned bundle or catalog |
-| Per-game mods/adapters/hooks | No | Not a supported distribution or integration path |
+| Tauri control application | Yes | Source integrated and headless browser-reviewed; installed/clean-machine qualification open |
+| Rust runtime host | Yes | Source integrated; full ordinary live turn open |
+| C++ media broker | Yes | Native source integrated; physical display/game matrix open |
+| Deterministic fixtures | Yes, development/review only | Never production evidence |
+| Optional local role packs/runtimes | No | Explicit install only; private YuNet provider-load lifecycle qualified in isolated state; normal installation/live authority/production qualification open |
+| Built-in data-only profiles | Yes | Content/schema coverage; live capabilities qualify separately |
+| Per-game mods, hooks, injected DLLs, rig adapters | No | Unsupported architecture |
 
-The NSIS installer does not require Python, Node, Rust, CUDA toolkit, FFmpeg, notebooks, or pip. Developer toolchains remain lockfile-pinned repository inputs, not end-user prerequisites.
+The target NSIS install requires no Python, Node, Rust, CUDA toolkit, FFmpeg, notebook, or
+pip from the user. That remains an acceptance condition until proven on clean Windows
+machines.
 
-## Degradation ladder
+## Degradation order
 
-The resource and failure policy applies this order and reports the reason:
+1. Drop stale optional vision or visual work.
+2. Disable experimental screen-space lip-sync.
+3. Neutralize optional effects/style proposals.
+4. Fall back from semantic retrieval to local FTS/recent delivered context.
+5. Continue conversation through audio and subtitles when target policy permits.
+6. Offer typed input when STT fails or subtitles when TTS fails.
+7. Surface a retryable LLM error.
 
-1. reduce continuous vision sampling;
-2. disable experimental screen-space lip-sync;
-3. neutralize optional emotion/voice-style effects;
-4. use SQLite FTS/recent context without hosted semantic retrieval;
-5. continue selected/offscreen character through audio/subtitles;
-6. offer typed input if STT fails or subtitles if TTS fails;
-7. surface a retryable LLM error.
-
-Cross-provider fallback is allowed only if the user pre-authorized the exact route and its privacy/cost implications.
+Cross-provider fallback occurs only when the user pre-authorized the exact route and its
+privacy/cost consequences. Local/cloud or device substitution is never implicit.
 
 ## Decision records
 

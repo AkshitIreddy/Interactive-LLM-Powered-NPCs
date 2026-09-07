@@ -1,14 +1,26 @@
 # ADR-0007: Use only generic external screen-space lip-sync
 
-Status: Accepted architecture; CPU headless component candidate implemented, no app route or neural pack qualified
+Status: Accepted visual architecture; component candidates exist, no product visual route or pack is qualified
+
 Date: 2026-08-28
-Updated: 2026-09-04
+
+Updated: 2026-09-05
+
+Reconciled: 2026-09-07
 
 ## Context
 
 SadTalker renders a complete talking-head video before playback and cannot meet the latency, resource or anchoring needs of a live game. Per-game facial-rig integration could improve quality, but it requires mods, hooks, game-specific adapters, exact-build work or publisher cooperation. That conflicts with the product goal of one broadly usable Windows companion.
 
-Conversation remains API-first: the current product has no local LLM, STT, TTS or embedding-model download route. Generic screen-space lip-sync is the only contemplated local AI workload, is optional, and must never delay or disable audio/subtitles.
+The base product remains API-first and model-free. ADR-0005 now permits explicitly
+selected, signed, measured local packs for language model, speech recognition, speech
+synthesis, embedding, vision, and lip-sync roles. This decision is narrower: any lip-sync
+implementation remains generic screen-space work and must never delay or disable
+audio/subtitles.
+
+Historical note: the 2026-08-28 revision called lip-sync the only contemplated local AI
+workload. ADR-0005 superseded that pack-scope restriction on 2026-09-05. It did not change
+the external, non-injecting visual boundary defined here.
 
 ## Decision
 
@@ -29,6 +41,32 @@ rig, write game state or receive game memory.
 
 **EfficientSync and FlashLips remain paper watchlist entries.** Their deformation/reconstruction approaches are relevant to preserving the current frame while localizing mouth edits, but paper-reported speed is not local evidence. Code, weights, licenses, Windows support, cancellation, resource use and visual behavior must all exist and pass the same gates before either can become a pack candidate.
 
+Current visual orchestration, worker transport, atlas, and compositor code is component
+infrastructure, not an accepted rendering method. The September 5 output was rejected
+visually for painted-cavity appearance, missing teeth, and upper-lip damage. It must not
+be promoted because motion or mask metrics pass.
+
+Follow-up evidence replaces that output as the newest experiment, not as product
+acceptance. The September 7 schema-3 Cyberpunk/Misty moderate-OH replay uses recorded
+native YuNet/LM1 mouth geometry, periodic 12-frame detection with tracked-ROI updates,
+smoothed state selection, and identity-bound photometric references. Its admission-event
+digest matches v14, all 20 source-identical frames remain exact, and no pixel changes
+outside the dynamic residual bounds. The state-7 reference makes rounded articulation
+materially more restrained, but a photometric/pasted seam remains and its generated
+anatomy is not observed game anatomy. Earlier opacity/EMA and rounded-reference scaling
+experiments introduced double contours or spoke artifacts and remain rejected. The
+moderate-OH artifact is accepted for local review only; it is not installed-provider,
+live-capture, natural-animation, game-load, or end-to-end latency proof.
+
+The target renderer is source-conditioned. It builds a recent high-confidence neutral
+mouth reference for the locked actor, stabilizes a current-frame 2D/2.5D lower-face mesh,
+warps source pixels for jaw/lip motion, and inpaints only newly exposed inner-mouth pixels
+inside the dynamic mask. It follows the exact playback-clocked viseme timeline, reprojects
+onto each newest compatible game frame, matches lighting/color, and discards work through
+pose jumps, cuts, occlusion, identity uncertainty, or staleness. Semantic viseme updates
+may use a visually qualified 15 Hz temporal mode, but presentation remains at display
+cadence. A generic painted mouth atlas is not sufficient product output.
+
 ## Immutable-current-frame contract
 
 Each captured source frame is immutable. A visual worker may return only a bounded mouth-region residual associated with the exact actor ID, capture-frame ID, QPC timestamp and cancellation generation that produced it. The compositor applies an accepted residual to a presentation copy of the newest compatible frame; it never mutates or recursively feeds a generated frame back into tracking or inference.
@@ -46,9 +84,27 @@ Never freeze the full game frame, paste a rectangular face or display a generate
 
 ## Resource admission and residency
 
-The current application admits at most one optional local visual lease. Admission uses live DXGI budget/headroom, a configured game reserve, measured warm and p99 workspace VRAM/RAM, backend/driver compatibility, frame-time target and the candidate's load/unload cost. Total advertised VRAM alone is not sufficient. The scheduler may keep a proven visual worker warm only while its lease remains safe; under pressure it drops stale work, suspends or unloads animation, and leaves hosted conversation and audio playback unaffected.
+The visual coordinator and Model Manager define at most one optional local visual lease,
+latest-frame scheduling, measured pack envelopes, and whole-loadout preflight. The target
+admission decision uses native-stamped current DXGI budget/headroom, the configured game
+reserve, measured warm and p99 workspace VRAM/RAM, backend/driver compatibility,
+frame-time target, and load/reload cost. Total advertised VRAM is never sufficient.
 
-If future scope adds local LLM, STT, TTS or embedding models, that requires a new architecture decision and measured co-residency matrix. Before download or activation, every requested combination must be classified as safe resident, serialized/cold-load only, CPU-only, conflicting or unverified. Admission must account for the running game's reserve and per-model p99 workspace, use exclusive leases for incompatible GPU stages, and expose load/unload latency. It must not silently co-reside, switch execution devices, evict a user-selected route or fall back to a cloud provider.
+This is not yet production enforcement. Runtime-core has an opt-in ResourceBroker path,
+but the normal runtime host does not yet receive the trusted selected-game budget and
+qualified whole-turn plan needed to drive it. Until that join exists, component policy
+and simulated telemetry cannot qualify visual activation.
+
+ADR-0005 governs co-residency with all local roles. Before download or activation, the
+complete selected combination is classified as safe resident, serialized/cold-load only,
+CPU-only, conflicting, or unverified. Admission accounts for the running game's reserve
+and every role's p99 workspace, uses exclusive leases for incompatible stages, and shows
+load/unload latency. It never silently co-resides, switches device/provider, evicts a
+user-selected route, or falls back to cloud.
+
+A proven visual worker may remain warm only while its current lease is safe. Under
+pressure the scheduler drops stale work, suspends or unloads animation, and leaves
+conversation audio/subtitles unaffected.
 
 ## Go/no-go gates
 
@@ -59,7 +115,9 @@ Candidates that fail remain research-only or are removed; they do not block conv
 ## Consequences
 
 - Profiles advertise only external audio/subtitles and, when evidence exists, experimental generic screen-space animation.
-- The coefficient-driven baseline and direct-video experiment share the same residual-validation and fail-open compositor boundary.
+- Every source-conditioned, coefficient-driven, or direct-video candidate shares the
+  same residual-validation and fail-open compositor boundary; none bypasses rendered
+  human review.
 - Visual workers can crash, unload or quarantine without affecting playback.
 - Tests require legally sourced or synthetic moving-face sequences, exact current-frame comparison and rendered human review—not isolated model FPS.
 - No profile requires a mod or executable component, and no visual candidate receives game memory, rig access or code-injection authority.

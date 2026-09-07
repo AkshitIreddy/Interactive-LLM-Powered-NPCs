@@ -2,7 +2,8 @@
 
 ## `GameProfileV2`
 
-Profiles are signed data, not code. Required logical sections:
+Profiles are data, not code. The current built-in profiles are development data;
+production catalogs must authenticate them before release. Required logical sections:
 
 ```text
 schema/version/profile ID/title
@@ -31,9 +32,13 @@ Discovery reads Steam library/app manifests, Epic manifests, GOG registry/databa
 
 Start rechecks process/build and online/protected/anti-cheat policy. Ambiguity disables capture and overlay. Manual selection cannot override the no-bypass policy; where policy permits, it can still select an audio/subtitle-only session.
 
-## `ModelPackManifestV1`
+## `ModelPackManifestV2`
 
-The downloadable pack scope is limited to optional generic screen-space lip-sync. Local LLM, STT, TTS, and embedding packs are not product routes. The base app and API-powered conversation remain model-free.
+The base application remains API-first and model-free. ADR-0005 permits explicitly
+selected, signed, measured local packs for language-model, speech-recognition,
+speech-synthesis, embedding, vision, and lip-sync roles. Manifest v2 carries
+role-specific extensions; legacy v1 manifests are migration inputs rather than the
+architecture's current product contract.
 
 Required logical fields:
 
@@ -57,8 +62,8 @@ The manifest never supplies a shell command. Entrypoints select application-owne
 
 ```text
 Available → Resolving → Downloading ⇄ Paused
-   → Verifying → ExtractingSafely → SelfTesting → ReadyToActivate
-   → Active → Updating/Repairing/Removing
+   → Verifying → ExtractingSafely → AwaitingSelfTest
+   → Activating → Active → Updating/Repairing/Removing
                        └──────────────→ RolledBack
 
 Any pre-activation failure → Failed (staging retained only when safe/resumable)
@@ -68,8 +73,30 @@ Downloads use TUF-selected metadata, bounded resume with ETag/content-range vali
 
 Disk-full, changed ETag, bad size/hash/signature, interrupted extraction, crashed self-test, locked file and rollback are first-class tests.
 
+The private YuNet/LM1 review catalog is a concrete pre-activation example: its
+fresh CPU envelope is 2-of-2 signed with ephemeral keys and explicitly carries
+`productionTrust=false`, required key rotation, and disabled promotion/publication.
+An isolated review-state qualification now proves inactive import, exact-nonce retry
+cleanup, fresh authenticated hidden-worker provider load/unload, exact active inventory,
+duplicate rejection, and stale runtime-admission revocation. That test-created active
+pointer does not install the pack in the user's normal state or authorize live rendering.
+Catalog validity and native inference measurements alone still cannot create an active
+pointer.
+
 ## Runtime admission and residency
 
-The current policy admits no local LLM, STT, TTS or embedding pack. It may admit at most one explicitly selected generic visual worker after checking live DXGI budget/headroom, configured game reserve, measured warm and p99 RAM/VRAM workspace, backend/driver compatibility, frame-time target, and load/unload cost. A pack manifest's minimum VRAM or the GPU's advertised total is not sufficient evidence. Pressure revokes or unloads the visual lease first; audio/subtitles and the configured hosted routes continue unchanged.
+Every requested local/hybrid combination is classified before download and activation as
+safe resident, serialized/cold-load only, CPU-only, conflicting, or unverified. Admission
+uses measured resident and p99 RAM/VRAM workspace, desktop usage, the larger of current
+game usage and configured game reserve, backend/driver compatibility, target frame time,
+and load/reload cost. A manifest minimum or advertised total VRAM is insufficient.
 
-If future scope reopens local conversation models, the pack contract and UI must first add a measured co-residency matrix. Every selected combination is classified before download and activation as safe resident, serialized/cold-load only, CPU-only, conflicting or unverified. The scheduler grants exclusive leases for incompatible GPU stages and exposes switching latency; it never silently co-resides unsafe models, changes execution device, evicts a selected route or switches to cloud.
+Model Manager implements this whole-loadout preflight. Runtime-core also has opt-in
+ResourceBroker turn admission, but the normal runtime host does not yet receive the
+trusted native-stamped selected-game budget and qualified whole-turn envelope required
+for production enforcement. Missing or stale evidence fails local admission.
+
+The scheduler uses exclusive leases for incompatible stages, exposes switching latency,
+and never silently co-resides unsafe models, changes device/provider, evicts the game, or
+switches to cloud. Under pressure it drops optional stale visual work first;
+audio/subtitles and the user's selected routes retain their declared fallback behavior.

@@ -46,6 +46,11 @@ Legacy pickle/Chroma indexes are rejected by extension and signature without des
 - Each pack declares immutable source revision, all file hashes/sizes, runtime ABI, supported backends/hardware, resource envelope, license and attribution.
 - Downloads land in unique staging, support bounded resume, are fully verified and self-tested, then activate through an atomic version pointer.
 - Repair re-verifies every declared file; uninstall uses manifest-owned explicit paths and reference counts, never broad globs.
+- The private YuNet review catalog is signed only by ephemeral local-review keys and
+  records `productionTrust=false`, required rotation, and disabled
+  promotion/publication. It cannot establish a production trust root. An isolated
+  authenticated provider-load/activation qualification proves the lifecycle without
+  granting live-rendering authority or altering the user's normal app state.
 
 ## Privacy model
 
@@ -57,7 +62,9 @@ Remote telemetry is off by default. If introduced later, it must be opt-in, docu
 
 ## Required security tests
 
-- fuzz every Protobuf payload and state transition, including oversized lengths, sequence gaps, old nonce/generation and deadline wrap;
+- fuzz every protobuf envelope, versioned JSON business payload, and state transition,
+  including oversized lengths, sequence gaps, unknown/duplicate sensitive fields, old
+  nonce/generation, and deadline wrap;
 - inject quotes/code/tool directives into model spoken/effects output and prove no execution or path access;
 - feed malicious profile/model archives covering traversal, links, ADS/device names, duplicates, bombs and unexpected executables;
 - prove legacy pickle files are never opened by an object deserializer;
