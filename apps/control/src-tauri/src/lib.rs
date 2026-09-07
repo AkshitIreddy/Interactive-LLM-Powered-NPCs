@@ -1,5 +1,6 @@
 pub mod catalog;
 mod character_content_overrides;
+mod character_mouth_packs;
 pub mod character_workspace;
 mod commands;
 mod content_packs;
@@ -99,6 +100,11 @@ pub fn run() {
             commands::character_content_override,
             commands::save_character_content_override,
             commands::reset_character_content_override,
+            commands::inspect_character_mouth_pack,
+            commands::import_character_mouth_pack,
+            commands::enable_character_mouth_pack,
+            commands::disable_character_mouth_pack,
+            commands::character_mouth_pack_state,
             commands::inspect_content_pack,
             commands::activate_content_pack,
             commands::content_pack_state,

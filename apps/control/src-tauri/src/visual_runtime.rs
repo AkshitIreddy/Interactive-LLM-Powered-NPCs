@@ -5,6 +5,7 @@
 //! in the native control plane. A worker failure produces a visual-only bypass;
 //! it never cancels broker PCM playback or blocks the dialogue turn.
 
+use crate::character_mouth_packs::{CharacterMouthPackManagerV1, ResolvedCharacterMouthPackV1};
 use crate::identity_runtime::{
     NativeActorLockBusV1, NativeActorLockProvenanceV1, NativeActorSelectionAuthorityV1,
     NativeSelectedActorLockV1,
@@ -40,13 +41,23 @@ const PROTOCOL_MAGIC: u32 = 0x3152_574d;
 const PROTOCOL_VERSION: u16 = 1;
 const MAX_ATLAS_BYTES: usize = 16 * 1024 * 1024;
 const MAX_MESSAGE_BYTES: usize = MAX_ATLAS_BYTES + 512 * 1024;
+const FULL_LIP_ATLAS_SCHEMA: u32 = 1;
+const NORMALIZED_ORAL_ATLAS_SCHEMA: u32 = 2;
+const PHOTOMETRIC_FULL_LIP_ATLAS_SCHEMA: u32 = 3;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_millis(500);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const OPENSEEFACE_PACK_ID: &str = "openseeface-mnv3-lm1-mouth-signal";
+const YUNET_OPENSEEFACE_PACK_ID: &str = "openseeface-yunet640-lm1-mouth-signal";
 const OPENSEEFACE_PACK_REVISION: &str = "85aa70fc67582d046e771ea73625182a0d8f7475";
 const OPENSEEFACE_RUNTIME_REVISION: &str = "1.22.1";
 const OPENSEEFACE_BACKEND: &str = "cpu-execution-provider-one-thread";
+const OPENSEEFACE_MNV3_DETECTOR_SHA256: &str =
+    "0e8e4806766d85ab067a52c7af0dcb59eb7f9dfe580b44f20a8e6ab712d89809";
+const OPENSEEFACE_YUNET_DETECTOR_SHA256: &str =
+    "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4";
+const OPENSEEFACE_LM1_SHA256: &str =
+    "5bec42b298a24142cdb249a7256d65bc3fc0fbc673fa1752a64f4d7164719c9f";
 const VISUAL_COORDINATOR_INTERVAL: Duration = Duration::from_millis(67);
 const VISUAL_FRAME_DEADLINE_NS: i64 = 150_000_000;
 #[cfg(debug_assertions)]
@@ -65,6 +76,18 @@ const REVIEW_ORT_SHA256: &str = "ea37f63d94a0f37405bf47eaf9c2287cd84b8084bfc37f6
 #[cfg(debug_assertions)]
 const REVIEW_ORT_SHARED_SHA256: &str =
     "6da7afec6c88cf51572c1d0ce60cd97c865b5f348c2431b0733ce48cd03c201c";
+#[cfg(debug_assertions)]
+const LEGACY_MARA_GAME_PROFILE_ID: &str = "eclipse-harbor";
+#[cfg(debug_assertions)]
+const LEGACY_MARA_CHARACTER_ID: &str = "mara-venn";
+#[cfg(debug_assertions)]
+const LEGACY_MARA_ATLAS_IDENTITY_REVISION: u64 = 14_018_431_763_358_334_153;
+#[cfg(debug_assertions)]
+const LEGACY_MARA_ATLAS_MANIFEST_SHA256: &str =
+    "c4270c252f382502aa5218f5bb0c6b30b01f2db24988b0fde6b2f9d36ef65757";
+#[cfg(debug_assertions)]
+const LEGACY_MARA_ATLAS_TEXTURE_SHA256: &str =
+    "420e518d3a1552cdf6407a59e78f5d14225a2c461c624cac3049509a8bef5ad1";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct WorkerFailurePolicy {
@@ -260,6 +283,8 @@ pub(crate) struct AdmittedVisualFrameRequest {
     pub turn_id_high: u64,
     pub turn_id_low: u64,
     pub sentence_id: u64,
+    pub game_profile_id: String,
+    pub character_id: String,
     pub selected_process_id: u32,
     pub selected_window_handle: u64,
     pub selected_executable_name: String,
@@ -852,6 +877,8 @@ fn admitted_request_from_actor_lock(
         turn_id_high,
         turn_id_low,
         sentence_id,
+        game_profile_id: lock.game_profile_id.clone(),
+        character_id: lock.character_id.clone(),
         selected_process_id: lock.selected_process_id,
         selected_window_handle: lock.selected_window_handle,
         selected_executable_name: lock.selected_executable_name.clone(),
@@ -963,6 +990,7 @@ pub struct MouthWorkerSupervisor {
     config: Arc<MouthWorkerLaunchConfig>,
     parent_job: RuntimeSupervisor,
     broker: MediaBrokerSupervisor,
+    character_mouth_packs: Option<Arc<CharacterMouthPackManagerV1>>,
     managed: Arc<tokio::sync::Mutex<Option<ManagedWorker>>>,
     startup_gate: Arc<tokio::sync::Mutex<()>>,
     frame_gate: Arc<tokio::sync::Mutex<()>>,
@@ -987,10 +1015,19 @@ impl MouthWorkerSupervisor {
             config: Arc::new(config),
             parent_job,
             broker,
+            character_mouth_packs: None,
             managed: Arc::new(tokio::sync::Mutex::new(None)),
             startup_gate: Arc::new(tokio::sync::Mutex::new(())),
             frame_gate: Arc::new(tokio::sync::Mutex::new(())),
         }
+    }
+
+    pub(crate) fn with_character_mouth_packs(
+        mut self,
+        character_mouth_packs: Arc<CharacterMouthPackManagerV1>,
+    ) -> Self {
+        self.character_mouth_packs = Some(character_mouth_packs);
+        self
     }
 
     /// Runs one exact-frame visual attempt. Contention, stale tracker output,
@@ -1211,6 +1248,22 @@ impl MouthWorkerSupervisor {
             .resolve_admitted_openseeface_launch()
             .map_err(|error| VisualRuntimeError::Admission(error.to_string()))?;
         validate_admitted_launch(&launch)?;
+        let enabled_atlas = self
+            .character_mouth_packs
+            .as_ref()
+            .ok_or_else(|| {
+                VisualRuntimeError::Admission(
+                    "no private character mouth-pack registry is configured".into(),
+                )
+            })?
+            .resolve_enabled(&request.game_profile_id, &request.character_id)
+            .map_err(|error| VisualRuntimeError::Admission(error.to_string()))?
+            .ok_or_else(|| {
+                VisualRuntimeError::Admission(
+                    "no reviewed mouth pack is explicitly enabled for the selected character"
+                        .into(),
+                )
+            })?;
         let evidence = self.broker.native_capture_evidence().await?;
         let authority_checked_at_ns = monotonic_ns()?;
         if evidence.selected_process_id != launch.exact_target_pid
@@ -1282,6 +1335,8 @@ impl MouthWorkerSupervisor {
 
         let (client, worker) = self.ensure_ready(generation).await?;
         self.configure_admitted_provider(&client, generation, &launch)
+            .await?;
+        self.configure_enabled_character_atlas(&client, generation, request, &enabled_atlas)
             .await?;
         // Finish every fallible/awaiting audio operation before asking the
         // broker to duplicate a source texture into the worker. Once a lease
@@ -1432,15 +1487,20 @@ impl MouthWorkerSupervisor {
             evidence.selected_process_id,
         )?;
         let review_actor_id = stable_nonzero_id("eclipse-harbor:mara-venn");
-        let atlas = resolve_project_owned_review_atlas(
+        let requested_atlas_identity = RequestedCharacterMouthAtlasIdentity {
+            game_profile_id: LEGACY_MARA_GAME_PROFILE_ID,
+            character_id: LEGACY_MARA_CHARACTER_ID,
+            actor_id: review_actor_id,
+        };
+        let atlas = resolve_character_mouth_atlas(
             self.config.review_mouth_atlas_root.as_deref(),
             generation,
-            review_actor_id,
+            &requested_atlas_identity,
         )?;
         let (client, worker) = self.ensure_ready(generation).await?;
         self.configure_project_owned_review_provider(&client, generation, &launch)
             .await?;
-        self.configure_project_owned_review_atlas(&client, generation, &atlas)
+        self.configure_character_mouth_atlas(&client, generation, &atlas)
             .await?;
 
         // Provider startup is the expensive cold-path operation. Read the
@@ -1531,6 +1591,8 @@ impl MouthWorkerSupervisor {
             turn_id_high,
             turn_id_low,
             sentence_id,
+            game_profile_id: LEGACY_MARA_GAME_PROFILE_ID.into(),
+            character_id: LEGACY_MARA_CHARACTER_ID.into(),
             selected_process_id: evidence.selected_process_id,
             selected_window_handle: evidence.selected_window_handle,
             selected_executable_name: evidence.selected_executable_name.clone(),
@@ -1839,8 +1901,7 @@ impl MouthWorkerSupervisor {
         Ok(())
     }
 
-    #[cfg(debug_assertions)]
-    async fn configure_project_owned_review_atlas(
+    async fn configure_character_mouth_atlas(
         &self,
         client: &WorkerClient,
         generation: u64,
@@ -1848,6 +1909,7 @@ impl MouthWorkerSupervisor {
     ) -> Result<(), VisualRuntimeError> {
         let binding = AtlasBinding {
             content_sha256: atlas.content_sha256.clone(),
+            enrollment_binding_sha256: atlas.enrollment_binding_sha256.clone(),
             actor_id: atlas.actor_id,
             identity_revision: atlas.identity_revision,
         };
@@ -1871,6 +1933,48 @@ impl MouthWorkerSupervisor {
         }
         worker.atlas_binding = Some(binding);
         Ok(())
+    }
+
+    async fn configure_enabled_character_atlas(
+        &self,
+        client: &WorkerClient,
+        generation: u64,
+        request: &AdmittedVisualFrameRequest,
+        enabled: &ResolvedCharacterMouthPackV1,
+    ) -> Result<(), VisualRuntimeError> {
+        let expected = AtlasBinding {
+            content_sha256: enabled.content_sha256.clone(),
+            enrollment_binding_sha256: Some(enabled.enrollment_binding_sha256.clone()),
+            actor_id: request.track.actor_id,
+            identity_revision: enabled.identity_revision,
+        };
+        if self
+            .managed
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|worker| worker.atlas_binding.as_ref())
+            == Some(&expected)
+        {
+            return Ok(());
+        }
+        let requested = RequestedCharacterMouthAtlasIdentity {
+            game_profile_id: &request.game_profile_id,
+            character_id: &request.character_id,
+            actor_id: request.track.actor_id,
+        };
+        let atlas = resolve_character_mouth_atlas(Some(&enabled.root), generation, &requested)?;
+        if atlas.content_sha256 != enabled.content_sha256
+            || atlas.enrollment_binding_sha256.as_deref()
+                != Some(enabled.enrollment_binding_sha256.as_str())
+            || atlas.identity_revision != enabled.identity_revision
+        {
+            return Err(VisualRuntimeError::Admission(
+                "enabled mouth pack no longer matches its private registry".into(),
+            ));
+        }
+        self.configure_character_mouth_atlas(client, generation, &atlas)
+            .await
     }
 
     pub async fn shutdown(&self) {
@@ -2008,6 +2112,7 @@ struct ProviderBinding {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct AtlasBinding {
     content_sha256: String,
+    enrollment_binding_sha256: Option<String>,
     actor_id: u64,
     identity_revision: u64,
 }
@@ -2033,22 +2138,52 @@ struct ReviewOpenSeeFaceLaunch {
     exact_target_pid: u32,
 }
 
-#[cfg(debug_assertions)]
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ReviewMouthAtlasManifestV1 {
+struct ReviewMouthAtlasManifest {
     schema_version: u32,
     identity_revision: u64,
-    texture: ReviewMouthAtlasTextureV1,
-    states: Vec<ReviewMouthAtlasStateV1>,
+    #[serde(default)]
+    enrollment_binding: Option<ReviewMouthAtlasEnrollmentBinding>,
+    #[serde(default)]
+    neutral_state_index: Option<u32>,
+    texture: ReviewMouthAtlasTexture,
+    states: Vec<ReviewMouthAtlasState>,
 }
 
-#[cfg(debug_assertions)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ReviewMouthAtlasEnrollmentBinding {
+    schema_version: u32,
+    game_profile_id: String,
+    character_id: String,
+    reference_provenance_sha256: Vec<String>,
+    review_status: ReviewMouthAtlasReviewStatus,
+    #[serde(default)]
+    review_evidence_sha256: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum ReviewMouthAtlasReviewStatus {
+    Unreviewed,
+    ReviewedPrivate,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RequestedCharacterMouthAtlasIdentity<'a> {
+    game_profile_id: &'a str,
+    character_id: &'a str,
+    actor_id: u64,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ReviewMouthAtlasTextureV1 {
+struct ReviewMouthAtlasTexture {
     file: String,
     sha256: String,
+    #[serde(default)]
+    representation: Option<ReviewMouthAtlasRepresentation>,
     width: u32,
     height: u32,
     stride_bytes: u32,
@@ -2056,13 +2191,22 @@ struct ReviewMouthAtlasTextureV1 {
     state_bytes: u32,
 }
 
-#[cfg(debug_assertions)]
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ReviewMouthAtlasStateV1 {
+struct ReviewMouthAtlasState {
     index: u32,
     coefficients: [f64; 8],
     enrolled_pose: [f64; 3],
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+enum ReviewMouthAtlasRepresentation {
+    #[serde(rename = "full-lip-observation-v1")]
+    FullLipObservationV1,
+    #[serde(rename = "normalized-oral-interior-v1")]
+    NormalizedOralInteriorV1,
+    #[serde(rename = "photometric-full-lip-reference-v1")]
+    PhotometricFullLipReferenceV1,
 }
 
 #[derive(Clone, Debug)]
@@ -2077,11 +2221,25 @@ struct CharacterMouthAtlasState {
 
 #[derive(Clone, Debug)]
 struct CharacterMouthAtlas {
+    schema_version: u32,
     cancellation_generation: u64,
     actor_id: u64,
     identity_revision: u64,
+    manifest_sha256: String,
+    texture_file_name: String,
     content_sha256: String,
+    enrollment_binding_sha256: Option<String>,
     states: Vec<CharacterMouthAtlasState>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ValidatedCharacterMouthAtlasV1 {
+    pub schema_version: u32,
+    pub identity_revision: u64,
+    pub manifest_sha256: String,
+    pub texture_file_name: String,
+    pub content_sha256: String,
+    pub enrollment_binding_sha256: String,
 }
 
 #[derive(Clone)]
@@ -2507,6 +2665,8 @@ fn validate_admitted_frame_request(
         || (request.session_id_high == 0 && request.session_id_low == 0)
         || (request.turn_id_high == 0 && request.turn_id_low == 0)
         || request.sentence_id == 0
+        || !is_review_semantic_identifier(&request.game_profile_id)
+        || !is_review_semantic_identifier(&request.character_id)
         || request.selected_process_id == 0
         || request.selected_window_handle == 0
         || request.selected_executable_name.is_empty()
@@ -2551,16 +2711,62 @@ fn validate_admitted_frame_request(
 fn validate_admitted_launch(
     launch: &NativeAdmittedVisualPackLaunchV1,
 ) -> Result<(), VisualRuntimeError> {
-    let exact = launch.identity.pack_id.as_str() == OPENSEEFACE_PACK_ID
-        && launch.identity.revision.as_str() == OPENSEEFACE_PACK_REVISION
-        && launch.runtime == "onnxruntime"
+    let exact = admitted_provider_contract_is_exact(
+        launch.identity.pack_id.as_str(),
+        launch.identity.revision.as_str(),
+        launch
+            .detector_model
+            .path
+            .file_name()
+            .and_then(|value| value.to_str()),
+        launch.detector_model.sha256.as_str(),
+        launch
+            .landmark_model
+            .path
+            .file_name()
+            .and_then(|value| value.to_str()),
+        launch.landmark_model.sha256.as_str(),
+    ) && launch.runtime == "onnxruntime"
         && launch.runtime_revision == OPENSEEFACE_RUNTIME_REVISION
         && launch.backend == OPENSEEFACE_BACKEND
         && launch.exact_target_pid != 0
-        && launch.artifact_root.is_absolute();
+        && launch.artifact_root.is_absolute()
+        && [
+            &launch.detector_model.path,
+            &launch.landmark_model.path,
+            &launch.runtime_library.path,
+            &launch.runtime_shared_library.path,
+        ]
+        .into_iter()
+        .all(|path| path.is_absolute() && path.starts_with(&launch.artifact_root));
     exact.then_some(()).ok_or(VisualRuntimeError::Admission(
         "admitted OpenSeeFace launch authority is not the frozen product contract".into(),
     ))
+}
+
+fn admitted_provider_contract_is_exact(
+    pack_id: &str,
+    revision: &str,
+    detector_file_name: Option<&str>,
+    detector_sha256: &str,
+    landmark_file_name: Option<&str>,
+    landmark_sha256: &str,
+) -> bool {
+    let detector_exact = match pack_id {
+        OPENSEEFACE_PACK_ID => {
+            detector_file_name == Some("mnv3_detection_opt.onnx")
+                && detector_sha256 == OPENSEEFACE_MNV3_DETECTOR_SHA256
+        }
+        YUNET_OPENSEEFACE_PACK_ID => {
+            detector_file_name == Some("face_detection_yunet_2023mar.onnx")
+                && detector_sha256 == OPENSEEFACE_YUNET_DETECTOR_SHA256
+        }
+        _ => false,
+    };
+    revision == OPENSEEFACE_PACK_REVISION
+        && detector_exact
+        && landmark_file_name == Some("lm_model1_opt.onnx")
+        && landmark_sha256 == OPENSEEFACE_LM1_SHA256
 }
 
 fn encode_admitted_render_command(
@@ -2726,7 +2932,10 @@ fn encode_review_provider_configuration(
 fn encode_character_mouth_atlas(
     atlas: &CharacterMouthAtlas,
 ) -> Result<Vec<u8>, VisualRuntimeError> {
-    if atlas.cancellation_generation == 0
+    if !matches!(
+        atlas.schema_version,
+        FULL_LIP_ATLAS_SCHEMA | NORMALIZED_ORAL_ATLAS_SCHEMA | PHOTOMETRIC_FULL_LIP_ATLAS_SCHEMA
+    ) || atlas.cancellation_generation == 0
         || atlas.actor_id == 0
         || atlas.identity_revision == 0
         || atlas.states.len() < 4
@@ -2737,7 +2946,7 @@ fn encode_character_mouth_atlas(
     let first = atlas.states.first().ok_or(VisualRuntimeError::Payload)?;
     let mut total_pixels = 0_usize;
     let mut wire = WireWriter::default();
-    wire.u32(1);
+    wire.u32(atlas.schema_version);
     wire.u64(atlas.cancellation_generation);
     wire.u64(atlas.actor_id);
     wire.u64(atlas.identity_revision);
@@ -3594,12 +3803,11 @@ fn select_visual_speech_cue(
                 && release.1 >= 0.25
             {
                 Some(release)
-            } else if anticipation.0.canonical_viseme == 1
+            } else if (anticipation.0.canonical_viseme == 1
                 && anticipation.0.strength_q15 >= 24_575
-                && anticipation.1 >= 0.25
+                && anticipation.1 >= 0.25)
+                || anticipation.1 > release.1
             {
-                Some(anticipation)
-            } else if anticipation.1 > release.1 {
                 Some(anticipation)
             } else {
                 Some(release)
@@ -3755,13 +3963,113 @@ fn resolve_project_owned_review_provider(
     })
 }
 
+fn is_lowercase_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn is_review_semantic_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 96
+        && !value.contains("..")
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || b".-".contains(&byte))
+        && value
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphanumeric)
+        && value
+            .as_bytes()
+            .last()
+            .is_some_and(u8::is_ascii_alphanumeric)
+}
+
 #[cfg(debug_assertions)]
-fn resolve_project_owned_review_atlas(
+fn is_exact_legacy_mara_atlas(
+    manifest: &ReviewMouthAtlasManifest,
+    manifest_sha256: &str,
+    requested: &RequestedCharacterMouthAtlasIdentity<'_>,
+) -> bool {
+    manifest.schema_version == FULL_LIP_ATLAS_SCHEMA
+        && manifest.neutral_state_index.is_none()
+        && requested.game_profile_id == LEGACY_MARA_GAME_PROFILE_ID
+        && requested.character_id == LEGACY_MARA_CHARACTER_ID
+        && requested.actor_id == stable_nonzero_id("eclipse-harbor:mara-venn")
+        && manifest.identity_revision == LEGACY_MARA_ATLAS_IDENTITY_REVISION
+        && manifest_sha256 == LEGACY_MARA_ATLAS_MANIFEST_SHA256
+        && manifest.texture.sha256 == LEGACY_MARA_ATLAS_TEXTURE_SHA256
+}
+
+fn validate_review_atlas_enrollment(
+    manifest: &ReviewMouthAtlasManifest,
+    _manifest_sha256: &str,
+    requested: &RequestedCharacterMouthAtlasIdentity<'_>,
+) -> Result<Option<String>, VisualRuntimeError> {
+    if !is_review_semantic_identifier(requested.game_profile_id)
+        || !is_review_semantic_identifier(requested.character_id)
+        || requested.actor_id == 0
+    {
+        return Err(VisualRuntimeError::Admission(
+            "review mouth atlas requested identity is invalid".into(),
+        ));
+    }
+
+    let Some(binding) = manifest.enrollment_binding.as_ref() else {
+        #[cfg(debug_assertions)]
+        if is_exact_legacy_mara_atlas(manifest, _manifest_sha256, requested) {
+            return Ok(None);
+        }
+        return Err(VisualRuntimeError::Admission(
+            "review mouth atlas has no trusted semantic enrollment".into(),
+        ));
+    };
+
+    let references_valid = (1..=16).contains(&binding.reference_provenance_sha256.len())
+        && binding
+            .reference_provenance_sha256
+            .iter()
+            .all(|value| is_lowercase_sha256(value))
+        && binding
+            .reference_provenance_sha256
+            .iter()
+            .enumerate()
+            .all(|(index, value)| !binding.reference_provenance_sha256[..index].contains(value));
+    if binding.schema_version != 1
+        || !is_review_semantic_identifier(&binding.game_profile_id)
+        || !is_review_semantic_identifier(&binding.character_id)
+        || !references_valid
+        || binding.review_status != ReviewMouthAtlasReviewStatus::ReviewedPrivate
+        || !binding
+            .review_evidence_sha256
+            .as_deref()
+            .is_some_and(is_lowercase_sha256)
+    {
+        return Err(VisualRuntimeError::Admission(
+            "review mouth atlas semantic enrollment is not privately reviewed".into(),
+        ));
+    }
+    if binding.game_profile_id != requested.game_profile_id
+        || binding.character_id != requested.character_id
+    {
+        return Err(VisualRuntimeError::Admission(
+            "review mouth atlas semantic identity does not match the requested actor".into(),
+        ));
+    }
+    let canonical_binding = serde_json::to_vec(binding).map_err(|_| {
+        VisualRuntimeError::Admission("review mouth atlas semantic enrollment is invalid".into())
+    })?;
+    Ok(Some(sha256_hex(&canonical_binding)))
+}
+
+fn resolve_character_mouth_atlas(
     configured_root: Option<&Path>,
     generation: u64,
-    actor_id: u64,
+    requested: &RequestedCharacterMouthAtlasIdentity<'_>,
 ) -> Result<CharacterMouthAtlas, VisualRuntimeError> {
-    if generation == 0 || actor_id == 0 {
+    if generation == 0 || requested.actor_id == 0 {
         return Err(VisualRuntimeError::Admission(
             "review atlas has no active actor generation".into(),
         ));
@@ -3794,13 +4102,40 @@ fn resolve_project_owned_review_atlas(
     let manifest_bytes = std::fs::read(&manifest_path).map_err(|_| {
         VisualRuntimeError::Admission("review mouth atlas manifest cannot be read".into())
     })?;
-    let manifest: ReviewMouthAtlasManifestV1 =
+    let manifest: ReviewMouthAtlasManifest =
         serde_json::from_slice(&manifest_bytes).map_err(|_| {
             VisualRuntimeError::Admission("review mouth atlas manifest is invalid".into())
         })?;
+    let manifest_sha256 = sha256_hex(&manifest_bytes);
+    let enrollment_binding_sha256 =
+        validate_review_atlas_enrollment(&manifest, &manifest_sha256, requested)?;
     let texture = &manifest.texture;
     let file_name = Path::new(&texture.file);
-    let dimensions_valid = manifest.schema_version == 1
+    let representation_valid = matches!(
+        (manifest.schema_version, texture.representation),
+        (FULL_LIP_ATLAS_SCHEMA, None)
+            | (
+                FULL_LIP_ATLAS_SCHEMA,
+                Some(ReviewMouthAtlasRepresentation::FullLipObservationV1)
+            )
+            | (
+                NORMALIZED_ORAL_ATLAS_SCHEMA,
+                Some(ReviewMouthAtlasRepresentation::NormalizedOralInteriorV1)
+            )
+            | (
+                PHOTOMETRIC_FULL_LIP_ATLAS_SCHEMA,
+                Some(ReviewMouthAtlasRepresentation::PhotometricFullLipReferenceV1)
+            )
+    );
+    let neutral_state_valid = match manifest.schema_version {
+        PHOTOMETRIC_FULL_LIP_ATLAS_SCHEMA => manifest.neutral_state_index == Some(0),
+        FULL_LIP_ATLAS_SCHEMA | NORMALIZED_ORAL_ATLAS_SCHEMA => {
+            manifest.neutral_state_index.is_none()
+        }
+        _ => false,
+    };
+    let dimensions_valid = representation_valid
+        && neutral_state_valid
         && manifest.identity_revision != 0
         && texture.width >= 16
         && texture.height >= 16
@@ -3854,6 +4189,7 @@ fn resolve_project_owned_review_atlas(
             "review mouth atlas texture hash mismatch".into(),
         ));
     }
+    let texture_file_name = texture.file.clone();
     let state_bytes = texture.state_bytes as usize;
     let mut states = Vec::with_capacity(manifest.states.len());
     for (expected_index, state) in manifest.states.into_iter().enumerate() {
@@ -3895,15 +4231,88 @@ fn resolve_project_owned_review_atlas(
             premultiplied_bgra: state_pixels,
         });
     }
-    let manifest_sha256 = sha256_hex(&manifest_bytes);
+    if manifest.schema_version == PHOTOMETRIC_FULL_LIP_ATLAS_SCHEMA {
+        let neutral = states.first().ok_or_else(|| {
+            VisualRuntimeError::Admission(
+                "photometric mouth atlas has no neutral contact reference".into(),
+            )
+        })?;
+        let neutral_coefficients_valid = neutral.coefficients[0] <= 0.05
+            && neutral.coefficients[1] >= 0.95
+            && neutral.coefficients[2..].iter().all(|value| *value <= 0.05);
+        let opaque_pixels = neutral
+            .premultiplied_bgra
+            .chunks_exact(4)
+            .filter(|pixel| pixel[3] >= 250)
+            .count();
+        let transparent_pixels = neutral
+            .premultiplied_bgra
+            .chunks_exact(4)
+            .filter(|pixel| pixel[3] == 0)
+            .count();
+        let common_alpha_and_pose = states.iter().skip(1).all(|state| {
+            state
+                .enrolled_pose
+                .iter()
+                .zip(neutral.enrolled_pose.iter())
+                .all(|(value, neutral_value)| value.to_bits() == neutral_value.to_bits())
+                && state
+                    .premultiplied_bgra
+                    .chunks_exact(4)
+                    .zip(neutral.premultiplied_bgra.chunks_exact(4))
+                    .all(|(state_pixel, neutral_pixel)| state_pixel[3] == neutral_pixel[3])
+        });
+        if !neutral_coefficients_valid
+            || opaque_pixels < 16
+            || transparent_pixels < 16
+            || !common_alpha_and_pose
+        {
+            return Err(VisualRuntimeError::Admission(
+                "photometric mouth atlas reference invariants are invalid".into(),
+            ));
+        }
+    }
+    let content_sha256 =
+        sha256_hex(format!("{manifest_sha256}\n{actual_texture_sha256}").as_bytes());
     Ok(CharacterMouthAtlas {
+        schema_version: manifest.schema_version,
         cancellation_generation: generation,
-        actor_id,
+        actor_id: requested.actor_id,
         identity_revision: manifest.identity_revision,
-        content_sha256: sha256_hex(
-            format!("{manifest_sha256}\n{actual_texture_sha256}").as_bytes(),
-        ),
+        manifest_sha256,
+        texture_file_name,
+        content_sha256,
+        enrollment_binding_sha256,
         states,
+    })
+}
+
+pub(crate) fn validate_character_mouth_atlas_root(
+    root: &Path,
+    game_profile_id: &str,
+    character_id: &str,
+) -> Result<ValidatedCharacterMouthAtlasV1, VisualRuntimeError> {
+    let requested = RequestedCharacterMouthAtlasIdentity {
+        game_profile_id,
+        character_id,
+        // Import validation does not install the atlas into a worker. The
+        // live actor ID is supplied from NativeSelectedActorLockV1 only when
+        // an enabled revision is loaded for presentation.
+        actor_id: u64::MAX,
+    };
+    let atlas = resolve_character_mouth_atlas(Some(root), 1, &requested)?;
+    let enrollment_binding_sha256 = atlas.enrollment_binding_sha256.ok_or_else(|| {
+        VisualRuntimeError::Admission(
+            "legacy review atlases cannot be imported as character mouth packs".into(),
+        )
+    })?;
+    Ok(ValidatedCharacterMouthAtlasV1 {
+        schema_version: atlas.schema_version,
+        identity_revision: atlas.identity_revision,
+        manifest_sha256: atlas.manifest_sha256,
+        texture_file_name: atlas.texture_file_name,
+        content_sha256: atlas.content_sha256,
+        enrollment_binding_sha256,
     })
 }
 
@@ -4371,10 +4780,14 @@ mod tests {
             }
         };
         CharacterMouthAtlas {
+            schema_version: FULL_LIP_ATLAS_SCHEMA,
             cancellation_generation: 7,
             actor_id: 41,
             identity_revision: 3,
+            manifest_sha256: "b".repeat(64),
+            texture_file_name: "atlas.bin".into(),
             content_sha256: "a".repeat(64),
+            enrollment_binding_sha256: None,
             states: vec![
                 state(0.0, 1.0, 20),
                 state(0.3, 0.2, 40),
@@ -4384,20 +4797,119 @@ mod tests {
         }
     }
 
+    #[cfg(debug_assertions)]
+    fn test_review_atlas_identity() -> RequestedCharacterMouthAtlasIdentity<'static> {
+        RequestedCharacterMouthAtlasIdentity {
+            game_profile_id: "cyberpunk-2077",
+            character_id: "misty",
+            actor_id: stable_nonzero_id("cyberpunk-2077:misty"),
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    fn test_review_atlas_enrollment() -> serde_json::Value {
+        serde_json::json!({
+            "schemaVersion": 1,
+            "gameProfileId": "cyberpunk-2077",
+            "characterId": "misty",
+            "referenceProvenanceSha256": ["b".repeat(64)],
+            "reviewStatus": "reviewed-private",
+            "reviewEvidenceSha256": "c".repeat(64)
+        })
+    }
+
+    #[cfg(debug_assertions)]
+    fn test_review_atlas_document(
+        schema_version: u32,
+        representation: &str,
+    ) -> (serde_json::Value, Vec<u8>) {
+        let state_bytes = 24 * 16 * 4;
+        let mut pixels = vec![0_u8; state_bytes * 4];
+        for state in pixels.chunks_exact_mut(state_bytes) {
+            for (index, pixel) in state.chunks_exact_mut(4).enumerate() {
+                if index < 16 {
+                    pixel.copy_from_slice(&[0, 0, 0, 0]);
+                } else {
+                    pixel.copy_from_slice(&[20, 40, 80, 255]);
+                }
+            }
+        }
+        let states = (0..4)
+            .map(|index| {
+                serde_json::json!({
+                    "index": index,
+                    "coefficients": [index as f64 / 3.0, 1.0 - index as f64 / 3.0,
+                                      0.0, 0.0, 0.0, 0.0, 0.0, index as f64 / 3.0],
+                    "enrolledPose": [0.0, 0.0, 0.0]
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut manifest = serde_json::json!({
+            "schemaVersion": schema_version,
+            "identityRevision": 23,
+            "enrollmentBinding": test_review_atlas_enrollment(),
+            "texture": {
+                "file": "atlas.bin",
+                "sha256": sha256_hex(&pixels),
+                "representation": representation,
+                "width": 24,
+                "height": 16,
+                "strideBytes": 96,
+                "stateCount": 4,
+                "stateBytes": state_bytes
+            },
+            "states": states
+        });
+        if schema_version == PHOTOMETRIC_FULL_LIP_ATLAS_SCHEMA {
+            manifest["neutralStateIndex"] = serde_json::json!(0);
+        }
+        (manifest, pixels)
+    }
+
+    #[cfg(debug_assertions)]
+    fn write_test_review_atlas(directory: &Path, manifest: &serde_json::Value, pixels: &[u8]) {
+        std::fs::write(directory.join("atlas.bin"), pixels).expect("atlas pixels");
+        std::fs::write(
+            directory.join("atlas.json"),
+            serde_json::to_vec_pretty(manifest).expect("serialize atlas manifest"),
+        )
+        .expect("atlas manifest");
+    }
+
     #[test]
     fn character_mouth_atlas_wire_is_bounded_and_premultiplied() {
         let atlas = test_character_mouth_atlas();
         let encoded = encode_character_mouth_atlas(&atlas).expect("valid atlas wire");
         assert!(encoded.len() < MAX_MESSAGE_BYTES);
-        assert_eq!(u32::from_le_bytes(encoded[0..4].try_into().unwrap()), 1);
-        assert_eq!(u64::from_le_bytes(encoded[4..12].try_into().unwrap()), 7);
-        assert_eq!(u64::from_le_bytes(encoded[12..20].try_into().unwrap()), 41);
+        assert_eq!(
+            u32::from_le_bytes(encoded[0..4].try_into().expect("schema bytes")),
+            1
+        );
+        assert_eq!(
+            u64::from_le_bytes(
+                encoded[4..12]
+                    .try_into()
+                    .expect("cancellation generation bytes")
+            ),
+            7
+        );
+        assert_eq!(
+            u64::from_le_bytes(encoded[12..20].try_into().expect("actor id bytes")),
+            41
+        );
 
         let mut invalid = atlas;
         invalid.states[0].premultiplied_bgra[0] = 255;
         invalid.states[0].premultiplied_bgra[3] = 0;
         assert!(matches!(
             encode_character_mouth_atlas(&invalid),
+            Err(VisualRuntimeError::Payload)
+        ));
+
+        let mut invalid_schema = test_character_mouth_atlas();
+        invalid_schema.schema_version = 4;
+        assert!(matches!(
+            encode_character_mouth_atlas(&invalid_schema),
             Err(VisualRuntimeError::Payload)
         ));
     }
@@ -4426,6 +4938,7 @@ mod tests {
         let manifest = serde_json::json!({
             "schemaVersion": 1,
             "identityRevision": 19,
+            "enrollmentBinding": test_review_atlas_enrollment(),
             "texture": {
                 "file": "atlas.bin",
                 "sha256": texture_sha256,
@@ -4439,14 +4952,16 @@ mod tests {
         });
         std::fs::write(
             directory.path().join("atlas.json"),
-            serde_json::to_vec_pretty(&manifest).unwrap(),
+            serde_json::to_vec_pretty(&manifest).expect("serialize atlas manifest"),
         )
         .expect("atlas manifest");
 
-        let loaded = resolve_project_owned_review_atlas(Some(directory.path()), 7, 41)
-            .expect("verified atlas");
+        let loaded =
+            resolve_character_mouth_atlas(Some(directory.path()), 7, &test_review_atlas_identity())
+                .expect("verified atlas");
         assert_eq!(loaded.cancellation_generation, 7);
-        assert_eq!(loaded.actor_id, 41);
+        assert_eq!(loaded.schema_version, FULL_LIP_ATLAS_SCHEMA);
+        assert_eq!(loaded.actor_id, stable_nonzero_id("cyberpunk-2077:misty"));
         assert_eq!(loaded.identity_revision, 19);
         assert_eq!(loaded.states.len(), 4);
         assert_eq!(loaded.states[3].premultiplied_bgra.len(), state_bytes);
@@ -4454,8 +4969,375 @@ mod tests {
         pixels[0] ^= 1;
         std::fs::write(directory.path().join("atlas.bin"), &pixels).expect("corrupt atlas");
         assert!(matches!(
-            resolve_project_owned_review_atlas(Some(directory.path()), 7, 41),
+            resolve_character_mouth_atlas(Some(directory.path()), 7, &test_review_atlas_identity(),),
             Err(VisualRuntimeError::Admission(_))
+        ));
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn review_atlas_loader_preserves_normalized_oral_schema_on_the_worker_wire() {
+        let directory = tempfile::tempdir().expect("atlas scratch");
+        let state_bytes = 24 * 16 * 4;
+        let mut pixels = vec![0_u8; state_bytes * 4];
+        for pixel in pixels.chunks_exact_mut(4) {
+            pixel.copy_from_slice(&[20, 40, 80, 255]);
+        }
+        std::fs::write(directory.path().join("atlas.bin"), &pixels).expect("atlas pixels");
+        let states = (0..4)
+            .map(|index| {
+                serde_json::json!({
+                    "index": index,
+                    "coefficients": [index as f64 / 3.0, 1.0 - index as f64 / 3.0,
+                                      0.0, 0.0, 0.0, 0.0, 0.0, index as f64 / 3.0],
+                    "enrolledPose": [0.0, 0.0, 0.0]
+                })
+            })
+            .collect::<Vec<_>>();
+        let manifest = serde_json::json!({
+            "schemaVersion": 2,
+            "identityRevision": 23,
+            "enrollmentBinding": {
+                "schemaVersion": 1,
+                "gameProfileId": "cyberpunk-2077",
+                "characterId": "misty",
+                "referenceProvenanceSha256": ["b".repeat(64)],
+                "reviewStatus": "reviewed-private",
+                "reviewEvidenceSha256": "c".repeat(64)
+            },
+            "texture": {
+                "file": "atlas.bin",
+                "sha256": sha256_hex(&pixels),
+                "representation": "normalized-oral-interior-v1",
+                "width": 24,
+                "height": 16,
+                "strideBytes": 96,
+                "stateCount": 4,
+                "stateBytes": state_bytes
+            },
+            "states": states
+        });
+        std::fs::write(
+            directory.path().join("atlas.json"),
+            serde_json::to_vec_pretty(&manifest).expect("serialize atlas manifest"),
+        )
+        .expect("atlas manifest");
+
+        let loaded =
+            resolve_character_mouth_atlas(Some(directory.path()), 7, &test_review_atlas_identity())
+                .expect("normalized oral atlas");
+        let encoded = encode_character_mouth_atlas(&loaded).expect("normalized oral atlas wire");
+        assert_eq!(
+            u32::from_le_bytes(encoded[0..4].try_into().expect("schema bytes")),
+            2
+        );
+        assert_eq!(loaded.identity_revision, 23);
+        assert_eq!(loaded.schema_version, NORMALIZED_ORAL_ATLAS_SCHEMA);
+        assert_eq!(loaded.states.len(), 4);
+        assert_eq!(loaded.content_sha256.len(), 64);
+        assert_eq!(
+            loaded.enrollment_binding_sha256.as_deref().map(str::len),
+            Some(64)
+        );
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn review_atlas_loader_rejects_schema_representation_mismatches() {
+        let cases = [
+            (NORMALIZED_ORAL_ATLAS_SCHEMA, None),
+            (
+                NORMALIZED_ORAL_ATLAS_SCHEMA,
+                Some("full-lip-observation-v1"),
+            ),
+            (FULL_LIP_ATLAS_SCHEMA, Some("normalized-oral-interior-v1")),
+            (
+                NORMALIZED_ORAL_ATLAS_SCHEMA,
+                Some("normalized-oral-interior-v2"),
+            ),
+        ];
+        for (schema_version, representation) in cases {
+            let directory = tempfile::tempdir().expect("atlas scratch");
+            let state_bytes = 24 * 16 * 4;
+            let mut pixels = vec![0_u8; state_bytes * 4];
+            for pixel in pixels.chunks_exact_mut(4) {
+                pixel.copy_from_slice(&[20, 40, 80, 255]);
+            }
+            std::fs::write(directory.path().join("atlas.bin"), &pixels).expect("atlas pixels");
+            let mut texture = serde_json::json!({
+                "file": "atlas.bin",
+                "sha256": sha256_hex(&pixels),
+                "width": 24,
+                "height": 16,
+                "strideBytes": 96,
+                "stateCount": 4,
+                "stateBytes": state_bytes
+            });
+            if let Some(representation) = representation {
+                texture["representation"] = serde_json::json!(representation);
+            }
+            let states = (0..4)
+                .map(|index| {
+                    serde_json::json!({
+                        "index": index,
+                        "coefficients": [index as f64 / 3.0, 1.0 - index as f64 / 3.0,
+                                          0.0, 0.0, 0.0, 0.0, 0.0, index as f64 / 3.0],
+                        "enrolledPose": [0.0, 0.0, 0.0]
+                    })
+                })
+                .collect::<Vec<_>>();
+            let manifest = serde_json::json!({
+                "schemaVersion": schema_version,
+                "identityRevision": 23,
+                "enrollmentBinding": test_review_atlas_enrollment(),
+                "texture": texture,
+                "states": states
+            });
+            std::fs::write(
+                directory.path().join("atlas.json"),
+                serde_json::to_vec_pretty(&manifest).expect("serialize atlas manifest"),
+            )
+            .expect("atlas manifest");
+
+            assert!(matches!(
+                resolve_character_mouth_atlas(
+                    Some(directory.path()),
+                    7,
+                    &test_review_atlas_identity(),
+                ),
+                Err(VisualRuntimeError::Admission(_))
+            ));
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn review_atlas_loader_rejects_swapped_character_or_game_despite_forged_revision() {
+        for (game_profile_id, character_id) in
+            [("cyberpunk-2077", "judy-alvarez"), ("witcher-3", "misty")]
+        {
+            let directory = tempfile::tempdir().expect("atlas scratch");
+            let (mut manifest, pixels) = test_review_atlas_document(
+                NORMALIZED_ORAL_ATLAS_SCHEMA,
+                "normalized-oral-interior-v1",
+            );
+            manifest["identityRevision"] = serde_json::json!(u64::MAX);
+            manifest["enrollmentBinding"]["gameProfileId"] = serde_json::json!(game_profile_id);
+            manifest["enrollmentBinding"]["characterId"] = serde_json::json!(character_id);
+            write_test_review_atlas(directory.path(), &manifest, &pixels);
+
+            assert!(matches!(
+                resolve_character_mouth_atlas(
+                    Some(directory.path()),
+                    7,
+                    &test_review_atlas_identity(),
+                ),
+                Err(VisualRuntimeError::Admission(message))
+                    if message.contains("does not match the requested actor")
+            ));
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn review_atlas_loader_rejects_unreviewed_or_self_declared_qualified_enrollment() {
+        for review_status in ["unreviewed", "qualified"] {
+            let directory = tempfile::tempdir().expect("atlas scratch");
+            let (mut manifest, pixels) = test_review_atlas_document(
+                NORMALIZED_ORAL_ATLAS_SCHEMA,
+                "normalized-oral-interior-v1",
+            );
+            manifest["enrollmentBinding"]["reviewStatus"] = serde_json::json!(review_status);
+            manifest["enrollmentBinding"]
+                .as_object_mut()
+                .expect("enrollment object")
+                .remove("reviewEvidenceSha256");
+            write_test_review_atlas(directory.path(), &manifest, &pixels);
+
+            assert!(matches!(
+                resolve_character_mouth_atlas(
+                    Some(directory.path()),
+                    7,
+                    &test_review_atlas_identity(),
+                ),
+                Err(VisualRuntimeError::Admission(_))
+            ));
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn review_atlas_loader_bounds_hash_only_reference_provenance() {
+        let cases = ["source-url", "too-many-hashes", "duplicate-hash"];
+        for case in cases {
+            let directory = tempfile::tempdir().expect("atlas scratch");
+            let (mut manifest, pixels) = test_review_atlas_document(
+                NORMALIZED_ORAL_ATLAS_SCHEMA,
+                "normalized-oral-interior-v1",
+            );
+            match case {
+                "source-url" => {
+                    manifest["enrollmentBinding"]["sourceUrl"] =
+                        serde_json::json!("https://example.invalid/reference.png");
+                }
+                "too-many-hashes" => {
+                    manifest["enrollmentBinding"]["referenceProvenanceSha256"] =
+                        serde_json::json!((0_u8..17)
+                            .map(|value| format!("{value:064x}"))
+                            .collect::<Vec<_>>());
+                }
+                "duplicate-hash" => {
+                    manifest["enrollmentBinding"]["referenceProvenanceSha256"] =
+                        serde_json::json!(["b".repeat(64), "b".repeat(64)]);
+                }
+                _ => unreachable!(),
+            }
+            write_test_review_atlas(directory.path(), &manifest, &pixels);
+            assert!(matches!(
+                resolve_character_mouth_atlas(
+                    Some(directory.path()),
+                    7,
+                    &test_review_atlas_identity(),
+                ),
+                Err(VisualRuntimeError::Admission(_))
+            ));
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn review_atlas_loader_accepts_strict_photometric_reference_schema() {
+        let directory = tempfile::tempdir().expect("atlas scratch");
+        let (manifest, pixels) = test_review_atlas_document(
+            PHOTOMETRIC_FULL_LIP_ATLAS_SCHEMA,
+            "photometric-full-lip-reference-v1",
+        );
+        write_test_review_atlas(directory.path(), &manifest, &pixels);
+
+        let loaded =
+            resolve_character_mouth_atlas(Some(directory.path()), 7, &test_review_atlas_identity())
+                .expect("photometric full-lip atlas");
+        assert_eq!(loaded.schema_version, PHOTOMETRIC_FULL_LIP_ATLAS_SCHEMA);
+        assert_eq!(
+            loaded.enrollment_binding_sha256.as_deref().map(str::len),
+            Some(64)
+        );
+        let wire = encode_character_mouth_atlas(&loaded).expect("schema three worker wire");
+        assert_eq!(
+            u32::from_le_bytes(wire[0..4].try_into().expect("schema bytes")),
+            PHOTOMETRIC_FULL_LIP_ATLAS_SCHEMA
+        );
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn review_atlas_loader_rejects_unbound_or_invalid_photometric_neutral_reference() {
+        for case in [
+            "unbound",
+            "neutral-missing",
+            "neutral-not-zero",
+            "alpha-mask-changed",
+            "mask-has-no-transparent-exterior",
+            "pose-changed",
+            "bad-neutral-coefficients",
+        ] {
+            let directory = tempfile::tempdir().expect("atlas scratch");
+            let (mut manifest, mut pixels) = test_review_atlas_document(
+                PHOTOMETRIC_FULL_LIP_ATLAS_SCHEMA,
+                "photometric-full-lip-reference-v1",
+            );
+            match case {
+                "unbound" => {
+                    manifest
+                        .as_object_mut()
+                        .expect("manifest object")
+                        .remove("enrollmentBinding");
+                }
+                "neutral-missing" => {
+                    manifest
+                        .as_object_mut()
+                        .expect("manifest object")
+                        .remove("neutralStateIndex");
+                }
+                "neutral-not-zero" => manifest["neutralStateIndex"] = serde_json::json!(1),
+                "alpha-mask-changed" => {
+                    let state_bytes = 24 * 16 * 4;
+                    pixels[state_bytes + 3] = 1;
+                    manifest["texture"]["sha256"] = serde_json::json!(sha256_hex(&pixels));
+                }
+                "mask-has-no-transparent-exterior" => {
+                    let state_bytes = 24 * 16 * 4;
+                    for state in pixels.chunks_exact_mut(state_bytes) {
+                        for pixel in state.chunks_exact_mut(4).take(16) {
+                            pixel[3] = 255;
+                        }
+                    }
+                    manifest["texture"]["sha256"] = serde_json::json!(sha256_hex(&pixels));
+                }
+                "pose-changed" => {
+                    manifest["states"][1]["enrolledPose"] = serde_json::json!([0.1, 0.0, 0.0]);
+                }
+                "bad-neutral-coefficients" => {
+                    manifest["states"][0]["coefficients"] =
+                        serde_json::json!([0.1, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+                }
+                _ => unreachable!(),
+            }
+            write_test_review_atlas(directory.path(), &manifest, &pixels);
+            assert!(matches!(
+                resolve_character_mouth_atlas(
+                    Some(directory.path()),
+                    7,
+                    &test_review_atlas_identity(),
+                ),
+                Err(VisualRuntimeError::Admission(_))
+            ));
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn legacy_mara_compatibility_requires_the_complete_pinned_v80_tuple() {
+        let manifest_json = serde_json::json!({
+            "schemaVersion": 1,
+            "identityRevision": LEGACY_MARA_ATLAS_IDENTITY_REVISION,
+            "texture": {
+                "file": "atlas-bgra8-premultiplied.bin",
+                "sha256": LEGACY_MARA_ATLAS_TEXTURE_SHA256,
+                "width": 206,
+                "height": 143,
+                "strideBytes": 824,
+                "stateCount": 12,
+                "stateBytes": 117832
+            },
+            "states": []
+        });
+        let manifest: ReviewMouthAtlasManifest =
+            serde_json::from_value(manifest_json).expect("legacy manifest shape");
+        let requested = RequestedCharacterMouthAtlasIdentity {
+            game_profile_id: LEGACY_MARA_GAME_PROFILE_ID,
+            character_id: LEGACY_MARA_CHARACTER_ID,
+            actor_id: stable_nonzero_id("eclipse-harbor:mara-venn"),
+        };
+        assert!(is_exact_legacy_mara_atlas(
+            &manifest,
+            LEGACY_MARA_ATLAS_MANIFEST_SHA256,
+            &requested,
+        ));
+        assert!(!is_exact_legacy_mara_atlas(
+            &manifest,
+            &"0".repeat(64),
+            &requested,
+        ));
+        let swapped = RequestedCharacterMouthAtlasIdentity {
+            character_id: "misty",
+            actor_id: stable_nonzero_id("eclipse-harbor:misty"),
+            ..requested
+        };
+        assert!(!is_exact_legacy_mara_atlas(
+            &manifest,
+            LEGACY_MARA_ATLAS_MANIFEST_SHA256,
+            &swapped,
         ));
     }
 
@@ -4999,6 +5881,62 @@ mod tests {
             validate_admitted_frame_request(&request),
             Err(VisualRuntimeError::InvalidRequest)
         ));
+        request = valid_admitted_request();
+        request.game_profile_id.clear();
+        assert!(matches!(
+            validate_admitted_frame_request(&request),
+            Err(VisualRuntimeError::InvalidRequest)
+        ));
+        request = valid_admitted_request();
+        request.character_id = "../other-character".into();
+        assert!(matches!(
+            validate_admitted_frame_request(&request),
+            Err(VisualRuntimeError::InvalidRequest)
+        ));
+    }
+
+    #[test]
+    fn admitted_visual_provider_contract_accepts_only_exact_pinned_model_tuples() {
+        assert!(admitted_provider_contract_is_exact(
+            OPENSEEFACE_PACK_ID,
+            OPENSEEFACE_PACK_REVISION,
+            Some("mnv3_detection_opt.onnx"),
+            OPENSEEFACE_MNV3_DETECTOR_SHA256,
+            Some("lm_model1_opt.onnx"),
+            OPENSEEFACE_LM1_SHA256,
+        ));
+        assert!(admitted_provider_contract_is_exact(
+            YUNET_OPENSEEFACE_PACK_ID,
+            OPENSEEFACE_PACK_REVISION,
+            Some("face_detection_yunet_2023mar.onnx"),
+            OPENSEEFACE_YUNET_DETECTOR_SHA256,
+            Some("lm_model1_opt.onnx"),
+            OPENSEEFACE_LM1_SHA256,
+        ));
+        assert!(!admitted_provider_contract_is_exact(
+            "unreviewed-yunet-provider",
+            OPENSEEFACE_PACK_REVISION,
+            Some("face_detection_yunet_2023mar.onnx"),
+            OPENSEEFACE_YUNET_DETECTOR_SHA256,
+            Some("lm_model1_opt.onnx"),
+            OPENSEEFACE_LM1_SHA256,
+        ));
+        assert!(!admitted_provider_contract_is_exact(
+            YUNET_OPENSEEFACE_PACK_ID,
+            OPENSEEFACE_PACK_REVISION,
+            Some("face_detection_yunet_2023mar.onnx"),
+            OPENSEEFACE_MNV3_DETECTOR_SHA256,
+            Some("lm_model1_opt.onnx"),
+            OPENSEEFACE_LM1_SHA256,
+        ));
+        assert!(!admitted_provider_contract_is_exact(
+            YUNET_OPENSEEFACE_PACK_ID,
+            OPENSEEFACE_PACK_REVISION,
+            Some("face_detection_yunet_2023mar.onnx"),
+            OPENSEEFACE_YUNET_DETECTOR_SHA256,
+            Some("lm_model1_opt.onnx"),
+            OPENSEEFACE_MNV3_DETECTOR_SHA256,
+        ));
     }
 
     struct FakeActorLockSource {
@@ -5097,6 +6035,8 @@ mod tests {
             assert_eq!(request.track.actor_id, current.runtime_actor_id);
             assert_eq!(request.track.track_id, current.track_id);
             assert_eq!(request.track.track_epoch, current.track_epoch);
+            assert_eq!(request.game_profile_id, current.game_profile_id);
+            assert_eq!(request.character_id, current.character_id);
             assert_eq!(request.selected_process_id, current.selected_process_id);
             assert_eq!(
                 request.selected_window_handle,
@@ -5340,6 +6280,8 @@ mod tests {
             turn_id_high: 3,
             turn_id_low: 4,
             sentence_id: 1,
+            game_profile_id: "cyberpunk-2077".into(),
+            character_id: "misty".into(),
             selected_process_id: 42,
             selected_window_handle: 43,
             selected_executable_name: "game.exe".into(),

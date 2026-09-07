@@ -8,6 +8,14 @@ use crate::character_content_overrides::{
     CharacterContentOverrideScopeV1, CharacterContentOverrideSnapshotV1,
     SaveCharacterContentOverrideRequestV1,
 };
+use crate::character_mouth_packs::{
+    CharacterMouthPackFilesV1, CharacterMouthPackManagerV1, CharacterMouthPackPreviewV1,
+    CharacterMouthPackStateV1, CurrentCharacterMouthEnableAuthorityV1,
+    DisableCharacterMouthPackRequestV1, DisabledCharacterMouthPackV1,
+    EnableCharacterMouthPackRequestV1, EnabledCharacterMouthPackV1,
+    ImportCharacterMouthPackRequestV1, InstalledCharacterMouthPackV1,
+    SelectedCharacterMouthAuthorityV1,
+};
 use crate::character_workspace::{
     CharacterCatalogSnapshot, CharacterInspection, CharacterInspectionRequest,
     CharacterMemoryBackupDeleteRequest, CharacterMemoryBackupDeleteResult,
@@ -43,7 +51,7 @@ use crate::game_targets::{
 };
 use crate::identity_runtime::{
     IdentityReferenceEnrollmentCommandRequest, IdentityReferenceEnrollmentReceipt,
-    NativeActorLockBusV1, QualifiedIdentityRuntimeServiceV1,
+    NativeActorLockBusV1, NativeActorLockStateV1, QualifiedIdentityRuntimeServiceV1,
 };
 use crate::local_resources::{
     ExperimentalPackMutationRequest, ExperimentalPackState, LocalResourceManager,
@@ -198,6 +206,7 @@ pub struct AppState {
     resources: ResourceCatalog,
     content_packs: ContentPackManagerV1,
     character_content_overrides: CharacterContentOverrideManagerV1,
+    character_mouth_packs: Arc<CharacterMouthPackManagerV1>,
     pub(crate) provider_loadouts: ProviderLoadoutManager,
     character_workspace: CharacterWorkspace,
     game_targets: GameTargetManager,
@@ -271,6 +280,10 @@ impl AppState {
             runtime_supervisor.clone(),
         );
         let media_broker = MediaBrokerSupervisor::new(media_launch, runtime_supervisor.clone());
+        let character_mouth_packs = Arc::new(
+            CharacterMouthPackManagerV1::new(&config_directory)
+                .map_err(|error| error.to_string())?,
+        );
         let visual_runtime = MouthWorkerSupervisor::new(
             MouthWorkerLaunchConfig::from_application(
                 cfg!(dev) && cfg!(debug_assertions),
@@ -279,7 +292,8 @@ impl AppState {
             .map_err(|error| error.to_string())?,
             runtime_supervisor.clone(),
             media_broker.clone(),
-        );
+        )
+        .with_character_mouth_packs(Arc::clone(&character_mouth_packs));
         let identity_actor_locks = NativeActorLockBusV1::new_unqualified();
         let local_resources = Arc::new(
             LocalResourceManager::new(&config_directory, Some(&resource_root))
@@ -356,6 +370,7 @@ impl AppState {
             resources,
             content_packs,
             character_content_overrides,
+            character_mouth_packs,
             provider_loadouts,
             character_workspace,
             game_targets: GameTargetManager::default(),
@@ -1674,6 +1689,107 @@ pub fn reset_character_content_override(
         .character_content_overrides
         .reset(request)
         .map_err(product_error)
+}
+
+fn selected_character_mouth_authority(
+    state: &AppState,
+    game_profile_id: &str,
+) -> Result<SelectedCharacterMouthAuthorityV1, CommandError> {
+    let profile = state
+        .resources
+        .load_game_profile(game_profile_id)
+        .map_err(product_error)?;
+    let selected_character_id = state.character_workspace.selected_for_game(game_profile_id);
+    SelectedCharacterMouthAuthorityV1::from_persisted_selection(
+        &profile,
+        selected_character_id.as_deref(),
+    )
+    .map_err(product_error)
+}
+
+#[tauri::command]
+pub fn inspect_character_mouth_pack(
+    files: CharacterMouthPackFilesV1,
+    state: State<'_, AppState>,
+) -> Result<CharacterMouthPackPreviewV1, CommandError> {
+    let authority = selected_character_mouth_authority(&state, &files.game_profile_id)?;
+    state
+        .character_mouth_packs
+        .inspect(&authority, &files)
+        .map_err(product_error)
+}
+
+#[tauri::command]
+pub fn import_character_mouth_pack(
+    request: ImportCharacterMouthPackRequestV1,
+    state: State<'_, AppState>,
+) -> Result<InstalledCharacterMouthPackV1, CommandError> {
+    record_native_product_event(
+        &state,
+        "character-mouth-pack",
+        "mouth-pack.import_requested",
+    );
+    let authority = selected_character_mouth_authority(&state, &request.files.game_profile_id)?;
+    state
+        .character_mouth_packs
+        .import(&authority, request, epoch_ms())
+        .map_err(product_error)
+}
+
+#[tauri::command]
+pub fn enable_character_mouth_pack(
+    request: EnableCharacterMouthPackRequestV1,
+    state: State<'_, AppState>,
+) -> Result<EnabledCharacterMouthPackV1, CommandError> {
+    record_native_product_event(
+        &state,
+        "character-mouth-pack",
+        "mouth-pack.enable_requested",
+    );
+    let selected = selected_character_mouth_authority(&state, &request.game_profile_id)?;
+    let lock = match state.identity_actor_locks.snapshot() {
+        NativeActorLockStateV1::Selected(lock) => lock,
+        NativeActorLockStateV1::IdentityPackUnqualified
+        | NativeActorLockStateV1::QualifiedNoSelection { .. } => {
+            return Err(product_error(
+                "enabling a mouth pack requires a current qualified or sealed native actor selection",
+            ));
+        }
+    };
+    let authority = CurrentCharacterMouthEnableAuthorityV1::from_current_actor(
+        selected,
+        lock.as_ref(),
+        epoch_ms(),
+    )
+    .map_err(product_error)?;
+    state
+        .character_mouth_packs
+        .enable(&authority, request, epoch_ms())
+        .map_err(product_error)
+}
+
+#[tauri::command]
+pub fn disable_character_mouth_pack(
+    request: DisableCharacterMouthPackRequestV1,
+    state: State<'_, AppState>,
+) -> Result<DisabledCharacterMouthPackV1, CommandError> {
+    record_native_product_event(
+        &state,
+        "character-mouth-pack",
+        "mouth-pack.disable_requested",
+    );
+    let authority = selected_character_mouth_authority(&state, &request.game_profile_id)?;
+    state
+        .character_mouth_packs
+        .disable(&authority, request)
+        .map_err(product_error)
+}
+
+#[tauri::command]
+pub fn character_mouth_pack_state(
+    state: State<'_, AppState>,
+) -> Result<CharacterMouthPackStateV1, CommandError> {
+    state.character_mouth_packs.state().map_err(product_error)
 }
 
 #[tauri::command]

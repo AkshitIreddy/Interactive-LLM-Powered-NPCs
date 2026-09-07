@@ -33,6 +33,13 @@ const MAX_VISUAL_DEADLINE_MILLIS: u64 = 2_000;
 const IDENTITY_PACK_ID: &str = "opencv-yunet-sface-private-eval";
 const IDENTITY_PACK_REVISION: &str = "zoo-47534e27-opencv-5.0.0.93";
 const IDENTITY_RUNTIME_AUTHORITY_SCHEMA_V1: &str = "npc.identity-runtime-authority/v1";
+const YUNET_OPENSEEFACE_VISUAL_SIGNAL_PACK_ID: &str = "openseeface-yunet640-lm1-mouth-signal";
+const YUNET_OPENSEEFACE_DETECTOR_PATH: &str = "models/face_detection_yunet_2023mar.onnx";
+const YUNET_OPENSEEFACE_DETECTOR_SHA256: &str =
+    "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4";
+const OPENSEEFACE_LM1_PATH: &str = "models/lm_model1_opt.onnx";
+const OPENSEEFACE_LM1_SHA256: &str =
+    "5bec42b298a24142cdb249a7256d65bc3fc0fbc673fa1752a64f4d7164719c9f";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1062,9 +1069,11 @@ impl LocalResourceManager {
         })
     }
 
-    /// Resolves the only visual pack this product currently knows how to
-    /// launch from a governor-minted admission. No caller supplies a path,
-    /// runtime, placement, measurement, or receipt.
+    /// Resolves an exact visual provider from a governor-minted admission.
+    /// No caller supplies a provider id, path, runtime, placement,
+    /// measurement, or receipt. The existing MNV3 pack remains the default;
+    /// the YuNet pack can cross this boundary only when it is the exact pack
+    /// selected by the sealed loadout.
     pub fn resolve_admitted_openseeface_launch(
         &self,
     ) -> Result<NativeAdmittedVisualPackLaunchV1, LocalResourceError> {
@@ -1091,22 +1100,21 @@ impl LocalResourceManager {
                         .into(),
                 )
             })?;
-        let model = active
-            .receipt
-            .models()
-            .iter()
-            .find(|model| {
-                model.role == ModelPackKindV1::Vision
-                    && model.identity.pack_id.as_str() == OPENSEEFACE_VISUAL_SIGNAL_PACK_ID
-                    && model.identity.revision.as_str() == OPENSEEFACE_VISUAL_SIGNAL_REVISION
-            })
-            .cloned()
-            .ok_or_else(|| {
-                LocalResourceError::Operation(
-                    "the current sealed loadout does not admit the exact OpenSeeFace visual pack"
-                        .into(),
-                )
-            })?;
+        let mut admitted_visual_models = active.receipt.models().iter().filter(|model| {
+            model.role == ModelPackKindV1::Vision
+                && supported_openseeface_visual_identity(&model.identity)
+        });
+        let model = admitted_visual_models.next().cloned().ok_or_else(|| {
+            LocalResourceError::Operation(
+                "the current sealed loadout does not admit an exact supported OpenSeeFace visual pack"
+                    .into(),
+            )
+        })?;
+        if admitted_visual_models.next().is_some() {
+            return Err(LocalResourceError::Operation(
+                "the current sealed loadout ambiguously admits multiple visual providers".into(),
+            ));
+        }
         let trusted_pack = packs
             .iter()
             .find(|pack| pack.identity == model.identity)
@@ -1177,8 +1185,23 @@ impl LocalResourceManager {
                 "the active installed visual tree is bound to a different manifest".into(),
             ));
         }
-        let detector_model = native_installed_file(&inventory, "models/mnv3_detection_opt.onnx")?;
-        let landmark_model = native_installed_file(&inventory, "models/lm_model1_opt.onnx")?;
+        let detector_path =
+            if model.identity.pack_id.as_str() == YUNET_OPENSEEFACE_VISUAL_SIGNAL_PACK_ID {
+                YUNET_OPENSEEFACE_DETECTOR_PATH
+            } else {
+                "models/mnv3_detection_opt.onnx"
+            };
+        let detector_model = native_installed_file(&inventory, detector_path)?;
+        let landmark_model = native_installed_file(&inventory, OPENSEEFACE_LM1_PATH)?;
+        if landmark_model.sha256.as_str() != OPENSEEFACE_LM1_SHA256
+            || (model.identity.pack_id.as_str() == YUNET_OPENSEEFACE_VISUAL_SIGNAL_PACK_ID
+                && detector_model.sha256.as_str() != YUNET_OPENSEEFACE_DETECTOR_SHA256)
+        {
+            return Err(LocalResourceError::Operation(
+                "the admitted visual provider model hashes do not match the frozen native contract"
+                    .into(),
+            ));
+        }
         let openseeface_license = native_installed_file(&inventory, "LICENSE")?;
         let runtime_library = native_installed_file(
             &inventory,
@@ -2281,6 +2304,14 @@ fn native_installed_file(
     })
 }
 
+fn supported_openseeface_visual_identity(identity: &PackRevision) -> bool {
+    identity.revision.as_str() == OPENSEEFACE_VISUAL_SIGNAL_REVISION
+        && matches!(
+            identity.pack_id.as_str(),
+            OPENSEEFACE_VISUAL_SIGNAL_PACK_ID | YUNET_OPENSEEFACE_VISUAL_SIGNAL_PACK_ID
+        )
+}
+
 fn verify_native_file_binding(
     root: &Path,
     binding: &NativeFileBindingV1,
@@ -2576,6 +2607,30 @@ mod tests {
         wrong.revision = "latest".into();
         assert!(validate_mutation(&wrong).is_err());
         assert!(validate_mutation(&request(true)).is_ok());
+    }
+
+    #[test]
+    fn admitted_visual_identity_allows_only_the_two_frozen_provider_ids() {
+        let identity = |pack_id: &str, revision: &str| PackRevision {
+            pack_id: npc_model_manager::PackId::parse(pack_id).expect("pack id"),
+            revision: npc_model_manager::Revision::parse(revision).expect("revision"),
+        };
+        assert!(supported_openseeface_visual_identity(&identity(
+            OPENSEEFACE_VISUAL_SIGNAL_PACK_ID,
+            OPENSEEFACE_VISUAL_SIGNAL_REVISION,
+        )));
+        assert!(supported_openseeface_visual_identity(&identity(
+            YUNET_OPENSEEFACE_VISUAL_SIGNAL_PACK_ID,
+            OPENSEEFACE_VISUAL_SIGNAL_REVISION,
+        )));
+        assert!(!supported_openseeface_visual_identity(&identity(
+            "openseeface-yunet640-lm1-unreviewed",
+            OPENSEEFACE_VISUAL_SIGNAL_REVISION,
+        )));
+        assert!(!supported_openseeface_visual_identity(&identity(
+            YUNET_OPENSEEFACE_VISUAL_SIGNAL_PACK_ID,
+            "latest",
+        )));
     }
 
     #[test]
