@@ -602,6 +602,42 @@ fn archive_preflight_blocks_links_bombs_case_collisions_and_file_parents() {
         ),
         Err(ArchiveValidationError::SizeLimit)
     ));
+    assert_eq!(
+        validate_archive_entries(
+            [ArchiveEntry {
+                path: "runtime/lib/",
+                kind: ArchiveEntryKind::Directory,
+                uncompressed_size: 0,
+            }],
+            &policy,
+        )
+        .unwrap()[0]
+            .as_str(),
+        "runtime/lib"
+    );
+    assert!(validate_archive_entries(
+        [ArchiveEntry {
+            path: "runtime/lib//",
+            kind: ArchiveEntryKind::Directory,
+            uncompressed_size: 0,
+        }],
+        &policy,
+    )
+    .is_err());
+    for (path, kind) in [
+        ("/", ArchiveEntryKind::Directory),
+        ("runtime/lib/", ArchiveEntryKind::File),
+    ] {
+        assert!(validate_archive_entries(
+            [ArchiveEntry {
+                path,
+                kind,
+                uncompressed_size: 0,
+            }],
+            &policy,
+        )
+        .is_err());
+    }
 }
 
 #[test]
@@ -810,6 +846,88 @@ fn activation_requires_a_verified_attestation_and_rejects_replay() {
         ),
         Err(ManagerError::AttestationReplay)
     ));
+    manager.activate(&identity).unwrap();
+}
+
+#[test]
+fn abandoned_self_test_challenge_is_nonce_scoped_and_retryable() {
+    let (mut manager, identity) = prepare_staged_manager();
+    let abandoned = manager
+        .issue_self_test_challenge(&identity, "mock-runtime", 100, 60)
+        .unwrap();
+    let old_attestation = fixture_attestation(
+        abandoned.clone(),
+        AttestedSelfTestOutcomeV1 {
+            passed: true,
+            duration_millis: 1,
+            output_sha256: Some(digest(b"self-test-ok")),
+            diagnostic_code: None,
+        },
+    );
+
+    assert!(matches!(
+        manager.abandon_self_test_challenge(&identity, &"00".repeat(32)),
+        Err(ManagerError::AttestationChallengeMismatch)
+    ));
+    manager
+        .record_self_test_attestation(
+            &identity,
+            old_attestation.clone(),
+            &FixtureAttestationVerifier,
+            120,
+        )
+        .unwrap();
+    assert!(matches!(
+        manager.abandon_self_test_challenge(&identity, &abandoned.nonce),
+        Err(ManagerError::InvalidState(InstallState::Activating))
+    ));
+
+    let (mut manager, identity) = prepare_staged_manager();
+    let abandoned = manager
+        .issue_self_test_challenge(&identity, "mock-runtime", 100, 60)
+        .unwrap();
+    let old_attestation = fixture_attestation(
+        abandoned.clone(),
+        AttestedSelfTestOutcomeV1 {
+            passed: true,
+            duration_millis: 1,
+            output_sha256: Some(digest(b"self-test-ok")),
+            diagnostic_code: None,
+        },
+    );
+    manager
+        .abandon_self_test_challenge(&identity, &abandoned.nonce)
+        .unwrap();
+    assert!(matches!(
+        manager.record_self_test_attestation(
+            &identity,
+            old_attestation,
+            &FixtureAttestationVerifier,
+            120,
+        ),
+        Err(ManagerError::MissingSelfTestChallenge)
+    ));
+
+    let replacement = manager
+        .issue_self_test_challenge(&identity, "mock-runtime", 121, 60)
+        .unwrap();
+    assert_ne!(replacement.nonce, abandoned.nonce);
+    manager
+        .record_self_test_attestation(
+            &identity,
+            fixture_attestation(
+                replacement,
+                AttestedSelfTestOutcomeV1 {
+                    passed: true,
+                    duration_millis: 1,
+                    output_sha256: Some(digest(b"self-test-ok")),
+                    diagnostic_code: None,
+                },
+            ),
+            &FixtureAttestationVerifier,
+            130,
+        )
+        .unwrap();
     manager.activate(&identity).unwrap();
 }
 

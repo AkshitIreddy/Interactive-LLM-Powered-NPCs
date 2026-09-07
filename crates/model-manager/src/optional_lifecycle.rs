@@ -181,6 +181,19 @@ impl TrustedOptionalPackLifecycleV1 {
         Ok(())
     }
 
+    /// Clears only the exact outstanding self-test challenge owned by a
+    /// failed provider probe. The immutable inactive version remains verified
+    /// and can be retried under a freshly minted whole-loadout admission.
+    pub fn abandon_self_test_challenge(
+        &mut self,
+        identity: &PackRevision,
+        expected_nonce: &str,
+    ) -> Result<(), OptionalPackLifecycleError> {
+        self.manager
+            .abandon_self_test_challenge(identity, expected_nonce)?;
+        Ok(())
+    }
+
     pub fn remove(
         &mut self,
         identity: &PackRevision,

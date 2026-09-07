@@ -325,19 +325,51 @@ where
         selection: &SelectedLoadoutSelectionV1,
         context: NativeAdmissionContextV1<'_>,
     ) -> SelectedLoadoutDecisionV1 {
+        self.admit_with_target_policy(selection, context, true)
+    }
+
+    /// Mints a setup-only receipt for an explicitly selected complete loadout
+    /// before any game process exists. It uses the same signed current-device
+    /// envelopes and configured game RAM/VRAM reserves as runtime admission,
+    /// but carries no target PID and therefore cannot become runtime launch
+    /// authority. The caller must keep this receipt scoped to install/self-test
+    /// authorization and run normal target-bound admission before gameplay.
+    pub fn admit_for_setup(
+        &mut self,
+        selection: &SelectedLoadoutSelectionV1,
+        context: NativeAdmissionContextV1<'_>,
+    ) -> SelectedLoadoutDecisionV1 {
+        self.admit_with_target_policy(selection, context, false)
+    }
+
+    fn admit_with_target_policy(
+        &mut self,
+        selection: &SelectedLoadoutSelectionV1,
+        context: NativeAdmissionContextV1<'_>,
+        require_target_pid: bool,
+    ) -> SelectedLoadoutDecisionV1 {
         let mut base = DecisionBuilderV1::new(selection, &context);
-        base.pressure_cancellations = self
-            .scheduler
-            .apply_pressure(context.resource_pressure, context.now_monotonic_millis);
+        if require_target_pid {
+            base.pressure_cancellations = self
+                .scheduler
+                .apply_pressure(context.resource_pressure, context.now_monotonic_millis);
+        }
         if let Err(detail) = validate_selection(selection) {
             return base.block(SelectedLoadoutBlockCodeV1::InvalidSelection, detail);
         }
-        let target_pid = match context.exact_target_pid {
-            Some(pid) if pid != 0 => pid,
-            _ => {
+        let target_pid = match (require_target_pid, context.exact_target_pid) {
+            (true, Some(pid)) if pid != 0 => Some(pid),
+            (true, _) => {
                 return base.block(
                     SelectedLoadoutBlockCodeV1::MissingTargetPid,
                     "a native-selected non-zero target PID is required".to_owned(),
+                )
+            }
+            (false, None) => None,
+            (false, Some(_)) => {
+                return base.block(
+                    SelectedLoadoutBlockCodeV1::InvalidSelection,
+                    "setup-only admission must not carry runtime target authority".to_owned(),
                 )
             }
         };
@@ -351,11 +383,11 @@ where
             }
         };
         base.live_snapshot = Some(telemetry.clone());
-        if telemetry.selected_game_pid != Some(target_pid) {
+        if telemetry.selected_game_pid != target_pid {
             return base.block(
                 SelectedLoadoutBlockCodeV1::TargetPidMismatch,
                 format!(
-                    "telemetry PID {:?} does not match selected target PID {target_pid}",
+                    "telemetry PID {:?} does not match admission target PID {target_pid:?}",
                     telemetry.selected_game_pid
                 ),
             );
@@ -533,11 +565,13 @@ where
             &selection.roles,
             &qualified,
         );
-        self.measurement_state = pending_trust;
-        self.active_evidence = qualified
-            .into_iter()
-            .map(|evidence| (evidence.identity().clone(), evidence))
-            .collect();
+        if require_target_pid {
+            self.measurement_state = pending_trust;
+            self.active_evidence = qualified
+                .into_iter()
+                .map(|evidence| (evidence.identity().clone(), evidence))
+                .collect();
+        }
         base.admit(receipt, residency_decisions)
     }
 
@@ -809,13 +843,17 @@ impl DecisionBuilderV1 {
         admission_receipt: LoadoutAdmissionV1,
         residency_decisions: Vec<MeasuredResidencyDecisionV1>,
     ) -> SelectedLoadoutDecisionV1 {
+        let detail = if self.exact_target_pid.is_some() {
+            "exact selected loadout passed current-device whole-loadout admission"
+        } else {
+            "exact selected loadout passed setup-only current-device admission with configured game reserves; this receipt is not runtime target authority"
+        };
         SelectedLoadoutDecisionV1 {
             schema: self.schema,
             selection_id: self.selection_id,
             status: SelectedLoadoutStatusV1::Admitted,
             reason_code: None,
-            detail: "exact selected loadout passed current-device whole-loadout admission"
-                .to_owned(),
+            detail: detail.to_owned(),
             exact_target_pid: self.exact_target_pid,
             selected_roles: self.selected_roles,
             live_snapshot: self.live_snapshot,

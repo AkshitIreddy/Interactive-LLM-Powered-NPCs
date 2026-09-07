@@ -790,6 +790,33 @@ impl<S: PackStorage> ModelPackManager<S> {
         Ok(challenge)
     }
 
+    /// Abandons only the caller-owned outstanding challenge after a runtime
+    /// probe fails or times out. The exact nonce prevents one operation from
+    /// clearing another operation's challenge. Installed bytes, verified
+    /// evidence, activation selection, and quarantine state are untouched.
+    pub fn abandon_self_test_challenge(
+        &mut self,
+        identity: &PackRevision,
+        expected_nonce: &str,
+    ) -> Result<(), ManagerError> {
+        let record = self
+            .records
+            .get(identity)
+            .ok_or(ManagerError::UnknownRevision)?;
+        if record.state != InstallState::AwaitingSelfTest {
+            return Err(ManagerError::InvalidState(record.state.clone()));
+        }
+        let challenge = self
+            .pending_self_tests
+            .get(identity)
+            .ok_or(ManagerError::MissingSelfTestChallenge)?;
+        if challenge.nonce != expected_nonce {
+            return Err(ManagerError::AttestationChallengeMismatch);
+        }
+        self.pending_self_tests.remove(identity);
+        Ok(())
+    }
+
     pub fn record_self_test_attestation(
         &mut self,
         identity: &PackRevision,

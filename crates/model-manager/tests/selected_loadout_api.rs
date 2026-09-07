@@ -3,7 +3,7 @@
 use model_manager::*;
 use npc_system_telemetry::{
     AdapterLuid, GraphicsAdapterIdentity, Observation, ObservationProvenance,
-    ResourceTelemetrySnapshotV1, TelemetrySource, RESOURCE_TELEMETRY_SCHEMA_V1,
+    ResourceTelemetrySnapshotV1, TelemetrySource, UnavailableReason, RESOURCE_TELEMETRY_SCHEMA_V1,
 };
 use pretty_assertions::assert_eq;
 use std::collections::{BTreeMap, BTreeSet};
@@ -360,6 +360,35 @@ fn context<'a>(snapshot: &'a ResourceTelemetrySnapshotV1) -> NativeAdmissionCont
     }
 }
 
+fn setup_snapshot(snapshot: &ResourceTelemetrySnapshotV1) -> ResourceTelemetrySnapshotV1 {
+    let mut setup = snapshot.clone();
+    setup.selected_game_pid = None;
+    setup.selected_game_working_set_bytes = Observation::Unavailable {
+        reason: UnavailableReason::GameProcessNotSelected,
+        provenance: snapshot
+            .selected_game_working_set_bytes
+            .provenance()
+            .clone(),
+    };
+    setup.selected_game_vram_bytes = Observation::Unavailable {
+        reason: UnavailableReason::GameProcessNotSelected,
+        provenance: snapshot.selected_game_vram_bytes.provenance().clone(),
+    };
+    setup
+}
+
+fn setup_context<'a>(snapshot: &'a ResourceTelemetrySnapshotV1) -> NativeAdmissionContextV1<'a> {
+    NativeAdmissionContextV1 {
+        exact_target_pid: None,
+        now_unix_seconds: 200,
+        now_monotonic_millis: 1_050,
+        configured_game_reserve_vram_bytes: 3_000,
+        game_additional_reserve_ram_bytes: 1_000,
+        resource_pressure: ResourcePressureLevelV1::Normal,
+        telemetry: Some(snapshot),
+    }
+}
+
 fn catalog_snapshot(selected: &SelectedPackV1) -> TrustedReleasePackSnapshotV1 {
     TrustedReleasePackSnapshotV1 {
         identity: selected.identity.clone(),
@@ -490,6 +519,55 @@ fn aggregate_admits_exact_pid_four_role_co_residency_and_uses_measured_reload_po
     let serialized = serde_json::to_value(&decision).unwrap();
     assert_eq!(serialized["status"], "admitted");
     assert!(serialized.get("admission_receipt").is_some());
+}
+
+#[test]
+fn setup_admission_reserves_game_budget_without_minting_target_authority() {
+    let (mut setup_manager, selection, runtime_snapshot) = manager(None);
+    let setup_snapshot = setup_snapshot(&runtime_snapshot);
+    setup_manager
+        .submit_work(
+            work("setup-background-embed", WorkKindV1::Embedding, None),
+            10,
+        )
+        .unwrap();
+    let mut setup_native = setup_context(&setup_snapshot);
+    setup_native.resource_pressure = ResourcePressureLevelV1::Elevated;
+    let decision = setup_manager.admit_for_setup(&selection, setup_native);
+    assert!(decision.admitted(), "{}", decision.detail);
+    assert_eq!(decision.exact_target_pid, None);
+    assert!(decision.detail.contains("not runtime target authority"));
+    let receipt = decision.admission_receipt.expect("setup receipt");
+    assert_eq!(receipt.models().len(), 4);
+    assert_eq!(receipt.protected_desktop_and_game_vram_bytes(), 6_000);
+    assert!(decision.pressure_cancellations.is_empty());
+    assert_eq!(
+        setup_manager.planner_snapshot().trusted_measurement_streams,
+        0
+    );
+    assert_eq!(setup_manager.planner_snapshot().pending_work, 1);
+
+    let (mut normal, selection, _) = manager(None);
+    let blocked = normal.admit(&selection, setup_context(&setup_snapshot));
+    assert_eq!(
+        blocked.reason_code,
+        Some(SelectedLoadoutBlockCodeV1::MissingTargetPid)
+    );
+    assert_eq!(normal.planner_snapshot().trusted_measurement_streams, 0);
+
+    let (mut contaminated, selection, _) = manager(None);
+    let mut invalid = setup_context(&setup_snapshot);
+    invalid.exact_target_pid = Some(4242);
+    let blocked = contaminated.admit_for_setup(&selection, invalid);
+    assert_eq!(
+        blocked.reason_code,
+        Some(SelectedLoadoutBlockCodeV1::InvalidSelection)
+    );
+    assert!(blocked.admission_receipt.is_none());
+    assert_eq!(
+        contaminated.planner_snapshot().trusted_measurement_streams,
+        0
+    );
 }
 
 #[test]

@@ -137,7 +137,15 @@ pub fn validate_archive_entries<'a>(
         if total > policy.max_uncompressed_bytes {
             return Err(ArchiveValidationError::SizeLimit);
         }
-        let path = validate_relative_archive_path(entry.path)?;
+        // ZIP directory records conventionally carry one terminal `/`. Treat
+        // that marker as metadata, while still rejecting a root entry, doubled
+        // separators, and terminal separators on files.
+        let candidate = if entry.kind == ArchiveEntryKind::Directory {
+            entry.path.strip_suffix('/').unwrap_or(entry.path)
+        } else {
+            entry.path
+        };
+        let path = validate_relative_archive_path(candidate)?;
         let folded = path.as_str().to_ascii_lowercase();
         if !seen.insert(folded.clone()) {
             return Err(ArchiveValidationError::CaseFoldCollision(
