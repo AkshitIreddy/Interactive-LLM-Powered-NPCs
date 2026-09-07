@@ -9,7 +9,6 @@ if (!profileArgument || !outputArgument) {
 }
 
 const profilePath = resolve(profileArgument);
-const outputPath = resolve(outputArgument);
 const profile = JSON.parse(await readFile(profilePath, "utf8"));
 if (profile.id !== "cyberpunk-2077" || profile.schema_version !== "2.0.0") {
   throw new Error(
@@ -66,14 +65,31 @@ const authored = {
     knowledge:
       "Misty listens for emotional patterns and uncertainty, offering reflective guidance without claiming supernatural certainty as fact.",
   },
-  "night-city-resident": {
-    opening: "What are you looking for around here?",
-    example:
-      "Keep the question practical and I will tell you what I have actually seen.",
+  "claire-russell": {
+    opening:
+      "Tell me what happened, and keep it straight. We can work from there.",
+    example: "Start with what you know. We can leave the guesses out of it.",
     knowledge:
-      "Background residents stay encounter-scoped and use only district or faction context supplied by the active profile, never inferred demographics.",
+      "Claire keeps conversation direct and practical. Her street-racing storyline, private motives, relationships, and outcomes stay bounded by trusted progress rather than assumed canon.",
   },
 };
+
+const authoredIds = new Set(Object.keys(authored));
+const profileIds = new Set(profile.characters.map((character) => character.id));
+for (const authoredId of authoredIds) {
+  if (!profileIds.has(authoredId)) {
+    throw new Error(
+      `authored context references unknown canonical character ID: ${authoredId}`,
+    );
+  }
+}
+for (const character of profile.characters) {
+  if (!character.background_npc && !authoredIds.has(character.id)) {
+    throw new Error(
+      `named profile character has no authored context: ${character.id}`,
+    );
+  }
+}
 
 for (const character of profile.characters) {
   character.voice.user_override_allowed = true;
@@ -108,14 +124,14 @@ for (const character of profile.characters) {
 }
 profile.content.character_data_readiness = "partial";
 profile.content.character_data_readiness_notes =
-  "Local review expansion with original style examples and one provenance-linked perspective record per bundled character. No publisher media, extracted dialogue, visual identity data, or appearance atlas is included.";
+  "Local review expansion with original style examples and one provenance-linked perspective record per bundled named character. The encounter-scoped background template remains profile-level. No publisher media, extracted dialogue, visual identity data, or appearance atlas is included.";
 
 const pack = {
   format: "npc.content-pack",
   schema_version: 1,
   namespace: "io.github.akshitireddy.local-review",
   pack_id: "cyberpunk-2077-authored-context",
-  version: "1.0.0",
+  version: "1.1.0",
   kind: "game_base",
   game_profile_id: "cyberpunk-2077",
   title: "Night City local review context",
@@ -149,6 +165,12 @@ const pack = {
   profile,
 };
 
-await mkdir(dirname(outputPath), { recursive: true });
-await writeFile(outputPath, `${JSON.stringify(pack, null, 2)}\n`, "utf8");
-console.log(outputPath);
+const serialized = `${JSON.stringify(pack, null, 2)}\n`;
+if (outputArgument === "-") {
+  process.stdout.write(serialized);
+} else {
+  const outputPath = resolve(outputArgument);
+  await mkdir(dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, serialized, "utf8");
+  console.log(outputPath);
+}

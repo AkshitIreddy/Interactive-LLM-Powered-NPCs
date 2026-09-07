@@ -15,3 +15,27 @@ node scripts/content-packs/build-cyberpunk-local-review-pack.mjs profiles/games/
 ```
 
 The example contains original private-review text and no publisher art, audio, fonts, screenshots, extracted dialogue, face images, identity embeddings, mouth atlases, or voice clones. Visual identity and mouth appearance require a separate rights-bound and runtime-qualified appearance-pack workflow.
+
+## Canonical character joins
+
+Profile selection, character content, provider overrides, and a reviewed mouth
+atlas join on the exact pair `game_profile_id` + `character_id`. The reviewed
+Cyberpunk character IDs currently needed by the local integration are:
+
+| Character | Game profile ID | Canonical character ID |
+| --- | --- | --- |
+| Misty Olszewski | `cyberpunk-2077` | `misty-olszewski` |
+| Claire Russell | `cyberpunk-2077` | `claire-russell` |
+| Johnny Silverhand | `cyberpunk-2077` | `johnny-silverhand` |
+
+Do not resolve `misty`, `claire`, or `johnny` as aliases at this boundary. The
+unreviewed `integration-20260907/packs/*-v1` scratch atlases use those short IDs
+and therefore cannot bind to a persisted canonical character selection. They
+must be regenerated with the canonical IDs after visual review. Older immutable
+artifacts may retain historical short IDs as evidence, but they do not become
+selectable content by renaming them.
+
+Two frontend-only content-override test fixtures still spell Misty's ID as
+`misty-olzewski`. That misspelling is not present in the authored profile or
+generated content pack and remains a separate test-fixture cleanup; runtime
+selection must continue to use `misty-olszewski`.
