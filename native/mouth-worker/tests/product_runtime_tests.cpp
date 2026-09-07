@@ -101,6 +101,62 @@ ProductFrameRequest make_request(const std::uint64_t request_id,
     return request;
 }
 
+[[nodiscard]] CharacterMouthAtlas make_source_only_schema_four_atlas() {
+    CharacterMouthAtlas atlas{};
+    atlas.schema_version = 4U;
+    atlas.cancellation_generation = 1U;
+    atlas.actor_id = 41U;
+    atlas.identity_revision = 91U;
+    const auto state = [](const MouthCoefficients coefficients) {
+        MouthAtlasState result{};
+        result.coefficients = coefficients;
+        result.appearance.width = 128U;
+        result.appearance.height = 64U;
+        result.appearance.stride_bytes = result.appearance.width * 4U;
+        result.appearance.representation =
+            MouthPatchRepresentation::normalized_oral_strip_v1;
+        result.appearance.reference_context_mean = 1.0;
+        result.appearance.premultiplied_bgra.assign(
+            static_cast<std::size_t>(result.appearance.stride_bytes) *
+                result.appearance.height,
+            0U);
+        return result;
+    };
+    MouthCoefficients neutral{};
+    neutral.lip_close = 1.0;
+    MouthCoefficients rounded{};
+    rounded.jaw_open = 0.75;
+    rounded.funnel = 1.0;
+    MouthCoefficients open{};
+    open.jaw_open = 1.0;
+    MouthCoefficients spread{};
+    spread.jaw_open = 0.575;
+    spread.smile_left = spread.smile_right = 1.0;
+    atlas.states = {state(neutral), state(rounded), state(open), state(spread)};
+    return atlas;
+}
+
+void set_stream_sample(ProductFrameRequest& request,
+                       const std::uint64_t segment_id,
+                       const std::uint64_t playback_sample,
+                       const std::uint64_t sample_count = 8'000U) {
+    request.drive.clock.segment_id = segment_id;
+    request.drive.clock.first_sample_index = 0U;
+    request.drive.clock.sample_count = sample_count;
+    request.drive.clock.playback_sample_index = playback_sample;
+    request.drive.clock.playback_at_ns = request.source.identity.captured_at_ns;
+}
+
+[[nodiscard]] PresentationReceiptV1 submit_and_process(
+    MouthProductRuntime& runtime, ProductFrameRequest request,
+    const Nanoseconds now_ns) {
+    const auto frame = request.source.identity;
+    const auto queued = runtime.submit(std::move(request), frame, now_ns);
+    expect(queued.receipt.disposition == PresentationDisposition::queued,
+           "accepted cadence sample reaches the schema-four worker");
+    return runtime.process_latest(frame, now_ns + 2'000'000);
+}
+
 void shift_mouth_geometry(ProductFrameRequest& request,
                           const double dx,
                           const double dy = 0.0) {
@@ -108,6 +164,71 @@ void shift_mouth_geometry(ProductFrameRequest& request,
         request.landmarks.landmarks[index].x += dx;
         request.landmarks.landmarks[index].y += dy;
     }
+}
+
+void set_valid_schema_four_geometry(ProductFrameRequest& request) {
+    request.landmarks.face_bounds = {0.05, 0.05, 0.90, 0.90};
+    const auto set = [&](const std::size_t index, const double x, const double y) {
+        request.landmarks.landmarks[index] = {x / 320.0, y / 180.0, 0.97};
+    };
+    set(48U, 128.0, 84.0);
+    set(49U, 144.0, 80.0);
+    set(50U, 160.0, 78.0);
+    set(51U, 176.0, 80.0);
+    set(52U, 192.0, 84.0);
+    set(53U, 192.0, 96.0);
+    set(54U, 176.0, 100.0);
+    set(55U, 160.0, 102.0);
+    set(56U, 144.0, 100.0);
+    set(57U, 128.0, 96.0);
+    set(58U, 120.0, 90.0);
+    set(59U, 136.0, 88.0);
+    set(60U, 160.0, 86.0);
+    set(61U, 184.0, 88.0);
+    set(62U, 200.0, 90.0);
+    set(63U, 184.0, 92.0);
+    set(64U, 160.0, 94.0);
+    set(65U, 136.0, 92.0);
+}
+
+void test_source_preserving_geometry_follows_face_motion() {
+    OpenSeeFaceSignalAdapter adapter;
+    adapter.set_current_frame_geometry(true);
+    auto first = make_request(800U, 800U, 30'000'000'000);
+    expect(adapter.adapt(first.landmarks, first.appearance, first.resources,
+                         first.source.identity, 30'005'000'000).accepted(),
+           "source-preserving geometry acquires its initial actor");
+    auto translated = make_request(801U, 801U, 30'070'000'000);
+    for (auto& point : translated.landmarks.landmarks) point.x += .15;
+    translated.landmarks.face_bounds.x += .15;
+    const auto moved = adapter.adapt(translated.landmarks, translated.appearance,
+        translated.resources, translated.source.identity, 30'075'000'000);
+    expect(moved.accepted() &&
+               std::abs(moved.tracking->mouth_landmarks.left_corner.x - .58) < 1e-12,
+           "whole-face translation preserves exact current mouth position without an EMA lag");
+
+    auto scaled = make_request(802U, 802U, 30'140'000'000);
+    const double scale = 1.15;
+    for (auto& point : scaled.landmarks.landmarks) {
+        point.x = .5 + (point.x - .5) * scale + .15;
+        point.y = .5 + (point.y - .5) * scale;
+    }
+    scaled.landmarks.face_bounds = {.5 - .2*scale + .15, .5 - .34*scale,
+                                    .4*scale, .68*scale};
+    const auto resized = adapter.adapt(scaled.landmarks, scaled.appearance,
+        scaled.resources, scaled.source.identity, 30'145'000'000);
+    expect(resized.accepted(), "whole-face scale change is not mistaken for a mouth identity jump");
+
+    auto mouth_jump = scaled;
+    mouth_jump.source.identity.sequence++;
+    mouth_jump.source.identity.captured_at_ns += 70'000'000;
+    mouth_jump.landmarks.frame = mouth_jump.source.identity;
+    mouth_jump.landmarks.measured_at_ns += 70'000'000;
+    shift_mouth_geometry(mouth_jump, .13);
+    expect(adapter.adapt(mouth_jump.landmarks, mouth_jump.appearance, mouth_jump.resources,
+                         mouth_jump.source.identity, 30'215'000'000).disposition ==
+               SignalDisposition::bypass_appearance,
+           "mouth-only displacement retains the hard geometry-consistency gate");
 }
 
 void test_typed_openseeface_mapping_and_rate_policy() {
@@ -702,6 +823,101 @@ void test_product_queue_receipts_and_exact_current_frame() {
            "product residual remains inside hard presentation ceilings");
 }
 
+void test_routine_rate_limit_preserves_current_pixel_history() {
+    constexpr Nanoseconds first_at = 20'000'000'000;
+    constexpr Nanoseconds limited_at = first_at + 30'000'000;
+    constexpr Nanoseconds second_at = first_at + 70'000'000;
+    constexpr std::uint64_t segment_id = 700U;
+
+    const auto first_request = [&] {
+        auto request = make_request(900U, 900U, first_at);
+        set_valid_schema_four_geometry(request);
+        request.drive.viseme = Viseme::open_vowel;
+        request.drive.viseme_strength = 1.0;
+        set_stream_sample(request, segment_id, 0U);
+        return request;
+    };
+    const auto second_request = [&] {
+        auto request = make_request(901U, 901U, second_at);
+        set_valid_schema_four_geometry(request);
+        request.drive.viseme = Viseme::open_vowel;
+        request.drive.viseme_strength = 1.0;
+        set_stream_sample(request, segment_id, 1'680U);
+        return request;
+    };
+
+    MouthProductRuntime admitted_only;
+    MouthProductRuntime interleaved;
+    expect(admitted_only.install_atlas(make_source_only_schema_four_atlas()) &&
+               interleaved.install_atlas(make_source_only_schema_four_atlas()),
+           "rate-limit cadence controls install identical schema-four atlases");
+    static_cast<void>(submit_and_process(admitted_only, first_request(),
+                                         first_at + 5'000'000));
+    static_cast<void>(submit_and_process(interleaved, first_request(),
+                                         first_at + 5'000'000));
+
+    auto routine_drop = make_request(999U, 999U, limited_at);
+    set_valid_schema_four_geometry(routine_drop);
+    routine_drop.drive.viseme = Viseme::dental;
+    set_stream_sample(routine_drop, segment_id, 720U);
+    const auto limited_frame = routine_drop.source.identity;
+    const auto limited = interleaved.submit(std::move(routine_drop), limited_frame,
+                                             limited_at + 5'000'000);
+    expect(limited.receipt.signal_disposition ==
+               SignalDisposition::bypass_rate_limited,
+           "30 Hz interleaving produces the expected routine 15 Hz cadence drop");
+
+    const auto control = submit_and_process(admitted_only, second_request(),
+                                            second_at + 5'000'000);
+    const auto with_drop = submit_and_process(interleaved, second_request(),
+                                              second_at + 5'000'000);
+    expect(control.proposed_residual() && with_drop.proposed_residual(),
+           "both accepted 15 Hz samples produce schema-four residuals");
+    expect(control.residual->coefficients.jaw_open ==
+               with_drop.residual->coefficients.jaw_open &&
+               control.residual->coefficients.funnel ==
+                   with_drop.residual->coefficients.funnel &&
+               control.residual->premultiplied_bgra ==
+                   with_drop.residual->premultiplied_bgra,
+           "routine rate limiting preserves the same shape and trajectory as admitted-only input");
+
+    MouthProductRuntime invalid_interleaved;
+    MouthProductRuntime fresh_second;
+    expect(invalid_interleaved.install_atlas(make_source_only_schema_four_atlas()) &&
+               fresh_second.install_atlas(make_source_only_schema_four_atlas()),
+           "invalid-identity reset controls install identical schema-four atlases");
+    static_cast<void>(submit_and_process(invalid_interleaved, first_request(),
+                                         first_at + 5'000'000));
+    auto untraceable_drop = make_request(998U, 998U, limited_at);
+    set_valid_schema_four_geometry(untraceable_drop);
+    set_stream_sample(untraceable_drop, segment_id, 720U);
+    untraceable_drop.identity.turn_id_high = 0U;
+    untraceable_drop.identity.turn_id_low = 0U;
+    const auto untraceable_frame = untraceable_drop.source.identity;
+    const auto untraceable = invalid_interleaved.submit(
+        std::move(untraceable_drop), untraceable_frame,
+        limited_at + 5'000'000);
+    expect(untraceable.receipt.signal_disposition ==
+               SignalDisposition::bypass_invalid_packet,
+           "invalid identity remains a hard reset even on a rate-limited signal");
+
+    const auto after_invalid = submit_and_process(
+        invalid_interleaved, second_request(), second_at + 5'000'000);
+    const auto fresh = submit_and_process(fresh_second, second_request(),
+                                          second_at + 5'000'000);
+    expect(after_invalid.proposed_residual() && fresh.proposed_residual() &&
+               after_invalid.residual->coefficients.jaw_open ==
+                   fresh.residual->coefficients.jaw_open &&
+               after_invalid.residual->coefficients.funnel ==
+                   fresh.residual->coefficients.funnel &&
+               after_invalid.residual->premultiplied_bgra ==
+                   fresh.residual->premultiplied_bgra,
+           "invalid identity clears history exactly like a fresh schema-four stream");
+    expect(after_invalid.residual->premultiplied_bgra !=
+               control.residual->premultiplied_bgra,
+           "invalid-identity regression is sensitive to whether trajectory history was reset");
+}
+
 void test_cancel_pressure_and_invalid_identity_receipts() {
     MouthProductRuntime runtime;
     auto request = make_request(1U, 20U, 5'000'000'000);
@@ -739,6 +955,7 @@ void test_cancel_pressure_and_invalid_identity_receipts() {
 } // namespace
 
 int main() {
+    test_source_preserving_geometry_follows_face_motion();
     test_typed_openseeface_mapping_and_rate_policy();
     test_qualified_detector_confidence_floor();
     test_padded_mask_may_cross_detector_edge_but_lip_contour_may_not();
@@ -750,6 +967,7 @@ int main() {
     test_original_geometry_recovery_also_requires_fresh_consensus();
     test_geometry_reacquisition_candidate_resets_at_safety_boundaries();
     test_product_queue_receipts_and_exact_current_frame();
+    test_routine_rate_limit_preserves_current_pixel_history();
     test_cancel_pressure_and_invalid_identity_receipts();
     if (failures != 0) {
         std::cerr << failures << " product runtime assertion(s) failed\n";

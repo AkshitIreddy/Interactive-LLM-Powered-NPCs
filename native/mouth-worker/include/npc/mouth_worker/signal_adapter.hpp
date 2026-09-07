@@ -134,6 +134,9 @@ public:
 
     [[nodiscard]] bool cancel_to(std::uint64_t generation) noexcept;
     void reset_track() noexcept;
+    // Source-preserving renderers filter shape in current mouth coordinates;
+    // they must not inherit a lagging screen-space pose from the legacy EMA.
+    void set_current_frame_geometry(bool enabled) noexcept;
 
     [[nodiscard]] std::uint64_t active_generation() const noexcept;
     [[nodiscard]] bool appearance_latched() const noexcept;
@@ -142,6 +145,7 @@ private:
     struct StableState {
         TrackBinding track;
         NormalizedRect mouth_bounds;
+        NormalizedRect face_bounds;
         MouthLandmarks mouth_landmarks;
         Nanoseconds last_accepted_at_ns{};
         bool rejected_since_accept{};
@@ -150,6 +154,7 @@ private:
     struct ReacquisitionCandidate {
         TrackBinding track;
         NormalizedRect mouth_bounds;
+        NormalizedRect face_bounds;
         MouthLandmarks mouth_landmarks;
         Nanoseconds last_observed_at_ns{};
         std::uint32_t consecutive_matches{};
@@ -162,6 +167,7 @@ private:
     std::uint64_t active_generation_{};
     std::uint64_t latch_generation_{1};
     OpenSeeFaceAdapterPolicy policy_;
+    bool current_frame_geometry_{};
     std::optional<StableState> stable_;
     std::optional<ReacquisitionCandidate> reacquisition_candidate_;
 };

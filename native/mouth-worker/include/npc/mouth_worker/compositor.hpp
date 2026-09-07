@@ -15,6 +15,9 @@ enum class MouthPatchRepresentation : std::uint8_t {
     // deliberately opt-in: legacy full-lip and oral-interior pixels retain
     // their existing rendering semantics.
     photometric_full_lip_reference_v1 = 2,
+    // Schema four: only the eroded oral interior. U follows the inner mouth
+    // columns; V runs between the upper/lower boundary in each column.
+    normalized_oral_strip_v1 = 3,
 };
 
 // One enrollment-generated mouth appearance in canonical mouth coordinates.
@@ -28,6 +31,10 @@ struct CanonicalMouthPatch {
     HeadPoseDegrees enrolled_pose;
     std::vector<std::uint8_t> premultiplied_bgra;
     MouthPatchRepresentation representation{MouthPatchRepresentation::full_lip_observation_v1};
+    // Schema four exposure context in byte luminance units. Legacy schemas
+    // neither serialize nor interpret this field.
+    double reference_context_mean{};
+    bool refine_source_edges{};
 };
 
 [[nodiscard]] MouthCoefficients coefficients_for_viseme(Viseme viseme,

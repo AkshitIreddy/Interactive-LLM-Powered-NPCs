@@ -127,6 +127,7 @@ private:
     OpenSeeFaceSignalAdapter adapter_;
     ReferenceMouthWorker worker_;
     std::optional<PendingReceipt> pending_;
+    std::optional<std::uint64_t> current_pixel_actor_;
 };
 
 } // namespace npc::mouth

@@ -1,4 +1,5 @@
 #include "npc/mouth_worker/compositor.hpp"
+#include "npc/mouth_worker/current_pixel_compositor.hpp"
 #include "npc/mouth_worker/worker.hpp"
 
 #include <algorithm>
@@ -1417,6 +1418,74 @@ void test_public_compositor_rejects_malformed_direct_calls() {
            "preview compositor rejects a truncated residual buffer");
 }
 
+void test_schema_four_worker_streaming_and_reset() {
+    auto origin = make_item();
+    auto& mouth = origin.tracking.mouth_landmarks;
+    mouth.schema_version = 2U;
+    mouth.contour_points = 18U;
+    const auto point = [](const double x, const double amplitude) {
+        const double t = (x - .5) / .058;
+        return NormalizedLandmark{x, .646 + amplitude * (1.0 - t*t), .96};
+    };
+    for (std::size_t i = 0; i < 5U; ++i) {
+        const double x = .5 + (static_cast<double>(i) - 2.0) * .019;
+        mouth.contour[i] = point(x, -.025);
+        mouth.contour[9U-i] = point(x, .027);
+    }
+    mouth.contour[10U] = point(.442, 0);
+    mouth.contour[14U] = point(.558, 0);
+    for (std::size_t i = 0; i < 3U; ++i) {
+        const double x = .5 + (static_cast<double>(i) - 1.0) * .03;
+        mouth.contour[11U+i] = point(x, -.006);
+        mouth.contour[17U-i] = point(x, .006);
+    }
+    mouth.left_corner = mouth.contour[10U];
+    mouth.right_corner = mouth.contour[14U];
+    mouth.upper_lip_center = mouth.contour[12U];
+    mouth.lower_lip_center = mouth.contour[16U];
+    origin.drive.viseme = Viseme::bilabial;
+    origin.drive.viseme_strength = 1.0;
+    auto atlas = make_character_atlas(origin);
+    atlas.schema_version = 4U;
+    for (auto& state : atlas.states) {
+        state.appearance.representation = MouthPatchRepresentation::normalized_oral_strip_v1;
+        state.appearance.reference_context_mean = 1.0;
+        std::fill(state.appearance.premultiplied_bgra.begin(),
+                  state.appearance.premultiplied_bgra.end(), 0U);
+    }
+    ReferenceMouthWorker worker(origin.track.cancellation_generation);
+    auto mixed = atlas;
+    mixed.states.back().appearance.refine_source_edges = true;
+    expect(!worker.install_atlas(mixed), "schema four rejects cue-dependent geometry policies");
+    expect(worker.install_atlas(atlas), "schema four source-only atlas installs");
+    expect(worker.submit(origin), "schema four work submits through the ordinary worker");
+    const auto closed = worker.process_latest(origin.source.identity,
+                                               origin.source.identity.captured_at_ns + 3'000'000);
+    expect(closed.has_residual() && closed.residual.coefficients.jaw_open == 0.0 &&
+               closed.residual.coefficients.lip_close == 1.0 &&
+               closed.residual.coefficients.pucker > .20,
+           "schema four native trajectory makes contact exact and preserves its identity");
+    auto next = origin;
+    next.source.identity.sequence++;
+    next.source.identity.captured_at_ns += 33'333'333;
+    next.tracking.frame = next.source.identity;
+    next.tracking.measured_at_ns += 33'333'333;
+    next.drive.clock.first_sample_index = next.drive.clock.playback_sample_index = 1600U;
+    next.drive.clock.playback_at_ns += 33'333'333;
+    next.deadline_ns += 33'333'333;
+    next.drive.viseme = Viseme::open_vowel;
+    expect(worker.submit(next), "next incremental vowel submits");
+    const auto vowel = worker.process_latest(next.source.identity,
+                                             next.source.identity.captured_at_ns + 3'000'000);
+    expect(vowel.has_residual() && vowel.residual.coefficients.jaw_open > 0.0 &&
+               vowel.residual.coefficients.jaw_open < 1.0,
+           "schema four transition is continuous across single cue snapshots");
+    expect(worker.cancel_to(origin.track.cancellation_generation + 1U),
+           "schema four cancellation advances the shared generation");
+    expect(!worker.install_atlas(atlas) && !worker.submit(next),
+           "cancelled schema four atlas and work cannot resurrect");
+}
+
 } // namespace
 
 int main() {
@@ -1443,6 +1512,7 @@ int main() {
     test_pcm_smoothing_preserves_attack_and_release();
     test_hard_safety_limits_cannot_be_relaxed();
     test_public_compositor_rejects_malformed_direct_calls();
+    test_schema_four_worker_streaming_and_reset();
 
     if (failures != 0) {
         std::cerr << failures << " mouth-worker test assertion(s) failed\n";

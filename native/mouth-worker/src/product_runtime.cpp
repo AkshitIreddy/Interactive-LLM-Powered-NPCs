@@ -23,9 +23,20 @@ MouthProductRuntime::MouthProductRuntime(const std::uint64_t initial_generation,
 ProductSubmissionResult MouthProductRuntime::submit(ProductFrameRequest request,
                                                     const FrameIdentity& current_frame,
                                                     const Nanoseconds now_ns) {
+    adapter_.set_current_frame_geometry(current_pixel_actor_.has_value() &&
+                                       *current_pixel_actor_ == request.landmarks.track.actor_id);
     const auto signal = adapter_.adapt(request.landmarks, request.appearance,
                                        request.resources, current_frame, now_ns);
     if (!valid_request_identity(request.identity) || !signal.accepted()) {
+        // A 30 Hz capture source routinely lands between the admitted 15 Hz
+        // inference samples. That cadence drop does not break the audio or
+        // geometry timeline, so retain schema-four shape/trajectory history.
+        // An untraceable request remains a hard reset even when its signal
+        // happens to be rate limited.
+        if (!valid_request_identity(request.identity) ||
+            signal.disposition != SignalDisposition::bypass_rate_limited) {
+            worker_.reset_current_pixel_history();
+        }
         auto bypass = make_signal_bypass(request, signal, now_ns);
         if (!valid_request_identity(request.identity)) {
             bypass.signal_disposition = SignalDisposition::bypass_invalid_packet;
@@ -111,6 +122,8 @@ std::optional<PresentationReceiptV1> MouthProductRuntime::cancel_to(
     if (!adapter_.cancel_to(new_generation) || !worker_.cancel_to(new_generation)) {
         return std::nullopt;
     }
+    current_pixel_actor_.reset();
+    adapter_.set_current_frame_geometry(false);
     if (!pending_) {
         return std::nullopt;
     }
@@ -122,11 +135,17 @@ std::optional<PresentationReceiptV1> MouthProductRuntime::cancel_to(
 }
 
 bool MouthProductRuntime::install_atlas(CharacterMouthAtlas atlas) {
-    return worker_.install_atlas(std::move(atlas));
+    const auto actor = atlas.schema_version == 4U
+        ? std::optional<std::uint64_t>{atlas.actor_id} : std::nullopt;
+    if (!worker_.install_atlas(std::move(atlas))) return false;
+    current_pixel_actor_ = actor;
+    return true;
 }
 
 void MouthProductRuntime::clear_atlas() noexcept {
     worker_.clear_atlas();
+    current_pixel_actor_.reset();
+    adapter_.set_current_frame_geometry(false);
 }
 
 std::uint64_t MouthProductRuntime::active_generation() const noexcept {

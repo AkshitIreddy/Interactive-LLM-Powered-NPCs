@@ -11,6 +11,8 @@ option(NPC_MOUTH_WORKER_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" O
 
 add_library(npc_mouth_worker STATIC
     src/compositor.cpp
+    src/current_pixel_compositor.cpp
+    src/current_mouth_shape_filter.cpp
     src/landmark_provider.cpp
     src/product_runtime.cpp
     src/service_protocol.cpp
@@ -67,6 +69,14 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING AND NPC_MOUTH_WORKER_BUILD_TESTS)
+    add_executable(npc_mouth_current_mouth_shape_filter_tests tests/current_mouth_shape_filter_tests.cpp)
+    target_compile_features(npc_mouth_current_mouth_shape_filter_tests PRIVATE cxx_std_20)
+    target_link_libraries(npc_mouth_current_mouth_shape_filter_tests PRIVATE npc_mouth_worker)
+    add_test(NAME npc_mouth_current_mouth_shape_filter_tests COMMAND npc_mouth_current_mouth_shape_filter_tests)
+    add_executable(npc_mouth_current_pixel_compositor_tests tests/current_pixel_compositor_tests.cpp)
+    target_compile_features(npc_mouth_current_pixel_compositor_tests PRIVATE cxx_std_20)
+    target_link_libraries(npc_mouth_current_pixel_compositor_tests PRIVATE npc_mouth_worker)
+    add_test(NAME npc_mouth_current_pixel_compositor_tests COMMAND npc_mouth_current_pixel_compositor_tests)
     add_executable(npc_mouth_streaming_trajectory_tests tests/streaming_trajectory_tests.cpp)
     target_compile_features(npc_mouth_streaming_trajectory_tests PRIVATE cxx_std_20)
     target_link_libraries(npc_mouth_streaming_trajectory_tests PRIVATE npc_mouth_worker)
@@ -139,6 +149,9 @@ if(NPC_MOUTH_WORKER_BUILD_SYNTHETIC_PROOF)
 endif()
 
 if(WIN32 AND NPC_MOUTH_WORKER_BUILD_HEADLESS_REALISTIC_PROOF)
+    add_executable(npc_mouth_worker_current_pixel_replay tools/replay_current_pixel_mouth.cpp)
+    target_compile_features(npc_mouth_worker_current_pixel_replay PRIVATE cxx_std_20)
+    target_link_libraries(npc_mouth_worker_current_pixel_replay PRIVATE npc_mouth_worker bcrypt psapi)
     add_executable(npc_mouth_worker_tracked_replay tools/replay_tracked_mouth.cpp)
     target_compile_features(npc_mouth_worker_tracked_replay PRIVATE cxx_std_20)
     target_link_libraries(npc_mouth_worker_tracked_replay PRIVATE npc_mouth_worker bcrypt psapi)

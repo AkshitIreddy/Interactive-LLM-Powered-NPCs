@@ -1,6 +1,8 @@
 #pragma once
 
 #include "npc/mouth_worker/atlas.hpp"
+#include "npc/mouth_worker/current_mouth_shape_filter.hpp"
+#include "npc/mouth_worker/streaming_trajectory.hpp"
 
 #include <optional>
 
@@ -21,6 +23,7 @@ public:
     // oversized, cross-generation, or cross-actor artifacts are rejected.
     [[nodiscard]] bool install_atlas(CharacterMouthAtlas atlas);
     void clear_atlas() noexcept;
+    void reset_current_pixel_history() noexcept;
 
     // The caller supplies the frame currently eligible for presentation. A job
     // for any other frame is consumed and fails open with no retained residual.
@@ -49,6 +52,10 @@ private:
     WorkerPolicy policy_;
     std::optional<WorkItem> pending_;
     std::optional<CharacterMouthAtlas> atlas_;
+    StreamingMouthTrajectory streaming_trajectory_;
+    std::optional<TrackBinding> trajectory_track_;
+    CurrentMouthShapeFilter shape_filter_;
+    std::uint64_t shape_filter_segment_id_{};
     std::optional<MouthCoefficients> smoothed_drive_coefficients_;
     std::optional<TrackBinding> smoothed_drive_track_;
     std::uint64_t smoothed_drive_segment_id_{};

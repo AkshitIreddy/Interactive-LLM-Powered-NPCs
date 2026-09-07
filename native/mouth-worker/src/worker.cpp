@@ -1,6 +1,7 @@
 #include "npc/mouth_worker/worker.hpp"
 
 #include "npc/mouth_worker/compositor.hpp"
+#include "npc/mouth_worker/current_pixel_compositor.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -293,7 +294,8 @@ struct AtlasSelection final {
 
 ReferenceMouthWorker::ReferenceMouthWorker(const std::uint64_t initial_generation,
                                            WorkerPolicy policy)
-    : active_generation_(initial_generation), policy_(std::move(policy)) {}
+    : active_generation_(initial_generation), policy_(std::move(policy)),
+      streaming_trajectory_(initial_generation) {}
 
 bool ReferenceMouthWorker::submit(WorkItem item) {
     ++stats_.submitted;
@@ -325,7 +327,7 @@ bool ReferenceMouthWorker::cancel_to(const std::uint64_t new_generation) noexcep
 
 bool ReferenceMouthWorker::install_atlas(CharacterMouthAtlas atlas) {
     if ((atlas.schema_version != 1U && atlas.schema_version != 2U &&
-         atlas.schema_version != 3U) ||
+         atlas.schema_version != 3U && atlas.schema_version != 4U) ||
         atlas.cancellation_generation != active_generation_ ||
         atlas.actor_id == 0U || atlas.identity_revision == 0U ||
         atlas.states.size() < minimum_atlas_states ||
@@ -336,7 +338,9 @@ bool ReferenceMouthWorker::install_atlas(CharacterMouthAtlas atlas) {
     const auto width = atlas.states.front().appearance.width;
     const auto height = atlas.states.front().appearance.height;
     const auto stride = atlas.states.front().appearance.stride_bytes;
-    const auto expected_representation = atlas.schema_version == 2U
+    const auto expected_representation = atlas.schema_version == 4U
+        ? MouthPatchRepresentation::normalized_oral_strip_v1
+        : atlas.schema_version == 2U
         ? MouthPatchRepresentation::normalized_oral_interior_v1
         : atlas.schema_version == 3U
             ? MouthPatchRepresentation::photometric_full_lip_reference_v1
@@ -345,6 +349,10 @@ bool ReferenceMouthWorker::install_atlas(CharacterMouthAtlas atlas) {
         atlas.states.begin(), atlas.states.end(),
         [width, height, stride, expected_representation](const MouthAtlasState& state) {
             return state.appearance.representation == expected_representation &&
+                   (expected_representation != MouthPatchRepresentation::normalized_oral_strip_v1 ||
+                    (std::isfinite(state.appearance.reference_context_mean) &&
+                     state.appearance.reference_context_mean > 0.0 &&
+                     state.appearance.reference_context_mean <= 255.0)) &&
                    valid_coefficients(state.coefficients) &&
                    valid_atlas_patch_for_install(state.appearance) &&
                    state.appearance.width == width &&
@@ -354,6 +362,11 @@ bool ReferenceMouthWorker::install_atlas(CharacterMouthAtlas atlas) {
     if (!all_valid) {
         return false;
     }
+    if (atlas.schema_version == 4U &&
+        !std::all_of(atlas.states.begin(), atlas.states.end(), [&](const MouthAtlasState& state) {
+            return state.appearance.refine_source_edges ==
+                atlas.states.front().appearance.refine_source_edges;
+        })) return false;
     if (atlas.schema_version == 3U) {
         const auto& neutral = atlas.states.front();
         if (!neutral_reference_coefficients(neutral.coefficients)) return false;
@@ -392,6 +405,7 @@ bool ReferenceMouthWorker::install_atlas(CharacterMouthAtlas atlas) {
 
 void ReferenceMouthWorker::clear_atlas() noexcept {
     atlas_.reset();
+    reset_drive_smoothing();
     reset_atlas_selection();
 }
 
@@ -423,11 +437,52 @@ ProcessResult ReferenceMouthWorker::process_latest(const FrameIdentity& current_
                                              item.drive.clock.channels);
         break;
     }
+    const bool current_pixel_route = atlas_.has_value() && atlas_->schema_version == 4U &&
+        atlas_->cancellation_generation == item.track.cancellation_generation &&
+        atlas_->actor_id == item.track.actor_id;
+    if (current_pixel_route && item.drive.kind == DriveKind::timed_viseme) {
+        coefficients = current_pixel_coefficients_for_viseme(item.drive.viseme,
+                                                             item.drive.viseme_strength);
+    }
     const auto target_coefficients = coefficients;
-    coefficients = smooth_drive_coefficients(coefficients, item);
+    if (current_pixel_route) {
+        if (!trajectory_track_ || *trajectory_track_ != item.track) {
+            streaming_trajectory_.reset(active_generation_);
+            trajectory_track_ = item.track;
+            shape_filter_.reset();
+        }
+        if (shape_filter_segment_id_ != item.drive.clock.segment_id) shape_filter_.reset();
+        shape_filter_segment_id_ = item.drive.clock.segment_id;
+        item.tracking = shape_filter_.filter(item.tracking, item.source.lease.width,
+                                             item.source.lease.height);
+        const auto filtered_validation = validate(item, current_frame, now_ns);
+        if (filtered_validation != Disposition::residual_ready) return bypass(filtered_validation);
+        const TimedMouthTarget target{item.drive.clock.first_sample_index,
+            item.drive.clock.sample_count, coefficients, exact_contact_closure(coefficients)};
+        const auto trajectory = streaming_trajectory_.sample(item.drive.clock, std::span{&target, 1U});
+        if (!trajectory.usable()) return bypass(Disposition::bypass_audio_clock);
+        coefficients = trajectory.coefficients;
+    } else {
+        coefficients = smooth_drive_coefficients(coefficients, item);
+    }
 
     ResidualPatch residual{};
-    if (atlas_.has_value() &&
+    if (current_pixel_route) {
+        const auto selection = select_atlas_state(*atlas_, coefficients, item.tracking.pose);
+        if (std::isfinite(selection.distance) && selection.index < atlas_->states.size()) {
+            // Only geometry is smoothed. The current source frame owns every
+            // exterior pixel, and a single oral observation is never RGB-EMA'd.
+            const auto& appearance = atlas_->states[selection.index].appearance;
+            CurrentPixelCompositorPolicy policy{};
+            policy.refine_source_edges = appearance.refine_source_edges;
+            const bool source_hold = exact_silence_coefficients(target_coefficients) ||
+                (item.drive.kind == DriveKind::timed_viseme && item.drive.viseme == Viseme::silence);
+            const auto render_coefficients = source_hold
+                ? target_coefficients : coefficients;
+            residual = compose_current_pixel_residual(item.source, item.track, item.tracking,
+                &appearance, render_coefficients, now_ns, policy);
+        }
+    } else if (atlas_.has_value() &&
         atlas_->cancellation_generation == item.track.cancellation_generation &&
         atlas_->actor_id == item.track.actor_id) {
         const bool pure_silence = exact_silence_coefficients(target_coefficients);
@@ -602,11 +657,19 @@ const CanonicalMouthPatch& ReferenceMouthWorker::smooth_atlas_appearance(
 }
 
 void ReferenceMouthWorker::reset_drive_smoothing() noexcept {
+    reset_current_pixel_history();
     smoothed_drive_coefficients_.reset();
     smoothed_drive_track_.reset();
     smoothed_drive_segment_id_ = 0U;
     smoothed_drive_source_at_ns_ = 0;
     smoothed_drive_playback_at_ns_ = 0;
+}
+
+void ReferenceMouthWorker::reset_current_pixel_history() noexcept {
+    streaming_trajectory_.reset(active_generation_);
+    trajectory_track_.reset();
+    shape_filter_.reset();
+    shape_filter_segment_id_ = 0U;
 }
 
 void ReferenceMouthWorker::reset_atlas_selection() noexcept {
@@ -633,6 +696,7 @@ const WorkerStats& ReferenceMouthWorker::stats() const noexcept {
 ProcessResult ReferenceMouthWorker::bypass(const Disposition disposition) noexcept {
     if (disposition != Disposition::bypass_no_work) {
         ++stats_.bypasses;
+        reset_current_pixel_history();
     }
     return {disposition, {}};
 }

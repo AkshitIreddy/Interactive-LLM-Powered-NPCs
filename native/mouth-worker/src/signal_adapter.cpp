@@ -355,6 +355,24 @@ SignalDecision OpenSeeFaceSignalAdapter::adapt(const OpenSeeFaceLandmarkPacketV1
     }
 
     const Nanoseconds minimum_interval = 1'000'000'000LL / static_cast<Nanoseconds>(rate);
+    const auto compatible_with = [&](const NormalizedRect& current,
+                                     const NormalizedRect& reference,
+                                     const NormalizedRect& reference_face) {
+        if (!current_frame_geometry_) {
+            return geometry_compatible(current, reference, packet.face_bounds, policy_);
+        }
+        // Compare mouth placement after the independently tracked face's
+        // translation/scale. A standing or breathing actor is not a mouth
+        // identity change; a mouth-only jump still hits the same hard gates.
+        if (!valid_rect(reference_face)) return false;
+        const auto& face = packet.face_bounds;
+        const NormalizedRect projected{
+            face.x + (reference.x - reference_face.x) / reference_face.width * face.width,
+            face.y + (reference.y - reference_face.y) / reference_face.height * face.height,
+            reference.width / reference_face.width * face.width,
+            reference.height / reference_face.height * face.height};
+        return geometry_compatible(current, projected, face, policy_);
+    };
     const Nanoseconds maximum_reacquisition_gap =
         minimum_interval * maximum_reacquisition_gap_intervals;
     if (stable_ && stable_->track == packet.track) {
@@ -368,8 +386,8 @@ SignalDecision OpenSeeFaceSignalAdapter::adapt(const OpenSeeFaceLandmarkPacketV1
             return bypass(SignalDisposition::bypass_rate_limited, rate);
         }
         bool reacquired_geometry = false;
-        const bool matches_stable_geometry = geometry_compatible(
-            mouth_bounds, stable_->mouth_bounds, packet.face_bounds, policy_);
+        const bool matches_stable_geometry = compatible_with(
+            mouth_bounds, stable_->mouth_bounds, stable_->face_bounds);
         if (!matches_stable_geometry) {
             stable_->rejected_since_accept = true;
         }
@@ -378,15 +396,14 @@ SignalDecision OpenSeeFaceSignalAdapter::adapt(const OpenSeeFaceLandmarkPacketV1
                 reacquisition_candidate_->track == packet.track &&
                 packet.measured_at_ns - reacquisition_candidate_->last_observed_at_ns <=
                     maximum_reacquisition_gap &&
-                geometry_compatible(mouth_bounds,
-                                    reacquisition_candidate_->mouth_bounds,
-                                    packet.face_bounds,
-                                    policy_);
+                compatible_with(mouth_bounds, reacquisition_candidate_->mouth_bounds,
+                                reacquisition_candidate_->face_bounds);
             if (!continues_candidate) {
                 reacquisition_candidate_ = ReacquisitionCandidate{
-                    packet.track, mouth_bounds, semantic, packet.measured_at_ns, 1U};
+                    packet.track, mouth_bounds, packet.face_bounds, semantic, packet.measured_at_ns, 1U};
             } else {
                 reacquisition_candidate_->mouth_bounds = mouth_bounds;
+                reacquisition_candidate_->face_bounds = packet.face_bounds;
                 reacquisition_candidate_->mouth_landmarks = semantic;
                 reacquisition_candidate_->last_observed_at_ns = packet.measured_at_ns;
                 ++reacquisition_candidate_->consecutive_matches;
@@ -402,14 +419,14 @@ SignalDecision OpenSeeFaceSignalAdapter::adapt(const OpenSeeFaceLandmarkPacketV1
             // the mask through unrelated face pixels.
             mouth_bounds = reacquisition_candidate_->mouth_bounds;
             semantic = reacquisition_candidate_->mouth_landmarks;
-            reacquired_geometry = !geometry_compatible(
-                mouth_bounds, stable_->mouth_bounds, packet.face_bounds, policy_);
+            reacquired_geometry = !compatible_with(
+                mouth_bounds, stable_->mouth_bounds, stable_->face_bounds);
             clear_reacquisition_candidate();
             stable_->rejected_since_accept = false;
         } else {
             clear_reacquisition_candidate();
         }
-        if (!reacquired_geometry) {
+        if (!reacquired_geometry && !current_frame_geometry_) {
             const double alpha = std::clamp(policy_.smoothing_alpha, 0.0, 1.0);
             mouth_bounds = smooth(mouth_bounds, stable_->mouth_bounds, alpha);
             semantic.left_corner = smooth(
@@ -447,6 +464,7 @@ SignalDecision OpenSeeFaceSignalAdapter::adapt(const OpenSeeFaceLandmarkPacketV1
     stable_ = StableState{
         packet.track,
         mouth_bounds,
+        packet.face_bounds,
         semantic,
         packet.measured_at_ns,
         false,
@@ -468,6 +486,13 @@ void OpenSeeFaceSignalAdapter::reset_track() noexcept {
     if (stable_) {
         stable_.reset();
         ++latch_generation_;
+    }
+}
+
+void OpenSeeFaceSignalAdapter::set_current_frame_geometry(const bool enabled) noexcept {
+    if (current_frame_geometry_ != enabled) {
+        current_frame_geometry_ = enabled;
+        reset_track();
     }
 }
 

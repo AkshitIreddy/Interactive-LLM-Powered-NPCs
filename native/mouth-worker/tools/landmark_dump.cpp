@@ -334,6 +334,16 @@ int main(int argc, char** argv) {
                 stream << ",\"accepted\":false,\"reason\":\"provider:" << json_escape(failure) << "\"}";
             } else {
                 ++provider_packets;
+                // Preserve the complete provider packet for native replay;
+                // downstream tools must never invent the remaining 48 points
+                // from the older mouth-only diagnostic arrays.
+                stream << ",\"packetLandmarks\":[";
+                for (std::size_t point = 0U; point < packet->landmarks.size(); ++point) {
+                    if (point != 0U) stream << ',';
+                    write_point(stream, packet->landmarks[point]);
+                }
+                stream << "],\"packetMouthOccluded\":"
+                       << (packet->mouth_occluded ? "true" : "false");
                 seed = expanded_tracking_seed(packet->face_bounds);
                 const auto decision = adapter.adapt(
                     *packet, appearance, resources, packet->frame, packet->measured_at_ns + 1'000'000LL);

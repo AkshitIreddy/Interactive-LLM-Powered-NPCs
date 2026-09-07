@@ -352,6 +352,34 @@ void test_character_mouth_atlas_round_trip() {
     expect(!encode_character_mouth_atlas(oral),
            "oral data cannot be serialized as a legacy full-lip atlas");
 
+    auto strip = source;
+    strip.atlas.schema_version = 4U;
+    for (auto& state : strip.atlas.states) {
+        state.appearance.representation = MouthPatchRepresentation::normalized_oral_strip_v1;
+        state.appearance.reference_context_mean = 73.125;
+        state.appearance.refine_source_edges = true;
+    }
+    const auto strip_encoded = encode_character_mouth_atlas(strip);
+    const auto strip_decoded = strip_encoded
+        ? decode_character_mouth_atlas(*strip_encoded) : std::nullopt;
+    expect(strip_decoded && strip_decoded->atlas.schema_version == 4U &&
+               strip_decoded->atlas.states[2U].appearance.reference_context_mean == 73.125 &&
+               strip_decoded->atlas.states[2U].appearance.refine_source_edges &&
+               strip_decoded->atlas.states[2U].appearance.premultiplied_bgra ==
+                   strip.atlas.states[2U].appearance.premultiplied_bgra,
+           "oral strips preserve exposure, geometry policy and exact pixels on the wire");
+    if (strip_encoded) {
+        auto invalid_edge_policy = *strip_encoded;
+        invalid_edge_policy[140U] = std::byte{2U};
+        expect(!decode_character_mouth_atlas(invalid_edge_policy),
+               "schema four rejects non-boolean geometry policy on the wire");
+        auto truncated_strip = *strip_encoded;
+        truncated_strip.pop_back();
+        expect(!decode_character_mouth_atlas(truncated_strip), "truncated schema four fails closed");
+    }
+    strip.atlas.states.front().appearance.reference_context_mean = 0.0;
+    expect(!encode_character_mouth_atlas(strip), "zero reference exposure is rejected");
+
     auto photometric = source;
     photometric.atlas.schema_version = 3U;
     expect(!encode_character_mouth_atlas(photometric),

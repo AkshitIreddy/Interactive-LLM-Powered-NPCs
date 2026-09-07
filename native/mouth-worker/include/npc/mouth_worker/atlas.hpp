@@ -23,8 +23,9 @@ struct CharacterMouthAtlas {
     // with source-derived exterior lips. Schema 3: photometrically calibrated
     // full-lip references in one fixed canonical coordinate frame; state zero
     // is the mandatory closed neutral reference. Each state must match the
-    // schema. The wire layout stays fixed; older workers reject newer schemas
-    // at admission.
+    // schema. Schema 4 carries normalized oral strips and exposure context;
+    // exterior lips always sample the current frame. Older workers reject it
+    // at admission; schema 1-3 wire layouts remain unchanged.
     std::uint32_t schema_version{1};
     std::uint64_t cancellation_generation{};
     std::uint64_t actor_id{};

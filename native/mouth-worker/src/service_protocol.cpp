@@ -1,6 +1,7 @@
 #include "npc/mouth_worker/service_protocol.hpp"
 
 #include <bit>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <type_traits>
@@ -758,7 +759,7 @@ std::optional<std::vector<std::byte>> encode_character_mouth_atlas(
     const InstallCharacterMouthAtlasCommandV1& command) {
     const auto& atlas = command.atlas;
     if (atlas.schema_version != 1U && atlas.schema_version != 2U &&
-        atlas.schema_version != 3U) return std::nullopt;
+        atlas.schema_version != 3U && atlas.schema_version != 4U) return std::nullopt;
     if (atlas.states.size() < 4U || atlas.states.size() > 16U) return std::nullopt;
     std::uint64_t total_pixels{};
     Writer writer;
@@ -769,12 +770,18 @@ std::optional<std::vector<std::byte>> encode_character_mouth_atlas(
     writer.scalar(static_cast<std::uint32_t>(atlas.states.size()));
     for (const auto& state : atlas.states) {
         const auto& appearance = state.appearance;
-        const auto expected_representation = atlas.schema_version == 2U
+        const auto expected_representation = atlas.schema_version == 4U
+            ? MouthPatchRepresentation::normalized_oral_strip_v1
+            : atlas.schema_version == 2U
             ? MouthPatchRepresentation::normalized_oral_interior_v1
             : atlas.schema_version == 3U
                 ? MouthPatchRepresentation::photometric_full_lip_reference_v1
                 : MouthPatchRepresentation::full_lip_observation_v1;
         if (appearance.representation != expected_representation) return std::nullopt;
+        if (atlas.schema_version == 4U &&
+            (!std::isfinite(appearance.reference_context_mean) ||
+             appearance.reference_context_mean <= 0.0 || appearance.reference_context_mean > 255.0))
+            return std::nullopt;
         if (appearance.premultiplied_bgra.size() > maximum_atlas_bytes) return std::nullopt;
         total_pixels += appearance.premultiplied_bgra.size();
         if (total_pixels > maximum_atlas_bytes) return std::nullopt;
@@ -783,6 +790,10 @@ std::optional<std::vector<std::byte>> encode_character_mouth_atlas(
         writer.scalar(appearance.height);
         writer.scalar(appearance.stride_bytes);
         write_pose(writer, appearance.enrolled_pose);
+        if (atlas.schema_version == 4U) {
+            writer.floating(appearance.reference_context_mean);
+            writer.scalar(static_cast<std::uint8_t>(appearance.refine_source_edges));
+        }
         writer.scalar(static_cast<std::uint32_t>(appearance.premultiplied_bgra.size()));
         writer.raw(std::as_bytes(std::span{
             appearance.premultiplied_bgra.data(), appearance.premultiplied_bgra.size()}));
@@ -800,7 +811,7 @@ std::optional<InstallCharacterMouthAtlasCommandV1> decode_character_mouth_atlas(
     std::uint32_t state_count{};
     if (!reader.scalar(value.atlas.schema_version) ||
         (value.atlas.schema_version != 1U && value.atlas.schema_version != 2U &&
-         value.atlas.schema_version != 3U) ||
+         value.atlas.schema_version != 3U && value.atlas.schema_version != 4U) ||
         !reader.scalar(value.atlas.cancellation_generation) ||
         !reader.scalar(value.atlas.actor_id) ||
         !reader.scalar(value.atlas.identity_revision) ||
@@ -811,7 +822,10 @@ std::optional<InstallCharacterMouthAtlasCommandV1> decode_character_mouth_atlas(
     std::uint64_t total_pixels{};
     for (std::uint32_t index = 0U; index < state_count; ++index) {
         MouthAtlasState state{};
-        state.appearance.representation = value.atlas.schema_version == 2U
+        std::uint8_t refine_source_edges{};
+        state.appearance.representation = value.atlas.schema_version == 4U
+            ? MouthPatchRepresentation::normalized_oral_strip_v1
+            : value.atlas.schema_version == 2U
             ? MouthPatchRepresentation::normalized_oral_interior_v1
             : value.atlas.schema_version == 3U
                 ? MouthPatchRepresentation::photometric_full_lip_reference_v1
@@ -822,10 +836,17 @@ std::optional<InstallCharacterMouthAtlasCommandV1> decode_character_mouth_atlas(
             !reader.scalar(state.appearance.height) ||
             !reader.scalar(state.appearance.stride_bytes) ||
             !read_pose(reader, state.appearance.enrolled_pose) ||
+            (value.atlas.schema_version == 4U &&
+             (!reader.floating(state.appearance.reference_context_mean) ||
+              !std::isfinite(state.appearance.reference_context_mean) ||
+              state.appearance.reference_context_mean <= 0.0 ||
+              state.appearance.reference_context_mean > 255.0 ||
+              !reader.scalar(refine_source_edges) || refine_source_edges > 1U)) ||
             !reader.vector(pixels, maximum_atlas_bytes)) {
             return std::nullopt;
         }
         total_pixels += pixels.size();
+        state.appearance.refine_source_edges = refine_source_edges != 0U;
         if (total_pixels > maximum_atlas_bytes) return std::nullopt;
         state.appearance.premultiplied_bgra.resize(pixels.size());
         std::memcpy(state.appearance.premultiplied_bgra.data(), pixels.data(), pixels.size());

@@ -183,12 +183,15 @@ struct WavPcm {
         std::regex("\"representation\"\\s*:\\s*\"([^\"]+)\""));
     const bool normalized_oral = has_representation &&
         representation_match[1].str() == "normalized-oral-interior-v1";
+    const bool oral_strip = has_representation &&
+        representation_match[1].str() == "normalized-oral-strip-v1";
     const bool photometric_full_lip = has_representation &&
         representation_match[1].str() == "photometric-full-lip-reference-v1";
     std::smatch neutral_index;
     const bool has_neutral_index = std::regex_search(manifest, neutral_index,
         std::regex("\"neutralStateIndex\"\\s*:\\s*([0-9]+)"));
-    if ((schema != 1U && schema != 2U && schema != 3U) ||
+    if ((schema != 1U && schema != 2U && schema != 3U && schema != 4U) ||
+        (schema == 4U) != oral_strip ||
         (schema == 2U) != normalized_oral ||
         (schema == 3U) != photometric_full_lip ||
         (schema == 3U && (!has_neutral_index || neutral_index[1].str() != "0")) ||
@@ -229,9 +232,27 @@ struct WavPcm {
     }
     atlas.identity_revision = std::stoull(identity[1].str());
     atlas.states.reserve(state_count);
+    std::vector<double> context_means;
+    std::vector<bool> edge_policies;
+    if (schema == 4U) {
+        const std::regex pattern("\"referenceContextMean\"\\s*:\\s*([0-9.eE+\\-]+)");
+        for (std::sregex_iterator it(manifest.begin(), manifest.end(), pattern), end;
+             it != end; ++it) context_means.push_back(std::stod((*it)[1].str()));
+        if (context_means.size() != state_count)
+            throw std::runtime_error("oral strip requires exposure context for every state");
+        const std::regex edge_pattern("\"refineSourceEdges\"\\s*:\\s*(true|false)");
+        for (std::sregex_iterator it(manifest.begin(), manifest.end(), edge_pattern), end;
+             it != end; ++it) edge_policies.push_back((*it)[1].str() == "true");
+        if (edge_policies.size() != state_count)
+            throw std::runtime_error("oral strip requires an explicit edge policy for every state");
+    }
     for (std::size_t index = 0U; index < state_count; ++index) {
         MouthAtlasState state{};
-        state.appearance.representation = normalized_oral
+        state.appearance.reference_context_mean = schema == 4U ? context_means[index] : 0.0;
+        state.appearance.refine_source_edges = schema == 4U && edge_policies[index];
+        state.appearance.representation = oral_strip
+            ? MouthPatchRepresentation::normalized_oral_strip_v1
+            : normalized_oral
             ? MouthPatchRepresentation::normalized_oral_interior_v1
             : photometric_full_lip
                 ? MouthPatchRepresentation::photometric_full_lip_reference_v1
