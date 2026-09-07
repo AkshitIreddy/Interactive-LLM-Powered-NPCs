@@ -27,12 +27,13 @@ September 5. Follow-up source and evidence supersede several of their uses of
   character override, and character mouth-pack flows. The old `Pages.tsx` and
   standalone `Onboarding.tsx` remain unreachable source specimens, not the
   mounted application.
-- The September 7 Cyberpunk/Misty moderate-OH comparison supersedes v14 as the
-  latest local-review artifact. It uses the same recorded native admission
-  events, schema-3 smoothed state selection, and one generated same-identity
-  state-7 reference. The rounded articulation is materially more restrained,
-  but a photometric/pasted seam remains. It is accepted for local review only,
-  not as natural or production-qualified lip-sync.
+- The owner rejected the September 7 Cyberpunk/Misty moderate-OH comparison as
+  cheap-looking. It preserves the recorded native admission events and
+  containment, but its full-lip photometric paste remains visibly separate from
+  the game frame. Its immutable files and receipts remain regression evidence,
+  not an accepted local-review renderer. A newer private Misty/Claire/Johnny
+  current-pixel/oral-only experiment remains offline and unqualified; Johnny is
+  partially visible and serves only as a stress case.
 - The v17 test game is verified. A v17 application package is complete only if
   its generated complete-source receipt records successful staged and final
   verification; this source report does not predict that later build outcome.
@@ -129,10 +130,10 @@ No game window or audio output was created during these checks. Evidence is at:
 - `E:\temp\InteractiveNPCs\review-game-validation\22022d1564ba8f74137fe8b6813dd1d22dc47b00fa013632c6f6bbbc60bb265d\contact-boards\moving-mouth-contact-board.png`
 - `E:\temp\InteractiveNPCs\moving-prelip-control-v1\sequence.json` and its 36 contiguous RGB frames with transformed per-frame mouth geometry
 
-## Native moving-mouth replacement
+## Native moving-mouth regression evidence
 
-The latest retained comparison is the September 7 moderate-OH, smoothed-state
-artifact:
+The retained September 7 moderate-OH, smoothed-state artifact is the latest
+immutable full-lip paste regression baseline:
 
 - labeled source/v14/new comparison for viewing:
   `E:\temp\InteractiveNPCs\user-cyberpunk-lipsync-20260907\moderate-oh-reference-v1\final-three-way-v3\misty-source-v14-moderate-oh-final.mp4`
@@ -167,13 +168,22 @@ All 90 native outputs are byte-exact to verified sequence
 The replay measured 4.7075 ms compositor p95. That number excludes the detector,
 capture, presentation, game load, and live frame-rate behavior.
 
-Root visual review accepts the more restrained OH articulation as materially
-better than v14 for local review. A visible photometric/pasted seam remains, and
-the state-7 anatomy is a private generated hypothesis rather than teeth observed
-in the game. **Offline recorded native admission replay only; not live app, live
-game, installed-provider, audible-quality, or latency proof.** Containment and
-replay identity do not qualify arbitrary characters/poses, natural quality, or
-production readiness.
+The owner rejected the video as cheap-looking. Its more restrained OH shape does
+not overcome the visible full-lip photometric/pasted seam, and the state-7
+anatomy is a private generated hypothesis rather than teeth observed in the
+game. The files and receipts remain immutable regression evidence. **Offline
+recorded native admission replay only; not an accepted local-review renderer,
+live app, live game, installed-provider, audible-quality, or latency proof.**
+Containment and replay identity do not qualify arbitrary characters/poses,
+natural quality, or production readiness.
+
+The follow-up private prototype keeps current-frame lip pixels and inserts only
+newly exposed oral interior. Its current study covers Misty, Claire, and Johnny;
+Johnny is partially visible and provides a stress case rather than a clean
+qualification. Two built-in image-generation calls prepared the Claire and
+Johnny oral-interior enrollment references. The prototype remains an offline,
+unqualified experiment and has not passed the future five-character production
+acceptance matrix.
 
 ### v14 baseline
 
@@ -207,9 +217,9 @@ latest retained comparison.
 The September 7 rejection board and receipt are under
 `E:\temp\InteractiveNPCs\user-cyberpunk-lipsync-20260907\misty-smoothing-study\rounded-reference-v5`.
 The clean landmark morph was only a marginal offline improvement and was not
-integrated. Those warp/blend experiments remain rejected; the later generated
-moderate-OH reference and schema-3 smoothed selection are the accepted
-local-review successor described above.
+integrated. Those warp/blend experiments remain rejected. The later generated
+moderate-OH reference and schema-3 smoothed selection are also owner-rejected
+regression evidence as described above.
 
 ### Earlier synthetic Mara evidence
 

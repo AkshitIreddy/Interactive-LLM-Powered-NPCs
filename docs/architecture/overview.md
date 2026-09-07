@@ -127,12 +127,14 @@ qualified. The production actor-lock bus therefore starts unqualified, and the m
 character visual route cannot be called integrated product behavior.
 
 Generic screen-space lip-sync remains optional and fail-open. Keep the actor/frame/audio
-clock, current-frame, mask, freshness, and cancellation contracts. The September 7
-schema-3 Cyberpunk/Misty moderate-OH replay preserves the native admission digest and
-containment while making rounded articulation more restrained. A photometric/pasted seam
-remains, and its generated anatomy is not observed game anatomy. It is accepted for local
-review only, not as natural-animation, installed-provider, live-game, or latency proof,
-and must not be advertised or made a dependency of audio/subtitles.
+clock, current-frame, mask, freshness, and cancellation contracts. The owner rejected the
+September 7 schema-3 Cyberpunk/Misty moderate-OH replay as cheap-looking. Although it
+preserves the native admission digest and containment and restrains the rounded shape, its
+full-lip photometric paste remains visibly separate from the game frame and its generated
+anatomy is not observed game anatomy. The immutable files and receipts remain regression
+evidence only. The current Misty/Claire/Johnny current-pixel/oral-only study is an offline,
+unqualified experiment; Johnny is only partially visible. Neither path may be advertised,
+enabled by default, or made a dependency of audio/subtitles.
 
 ## System invariants
 

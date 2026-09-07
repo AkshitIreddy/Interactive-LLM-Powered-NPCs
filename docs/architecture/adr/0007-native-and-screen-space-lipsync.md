@@ -46,17 +46,24 @@ infrastructure, not an accepted rendering method. The September 5 output was rej
 visually for painted-cavity appearance, missing teeth, and upper-lip damage. It must not
 be promoted because motion or mask metrics pass.
 
-Follow-up evidence replaces that output as the newest experiment, not as product
-acceptance. The September 7 schema-3 Cyberpunk/Misty moderate-OH replay uses recorded
-native YuNet/LM1 mouth geometry, periodic 12-frame detection with tracked-ROI updates,
-smoothed state selection, and identity-bound photometric references. Its admission-event
-digest matches v14, all 20 source-identical frames remain exact, and no pixel changes
-outside the dynamic residual bounds. The state-7 reference makes rounded articulation
-materially more restrained, but a photometric/pasted seam remains and its generated
-anatomy is not observed game anatomy. Earlier opacity/EMA and rounded-reference scaling
-experiments introduced double contours or spoke artifacts and remain rejected. The
-moderate-OH artifact is accepted for local review only; it is not installed-provider,
-live-capture, natural-animation, game-load, or end-to-end latency proof.
+The September 7 schema-3 Cyberpunk/Misty moderate-OH replay uses recorded native YuNet/LM1
+mouth geometry, periodic 12-frame detection with tracked-ROI updates, smoothed state
+selection, and identity-bound photometric references. Its admission-event digest matches
+v14, all 20 source-identical frames remain exact, and no pixel changes outside the dynamic
+residual bounds. The state-7 reference makes rounded articulation more restrained, but the
+owner rejected the result as cheap-looking because its full-lip photometric paste remains
+visibly separate from the game frame. Its generated anatomy is not observed game anatomy.
+Earlier opacity/EMA and rounded-reference scaling experiments introduced double contours
+or spoke artifacts and remain rejected. The moderate-OH files and receipts are immutable
+regression evidence, not an accepted local-review renderer.
+
+The current follow-up prototype deforms current-frame lip pixels and restricts enrolled
+content to the newly exposed oral interior. The private offline study covers Misty, Claire,
+and a partially visible Johnny stress case; it does not pass the future multi-character
+production matrix. Two built-in image-generation calls prepared the private Claire and
+Johnny oral-interior enrollment references. This is still an unqualified offline
+experiment, not installed-provider, live-capture, natural-animation, game-load, or
+end-to-end latency proof.
 
 The target renderer is source-conditioned. It builds a recent high-confidence neutral
 mouth reference for the locked actor, stabilizes a current-frame 2D/2.5D lower-face mesh,
