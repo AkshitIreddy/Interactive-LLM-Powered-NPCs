@@ -749,6 +749,78 @@ void test_photometric_atlas_admission_and_contact_rendering() {
            "schema-three pure silence preserves the newest game frame byte-exactly");
 }
 
+void test_photometric_selection_follows_causal_coefficients_and_keeps_contact_immediate() {
+    const auto advance = [](WorkItem value, const Nanoseconds elapsed) {
+        ++value.source.identity.sequence;
+        value.source.identity.captured_at_ns += elapsed;
+        value.source.lease.lease_nonce_low = value.source.identity.sequence;
+        value.source.lease.expires_at_ns = value.source.identity.captured_at_ns + 100'000'000;
+        value.tracking.frame = value.source.identity;
+        value.tracking.measured_at_ns = value.source.identity.captured_at_ns + 2'000'000;
+        value.drive.clock.first_sample_index += value.drive.clock.sample_count;
+        value.drive.clock.playback_sample_index = value.drive.clock.first_sample_index;
+        value.drive.clock.playback_at_ns = value.source.identity.captured_at_ns;
+        value.deadline_ns = value.source.identity.captured_at_ns + 50'000'000;
+        return value;
+    };
+
+    auto origin = make_item(672U, 5'000'000'000);
+    origin.drive.viseme = Viseme::rounded;
+    origin.drive.viseme_strength = 1.0;
+    const auto atlas = make_photometric_atlas(origin);
+
+    ReferenceMouthWorker transitioning(origin.track.cancellation_generation);
+    ReferenceMouthWorker rounded_control(origin.track.cancellation_generation);
+    expect(transitioning.install_atlas(atlas) && rounded_control.install_atlas(atlas),
+           "schema-three causal-selection atlases install");
+    expect(transitioning.submit(origin) && rounded_control.submit(origin),
+           "schema-three rounded origins enter both workers");
+    (void)transitioning.process_latest(
+        origin.source.identity, origin.source.identity.captured_at_ns + 10'000'000);
+    (void)rounded_control.process_latest(
+        origin.source.identity, origin.source.identity.captured_at_ns + 10'000'000);
+
+    auto early_spread = advance(origin, 16'000'000);
+    early_spread.drive.viseme = Viseme::spread_vowel;
+    auto held_rounded = early_spread;
+    held_rounded.drive.viseme = Viseme::rounded;
+    expect(transitioning.submit(early_spread) && rounded_control.submit(held_rounded),
+           "schema-three early transition enters both workers");
+    const auto early = transitioning.process_latest(
+        early_spread.source.identity, early_spread.source.identity.captured_at_ns + 10'000'000);
+    const auto held = rounded_control.process_latest(
+        held_rounded.source.identity, held_rounded.source.identity.captured_at_ns + 10'000'000);
+    expect(early.has_residual() && held.has_residual() &&
+               digest(early.residual.premultiplied_bgra) ==
+                   digest(held.residual.premultiplied_bgra) &&
+               early.residual.coefficients.smile_left > 0.0 &&
+               early.residual.coefficients.smile_left <
+                   coefficients_for_viseme(Viseme::spread_vowel, 1.0).smile_left,
+           "schema-three pixels follow the causal coefficient trajectory before switching state");
+
+    ReferenceMouthWorker contact_after_open(origin.track.cancellation_generation);
+    ReferenceMouthWorker fresh_contact(origin.track.cancellation_generation);
+    expect(contact_after_open.install_atlas(atlas) && fresh_contact.install_atlas(atlas),
+           "schema-three contact comparison atlases install");
+    expect(contact_after_open.submit(origin), "schema-three pre-contact vowel enters worker");
+    (void)contact_after_open.process_latest(
+        origin.source.identity, origin.source.identity.captured_at_ns + 10'000'000);
+    auto contact = advance(origin, 16'000'000);
+    contact.drive.viseme = Viseme::bilabial;
+    expect(contact_after_open.submit(contact) && fresh_contact.submit(contact),
+           "schema-three bilabial enters continuous and fresh workers");
+    const auto continuous_contact = contact_after_open.process_latest(
+        contact.source.identity, contact.source.identity.captured_at_ns + 10'000'000);
+    const auto expected_contact = fresh_contact.process_latest(
+        contact.source.identity, contact.source.identity.captured_at_ns + 10'000'000);
+    expect(continuous_contact.has_residual() && expected_contact.has_residual() &&
+               digest(continuous_contact.residual.premultiplied_bgra) ==
+                   digest(expected_contact.residual.premultiplied_bgra) &&
+               continuous_contact.residual.coefficients.lip_close >= 0.88 &&
+               continuous_contact.residual.coefficients.jaw_open <= 0.04,
+           "schema-three contact closure remains immediate and history independent");
+}
+
 void test_worker_never_applies_an_atlas_to_another_actor() {
     auto item = make_item();
     auto atlas = make_character_atlas(item);
@@ -1357,6 +1429,7 @@ int main() {
     test_observed_patch_extraction_preserves_real_source_pixels();
     test_worker_uses_identity_bound_atlas_and_clears_on_cancel();
     test_photometric_atlas_admission_and_contact_rendering();
+    test_photometric_selection_follows_causal_coefficients_and_keeps_contact_immediate();
     test_worker_never_applies_an_atlas_to_another_actor();
     test_timed_viseme_does_not_wait_for_atlas_dwell();
     test_timed_atlas_transition_is_continuous_on_its_first_frame();

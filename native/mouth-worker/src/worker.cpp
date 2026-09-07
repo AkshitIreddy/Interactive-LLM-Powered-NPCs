@@ -439,8 +439,18 @@ ProcessResult ReferenceMouthWorker::process_latest(const FrameIdentity& current_
             residual = compose_current_frame_residual(
                 item.source, item.track, item.tracking, coefficients, now_ns);
         } else {
+            // Schema-three reference textures are the pixel realization of the
+            // causal coefficient trajectory. Selecting them from the raw cue
+            // bypasses the drive smoother and can chatter between full-lip
+            // observations even though the residual metadata is continuous.
+            // Legacy atlas selection remains unchanged for wire-compatible
+            // behavior; exact contact targets already reset the coefficient
+            // smoother above and topology boundaries still reset appearance.
+            const auto& selection_coefficients = atlas_->schema_version == 3U
+                ? coefficients
+                : target_coefficients;
             const auto selection = select_atlas_state(
-                *atlas_, target_coefficients, item.tracking.pose);
+                *atlas_, selection_coefficients, item.tracking.pose);
             if (std::isfinite(selection.distance) && selection.index < atlas_->states.size()) {
                 const auto& state = atlas_->states[selection.index];
                 const auto& appearance = smooth_atlas_appearance(state, item);
