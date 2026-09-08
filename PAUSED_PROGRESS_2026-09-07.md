@@ -1,5 +1,13 @@
 # Paused progress — 7 September 2026
 
+**Historical checkpoint: resumed by the owner on 8 September.** The final
+native rerenders are complete and all 156 frames match the preceding outputs.
+The new enlarged mouth sequences have been inspected. Current verification
+is tracked in [native integration](docs/research/native-current-pixel-integration-2026-09-07.md);
+the generated `E:\temp\InteractiveNPCs\review-v18\REVIEW-MANIFEST.json`, if present,
+determines whether the fresh local package completed. The pause and unfinished
+items below describe the original 7 September checkpoint, not a renewed stop.
+
 ## Resume here
 
 The owner explicitly requested: **stop for now, save the work, and record enough

@@ -1,12 +1,12 @@
 # Native current-pixel integration
 
-**Paused by the owner on 7 September.** Resume from
-[PAUSED_PROGRESS_2026-09-07.md](../../PAUSED_PROGRESS_2026-09-07.md).
-The final native build passed all 12 test groups. The replay results below
-predate that final build and may predate the reversed-corner correction;
-rerender before treating them as proof of the final binary. The final reviewed
-Mara Rust/native join passed separately at `r7-reviewed-mara`. The v18 package
-has not been built.
+**Resumed on 8 September.** All four cases were rerendered with the final
+native binary. All 156 output frames are pixel-identical to the preceding
+replays, resolving the paused corner-order verification question. Enlarged
+Misty, Claire and Mara sequences were inspected and accepted for limited
+private review; Johnny remains a source-exact tracking bypass. The final
+native build passes 12 test groups. The generated v18 package manifest, when
+present, is authoritative for its build status and source identity.
 
 The owner accepted the visual improvement in the three-character v10 video
 and requested integration on 7 September. That acceptance applies to the
@@ -86,10 +86,10 @@ adapter, schema-4 worker, sample-clock coefficients and CPU composition.
 
 | Character | Residual outputs | Changed outputs | Source-exact bypasses | Worker + composition p95 |
 | --- | ---: | ---: | ---: | ---: |
-| Misty | 45/45 | 39 | 0 | 10.303 ms |
-| Claire | 45/45 | 39 | 0 | 6.024 ms |
+| Misty | 45/45 | 39 | 0 | 11.493 ms |
+| Claire | 45/45 | 39 | 0 | 6.208 ms |
 | Johnny | 0/45 | 0 | 45 | Not applicable |
-| Mara test fixture | 21/21 | 20 | 0 | 16.369 ms |
+| Mara test fixture | 21/21 | 20 | 0 | 18.258 ms |
 
 All 16 rendered bilabial samples satisfy exact contact. No output changes
 pixels outside its residual support. Transparent silence is counted as a
@@ -97,15 +97,35 @@ source-exact residual, not as visible lip movement. These are short CPU replay
 measurements, excluding landmark inference, capture, audio decode, presentation,
 game load and file encoding. They are not conversational latency figures.
 
-The 11 native test groups pass, including reversed OSF contour ordering,
+The 12 native test groups pass, including reversed OSF contour ordering,
 source-edge false-cavity repair, local-shape filtering, whole-face movement,
 mouth-only jump rejection, schema-4 protocol validation and cancellation.
 The Rust parser's 30 focused tests and the opt-in real-process join also pass.
 The latter installs schema-4 bytes in a hidden native worker, rejects malformed
 and stale data, runs the owned D3D service smoke, and self-tests the hidden game.
-Its latest receipt is
-`E:\temp\InteractiveNPCs\schema4-native-join-proof-20260907-r5\schema4-native-join-receipt.json`
-(SHA-256 `428a02dcf6a0814e6fc5e7ae15171152d258ee0d88c1210ed7d5369e282c5dfa`).
+The exact reviewed Mara import/enable/resolve join also passed at
+`E:\temp\InteractiveNPCs\schema4-native-join-proof-20260907-r7-reviewed-mara\schema4-native-join-receipt.json`
+(SHA-256 `dcc8b4003a17770c1f95d6793c56212131559cc2d4962899532f100ca6f6fee1`).
+
+The 8 September visual review is bound to
+`E:\temp\InteractiveNPCs\integration-20260907\native-visual-review-20260908.json`
+(SHA-256 `7ccbdd5cb081328076ff00244cff39540fef03440385e7e2770a6b54a85644d8`).
+It records binary identities, exact-frame parity, report and board hashes,
+canonical character scopes and private-review limitations. Claire's enlarged
+inspection board applies the same +2-stop exposure to source and output;
+the comparison video retains original exposure. Small face resolution, soft
+oral detail and a short frontal corpus limit natural-quality conclusions.
+
+The final comparator is
+`E:\temp\InteractiveNPCs\integration-20260907\native-review-final-v2-20260908\native-current-pixel-four-character-review.mp4`:
+156 frames at 15 Hz, 10.4 seconds, SHA-256
+`bd20aa2c56c9fd442bb5ba4083e6eb9a6e97f87b7e923b39254ff31f6be0c609`.
+Its sibling `verification.json` binds the inputs and an exact
+`assembler-source.py` snapshot. The assembler was run with
+`--replay-dir misty misty-native-v3 --replay-dir claire claire-native-v3
+--replay-dir johnny johnny-native-v3 --replay-dir mara mara-native-v2`.
+Johnny's section explicitly shows native bypass, not successful lip-sync.
+The reused stock Sarah audio is not a new provider request or live dialogue.
 
 ## Evidence boundaries
 

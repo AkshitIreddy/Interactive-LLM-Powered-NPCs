@@ -1,11 +1,12 @@
 # Independent local review rebuild — 2026-09-05, reconciled 2026-09-07
 
-**Owner-requested pause:** the authoritative continuation checkpoint is
-[PAUSED_PROGRESS_2026-09-07.md](../../PAUSED_PROGRESS_2026-09-07.md).
-Final native tests pass 12/12; the exact reviewed Mara join passed at r7.
-The video needs a final-binary rerender and v18 remains unbuilt. Earlier
-receipt details below retain their original scope and are not final-binary
-visual qualification.
+**8 September continuation:** final-binary native rerenders are complete;
+all 156 frames match the preceding outputs and enlarged mouth sequences were
+inspected. Final native tests pass 12/12 and the exact reviewed Mara join passed
+at r7. See [native integration](../research/native-current-pixel-integration-2026-09-07.md)
+for current timing and visual evidence. The generated v18 manifest is the
+authority for package completion. The
+[7 September checkpoint](../../PAUSED_PROGRESS_2026-09-07.md) is historical.
 
 Status: independent implementation and headless review evidence recorded. The
 verified v17 test game remains the current synthetic target, and the 2-of-2
