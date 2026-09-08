@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -7,6 +7,7 @@ const bridge = vi.hoisted(() => ({
   readTarget: vi.fn(),
   selectTarget: vi.fn(),
   clearTarget: vi.fn(),
+  verifyCapture: vi.fn(),
   actorStart: vi.fn(),
   actorStatus: vi.fn(),
   actorCancel: vi.fn(),
@@ -47,6 +48,7 @@ vi.mock("./tauriBridge", async (importOriginal) => ({
   readSelectedGameTarget: bridge.readTarget,
   selectGameTarget: bridge.selectTarget,
   clearGameTarget: bridge.clearTarget,
+  verifySelectedGameCapture: bridge.verifyCapture,
   startManualActorPicker: bridge.actorStart,
   readManualActorPickerStatus: bridge.actorStatus,
   cancelManualActorPicker: bridge.actorCancel,
@@ -948,13 +950,20 @@ describe("native product workspaces", () => {
     expect(
       (await screen.findAllByText("Visual capture stays blocked.")).length,
     ).toBeGreaterThan(0);
-    await user.click(screen.getByText("Connection tools"));
+    await user.click(screen.getByText("Connection details"));
     expect(
-      screen.getByRole("button", { name: "Verify ordinary game capture" }),
-    ).toBeDisabled();
+      screen.getByRole("button", { name: "Check game capture" }),
+    ).toBeEnabled();
+    bridge.verifyCapture.mockRejectedValueOnce(
+      new Error("No current game frame available."),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Check game capture" }),
+    );
+    expect(bridge.verifyCapture).toHaveBeenCalled();
     expect(
-      screen.getByText(/no trusted offline and protection evidence/i),
-    ).toBeInTheDocument();
+      await screen.findByText("No current game frame available."),
+    ).toBeVisible();
     await user.click(
       screen.getByRole("button", { name: "Select NPC on screen" }),
     );
@@ -964,7 +973,11 @@ describe("native product workspaces", () => {
         /No current admitted native visual candidate set/i,
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText("Unavailable")).toBeInTheDocument();
+    expect(
+      within(
+        screen.getByRole("region", { name: "NPC tracking setup" }),
+      ).getByText("Not selected"),
+    ).toBeVisible();
     expect(
       screen.queryByText("Skyrim Special Edition"),
     ).not.toBeInTheDocument();

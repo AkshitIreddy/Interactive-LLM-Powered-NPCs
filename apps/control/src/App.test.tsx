@@ -18,7 +18,7 @@ describe("NPC 2.0 product console", () => {
     expect(screen.getByLabelText("Session signal rail")).toHaveTextContent(
       "Eclipse Harbor",
     );
-    for (const label of ["Channel", "Night City", "Loadout", "Settings"]) {
+    for (const label of ["Channel", "Games", "Loadout", "Settings"]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
     expect(
@@ -32,9 +32,7 @@ describe("NPC 2.0 product console", () => {
   it("maps a saved legacy Characters route to World", () => {
     window.history.replaceState(null, "", "/?page=characters");
     render(<App />);
-    expect(
-      screen.getByRole("heading", { name: "Night City" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Games" })).toBeInTheDocument();
     expect(
       screen.getByText(/Your Cyberpunk characters, voices and memories/i),
     ).toBeInTheDocument();
@@ -89,7 +87,7 @@ describe("NPC 2.0 product console", () => {
     ).toBeInTheDocument();
   });
 
-  it("opens Night City from the native mouth motion setup action", async () => {
+  it("opens Games from the native mouth motion setup action", async () => {
     const user = userEvent.setup();
     window.history.replaceState(null, "", "/?page=voice");
     render(<App />);
@@ -99,7 +97,7 @@ describe("NPC 2.0 product console", () => {
     await user.click(
       screen.getByRole("button", { name: "Set up mouth motion" }),
     );
-    expect(screen.getByRole("heading", { name: "Night City" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Games" })).toBeVisible();
     expect(window.location.search).toBe("?page=world");
   });
 
@@ -161,8 +159,8 @@ describe("NPC 2.0 product console", () => {
     },
     {
       query: "process",
-      action: "Open Night City",
-      destination: "Night City",
+      action: "Open Games",
+      destination: "Games",
       role: "heading" as const,
     },
     {

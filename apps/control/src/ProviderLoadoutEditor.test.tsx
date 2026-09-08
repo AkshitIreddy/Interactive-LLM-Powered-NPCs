@@ -346,7 +346,7 @@ describe("provider and model loadouts", () => {
     );
     expect(document.body).not.toHaveTextContent("Download pack");
     expect(document.body).toHaveTextContent(
-      "Game mouth motion is set up in Night City. A separate lip-sync model is optional and unavailable in this build.",
+      "Game mouth motion is set up in Games. A separate lip-sync model is optional and unavailable in this build.",
     );
     await user.click(
       screen.getByRole("button", { name: "Set up mouth motion" }),

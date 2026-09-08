@@ -87,7 +87,7 @@ export const SUPPORT_GUIDES: SupportGuideEntry[] = [
       "capture",
       "memory",
     ],
-    actionLabel: "Open Night City",
+    actionLabel: "Open Games",
     action: { kind: "navigate", page: "world" },
     reviewedRevision: "support-2026-08-30",
   },

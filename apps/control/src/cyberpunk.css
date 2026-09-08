@@ -816,6 +816,42 @@
   background: linear-gradient(115deg, #301923, #161016);
   box-shadow: inset 3px 0 #65e1e2;
 }
+.cyberpunk-shell .game-visual-setup {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-top: 1px solid #59353e;
+  margin-top: 18px;
+}
+.cyberpunk-shell :is(.game-overlay-setup, .game-actor-setup) {
+  padding: 22px 14px 12px;
+  min-width: 0;
+}
+.cyberpunk-shell .game-actor-setup {
+  border-left: 1px solid #59353e;
+}
+.cyberpunk-shell .game-overlay-setup__heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.cyberpunk-shell .game-visual-setup h3 {
+  margin: 5px 0 10px;
+}
+.cyberpunk-shell .game-visual-setup p {
+  color: #b799a4;
+  font-size: 13px;
+  line-height: 1.5;
+}
+@media (max-width: 900px) {
+  .cyberpunk-shell .game-visual-setup {
+    grid-template-columns: 1fr;
+  }
+  .cyberpunk-shell .game-actor-setup {
+    border-left: 0;
+    border-top: 1px solid #59353e;
+  }
+}
 .cyberpunk-shell .character-content-editor {
   border-color: #59353e;
   border-radius: 0;

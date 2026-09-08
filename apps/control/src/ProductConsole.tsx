@@ -156,7 +156,7 @@ const DEFAULT_PREFERENCES: AppPreferences = {
 
 const NAV: Array<{ id: ProductPage; label: string; icon: IconName }> = [
   { id: "session", label: "Channel", icon: "conversation" },
-  { id: "world", label: "Night City", icon: "games" },
+  { id: "world", label: "Games", icon: "games" },
   { id: "voice", label: "Loadout", icon: "headphones" },
   { id: "settings", label: "Settings", icon: "settings" },
 ];
@@ -1794,6 +1794,7 @@ export function ProductConsole() {
         {page === "world" && (
           <WorldPage
             onNavigate={navigate}
+            onPreferencesSnapshot={acceptPreferenceWorkspaceSnapshot}
             onConnectReviewGame={connectReviewGame}
             reviewLaunchAvailable={reviewTargetAvailable.available}
             captureBusy={captureBusy}
@@ -3113,6 +3114,7 @@ function SessionPage({
 
 function WorldPage({
   onNavigate,
+  onPreferencesSnapshot,
   onConnectReviewGame,
   reviewLaunchAvailable,
   captureBusy,
@@ -3131,6 +3133,7 @@ function WorldPage({
   identityEnrollmentError,
 }: {
   onNavigate: (page: ProductPage) => void;
+  onPreferencesSnapshot: (snapshot: NativeProductPreferenceSnapshot) => void;
   onConnectReviewGame: () => void;
   reviewLaunchAvailable: boolean;
   captureBusy: boolean;
@@ -3153,7 +3156,7 @@ function WorldPage({
     <div className="page-stack">
       <header className="page-heading">
         <span className="eyebrow">Choose who answers</span>
-        <h1>Night City</h1>
+        <h1>Games</h1>
         <p>
           {nativeAvailable
             ? "Connect Cyberpunk 2077. Choose who you want to talk to."
@@ -3162,6 +3165,7 @@ function WorldPage({
       </header>
       <GameTargetWorkspace
         nativeAvailable={nativeAvailable}
+        onPreferencesSnapshot={onPreferencesSnapshot}
         gameProfiles={gameProfiles}
         gameProfileId={gameProfileId}
         onGameProfileChange={onGameProfileChange}

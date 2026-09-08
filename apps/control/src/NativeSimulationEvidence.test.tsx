@@ -1171,7 +1171,7 @@ describe("native evidence in the product console", () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
-    await user.click(screen.getByRole("button", { name: "Night City" }));
+    await user.click(screen.getByRole("button", { name: "Games" }));
     await user.click(screen.getByText("Practice environment"));
     expect(
       screen.getByRole("button", { name: "Verify live capture" }),
@@ -1220,7 +1220,7 @@ describe("native evidence in the product console", () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
-    await user.click(screen.getByRole("button", { name: "Night City" }));
+    await user.click(screen.getByRole("button", { name: "Games" }));
     await user.click(screen.getByText("Character recognition"));
     expect(document.body).toHaveTextContent(
       "Identity reference enrollment is blocked until the signed identity pack is admitted.",
@@ -1246,7 +1246,7 @@ describe("native evidence in the product console", () => {
     });
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
-    await user.click(screen.getByRole("button", { name: "Night City" }));
+    await user.click(screen.getByRole("button", { name: "Games" }));
     await user.click(
       screen.getByRole("button", { name: "Select synthetic target" }),
     );
@@ -1271,7 +1271,7 @@ describe("native evidence in the product console", () => {
     );
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
-    await user.click(screen.getByRole("button", { name: "Night City" }));
+    await user.click(screen.getByRole("button", { name: "Games" }));
     await user.click(
       screen.getByRole("button", { name: "Select synthetic target" }),
     );
@@ -1332,7 +1332,7 @@ describe("native evidence in the product console", () => {
     expect(bridge.start.mock.calls[0][2]).not.toHaveProperty("devLiveTts");
   });
 
-  it("starts in Night City after a matching native Cyberpunk inspection", async () => {
+  it("starts in Games after a matching native Cyberpunk inspection", async () => {
     const user = userEvent.setup();
     bridge.loadBootstrap.mockResolvedValueOnce({
       ...authenticatedBootstrap,
@@ -1461,7 +1461,7 @@ describe("native evidence in the product console", () => {
     expect(screen.getByRole("heading", { name: "Mara Venn" })).toBeVisible();
   });
 
-  it("does not activate Night City from a mismatched inspection", async () => {
+  it("does not activate Games from a mismatched inspection", async () => {
     bridge.loadBootstrap.mockResolvedValueOnce({
       ...authenticatedBootstrap,
       snapshot: {

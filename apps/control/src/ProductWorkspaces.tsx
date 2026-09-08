@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { GameOverlaySetup } from "./GameOverlaySetup";
 import {
   readCharacterContentOverride,
   resetCharacterContentOverride,
@@ -20,6 +21,7 @@ import {
 import type {
   NativeGameProfileSummary,
   NativeModelSummary,
+  NativeProductPreferenceSnapshot,
 } from "./tauriBridge";
 import {
   activateTrustedOptionalPack,
@@ -57,6 +59,7 @@ import {
   selectGameTarget,
   startThisPcBenchmark,
   startManualActorPicker,
+  verifySelectedGameCapture,
   type NativeBenchmarkMetricSummary,
   type NativeBenchmarkReport,
   type NativeBenchmarkStatus,
@@ -161,12 +164,14 @@ export function GameTargetWorkspace({
   gameProfiles,
   gameProfileId,
   onSelectionChange,
+  onPreferencesSnapshot,
 }: {
   nativeAvailable: boolean;
   gameProfiles: NativeGameProfileSummary[];
   gameProfileId: string;
   onGameProfileChange: (gameProfileId: string) => void;
   onSelectionChange: (selection: NativeGameTargetSelection | null) => void;
+  onPreferencesSnapshot?: (snapshot: NativeProductPreferenceSnapshot) => void;
 }) {
   const cyberpunkProfile = gameProfiles.find(
     (profile) => profile.id === CYBERPUNK_PROFILE_ID,
@@ -179,6 +184,14 @@ export function GameTargetWorkspace({
     null,
   );
   const [confirmed, setConfirmed] = useState(false);
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  useEffect(
+    () => () => {
+      selectedRef.current = null;
+    },
+    [],
+  );
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState(
     nativeAvailable
@@ -190,7 +203,7 @@ export function GameTargetWorkspace({
       schemaVersion: 1,
       state: "unavailable",
       detail: nativeAvailable
-        ? "Bind a game target before selecting a character in the native overlay."
+        ? "Select an NPC to start mouth tracking."
         : "Native actor selection requires the Windows desktop shell.",
     });
 
@@ -297,6 +310,44 @@ export function GameTargetWorkspace({
       );
     } catch (error) {
       setNotice(errorText(error, "Game target could not be cleared."));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const verifyCapture = async () => {
+    const expected = selectedRef.current;
+    if (!nativeAvailable || !expected || busy) return;
+    setBusy(true);
+    try {
+      const receipt = await verifySelectedGameCapture();
+      if (selectedRef.current !== expected) return;
+      if (
+        !receipt ||
+        receipt.gameProfileId !== expected.gameProfileId ||
+        receipt.target.processId !== expected.target.processId ||
+        receipt.target.nativeWindow !== expected.target.nativeWindow ||
+        receipt.target.executablePathSha256 !==
+          expected.target.executablePathSha256
+      )
+        throw new Error("The capture check did not match the connected game.");
+      const next = await readSelectedGameTarget();
+      if (selectedRef.current !== expected) return;
+      if (
+        !next ||
+        next.gameProfileId !== expected.gameProfileId ||
+        next.target.processId !== expected.target.processId ||
+        next.target.nativeWindow !== expected.target.nativeWindow ||
+        next.target.executablePathSha256 !==
+          expected.target.executablePathSha256 ||
+        !next.captureAuthorized
+      )
+        throw new Error("Game capture is not ready yet. Try checking again.");
+      setSelected(next);
+      onSelectionChange(next);
+      setNotice("Game capture checked. You can now select the NPC on screen.");
+    } catch (error) {
+      if (selectedRef.current === expected)
+        setNotice(errorText(error, "Game capture could not be checked."));
     } finally {
       setBusy(false);
     }
@@ -459,47 +510,62 @@ export function GameTargetWorkspace({
         </article>
       )}
 
-      <details className="technical-disclosure actor-picker-disclosure">
-        <summary>Connection tools</summary>
-        <p>
-          Select the NPC you are facing after the game window is connected.
-          Their character profile below controls voice and memory.
-        </p>
-        <div className="target-toolbar manual-actor-picker-controls">
-          <button
-            className="secondary-action"
-            disabled={
-              !nativeAvailable ||
-              !selected ||
-              busy ||
-              actorPicker.state === "waiting"
-            }
-            onClick={startActorPicker}
-          >
-            Select NPC on screen
-          </button>
-          <button
-            className="quiet-button"
-            disabled={busy || actorPicker.state !== "waiting"}
-            onClick={cancelActorPicker}
-          >
-            Cancel selection
-          </button>
-          <span
-            className={
-              actorPicker.state === "selected" ? "badge good" : "badge wait"
-            }
-          >
-            {actorPicker.state === "waiting"
-              ? "Waiting for click"
-              : actorPicker.state === "selected"
-                ? "NPC selected"
-                : actorPicker.state === "cancelled"
-                  ? "Selection cancelled"
-                  : "Unavailable"}
-          </span>
+      {selected && (
+        <div className="game-visual-setup">
+          <GameOverlaySetup
+            nativeAvailable={nativeAvailable}
+            gameProfileId={activeGameProfileId}
+            onSnapshot={onPreferencesSnapshot}
+          />
+          <section className="game-actor-setup" aria-label="NPC tracking setup">
+            <span className="eyebrow">On-screen character</span>
+            <h3>NPC tracking</h3>
+            <p>
+              Select the NPC you are facing. The character profile below
+              controls voice and memory.
+            </p>
+            <div className="target-toolbar manual-actor-picker-controls">
+              <button
+                className="secondary-action"
+                disabled={
+                  !nativeAvailable ||
+                  !selected ||
+                  busy ||
+                  actorPicker.state === "waiting"
+                }
+                onClick={startActorPicker}
+              >
+                Select NPC on screen
+              </button>
+              {actorPicker.state === "waiting" && (
+                <button
+                  className="quiet-button"
+                  disabled={busy}
+                  onClick={cancelActorPicker}
+                >
+                  Cancel selection
+                </button>
+              )}
+              <span
+                className={
+                  actorPicker.state === "selected" ? "badge good" : "badge wait"
+                }
+              >
+                {actorPicker.state === "waiting"
+                  ? "Waiting for click"
+                  : actorPicker.state === "selected"
+                    ? "NPC selected"
+                    : actorPicker.state === "cancelled"
+                      ? "Selection cancelled"
+                      : "Not selected"}
+              </span>
+            </div>
+            <p className="source-disclosure">{actorPicker.detail}</p>
+          </section>
         </div>
-        <p className="source-disclosure">{actorPicker.detail}</p>
+      )}
+      <details className="technical-disclosure actor-picker-disclosure">
+        <summary>Connection details</summary>
         {selected && (
           <div className="connection-evidence">
             <dl className="facts">
@@ -519,16 +585,11 @@ export function GameTargetWorkspace({
             <p>{selected.safetyDetail}</p>
             <button
               className="quiet-button"
-              disabled
-              aria-describedby="ordinary-capture-blocked-reason"
+              disabled={!nativeAvailable || busy}
+              onClick={() => void verifyCapture()}
             >
-              Verify ordinary game capture
+              Check game capture
             </button>
-            <small id="ordinary-capture-blocked-reason">
-              Disabled: the native safety boundary has no trusted offline and
-              protection evidence for this commercial target. The task-owned
-              synthetic fixture uses a separate review-only verifier.
-            </small>
           </div>
         )}
       </details>

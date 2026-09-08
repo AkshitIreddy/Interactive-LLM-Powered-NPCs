@@ -76,7 +76,7 @@ export function CyberwareAnatomy({
                 <strong>{anatomyLabels[role]}</strong>
                 <small>
                   {mouthMotionUsesGameSetup
-                    ? "Night City setup · optional model Off"
+                    ? "Games setup · optional model Off"
                     : `${provider.name} · ${model.name}`}
                 </small>
               </span>

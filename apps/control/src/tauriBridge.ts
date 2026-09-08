@@ -1844,7 +1844,7 @@ export interface NativeGameCaptureVerification {
   frameSequenceAdvanced: true;
   contentChanged: boolean;
   reviewFixtureMotionMode?: string;
-  safetyState: "verified_synthetic_fixture";
+  safetyState: "verified_synthetic_fixture" | "verified_exact_window_wgc";
 }
 
 export interface SyntheticReplayCaptureResult {

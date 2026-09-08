@@ -1214,9 +1214,9 @@ export function ProviderLoadoutEditor({
                         <div>
                           <strong>Game mouth motion</strong>
                           <p>
-                            Game mouth motion is set up in Night City. A
-                            separate lip-sync model is optional and unavailable
-                            in this build.
+                            Game mouth motion is set up in Games. A separate
+                            lip-sync model is optional and unavailable in this
+                            build.
                           </p>
                         </div>
                         {onManageMouthMotion && (
