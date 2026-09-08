@@ -541,15 +541,19 @@ Review root: $destination
    activate. This checks that the provider can load and unload; it does not rate
    mouth-motion quality. Then, with the Cyberpunk window connected, choose Check
    and admit selected loadout. A blocked check is not a ready installation.
-5. Return to Games and choose Select NPC on screen. After the sealed native
-   selection succeeds, open the matching character's mouth-pack workspace,
-   import its staged reviewed receipt from review-character-mouth-packs, and
-   choose Apply to selected NPC. The selection lease lasts at most 15 seconds;
-   reselect the NPC before applying if it expires.
-6. Open Connect accounts, choose each hosted provider used by the voice and
-   conversation loadout, and choose Connect account to enter its key in the
-   secure Windows prompt. Provider keys are not imported automatically. Choose
-   the model and stock voice you intend to review; charges and limits may apply.
+5. Before starting the short NPC-selection lease, open the matching character's
+   mouth-pack workspace and import its staged reviewed receipt from
+   review-character-mouth-packs. Keep that character selected, return to Games,
+   choose Select NPC on screen, and then choose Apply to selected NPC. The sealed
+   selection lease lasts at most 15 seconds; reselect the NPC before applying if
+   it expires.
+6. Provider credentials remain owner-local and separate from this package. On
+   the already provisioned owner review profile, inspect the persisted connection
+   and loadout status; rebuilding this package does not require re-entering keys.
+   On another clean machine or profile, open Connect accounts and explicitly
+   connect each hosted provider used by the voice and conversation loadout.
+   Choose the model and stock voice you intend to review; charges and limits may
+   apply.
 
 This package contains no provider credential values and never imports them.
 Owner-local review setup, when performed separately, stays in Windows Credential
