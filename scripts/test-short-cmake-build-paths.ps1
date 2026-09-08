@@ -87,7 +87,7 @@ try {
         $ctest = Join-Path (Split-Path -Parent $cmake) 'ctest.exe'
         $fixtureMediaSource = Join-Path $firstRepo 'native/media-broker'
         $global:LASTEXITCODE = 0
-        & $cmake -S $fixtureMediaSource -B $mediaBuild -G 'Visual Studio 17 2022' -A x64 -DBUILD_TESTING=ON -DNPC_MEDIA_BROKER_BUILD_TESTS=ON
+        & $cmake -S $fixtureMediaSource -B $mediaBuild -G 'Visual Studio 17 2022' -A x64 -DBUILD_TESTING=ON -DNPC_MEDIA_BROKER_BUILD_TESTS=ON -DNPC_MEDIA_BROKER_REGISTER_INTERACTIVE_WINDOWS_TESTS=OFF
         if ($LASTEXITCODE -ne 0) { throw 'Deep-checkout media-broker configuration failed.' }
         & $cmake --build $mediaBuild --config Debug --parallel 4
         if ($LASTEXITCODE -ne 0) { throw 'Deep-checkout media-broker build failed.' }

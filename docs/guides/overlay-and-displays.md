@@ -33,9 +33,18 @@ Optional visuals receive the lowest GPU priority. They are disabled before speec
 ## Native build verification
 
 ```powershell
-cmake -S native/media-broker -B build/media-broker -G "Visual Studio 17 2022" -A x64
+cmake -S native/media-broker -B build/media-broker -G "Visual Studio 17 2022" -A x64 -DNPC_MEDIA_BROKER_REGISTER_INTERACTIVE_WINDOWS_TESTS=OFF
 cmake --build build/media-broker --config Debug
 ctest --test-dir build/media-broker -C Debug --output-on-failure
 ```
+
+The default CTest inventory contains only noninteractive tests. The Windows WGC,
+display, playback, input, and identity smoke tests can create visible windows or
+use live user devices, so they are not registered unless the build is configured
+with `-DNPC_MEDIA_BROKER_REGISTER_INTERACTIVE_WINDOWS_TESTS=ON`. Use that opt-in
+only for a deliberately scheduled interactive qualification, then run the
+`interactive_windows_smoke` label explicitly. An existing build directory keeps
+its previous CTest inventory until CMake is run again; reconfigure it with the
+option set to `OFF` before running an aggregate `ctest` command.
 
 Portable tests verify the contracts; only rendered/native Windows evidence can certify capture and overlay behavior.

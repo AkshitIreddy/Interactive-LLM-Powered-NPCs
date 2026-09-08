@@ -90,7 +90,7 @@ $nativeComponents = @(
     [pscustomobject]@{
         Id = 'media-broker'; CacheSegment = 'mb'; Source = 'native/media-broker';
         Target = 'npc-media-broker'; Output = 'npc-media-broker.exe';
-        Configure = @('-DBUILD_TESTING=OFF', '-DNPC_MEDIA_BROKER_BUILD_TESTS=OFF', '-DNPC_MEDIA_BROKER_WARNINGS_AS_ERRORS=ON')
+        Configure = @('-DBUILD_TESTING=OFF', '-DNPC_MEDIA_BROKER_BUILD_TESTS=OFF', '-DNPC_MEDIA_BROKER_REGISTER_INTERACTIVE_WINDOWS_TESTS=OFF', '-DNPC_MEDIA_BROKER_WARNINGS_AS_ERRORS=ON')
     },
     [pscustomobject]@{
         Id = 'mouth-worker'; CacheSegment = 'mw'; Source = 'native/mouth-worker';

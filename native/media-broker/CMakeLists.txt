@@ -4,6 +4,8 @@ project(npc_media_broker VERSION 2.0.0 LANGUAGES CXX)
 
 option(NPC_MEDIA_BROKER_BUILD_TESTS "Build the portable media-broker tests" ON)
 option(NPC_MEDIA_BROKER_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
+option(NPC_MEDIA_BROKER_REGISTER_INTERACTIVE_WINDOWS_TESTS
+       "Register Windows tests that create visible windows or use live user devices" OFF)
 
 add_library(npc_media_broker_core STATIC
     src/audio_ring.cpp
@@ -163,11 +165,6 @@ if(BUILD_TESTING AND NPC_MEDIA_BROKER_BUILD_TESTS)
                 target_compile_options(npc_media_broker_windows_smoke_tests PRIVATE /WX)
             endif()
         endif()
-        add_test(NAME npc_media_broker_windows_smoke_tests COMMAND npc_media_broker_windows_smoke_tests)
-        add_test(NAME npc_media_broker_capture_lifecycle_regression
-                 COMMAND npc_media_broker_windows_smoke_tests --direct-shared-only)
-        add_test(NAME npc_media_broker_service_protocol_tests
-                 COMMAND npc_media_broker_windows_smoke_tests --service-only)
         add_executable(npc_media_broker_windows_display_smoke_tests
                        tests/windows_display_smoke_tests.cpp)
         target_compile_features(npc_media_broker_windows_display_smoke_tests PRIVATE cxx_std_20)
@@ -183,8 +180,6 @@ if(BUILD_TESTING AND NPC_MEDIA_BROKER_BUILD_TESTS)
                 target_compile_options(npc_media_broker_windows_display_smoke_tests PRIVATE /WX)
             endif()
         endif()
-        add_test(NAME npc_media_broker_windows_display_smoke_tests
-                 COMMAND npc_media_broker_windows_display_smoke_tests)
         add_executable(npc_media_broker_windows_playback_smoke_tests
                        tests/windows_playback_smoke_tests.cpp)
         target_compile_features(npc_media_broker_windows_playback_smoke_tests PRIVATE cxx_std_20)
@@ -200,8 +195,6 @@ if(BUILD_TESTING AND NPC_MEDIA_BROKER_BUILD_TESTS)
                 target_compile_options(npc_media_broker_windows_playback_smoke_tests PRIVATE /WX)
             endif()
         endif()
-        add_test(NAME npc_media_broker_windows_playback_smoke_tests
-                 COMMAND npc_media_broker_windows_playback_smoke_tests)
         add_executable(npc_media_broker_windows_input_smoke_tests
                        tests/windows_input_smoke_tests.cpp)
         target_compile_features(npc_media_broker_windows_input_smoke_tests PRIVATE cxx_std_20)
@@ -217,8 +210,6 @@ if(BUILD_TESTING AND NPC_MEDIA_BROKER_BUILD_TESTS)
                 target_compile_options(npc_media_broker_windows_input_smoke_tests PRIVATE /WX)
             endif()
         endif()
-        add_test(NAME npc_media_broker_windows_input_smoke_tests
-                 COMMAND npc_media_broker_windows_input_smoke_tests)
         add_executable(npc_media_broker_windows_identity_smoke_tests
                        tests/windows_identity_smoke_tests.cpp)
         target_compile_features(npc_media_broker_windows_identity_smoke_tests PRIVATE cxx_std_20)
@@ -235,20 +226,36 @@ if(BUILD_TESTING AND NPC_MEDIA_BROKER_BUILD_TESTS)
                 target_compile_options(npc_media_broker_windows_identity_smoke_tests PRIVATE /WX)
             endif()
         endif()
-        add_test(NAME npc_media_broker_windows_identity_smoke_tests
-                 COMMAND npc_media_broker_windows_identity_smoke_tests)
-        # These tests create a real broker sidecar and exercise the user's shared
-        # WASAPI/WGC devices. Keep them isolated even under parallel CTest runs.
-        set_tests_properties(
-            npc_media_broker_windows_smoke_tests
-            npc_media_broker_capture_lifecycle_regression
-            npc_media_broker_service_protocol_tests
-            npc_media_broker_windows_display_smoke_tests
-            npc_media_broker_windows_playback_smoke_tests
-            npc_media_broker_windows_input_smoke_tests
-            npc_media_broker_windows_identity_smoke_tests
-            PROPERTIES
-                LABELS interactive_windows_smoke
-                RESOURCE_LOCK npc_media_broker_windows_services)
+        # These tests create visible WGC targets or exercise the user's shared
+        # WASAPI/input devices. They must never be part of the default CTest
+        # inventory: `ctest` runs every registered test unless explicitly
+        # filtered. A deliberate configure-time opt-in is required first.
+        if(NPC_MEDIA_BROKER_REGISTER_INTERACTIVE_WINDOWS_TESTS)
+            add_test(NAME npc_media_broker_windows_smoke_tests
+                     COMMAND npc_media_broker_windows_smoke_tests)
+            add_test(NAME npc_media_broker_capture_lifecycle_regression
+                     COMMAND npc_media_broker_windows_smoke_tests --direct-shared-only)
+            add_test(NAME npc_media_broker_service_protocol_tests
+                     COMMAND npc_media_broker_windows_smoke_tests --service-only)
+            add_test(NAME npc_media_broker_windows_display_smoke_tests
+                     COMMAND npc_media_broker_windows_display_smoke_tests)
+            add_test(NAME npc_media_broker_windows_playback_smoke_tests
+                     COMMAND npc_media_broker_windows_playback_smoke_tests)
+            add_test(NAME npc_media_broker_windows_input_smoke_tests
+                     COMMAND npc_media_broker_windows_input_smoke_tests)
+            add_test(NAME npc_media_broker_windows_identity_smoke_tests
+                     COMMAND npc_media_broker_windows_identity_smoke_tests)
+            set_tests_properties(
+                npc_media_broker_windows_smoke_tests
+                npc_media_broker_capture_lifecycle_regression
+                npc_media_broker_service_protocol_tests
+                npc_media_broker_windows_display_smoke_tests
+                npc_media_broker_windows_playback_smoke_tests
+                npc_media_broker_windows_input_smoke_tests
+                npc_media_broker_windows_identity_smoke_tests
+                PROPERTIES
+                    LABELS interactive_windows_smoke
+                    RESOURCE_LOCK npc_media_broker_windows_services)
+        endif()
     endif()
 endif()

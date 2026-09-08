@@ -574,7 +574,8 @@ function Invoke-Setup {
             '-S', 'native/media-broker',
             '-B', 'out/build/native-media-broker',
             '-DBUILD_TESTING=ON',
-            '-DNPC_MEDIA_BROKER_BUILD_TESTS=ON'
+            '-DNPC_MEDIA_BROKER_BUILD_TESTS=ON',
+            '-DNPC_MEDIA_BROKER_REGISTER_INTERACTIVE_WINDOWS_TESTS=OFF'
         )
     }
 }
@@ -909,6 +910,7 @@ function Invoke-Tests {
         if (Test-Path -LiteralPath (Join-Path $mediaSource 'CMakeLists.txt') -PathType Leaf) {
             Invoke-CheckBlock -Label 'Native media broker tests' -Action {
                 $nativeBuild = Get-NpcShortCMakeBuildPath -RepositoryRoot $script:RepoRoot -Component 'mb-tests'
+                $interactiveWindowsTests = if ($IncludeWindowsSmoke) { 'ON' } else { 'OFF' }
                 Write-Step 'Configuring native media broker tests for Windows x64'
                 Invoke-External -FilePath 'cmake' -ArgumentList @(
                     '-S', $mediaSource,
@@ -916,7 +918,8 @@ function Invoke-Tests {
                     '-G', 'Visual Studio 17 2022',
                     '-A', 'x64',
                     '-DBUILD_TESTING=ON',
-                    '-DNPC_MEDIA_BROKER_BUILD_TESTS=ON'
+                    '-DNPC_MEDIA_BROKER_BUILD_TESTS=ON',
+                    "-DNPC_MEDIA_BROKER_REGISTER_INTERACTIVE_WINDOWS_TESTS=$interactiveWindowsTests"
                 )
                 Write-Step 'Building the native media broker tests'
                 Invoke-External -FilePath 'cmake' -ArgumentList @('--build', $nativeBuild, '--config', 'Debug')
