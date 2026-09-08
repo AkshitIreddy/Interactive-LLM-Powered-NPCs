@@ -51,7 +51,8 @@ use crate::game_targets::{
 };
 use crate::identity_runtime::{
     IdentityReferenceEnrollmentCommandRequest, IdentityReferenceEnrollmentReceipt,
-    NativeActorLockBusV1, NativeActorLockStateV1, QualifiedIdentityRuntimeServiceV1,
+    NativeActorLockBusV1, NativeActorLockProvenanceV1, NativeActorLockStateV1,
+    QualifiedIdentityRuntimeServiceV1,
 };
 use crate::local_resources::{
     ExperimentalPackMutationRequest, ExperimentalPackState, LocalResourceManager,
@@ -62,9 +63,9 @@ use crate::local_resources::{
 };
 use crate::media_broker::{
     AudioInputSelection, AudioInputSnapshot, AudioOutputSelection, AudioOutputSnapshot,
-    MediaBrokerLaunchConfig, MediaBrokerSupervisor, NativeManualActorPickerReceiptV1,
-    NativeManualActorPickerRequestV1, NativeManualActorPickerStatusV1, SelectedAudioInput,
-    SelectedAudioOutput,
+    CapturePixelScope, CapturePixelSource, MediaBrokerLaunchConfig, MediaBrokerSupervisor,
+    NativeManualActorPickerReceiptV1, NativeManualActorPickerRequestV1,
+    NativeManualActorPickerStatusV1, SelectedAudioInput, SelectedAudioOutput,
 };
 use crate::persistence::OnboardingStore;
 use crate::product_benchmark::ControlBenchmarkProbe;
@@ -1578,6 +1579,97 @@ pub async fn manual_actor_picker_status(
 ) -> Result<ManualActorPickerPresentationV1, CommandError> {
     let active = state.manual_actor_picker.state.lock().await.active.clone();
     let Some(active) = active else {
+        if let NativeActorLockStateV1::Selected(selected) =
+            state.identity_actor_locks.snapshot()
+        {
+            if matches!(
+                &selected.provenance,
+                NativeActorLockProvenanceV1::SealedNativeClick { .. }
+                    | NativeActorLockProvenanceV1::UserAssignedCharacterPack { .. }
+            ) {
+                let pack_binding_current = match &selected.provenance {
+                    NativeActorLockProvenanceV1::UserAssignedCharacterPack {
+                        character_id,
+                        mouth_pack_content_sha256,
+                        enrollment_binding_sha256,
+                        identity_revision,
+                        ..
+                    } => state
+                        .character_mouth_packs
+                        .resolve_enabled(&selected.game_profile_id, character_id)
+                        .is_ok_and(|resolved| {
+                            resolved.is_some_and(|resolved| {
+                                resolved.content_sha256 == *mouth_pack_content_sha256
+                                    && resolved.enrollment_binding_sha256
+                                        == *enrollment_binding_sha256
+                                    && resolved.identity_revision == *identity_revision
+                            })
+                        }),
+                    NativeActorLockProvenanceV1::SealedNativeClick { .. } => true,
+                    NativeActorLockProvenanceV1::QualifiedIdentity { .. } => false,
+                };
+                let current = pack_binding_current
+                    && epoch_ms() < selected.expires_at_unix_ms
+                    && state
+                        .media_broker
+                        .diagnostics()
+                        .await
+                        .is_ok_and(|diagnostics| {
+                            diagnostics.cancellation_generation
+                                == selected.cancellation_generation
+                        })
+                    && state
+                        .media_broker
+                        .native_capture_evidence()
+                        .await
+                        .is_ok_and(|evidence| {
+                            evidence.selected_process_id == selected.selected_process_id
+                                && evidence.selected_window_handle
+                                    == selected.selected_window_handle
+                                && evidence.selected_executable_name
+                                    == selected.selected_executable_name
+                                && evidence.pixel_source
+                                    == CapturePixelSource::WindowsGraphicsCaptureTexture
+                                && evidence.pixel_scope
+                                    == CapturePixelScope::ExactSelectedWindow
+                                && evidence.external_display_overlay_pixels_excluded
+                                && evidence.desktop_luminance_excluded_from_pixel_evidence
+                                && evidence.device_generation == selected.device_generation
+                                && evidence.geometry_epoch == selected.geometry_epoch
+                                && evidence.content_width == selected.full_source_roi.source_width
+                                && evidence.content_height == selected.full_source_roi.source_height
+                        })
+                    && matches!(
+                        state.identity_actor_locks.snapshot(),
+                        NativeActorLockStateV1::Selected(ref observed)
+                            if observed.as_ref() == selected.as_ref()
+                    );
+                if current {
+                    let detail = if matches!(
+                        &selected.provenance,
+                        NativeActorLockProvenanceV1::UserAssignedCharacterPack { .. }
+                    ) {
+                        "Character pack is assigned to the selected NPC for 15 seconds. Select the NPC again after it expires."
+                    } else {
+                        "Character is selected for 15 seconds of basic mouth motion. Select the NPC again after it expires."
+                    };
+                    return Ok(manual_actor_presentation(
+                        ManualActorPickerPresentationStateV1::Selected,
+                        detail,
+                    ));
+                }
+                state
+                    .identity_actor_locks
+                    .revoke_selected_if_lock_generation(
+                        selected.lock_generation,
+                        selected.cancellation_generation,
+                    );
+                return Ok(manual_actor_presentation(
+                    ManualActorPickerPresentationStateV1::Unavailable,
+                    "The short-lived character selection expired or the captured game frame changed. Select the character again.",
+                ));
+            }
+        }
         return Ok(manual_actor_unavailable(
             ManualActorPickerUnavailableReasonV1::NoActiveSelection,
             "No native actor selection is active.",
@@ -1793,7 +1885,7 @@ pub fn enable_character_mouth_pack(
         "mouth-pack.enable_requested",
     );
     let selected = selected_character_mouth_authority(&state, &request.game_profile_id)?;
-    let lock = match state.identity_actor_locks.snapshot() {
+    let mut lock = match state.identity_actor_locks.snapshot() {
         NativeActorLockStateV1::Selected(lock) => lock,
         NativeActorLockStateV1::IdentityPackUnqualified
         | NativeActorLockStateV1::QualifiedNoSelection { .. } => {
@@ -1802,16 +1894,58 @@ pub fn enable_character_mouth_pack(
             ));
         }
     };
-    let authority = CurrentCharacterMouthEnableAuthorityV1::from_current_actor(
+    let mut user_assigned = false;
+    if matches!(
+        &lock.provenance,
+        NativeActorLockProvenanceV1::SealedNativeClick { .. }
+            | NativeActorLockProvenanceV1::UserAssignedCharacterPack { .. }
+    ) {
+        let installed = state
+            .character_mouth_packs
+            .state()
+            .map_err(product_error)?
+            .installed
+            .into_iter()
+            .find(|installed| {
+                installed.game_profile_id == request.game_profile_id
+                    && installed.character_id == selected.character_id()
+                    && installed.content_sha256 == request.expected_content_sha256
+            })
+            .ok_or_else(|| product_error("the exact selected character mouth pack is not installed"))?;
+        lock = state
+            .identity_actor_locks
+            .assign_character_pack_to_sealed_click(
+                &installed.game_profile_id,
+                &installed.character_id,
+                &installed.content_sha256,
+                &installed.enrollment_binding_sha256,
+                installed.identity_revision,
+                epoch_ms(),
+            )
+            .map_err(product_error)?;
+        user_assigned = true;
+    }
+    let enabled = CurrentCharacterMouthEnableAuthorityV1::from_current_actor(
         selected,
         lock.as_ref(),
         epoch_ms(),
     )
-    .map_err(product_error)?;
-    state
-        .character_mouth_packs
-        .enable(&authority, request, epoch_ms())
-        .map_err(product_error)
+    .map_err(product_error)
+    .and_then(|authority| {
+        state
+            .character_mouth_packs
+            .enable(&authority, request, epoch_ms())
+            .map_err(product_error)
+    });
+    if enabled.is_err() && user_assigned {
+        state
+            .identity_actor_locks
+            .revoke_selected_if_lock_generation(
+                lock.lock_generation,
+                lock.cancellation_generation,
+            );
+    }
+    enabled
 }
 
 #[tauri::command]
@@ -1825,10 +1959,30 @@ pub fn disable_character_mouth_pack(
         "mouth-pack.disable_requested",
     );
     let authority = selected_character_mouth_authority(&state, &request.game_profile_id)?;
-    state
+    let assigned_lock = match state.identity_actor_locks.snapshot() {
+        NativeActorLockStateV1::Selected(lock)
+            if matches!(
+                &lock.provenance,
+                NativeActorLockProvenanceV1::UserAssignedCharacterPack {
+                    character_id,
+                    mouth_pack_content_sha256,
+                    ..
+                } if lock.game_profile_id == request.game_profile_id
+                    && character_id == authority.character_id()
+                    && mouth_pack_content_sha256 == &request.expected_content_sha256
+            ) => Some((lock.lock_generation, lock.cancellation_generation)),
+        _ => None,
+    };
+    let disabled = state
         .character_mouth_packs
         .disable(&authority, request)
-        .map_err(product_error)
+        .map_err(product_error)?;
+    if let Some((lock_generation, cancellation_generation)) = assigned_lock {
+        state
+            .identity_actor_locks
+            .revoke_selected_if_lock_generation(lock_generation, cancellation_generation);
+    }
+    Ok(disabled)
 }
 
 #[tauri::command]

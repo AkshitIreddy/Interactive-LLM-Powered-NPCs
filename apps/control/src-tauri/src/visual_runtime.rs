@@ -325,6 +325,10 @@ pub(crate) struct AdmittedVisualFrameRequest {
     /// The authenticated native controller must reacquire this sealed-click
     /// seed against a fresh WGC frame. It carries no semantic character claim.
     pub sealed_click_source_only: bool,
+    pub user_assigned_character_pack: bool,
+    pub assigned_pack_content_sha256: Option<String>,
+    pub assigned_pack_enrollment_sha256: Option<String>,
+    pub assigned_pack_identity_revision: Option<u64>,
 }
 
 /// Exact causal address of the active one-sentence playback lease. The native
@@ -834,9 +838,17 @@ fn admitted_request_from_actor_lock(
             NativeActorLockProvenanceV1::SealedNativeClick { .. }
         )
     );
+    let user_assigned_character_pack = matches!(
+        (&lock.selection_authority, &lock.provenance),
+        (
+            NativeActorSelectionAuthorityV1::Explicit,
+            NativeActorLockProvenanceV1::UserAssignedCharacterPack { .. }
+        )
+    );
     let authority_admitted = match (&lock.selection_authority, &lock.provenance) {
         (
-            NativeActorSelectionAuthorityV1::Consensus,
+            NativeActorSelectionAuthorityV1::Consensus
+            | NativeActorSelectionAuthorityV1::Explicit,
             NativeActorLockProvenanceV1::QualifiedIdentity {
                 qualification_id,
                 catalog_admission_sha256,
@@ -864,6 +876,31 @@ fn admitted_request_from_actor_lock(
                 && lower_sha256(candidate_set_sha256)
                 && (*receipt_nonce_high != 0 || *receipt_nonce_low != 0)
         }
+        (
+            NativeActorSelectionAuthorityV1::Explicit,
+            NativeActorLockProvenanceV1::UserAssignedCharacterPack {
+                visual_pack_id,
+                visual_pack_admission_sha256,
+                native_click_receipt_sha256,
+                candidate_set_sha256,
+                receipt_nonce_high,
+                receipt_nonce_low,
+                character_id,
+                mouth_pack_content_sha256,
+                enrollment_binding_sha256,
+                identity_revision,
+            },
+        ) => {
+            !visual_pack_id.is_empty()
+                && lower_sha256(visual_pack_admission_sha256)
+                && lower_sha256(native_click_receipt_sha256)
+                && lower_sha256(candidate_set_sha256)
+                && (*receipt_nonce_high != 0 || *receipt_nonce_low != 0)
+                && character_id == &lock.character_id
+                && lower_sha256(mouth_pack_content_sha256)
+                && lower_sha256(enrollment_binding_sha256)
+                && *identity_revision != 0
+        }
         _ => false,
     };
     if request_id == 0
@@ -879,7 +916,7 @@ fn admitted_request_from_actor_lock(
         || lock.selected_executable_name.is_empty()
         || !authority_admitted
         || lock.scene_transition_detected
-        || (!sealed_click_source_only
+        || (!(sealed_click_source_only || user_assigned_character_pack)
             && (now_ns < captured_ns
                 || now_ns > captured_ns.checked_add(VISUAL_FRAME_DEADLINE_NS)?))
         || roi.source_width == 0
@@ -927,50 +964,71 @@ fn admitted_request_from_actor_lock(
         seed_face_height: f64::from(roi.height),
         appearance: AppearanceGateEvidence {
             descriptor_revision: lock.appearance_descriptor_revision,
-            expected_digest_high: if sealed_click_source_only {
+            expected_digest_high: if sealed_click_source_only || user_assigned_character_pack {
                 0
             } else {
                 lock.expected_appearance_digest_high
             },
-            expected_digest_low: if sealed_click_source_only {
+            expected_digest_low: if sealed_click_source_only || user_assigned_character_pack {
                 0
             } else {
                 lock.expected_appearance_digest_low
             },
-            observed_digest_high: if sealed_click_source_only {
+            observed_digest_high: if sealed_click_source_only || user_assigned_character_pack {
                 0
             } else {
                 lock.observed_appearance_digest_high
             },
-            observed_digest_low: if sealed_click_source_only {
+            observed_digest_low: if sealed_click_source_only || user_assigned_character_pack {
                 0
             } else {
                 lock.observed_appearance_digest_low
             },
-            similarity: if sealed_click_source_only {
+            similarity: if sealed_click_source_only || user_assigned_character_pack {
                 0.0
             } else {
                 f64::from(lock.appearance_similarity)
             },
-            temporal_iou: if sealed_click_source_only {
+            temporal_iou: if sealed_click_source_only || user_assigned_character_pack {
                 0.0
             } else {
                 f64::from(lock.temporal_iou)
             },
             blocker_coverage: f64::from(lock.blocker_coverage),
-            identity_locked: !sealed_click_source_only,
+            identity_locked: !(sealed_click_source_only || user_assigned_character_pack),
             target_visible: true,
             scene_transition: lock.scene_transition_detected,
         },
         pressure: VisualPressure::Nominal,
         admitted_signal_rate_hz: 15,
         audio: audio.clone(),
-        deadline_ns: if sealed_click_source_only {
+        deadline_ns: if sealed_click_source_only || user_assigned_character_pack {
             now_ns.checked_add(VISUAL_FRAME_DEADLINE_NS)?
         } else {
             captured_ns.checked_add(VISUAL_FRAME_DEADLINE_NS)?
         },
         sealed_click_source_only,
+        user_assigned_character_pack,
+        assigned_pack_content_sha256: match &lock.provenance {
+            NativeActorLockProvenanceV1::UserAssignedCharacterPack {
+                mouth_pack_content_sha256,
+                ..
+            } => Some(mouth_pack_content_sha256.clone()),
+            _ => None,
+        },
+        assigned_pack_enrollment_sha256: match &lock.provenance {
+            NativeActorLockProvenanceV1::UserAssignedCharacterPack {
+                enrollment_binding_sha256,
+                ..
+            } => Some(enrollment_binding_sha256.clone()),
+            _ => None,
+        },
+        assigned_pack_identity_revision: match &lock.provenance {
+            NativeActorLockProvenanceV1::UserAssignedCharacterPack {
+                identity_revision, ..
+            } => Some(*identity_revision),
+            _ => None,
+        },
     })
 }
 
@@ -1453,6 +1511,21 @@ impl MouthWorkerSupervisor {
                 .map_err(|error| VisualRuntimeError::Admission(error.to_string()))?,
             (false, None) => None,
         };
+        if request.user_assigned_character_pack {
+            let assigned = enabled_atlas
+                .as_ref()
+                .ok_or_else(|| VisualRuntimeError::Admission("assigned mouth pack is no longer enabled".into()))?;
+            if request.assigned_pack_content_sha256.as_deref()
+                != Some(assigned.content_sha256.as_str())
+                || request.assigned_pack_enrollment_sha256.as_deref()
+                    != Some(assigned.enrollment_binding_sha256.as_str())
+                || request.assigned_pack_identity_revision != Some(assigned.identity_revision)
+            {
+                return Err(VisualRuntimeError::Admission(
+                    "assigned mouth pack binding changed".into(),
+                ));
+            }
+        }
         let evidence = self.broker.native_capture_evidence().await?;
         let authority_checked_at_ns = monotonic_ns()?;
         bind_admitted_request_to_capture(
@@ -1805,6 +1878,10 @@ impl MouthWorkerSupervisor {
             audio: audio_binding.clone(),
             deadline_ns,
             sealed_click_source_only: false,
+            user_assigned_character_pack: false,
+            assigned_pack_content_sha256: None,
+            assigned_pack_enrollment_sha256: None,
+            assigned_pack_identity_revision: None,
         };
         if let Err(error) = validate_admitted_frame_request(&request) {
             self.abandon_unsubmitted_visual_source(&lease).await;
@@ -3150,7 +3227,7 @@ fn validate_admitted_frame_request(
         || request.audio.generation == 0
         || request.audio.stream_id.is_empty()
         || request.audio.stream_id.len() > 128
-        || (request.sealed_click_source_only
+        || ((request.sealed_click_source_only || request.user_assigned_character_pack)
             && (request.appearance.expected_digest_high != 0
                 || request.appearance.expected_digest_low != 0
                 || request.appearance.observed_digest_high != 0
@@ -3158,6 +3235,24 @@ fn validate_admitted_frame_request(
                 || request.appearance.identity_locked
                 || request.appearance.similarity != 0.0
                 || request.appearance.temporal_iou != 0.0))
+        || (request.sealed_click_source_only && request.user_assigned_character_pack)
+        || (request.user_assigned_character_pack
+            && (request.assigned_pack_content_sha256.is_none()
+                || request.assigned_pack_enrollment_sha256.is_none()
+                || request.assigned_pack_identity_revision.is_none()
+                || !request
+                    .assigned_pack_content_sha256
+                    .as_deref()
+                    .is_some_and(is_lowercase_sha256)
+                || !request
+                    .assigned_pack_enrollment_sha256
+                    .as_deref()
+                    .is_some_and(is_lowercase_sha256)
+                || request.assigned_pack_identity_revision == Some(0)))
+        || (!request.user_assigned_character_pack
+            && (request.assigned_pack_content_sha256.is_some()
+                || request.assigned_pack_enrollment_sha256.is_some()
+                || request.assigned_pack_identity_revision.is_some()))
     {
         return Err(VisualRuntimeError::InvalidRequest);
     }
@@ -3278,7 +3373,10 @@ fn encode_admitted_render_command(
     wire.u32(request.admitted_signal_rate_hz);
     wire.boolean(true);
     write_drive(&mut wire, drive);
-    wire.boolean(request.sealed_click_source_only);
+    // Command 6 carries one spatial-authority bit for both click-derived
+    // modes. The controller separately proves whether an exact atlas is bound;
+    // the worker receives no semantic identity claim from this bit.
+    wire.boolean(request.sealed_click_source_only || request.user_assigned_character_pack);
     wire.i64(request.deadline_ns);
     let bytes = wire.take();
     (bytes.len() <= MAX_MESSAGE_BYTES)
@@ -4549,7 +4647,7 @@ fn bind_admitted_request_to_capture(
         return Err(VisualRuntimeError::CaptureAuthority);
     }
 
-    if request.sealed_click_source_only {
+    if request.sealed_click_source_only || request.user_assigned_character_pack {
         // The click selected only a spatial seed. Rebind that seed to a frame
         // that is current now; the reserved discovery texture is never reused
         // as mouth-presentation authority.
@@ -7063,6 +7161,89 @@ mod tests {
         assert!(admitted_request_from_actor_lock(2, &lock, &audio, 1, now_ns).is_none());
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn user_assigned_pack_preserves_exact_binding_without_identity_claims() {
+        let generation = 7;
+        let audio = VisualAudioBinding {
+            session_id: "session-user-assigned".into(),
+            turn_id: "turn-user-assigned".into(),
+            generation,
+            stream_id: "pcm-user-assigned".into(),
+        };
+        let now_ns = monotonic_ns().expect("QPC clock");
+        let old_frame_ns = now_ns - VISUAL_FRAME_DEADLINE_NS - 100_000_000;
+        let mut lock = native_actor_lock_fixture(
+            generation,
+            old_frame_ns as u64,
+            current_unix_millis() + 1_000,
+        );
+        lock.selection_authority = NativeActorSelectionAuthorityV1::Explicit;
+        lock.provenance = NativeActorLockProvenanceV1::UserAssignedCharacterPack {
+            visual_pack_id: "openseeface-mnv3-lm1-mouth-signal".into(),
+            visual_pack_admission_sha256: "c".repeat(64),
+            native_click_receipt_sha256: "d".repeat(64),
+            candidate_set_sha256: "e".repeat(64),
+            receipt_nonce_high: 1,
+            receipt_nonce_low: 2,
+            character_id: lock.character_id.clone(),
+            mouth_pack_content_sha256: "f".repeat(64),
+            enrollment_binding_sha256: "a".repeat(64),
+            identity_revision: 9,
+        };
+        let request = admitted_request_from_actor_lock(3, &lock, &audio, 1, now_ns)
+            .expect("user-assigned pack remains eligible for fresh-frame reacquisition");
+        assert!(!request.sealed_click_source_only);
+        assert!(request.user_assigned_character_pack);
+        assert!(!request.appearance.identity_locked);
+        assert_eq!(request.appearance.expected_digest_high, 0);
+        assert_eq!(request.assigned_pack_content_sha256, Some("f".repeat(64)));
+        assert_eq!(
+            request.assigned_pack_enrollment_sha256,
+            Some("a".repeat(64))
+        );
+        assert_eq!(request.assigned_pack_identity_revision, Some(9));
+        validate_admitted_frame_request(&request).expect("exact assignment request is valid");
+
+        let mut ambiguous = request.clone();
+        ambiguous.sealed_click_source_only = true;
+        assert!(matches!(
+            validate_admitted_frame_request(&ambiguous),
+            Err(VisualRuntimeError::InvalidRequest)
+        ));
+        let mut replaced_pack = request;
+        replaced_pack.assigned_pack_content_sha256 = Some("b".repeat(63));
+        assert!(matches!(
+            validate_admitted_frame_request(&replaced_pack),
+            Err(VisualRuntimeError::InvalidRequest)
+        ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn explicit_qualified_identity_uses_the_existing_strict_evidence_gate() {
+        let generation = 7;
+        let audio = VisualAudioBinding {
+            session_id: "session-explicit-qualified".into(),
+            turn_id: "turn-explicit-qualified".into(),
+            generation,
+            stream_id: "pcm-explicit-qualified".into(),
+        };
+        let now_ns = monotonic_ns().expect("QPC clock");
+        let mut lock = native_actor_lock_fixture(
+            generation,
+            now_ns as u64,
+            current_unix_millis() + 1_000,
+        );
+        lock.selection_authority = NativeActorSelectionAuthorityV1::Explicit;
+        let request = admitted_request_from_actor_lock(4, &lock, &audio, 1, now_ns)
+            .expect("explicit qualified identity remains admissible");
+        assert!(!request.sealed_click_source_only);
+        assert!(!request.user_assigned_character_pack);
+        assert!(request.appearance.identity_locked);
+        assert_eq!(request.appearance.expected_digest_high, 2);
+    }
+
     #[test]
     fn sealed_click_rebinds_to_fresh_exact_capture_without_reusing_picker_frame() {
         let mut request = valid_admitted_request();
@@ -7294,6 +7475,10 @@ mod tests {
             },
             deadline_ns: 2_000_000,
             sealed_click_source_only: false,
+            user_assigned_character_pack: false,
+            assigned_pack_content_sha256: None,
+            assigned_pack_enrollment_sha256: None,
+            assigned_pack_identity_revision: None,
         }
     }
 

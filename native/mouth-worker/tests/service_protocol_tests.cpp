@@ -98,7 +98,7 @@ RenderWithAdmittedLandmarksCommandV1 admitted_render_command() {
     value.resources = supplied.resources;
     value.drive = supplied.drive;
     value.deadline_ns = supplied.deadline_ns;
-    value.sealed_click_source_only = true;
+    value.sealed_click_spatial_authority = true;
     return value;
 }
 
@@ -250,8 +250,8 @@ void test_admitted_provider_command_round_trip() {
     expect(decoded && decoded->seed_face_bounds.x == source.seed_face_bounds.x &&
                 decoded->seed_face_bounds.width == source.seed_face_bounds.width,
            "provider command carries only the identity-authoritative seed face ROI");
-    expect(decoded && decoded->sealed_click_source_only,
-           "provider command preserves the explicit source-only click scope");
+    expect(decoded && decoded->sealed_click_spatial_authority,
+           "provider command preserves explicit sealed-click spatial authority");
 
     auto truncated = *encoded;
     truncated.pop_back();

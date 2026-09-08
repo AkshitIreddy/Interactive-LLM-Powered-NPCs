@@ -98,7 +98,7 @@ struct RenderWithAdmittedLandmarksCommandV1 {
     VisualResourceStateV1 resources;
     MouthDrive drive;
     Nanoseconds deadline_ns{};
-    bool sealed_click_source_only{};
+    bool sealed_click_spatial_authority{};
 };
 
 struct CancelGenerationCommandV1 {

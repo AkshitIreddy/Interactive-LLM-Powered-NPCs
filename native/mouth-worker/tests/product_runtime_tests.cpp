@@ -958,8 +958,8 @@ void test_cancel_pressure_and_invalid_identity_receipts() {
            "untraceable product requests cannot produce a residual");
 }
 
-void mark_sealed_click_source_only(ProductFrameRequest& request) {
-    request.sealed_click_source_only = true;
+void mark_sealed_click_spatial_authority(ProductFrameRequest& request) {
+    request.sealed_click_spatial_authority = true;
     request.appearance.expected_descriptor_digest_high = 0U;
     request.appearance.expected_descriptor_digest_low = 0U;
     request.appearance.observed_descriptor_digest_high = 0U;
@@ -969,10 +969,10 @@ void mark_sealed_click_source_only(ProductFrameRequest& request) {
     request.appearance.identity_locked = false;
 }
 
-void test_sealed_click_source_only_requires_no_installed_atlas() {
+void test_sealed_click_spatial_authority_is_exactly_actor_scoped() {
     MouthProductRuntime source_only;
     auto admitted = make_request(170U, 170U, 20'000'000'000);
-    mark_sealed_click_source_only(admitted);
+    mark_sealed_click_spatial_authority(admitted);
     const auto admitted_frame = admitted.source.identity;
     const auto admitted_result =
         source_only.submit(std::move(admitted), admitted_frame, 20'005'000'000);
@@ -982,26 +982,39 @@ void test_sealed_click_source_only_requires_no_installed_atlas() {
 
     MouthProductRuntime unvouched;
     auto strict = make_request(171U, 171U, 20'100'000'000);
-    mark_sealed_click_source_only(strict);
-    strict.sealed_click_source_only = false;
+    mark_sealed_click_spatial_authority(strict);
+    strict.sealed_click_spatial_authority = false;
     const auto strict_frame = strict.source.identity;
     const auto strict_result = unvouched.submit(std::move(strict), strict_frame, 20'105'000'000);
     expect(strict_result.receipt.disposition == PresentationDisposition::bypassed_signal &&
                strict_result.receipt.signal_disposition == SignalDisposition::bypass_appearance,
            "zero appearance evidence remains rejected without explicit source-only authority");
 
-    MouthProductRuntime atlas_bound;
-    expect(atlas_bound.install_atlas(make_source_only_schema_four_atlas()),
-           "source-only scope guard fixture installs an actor atlas");
-    auto conflicting = make_request(172U, 172U, 20'200'000'000);
-    mark_sealed_click_source_only(conflicting);
+    MouthProductRuntime assigned_pack;
+    expect(assigned_pack.install_atlas(make_source_only_schema_four_atlas()),
+           "assigned-pack fixture installs an exact actor atlas");
+    auto exact = make_request(172U, 172U, 20'200'000'000);
+    mark_sealed_click_spatial_authority(exact);
+    const auto exact_frame = exact.source.identity;
+    const auto exact_result =
+        assigned_pack.submit(std::move(exact), exact_frame, 20'205'000'000);
+    expect(exact_result.receipt.disposition == PresentationDisposition::queued &&
+               exact_result.receipt.signal_disposition == SignalDisposition::accepted,
+           "sealed-click spatial authority admits an exact installed actor atlas without identity claims");
+
+    MouthProductRuntime wrong_actor_pack;
+    auto wrong_atlas = make_source_only_schema_four_atlas();
+    wrong_atlas.actor_id = 99U;
+    expect(wrong_actor_pack.install_atlas(std::move(wrong_atlas)),
+           "wrong-actor fixture installs a distinct actor atlas");
+    auto conflicting = make_request(173U, 173U, 20'300'000'000);
+    mark_sealed_click_spatial_authority(conflicting);
     const auto conflicting_frame = conflicting.source.identity;
-    const auto conflicting_result =
-        atlas_bound.submit(std::move(conflicting), conflicting_frame, 20'205'000'000);
+    const auto conflicting_result = wrong_actor_pack.submit(
+        std::move(conflicting), conflicting_frame, 20'305'000'000);
     expect(conflicting_result.receipt.disposition == PresentationDisposition::bypassed_signal &&
-               conflicting_result.receipt.signal_disposition ==
-                   SignalDisposition::bypass_appearance,
-           "source-only authority fails closed while any character atlas remains installed");
+               conflicting_result.receipt.signal_disposition == SignalDisposition::bypass_appearance,
+           "sealed-click spatial authority rejects an atlas installed for another actor");
 }
 
 } // namespace
@@ -1021,7 +1034,7 @@ int main() {
     test_product_queue_receipts_and_exact_current_frame();
     test_routine_rate_limit_preserves_current_pixel_history();
     test_cancel_pressure_and_invalid_identity_receipts();
-    test_sealed_click_source_only_requires_no_installed_atlas();
+    test_sealed_click_spatial_authority_is_exactly_actor_scoped();
     if (failures != 0) {
         std::cerr << failures << " product runtime assertion(s) failed\n";
         return 1;

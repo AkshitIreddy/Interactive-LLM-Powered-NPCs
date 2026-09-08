@@ -28,9 +28,9 @@ ProductSubmissionResult MouthProductRuntime::submit(ProductFrameRequest request,
                                    *installed_atlas_actor_ != actor;
     adapter_.set_current_frame_geometry(actor_has_no_pack ||
         (current_pixel_actor_.has_value() && *current_pixel_actor_ == actor));
-    const bool admitted_source_only_selection = request.sealed_click_source_only &&
-                                                !installed_atlas_actor_.has_value();
-    const auto signal = admitted_source_only_selection
+    const bool admitted_spatial_selection = request.sealed_click_spatial_authority &&
+        (!installed_atlas_actor_.has_value() || *installed_atlas_actor_ == actor);
+    const auto signal = admitted_spatial_selection
         ? adapter_.adapt_source_only_selected(request.landmarks, request.appearance,
                                               request.resources, current_frame, now_ns)
         : adapter_.adapt(request.landmarks, request.appearance,

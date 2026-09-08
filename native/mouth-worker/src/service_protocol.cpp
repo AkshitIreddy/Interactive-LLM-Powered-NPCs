@@ -676,7 +676,7 @@ std::optional<std::vector<std::byte>> encode_admitted_render_command(
     write_appearance(writer, command.appearance);
     write_resources(writer, command.resources);
     write_drive(writer, command.drive);
-    writer.boolean(command.sealed_click_source_only);
+    writer.boolean(command.sealed_click_spatial_authority);
     writer.scalar(command.deadline_ns);
     auto result = std::move(writer).take();
     if (result.size() > maximum_message_bytes) return std::nullopt;
@@ -692,7 +692,7 @@ std::optional<RenderWithAdmittedLandmarksCommandV1> decode_admitted_render_comma
         !read_track(reader, value.track) || !read_frame(reader, value.frame) ||
         !read_rect(reader, value.seed_face_bounds) || !read_appearance(reader, value.appearance) ||
         !read_resources(reader, value.resources) || !read_drive(reader, value.drive) ||
-        !reader.boolean(value.sealed_click_source_only) ||
+        !reader.boolean(value.sealed_click_spatial_authority) ||
         !reader.scalar(value.deadline_ns) || !reader.done()) {
         return std::nullopt;
     }

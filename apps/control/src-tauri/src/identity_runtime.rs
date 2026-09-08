@@ -287,6 +287,18 @@ pub(crate) enum NativeActorLockProvenanceV1 {
         receipt_nonce_high: u64,
         receipt_nonce_low: u64,
     },
+    UserAssignedCharacterPack {
+        visual_pack_id: String,
+        visual_pack_admission_sha256: String,
+        native_click_receipt_sha256: String,
+        candidate_set_sha256: String,
+        receipt_nonce_high: u64,
+        receipt_nonce_low: u64,
+        character_id: String,
+        mouth_pack_content_sha256: String,
+        enrollment_binding_sha256: String,
+        identity_revision: u64,
+    },
 }
 
 /// Normalized full-source coordinates. The identity crop is translated back
@@ -824,6 +836,144 @@ impl NativeActorLockBusV1 {
             .filter(|selected| selected.cancellation_generation == cancellation_generation)
     }
 
+    pub(crate) fn assign_character_pack_to_sealed_click(
+        &self,
+        game_profile_id: &str,
+        character_id: &str,
+        mouth_pack_content_sha256: &str,
+        enrollment_binding_sha256: &str,
+        identity_revision: u64,
+        now_unix_ms: u64,
+    ) -> Result<Arc<NativeSelectedActorLockV1>, IdentityRuntimeError> {
+        if !valid_enrollment_identifier(game_profile_id, 128)
+            || !valid_enrollment_identifier(character_id, 128)
+            || !valid_lower_sha256(mouth_pack_content_sha256)
+            || !valid_lower_sha256(enrollment_binding_sha256)
+            || identity_revision == 0
+        {
+            return Err(IdentityRuntimeError::ManualActorClickEvidenceMismatch);
+        }
+        let current = self
+            .selected_current(now_unix_ms)
+            .ok_or(IdentityRuntimeError::ManualActorClickEvidenceMismatch)?;
+        let (
+            visual_pack_id,
+            visual_pack_admission_sha256,
+            native_click_receipt_sha256,
+            candidate_set_sha256,
+            receipt_nonce_high,
+            receipt_nonce_low,
+        ) = match (&current.selection_authority, &current.provenance) {
+            (
+                NativeActorSelectionAuthorityV1::SealedNativeClick,
+                NativeActorLockProvenanceV1::SealedNativeClick {
+                visual_pack_id,
+                visual_pack_admission_sha256,
+                native_click_receipt_sha256,
+                candidate_set_sha256,
+                receipt_nonce_high,
+                receipt_nonce_low,
+                },
+            )
+            | (
+                NativeActorSelectionAuthorityV1::Explicit,
+                NativeActorLockProvenanceV1::UserAssignedCharacterPack {
+                visual_pack_id,
+                visual_pack_admission_sha256,
+                native_click_receipt_sha256,
+                candidate_set_sha256,
+                receipt_nonce_high,
+                receipt_nonce_low,
+                ..
+                },
+            ) => (
+                visual_pack_id,
+                visual_pack_admission_sha256,
+                native_click_receipt_sha256,
+                candidate_set_sha256,
+                receipt_nonce_high,
+                receipt_nonce_low,
+            ),
+            _ => {
+                return Err(IdentityRuntimeError::ManualActorClickEvidenceMismatch);
+            }
+        };
+        if current.game_profile_id != game_profile_id
+            || (matches!(
+                &current.provenance,
+                NativeActorLockProvenanceV1::SealedNativeClick { .. }
+            ) && !current.character_id.is_empty())
+        {
+            return Err(IdentityRuntimeError::ManualActorClickEvidenceMismatch);
+        }
+        let mut assigned = (*current).clone();
+        assigned.lock_generation = self
+            .next_lock_generation
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+                value.checked_add(1)
+            })
+            .map_err(|_| IdentityRuntimeError::GenerationExhausted)?;
+        assigned.selection_authority = NativeActorSelectionAuthorityV1::Explicit;
+        assigned.character_id = character_id.to_owned();
+        assigned.provenance = NativeActorLockProvenanceV1::UserAssignedCharacterPack {
+            visual_pack_id: visual_pack_id.clone(),
+            visual_pack_admission_sha256: visual_pack_admission_sha256.clone(),
+            native_click_receipt_sha256: native_click_receipt_sha256.clone(),
+            candidate_set_sha256: candidate_set_sha256.clone(),
+            receipt_nonce_high: *receipt_nonce_high,
+            receipt_nonce_low: *receipt_nonce_low,
+            character_id: character_id.to_owned(),
+            mouth_pack_content_sha256: mouth_pack_content_sha256.to_owned(),
+            enrollment_binding_sha256: enrollment_binding_sha256.to_owned(),
+            identity_revision,
+        };
+        assigned.expires_at_unix_ms = assigned
+            .expires_at_unix_ms
+            .min(now_unix_ms.saturating_add(MAX_MANUAL_ACTOR_SELECTION_LIFETIME_MS));
+        let assigned = Arc::new(assigned);
+        let original = current.clone();
+        let assigned_for_update = assigned.clone();
+        let replaced = self.state.send_if_modified(move |state| {
+            let NativeActorLockStateV1::Selected(observed) = state else {
+                return false;
+            };
+            if observed.as_ref() != original.as_ref() {
+                return false;
+            }
+            *state = NativeActorLockStateV1::Selected(assigned_for_update.clone());
+            true
+        });
+        replaced
+            .then_some(assigned)
+            .ok_or(IdentityRuntimeError::ManualActorClickEvidenceMismatch)
+    }
+
+    /// Rolls back only the exact assignment created by a failed enable action.
+    /// A newer native click or target generation is never revoked by cleanup
+    /// from an older command.
+    pub(crate) fn revoke_selected_if_lock_generation(
+        &self,
+        lock_generation: u64,
+        cancellation_generation: u64,
+    ) -> bool {
+        self.state.send_if_modified(|state| {
+            let NativeActorLockStateV1::Selected(selected) = state else {
+                return false;
+            };
+            if selected.lock_generation != lock_generation
+                || selected.cancellation_generation != cancellation_generation
+                || !matches!(
+                    &selected.provenance,
+                    NativeActorLockProvenanceV1::UserAssignedCharacterPack { .. }
+                )
+            {
+                return false;
+            }
+            *state = NativeActorLockStateV1::IdentityPackUnqualified;
+            true
+        })
+    }
+
     /// Returns the current broker-bound actor authority without conflating its
     /// capture cancellation generation with an independent dialogue-turn
     /// generation. Consumers still validate the lock's own generation against
@@ -876,7 +1026,8 @@ impl NativeActorLockBusV1 {
                             cancellation_generation,
                         });
                 }
-                NativeActorLockProvenanceV1::SealedNativeClick { .. } => {
+                NativeActorLockProvenanceV1::SealedNativeClick { .. }
+                | NativeActorLockProvenanceV1::UserAssignedCharacterPack { .. } => {
                     self.state
                         .send_replace(NativeActorLockStateV1::IdentityPackUnqualified);
                 }
@@ -2292,6 +2443,130 @@ mod tests {
         assert!(matches!(
             bus.publish_from_sealed_native_click(&request, &receipt, 1_101, 7),
             Err(IdentityRuntimeError::ManualActorClickReceiptReplayed)
+        ));
+    }
+
+    #[test]
+    fn sealed_click_pack_assignment_is_exact_reassignable_and_generation_safe() {
+        let bus = NativeActorLockBusV1::new_unqualified();
+        let request = manual_click_request_fixture();
+        let receipt = manual_click_receipt_fixture(&request);
+        let sealed = bus
+            .publish_from_sealed_native_click(&request, &receipt, 1_100, 7)
+            .expect("sealed click actor lock");
+        let assigned = bus
+            .assign_character_pack_to_sealed_click(
+                "eclipse-harbor",
+                "mara",
+                &"c".repeat(64),
+                &"d".repeat(64),
+                9,
+                1_101,
+            )
+            .expect("exact installed pack assigned to sealed click");
+        assert_ne!(assigned.lock_generation, sealed.lock_generation);
+        assert_eq!(assigned.runtime_actor_id, sealed.runtime_actor_id);
+        assert_eq!(assigned.expires_at_unix_ms, sealed.expires_at_unix_ms);
+        assert_eq!(assigned.character_id, "mara");
+        assert_eq!(
+            assigned.selection_authority,
+            NativeActorSelectionAuthorityV1::Explicit
+        );
+        assert!(matches!(
+            &assigned.provenance,
+            NativeActorLockProvenanceV1::UserAssignedCharacterPack {
+                character_id,
+                mouth_pack_content_sha256,
+                enrollment_binding_sha256,
+                identity_revision: 9,
+                native_click_receipt_sha256,
+                ..
+            } if character_id == "mara"
+                && mouth_pack_content_sha256 == &"c".repeat(64)
+                && enrollment_binding_sha256 == &"d".repeat(64)
+                && native_click_receipt_sha256 == &receipt.receipt_sha256
+        ));
+
+        let reassigned = bus
+            .assign_character_pack_to_sealed_click(
+                "eclipse-harbor",
+                "mara",
+                &"e".repeat(64),
+                &"f".repeat(64),
+                10,
+                1_102,
+            )
+            .expect("explicit reapply updates the exact pack binding");
+        assert_ne!(reassigned.lock_generation, assigned.lock_generation);
+        assert!(!bus.revoke_selected_if_lock_generation(
+            assigned.lock_generation,
+            assigned.cancellation_generation,
+        ));
+        assert!(matches!(
+            bus.snapshot(),
+            NativeActorLockStateV1::Selected(ref current)
+                if current.lock_generation == reassigned.lock_generation
+        ));
+        assert!(bus.revoke_selected_if_lock_generation(
+            reassigned.lock_generation,
+            reassigned.cancellation_generation,
+        ));
+        assert!(matches!(
+            bus.snapshot(),
+            NativeActorLockStateV1::IdentityPackUnqualified
+        ));
+    }
+
+    #[test]
+    fn pack_assignment_rejects_nonsealed_or_malformed_authority() {
+        let bus = NativeActorLockBusV1::new_unqualified();
+        let request = manual_click_request_fixture();
+        let receipt = manual_click_receipt_fixture(&request);
+        bus.publish_from_sealed_native_click(&request, &receipt, 1_100, 7)
+            .expect("sealed click actor lock");
+        assert!(matches!(
+            bus.assign_character_pack_to_sealed_click(
+                "eclipse-harbor",
+                "mara",
+                "not-a-digest",
+                &"d".repeat(64),
+                9,
+                1_101,
+            ),
+            Err(IdentityRuntimeError::ManualActorClickEvidenceMismatch)
+        ));
+        bus.deactivate_unqualified();
+        assert!(matches!(
+            bus.assign_character_pack_to_sealed_click(
+                "eclipse-harbor",
+                "mara",
+                &"c".repeat(64),
+                &"d".repeat(64),
+                9,
+                1_101,
+            ),
+            Err(IdentityRuntimeError::ManualActorClickEvidenceMismatch)
+        ));
+
+        let inconsistent = NativeActorLockBusV1::new_unqualified();
+        let selected = inconsistent
+            .publish_from_sealed_native_click(&request, &receipt, 1_100, 7)
+            .expect("fresh sealed click");
+        let mut mismatched = (*selected).clone();
+        mismatched.selection_authority = NativeActorSelectionAuthorityV1::Explicit;
+        inconsistent
+            .state
+            .send_replace(NativeActorLockStateV1::Selected(Arc::new(mismatched)));
+        assert!(matches!(
+            inconsistent.assign_character_pack_to_sealed_click(
+                "eclipse-harbor",
+                "mara",
+                &"c".repeat(64),
+                &"d".repeat(64),
+                9,
+                1_101,
+            ),
+            Err(IdentityRuntimeError::ManualActorClickEvidenceMismatch)
         ));
     }
 

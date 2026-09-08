@@ -453,7 +453,7 @@ void render_resolved_current_frame(MouthProductRuntime& runtime,
                                    const MouthDrive& drive,
                                    CpuFrame source,
                                    const Nanoseconds deadline_ns,
-                                   const bool sealed_click_source_only,
+                                   const bool sealed_click_spatial_authority,
                                    const Nanoseconds now) {
     const double detector_confidence = landmarks.detector_confidence;
     const double landmark_confidence = landmarks.landmark_confidence;
@@ -516,7 +516,7 @@ void render_resolved_current_frame(MouthProductRuntime& runtime,
     request.resources = resources;
     request.drive = drive;
     request.deadline_ns = deadline_ns;
-    request.sealed_click_source_only = sealed_click_source_only;
+    request.sealed_click_spatial_authority = sealed_click_spatial_authority;
     auto submission = runtime.submit(std::move(request), frame, now);
     if (submission.receipt.disposition != PresentationDisposition::queued) {
         response.receipt = std::move(submission.receipt);
@@ -711,7 +711,7 @@ int run_windows_service(const WindowsServiceConfig& config,
                     command->track, command->frame, std::move(*produced.packet),
                     command->appearance, command->resources, command->drive,
                     std::move(resolved_work.source), command->deadline_ns,
-                    command->sealed_click_source_only, resolved_now);
+                    command->sealed_click_spatial_authority, resolved_now);
                 break;
             }
             case CommandKind::discover_actor_candidates: {
