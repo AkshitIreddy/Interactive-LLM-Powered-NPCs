@@ -15,7 +15,7 @@ use npc_model_manager::{
     PackSelectionOriginV1, PackSelectionRequestV1, ReleaseCatalogTrustScopeV1, ResidencyModeV1,
     ResourceGovernorPolicyV1, ResourceGovernorV1, ResourcePressureLevelV1,
     SelectedLoadoutDecisionV1, SelectedLoadoutManagerV1, SelectedLoadoutPlannerSnapshotV1,
-    SelectedLoadoutSelectionV1, Sha256Digest, SignedMeasuredResourceEnvelopeV1,
+    SelectedLoadoutSelectionV1, SelectedPackV1, Sha256Digest, SignedMeasuredResourceEnvelopeV1,
     SignedResourceEnvelopeSourceV1, TrustedOptionalPackLifecycleV1, TrustedReleasePackSnapshotV1,
     VisualWorkAddressV1, WorkCancellationV1, WorkItemV1, WorkKindV1, WorkQueuePolicyV1,
     OPENSEEFACE_VISUAL_SIGNAL_PACK_ID, OPENSEEFACE_VISUAL_SIGNAL_REVISION,
@@ -152,6 +152,12 @@ pub struct SelectedLoadoutAdmissionResult {
     pub detail: String,
     pub persisted: bool,
     pub decision: Option<SelectedLoadoutDecisionV1>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PrepareSupportedVisualLoadoutRequestV1 {
+    pub explicit_user_confirmation: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -427,6 +433,7 @@ pub struct LocalResourceManager {
     settings: Mutex<LocalResourceSettings>,
     pack_state: Mutex<ExperimentalPackState>,
     selected_loadout: Mutex<Option<SelectedLoadoutSelectionV1>>,
+    selected_loadout_mutation: Mutex<()>,
     loadout_planner: Mutex<NativeLoadoutPlanner>,
     active_admission: Mutex<Option<NativeActiveLoadoutAdmissionV1>>,
     visual_work: Mutex<BTreeMap<String, NativeScreenSpaceLipSyncWorkV1>>,
@@ -556,6 +563,7 @@ impl LocalResourceManager {
             settings: Mutex::new(settings),
             pack_state: Mutex::new(load_json_or_default(&pack_state_path)),
             selected_loadout: Mutex::new(load_optional_json(&selected_loadout_path)),
+            selected_loadout_mutation: Mutex::new(()),
             loadout_planner: Mutex::new(loadout_planner),
             active_admission: Mutex::new(None),
             visual_work: Mutex::new(BTreeMap::new()),
@@ -673,6 +681,96 @@ impl LocalResourceManager {
                 planner: None,
             },
         })
+    }
+
+    /// Creates the one supported visual-only loadout draft from native catalog
+    /// authority. The WebView supplies neither pack identity nor residency.
+    /// Existing user selections are returned unchanged only when they already
+    /// contain the exact supported visual role; every other selection requires
+    /// a separate, explicit replacement flow.
+    pub fn prepare_supported_visual_loadout(
+        &self,
+        request: PrepareSupportedVisualLoadoutRequestV1,
+    ) -> Result<SelectedLoadoutPlannerResult, LocalResourceError> {
+        if !request.explicit_user_confirmation {
+            return Err(LocalResourceError::ConfirmationRequired);
+        }
+
+        let supported_identity = {
+            let telemetry = collect(TelemetryRequest::default());
+            let device = telemetry
+                .device_fingerprint_sha256
+                .value()
+                .cloned()
+                .and_then(|value| Sha256Digest::parse(value).ok())
+                .ok_or_else(|| {
+                    LocalResourceError::Operation(
+                        "the native device fingerprint is unavailable; the supported visual loadout cannot be selected"
+                            .into(),
+                    )
+                })?;
+            let mut planner = self
+                .loadout_planner
+                .lock()
+                .map_err(|_| LocalResourceError::State)?;
+            let (manager, packs) = match &mut *planner {
+                NativeLoadoutPlanner::Ready { manager, packs, .. } => (manager, packs),
+                NativeLoadoutPlanner::Unavailable(detail) => {
+                    return Err(LocalResourceError::Operation(detail.clone()))
+                }
+            };
+            let mut matches = packs.iter().filter(|pack| {
+                pack.identity.pack_id.as_str() == YUNET_OPENSEEFACE_VISUAL_SIGNAL_PACK_ID
+                    && pack.identity.revision.as_str() == OPENSEEFACE_VISUAL_SIGNAL_REVISION
+                    && pack.capability.kind == ModelPackKindV1::Vision
+                    && pack.allowed_residencies.contains(&ResidencyModeV1::CpuResident)
+            });
+            let mut supported = matches.next().cloned().ok_or_else(|| {
+                LocalResourceError::Operation(
+                    "the verified catalog does not contain the supported YuNet and OpenSeeFace visual pack"
+                        .into(),
+                )
+            })?;
+            if matches.next().is_some() {
+                return Err(LocalResourceError::Operation(
+                    "the verified catalog ambiguously contains multiple supported visual packs"
+                        .into(),
+                ));
+            }
+            manager.refresh_trusted_pack_measurement(
+                &mut supported,
+                &device,
+                current_unix_seconds(),
+            );
+            if supported.qualified_measurement.is_none() {
+                return Err(LocalResourceError::Operation(format!(
+                    "the supported visual pack has no trusted measurement for this PC: {}",
+                    supported.measurement_detail
+                )));
+            }
+            manager
+                .trusted_catalog()
+                .installable_entry(&supported.identity)
+                .map_err(|error| LocalResourceError::Operation(error.to_string()))?;
+            supported.identity
+        };
+
+        let _mutation = self
+            .selected_loadout_mutation
+            .lock()
+            .map_err(|_| LocalResourceError::State)?;
+        let mut selected = self
+            .selected_loadout
+            .lock()
+            .map_err(|_| LocalResourceError::State)?;
+        let prepared = prepare_supported_visual_selection(selected.as_ref(), supported_identity)?;
+        if selected.is_none() {
+            atomic_write_json(&self.selected_loadout_path, &prepared)?;
+            *selected = Some(prepared);
+        }
+        drop(selected);
+        drop(_mutation);
+        self.selected_loadout_planner()
     }
 
     pub fn trusted_pack_catalog(
@@ -880,11 +978,17 @@ impl LocalResourceManager {
             // Persist this only as the user's selected draft. It carries no
             // PID and never populates `active_admission`; gameplay still has
             // to reconstruct and admit the target-bound loadout.
-            atomic_write_json(&self.selected_loadout_path, &request.selection)?;
-            *self
-                .selected_loadout
-                .lock()
-                .map_err(|_| LocalResourceError::State)? = Some(request.selection.clone());
+            {
+                let _selection_mutation = self
+                    .selected_loadout_mutation
+                    .lock()
+                    .map_err(|_| LocalResourceError::State)?;
+                atomic_write_json(&self.selected_loadout_path, &request.selection)?;
+                *self
+                    .selected_loadout
+                    .lock()
+                    .map_err(|_| LocalResourceError::State)? = Some(request.selection.clone());
+            }
             let receipt = {
                 let mut lifecycle = self.optional_lifecycle.lock().await;
                 let lifecycle = lifecycle.as_mut().ok_or_else(|| {
@@ -1182,6 +1286,10 @@ impl LocalResourceManager {
                 .clear();
         }
         let persisted = if decision.admitted() {
+            let _selection_mutation = self
+                .selected_loadout_mutation
+                .lock()
+                .map_err(|_| LocalResourceError::State)?;
             atomic_write_json(&self.selected_loadout_path, &selection)?;
             *self
                 .selected_loadout
@@ -2434,6 +2542,44 @@ fn validate_settings(settings: &LocalResourceSettings) -> Result<(), LocalResour
     Ok(())
 }
 
+fn prepare_supported_visual_selection(
+    existing: Option<&SelectedLoadoutSelectionV1>,
+    identity: PackRevision,
+) -> Result<SelectedLoadoutSelectionV1, LocalResourceError> {
+    if let Some(existing) = existing {
+        let exact_visual_roles = existing
+            .roles
+            .iter()
+            .filter(|role| {
+                role.role == ModelPackKindV1::Vision
+                    && role.identity == identity
+                    && role.preferred_residency == ResidencyModeV1::CpuResident
+            })
+            .count();
+        let conflicting_identity = existing.roles.iter().any(|role| {
+            role.identity == identity
+                && (role.role != ModelPackKindV1::Vision
+                    || role.preferred_residency != ResidencyModeV1::CpuResident)
+        });
+        if exact_visual_roles == 1 && !conflicting_identity {
+            return Ok(existing.clone());
+        }
+        return Err(LocalResourceError::Invalid(
+            "a different native local loadout is already selected; it was preserved and must be changed through an explicit replacement flow"
+                .into(),
+        ));
+    }
+    Ok(SelectedLoadoutSelectionV1 {
+        selection_id: format!("visual-{}", uuid::Uuid::new_v4().simple()),
+        roles: vec![SelectedPackV1 {
+            role: ModelPackKindV1::Vision,
+            identity,
+            preferred_residency: ResidencyModeV1::CpuResident,
+        }],
+        expected_idle_millis: 1_000,
+    })
+}
+
 fn validate_mutation(request: &ExperimentalPackMutationRequest) -> Result<(), LocalResourceError> {
     if !request.explicit_user_confirmation {
         return Err(LocalResourceError::ConfirmationRequired);
@@ -3151,6 +3297,119 @@ mod tests {
         assert!(!catalog.ready);
         assert!(catalog.packs.is_empty());
         assert!(catalog.detail.contains("fail") || catalog.detail.contains("unavailable"));
+    }
+
+    fn supported_visual_identity_fixture() -> PackRevision {
+        PackRevision {
+            pack_id: npc_model_manager::PackId::parse(
+                YUNET_OPENSEEFACE_VISUAL_SIGNAL_PACK_ID,
+            )
+            .expect("pack id"),
+            revision: npc_model_manager::Revision::parse(OPENSEEFACE_VISUAL_SIGNAL_REVISION)
+                .expect("revision"),
+        }
+    }
+
+    #[test]
+    fn supported_visual_prepare_constructs_only_the_native_catalog_role() {
+        let identity = supported_visual_identity_fixture();
+        let prepared = prepare_supported_visual_selection(None, identity.clone())
+            .expect("clean selection");
+        assert!(prepared.selection_id.starts_with("visual-"));
+        assert_eq!(prepared.expected_idle_millis, 1_000);
+        assert_eq!(prepared.roles.len(), 1);
+        assert_eq!(prepared.roles[0].role, ModelPackKindV1::Vision);
+        assert_eq!(prepared.roles[0].identity, identity);
+        assert_eq!(
+            prepared.roles[0].preferred_residency,
+            ResidencyModeV1::CpuResident
+        );
+    }
+
+    #[test]
+    fn supported_visual_prepare_preserves_compatible_existing_loadout() {
+        let identity = supported_visual_identity_fixture();
+        let existing = SelectedLoadoutSelectionV1 {
+            selection_id: "owner-selected-loadout".into(),
+            roles: vec![SelectedPackV1 {
+                role: ModelPackKindV1::Vision,
+                identity: identity.clone(),
+                preferred_residency: ResidencyModeV1::CpuResident,
+            }],
+            expected_idle_millis: 7_500,
+        };
+        assert_eq!(
+            prepare_supported_visual_selection(Some(&existing), identity)
+                .expect("idempotent selection"),
+            existing
+        );
+    }
+
+    #[test]
+    fn supported_visual_prepare_never_overwrites_other_or_ambiguous_selection() {
+        let identity = supported_visual_identity_fixture();
+        let other = SelectedLoadoutSelectionV1 {
+            selection_id: "owner-other-loadout".into(),
+            roles: vec![SelectedPackV1 {
+                role: ModelPackKindV1::Embedding,
+                identity: PackRevision {
+                    pack_id: npc_model_manager::PackId::parse("owner.embedding")
+                        .expect("pack id"),
+                    revision: npc_model_manager::Revision::parse("r1").expect("revision"),
+                },
+                preferred_residency: ResidencyModeV1::CpuResident,
+            }],
+            expected_idle_millis: 1_000,
+        };
+        assert!(prepare_supported_visual_selection(Some(&other), identity.clone()).is_err());
+
+        let duplicated = SelectedLoadoutSelectionV1 {
+            selection_id: "owner-duplicate-loadout".into(),
+            roles: vec![
+                SelectedPackV1 {
+                    role: ModelPackKindV1::Vision,
+                    identity: identity.clone(),
+                    preferred_residency: ResidencyModeV1::CpuResident,
+                },
+                SelectedPackV1 {
+                    role: ModelPackKindV1::Vision,
+                    identity: identity.clone(),
+                    preferred_residency: ResidencyModeV1::CpuResident,
+                },
+            ],
+            expected_idle_millis: 1_000,
+        };
+        assert!(prepare_supported_visual_selection(Some(&duplicated), identity).is_err());
+    }
+
+    #[test]
+    fn supported_visual_prepare_request_requires_exact_bounded_shape() {
+        let request: PrepareSupportedVisualLoadoutRequestV1 =
+            serde_json::from_str(r#"{"explicitUserConfirmation":true}"#)
+                .expect("bounded request");
+        assert!(request.explicit_user_confirmation);
+        assert!(serde_json::from_str::<PrepareSupportedVisualLoadoutRequestV1>(
+            r#"{"explicitUserConfirmation":true,"packId":"untrusted"}"#
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn unsupported_visual_prepare_never_mutates_without_confirmation() {
+        let config = tempfile::tempdir().expect("config");
+        let manager = LocalResourceManager::new(config.path(), None).expect("manager");
+        let error = manager
+            .prepare_supported_visual_loadout(PrepareSupportedVisualLoadoutRequestV1 {
+                explicit_user_confirmation: false,
+            })
+            .expect_err("confirmation must be required before catalog resolution");
+        assert!(matches!(error, LocalResourceError::ConfirmationRequired));
+        assert!(!config.path().join(SELECTED_LOADOUT_FILE_NAME).exists());
+        assert!(manager
+            .selected_loadout
+            .lock()
+            .expect("selected loadout")
+            .is_none());
     }
 
     #[test]

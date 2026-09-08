@@ -129,6 +129,7 @@ pub fn run() {
             commands::repair_trusted_optional_pack,
             commands::remove_trusted_optional_pack,
             commands::selected_local_loadout_planner,
+            commands::prepare_supported_visual_loadout,
             commands::admit_selected_local_loadout,
             commands::experimental_visual_pack_status,
             commands::install_experimental_model_pack,

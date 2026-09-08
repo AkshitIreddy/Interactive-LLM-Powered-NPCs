@@ -55,8 +55,8 @@ use crate::identity_runtime::{
 };
 use crate::local_resources::{
     ExperimentalPackMutationRequest, ExperimentalPackState, LocalResourceManager,
-    LocalResourceSettings, ResourceTelemetryResult, SelectedLoadoutAdmissionResult,
-    SelectedLoadoutPlannerResult, TrustedLocalPackCatalogResult,
+    LocalResourceSettings, PrepareSupportedVisualLoadoutRequestV1, ResourceTelemetryResult,
+    SelectedLoadoutAdmissionResult, SelectedLoadoutPlannerResult, TrustedLocalPackCatalogResult,
     TrustedOptionalPackActivationRequestV1, TrustedOptionalPackActivationResultV1,
     TrustedOptionalPackLifecycleResultV1, TrustedOptionalPackMutationRequestV1,
 };
@@ -2163,6 +2163,18 @@ pub fn selected_local_loadout_planner(
     state
         .local_resources
         .selected_loadout_planner()
+        .map_err(product_error)
+}
+
+#[tauri::command]
+pub fn prepare_supported_visual_loadout(
+    request: PrepareSupportedVisualLoadoutRequestV1,
+    state: State<'_, AppState>,
+) -> Result<SelectedLoadoutPlannerResult, CommandError> {
+    record_native_product_event(&state, "resource-governor", "visual_loadout.prepare_requested");
+    state
+        .local_resources
+        .prepare_supported_visual_loadout(request)
         .map_err(product_error)
 }
 
