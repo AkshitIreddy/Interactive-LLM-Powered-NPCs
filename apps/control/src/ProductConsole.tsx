@@ -1092,6 +1092,11 @@ export function ProductConsole() {
     window.history.replaceState({}, "", url);
   };
 
+  const openMouthMotion = () => {
+    setSetupOpen(false);
+    navigate("world");
+  };
+
   const persistSetup = useCallback(
     async (
       completed: boolean,
@@ -1817,6 +1822,7 @@ export function ProductConsole() {
         )}
         {page === "voice" && !setupOpen && (
           <VoicePage
+            onManageMouthMotion={openMouthMotion}
             onNativeLoadoutsChange={acceptConfiguredLoadouts}
             accounts={snapshot?.providers ?? []}
             gameProfileId={currentSttScope.gameProfileId}
@@ -1928,6 +1934,7 @@ export function ProductConsole() {
           providerPresent={providerPresent}
           nvidiaPresent={nvidiaPresent}
           loadout={configuredLoadout}
+          onManageMouthMotion={openMouthMotion}
           onNativeLoadoutsChange={acceptConfiguredLoadouts}
           setupProofCurrent={Boolean(
             turnRoute &&
@@ -3375,6 +3382,7 @@ function WorldPage({
 }
 
 function VoicePage({
+  onManageMouthMotion,
   onNativeLoadoutsChange,
   accounts,
   gameProfileId,
@@ -3406,6 +3414,7 @@ function VoicePage({
   onProviderAction,
   onSave,
 }: {
+  onManageMouthMotion: () => void;
   onNativeLoadoutsChange: (loadouts: ProviderLoadout[]) => void;
   accounts: NativeProviderCredentialSummary[];
   gameProfileId: string;
@@ -3457,6 +3466,7 @@ function VoicePage({
             description: "Choose models & stock voice",
             content: (
               <ProviderLoadoutEditor
+                onManageMouthMotion={onManageMouthMotion}
                 onNativeLoadoutsChange={onNativeLoadoutsChange}
                 gameProfileId={gameProfileId}
                 characterId={characterId}
@@ -4421,6 +4431,7 @@ function AudioInputPicker({
 }
 
 function OnboardingOverlay({
+  onManageMouthMotion,
   setupProofCurrent,
   onConnectReviewGame,
   reviewLaunchAvailable,
@@ -4473,6 +4484,7 @@ function OnboardingOverlay({
   onRun,
   onClose,
 }: {
+  onManageMouthMotion: () => void;
   setupProofCurrent: boolean;
   onConnectReviewGame: () => void;
   reviewLaunchAvailable: boolean;
@@ -4760,6 +4772,7 @@ function OnboardingOverlay({
                     label: "Choose models",
                     content: (
                       <ProviderLoadoutEditor
+                        onManageMouthMotion={onManageMouthMotion}
                         onNativeLoadoutsChange={onNativeLoadoutsChange}
                         gameProfileId={gameProfileId}
                         characterId={characterId}

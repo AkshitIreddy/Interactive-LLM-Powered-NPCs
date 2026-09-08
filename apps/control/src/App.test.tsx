@@ -89,6 +89,20 @@ describe("NPC 2.0 product console", () => {
     ).toBeInTheDocument();
   });
 
+  it("opens Night City from the native mouth motion setup action", async () => {
+    const user = userEvent.setup();
+    window.history.replaceState(null, "", "/?page=voice");
+    render(<App />);
+    await user.click(
+      screen.getByRole("button", { name: /^Optional lip-sync\./ }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Set up mouth motion" }),
+    );
+    expect(screen.getByRole("heading", { name: "Night City" })).toBeVisible();
+    expect(window.location.search).toBe("?page=world");
+  });
+
   it("shows browser-only onboarding refusal inside the modal", async () => {
     const user = userEvent.setup();
     window.history.replaceState(null, "", "/?onboarding=1");
