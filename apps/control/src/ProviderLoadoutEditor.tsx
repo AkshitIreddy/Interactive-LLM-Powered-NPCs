@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "react-aria-components";
+import { CyberwareAnatomy } from "./CyberwareAnatomy";
 import { ActionButton, StatusPill } from "./components";
 import { Icon } from "./icons";
+import "./loadout.css";
 import {
   makeLoadout,
   modelFor,
@@ -47,9 +49,6 @@ const FALLBACK_ROLES: ProviderRole[] = [
   "vision",
 ];
 
-const ESSENTIAL_ROLES: ProviderRole[] = ["llm", "stt", "tts", "embeddings"];
-const OPTIONAL_ROLES: ProviderRole[] = ["vision", "lipSync"];
-
 export interface ProviderLoadoutEditorProps {
   gameProfileId?: string;
   gameProfileLabel?: string;
@@ -84,6 +83,18 @@ function qualifiedStockVoiceId(providerId: string) {
     default:
       return undefined;
   }
+}
+
+function stockVoicePresetFor(providerId: string) {
+  const voiceId = qualifiedStockVoiceId(providerId);
+  if (!voiceId) return null;
+  const labels: Record<string, string> = {
+    elevenlabs: "Sarah · warm conversation",
+    cartesia: "Greg · clear and grounded",
+    deepgram: "Arcas · natural English",
+    inworld: "Dennis · expressive English",
+  };
+  return { voiceId, label: labels[providerId] ?? "Verified stock voice" };
 }
 
 const scopeCopy: Record<
@@ -173,6 +184,7 @@ export function ProviderLoadoutEditor({
   const [privateEvaluationArmed, setPrivateEvaluationArmed] = useState(false);
   const [privateEvaluationBusy, setPrivateEvaluationBusy] = useState(false);
   const [activeRole, setActiveRole] = useState<ProviderRole>(initialRole);
+  const [customVoiceEditing, setCustomVoiceEditing] = useState(false);
 
   const selected =
     loadouts.find((loadout) => loadout.id === selectedId) ?? loadouts[0];
@@ -718,15 +730,15 @@ export function ProviderLoadoutEditor({
     >
       <header className="loadout-console__header">
         <div>
-          <span className="eyebrow">VOICE & MIND</span>
+          <span className="eyebrow">NEURAL LOADOUT</span>
           <h3 id="loadout-title">
             {mode === "onboarding"
               ? "Choose how this character listens and answers."
               : "Choose the route for the next conversation."}
           </h3>
           <p>
-            Pick one role at a time. Global choices flow into each game and
-            character until you add an override.
+            Select a system on the rig, then slot in its provider and model.
+            Your active loadout takes effect when the next conversation begins.
           </p>
         </div>
         <div
@@ -734,9 +746,11 @@ export function ProviderLoadoutEditor({
           aria-label="Turn routing safety"
         >
           <Icon name="shield" size={20} />
-          <span>TURN SNAPSHOT</span>
+          <span>ROUTE STATUS</span>
           <strong>Swaps begin next turn</strong>
-          <small>Never reroutes an in-flight response</small>
+          <small>
+            {selected.active ? "This loadout is active" : "Draft loadout"}
+          </small>
         </div>
       </header>
 
@@ -934,563 +948,597 @@ export function ProviderLoadoutEditor({
             </div>
           </details>
 
-          <nav
-            className="loadout-role-picker"
-            aria-label="Conversation route roles"
-          >
-            {ESSENTIAL_ROLES.map((role) => {
-              const route = selected.routes[role];
-              const provider = providerFor(role, route.providerId);
-              const model = modelFor(role, route);
-              const available = routeIsExecutable(role, provider.id);
-              return (
-                <Button
-                  key={role}
-                  className={`loadout-role-picker__item ${activeRole === role ? "is-selected" : ""} ${available ? "" : "is-unavailable"}`}
-                  onPress={() => setActiveRole(role)}
-                  aria-pressed={activeRole === role}
-                >
-                  <span>{ROLE_META[role].short}</span>
-                  <div>
-                    <strong>{ROLE_META[role].label}</strong>
-                    <small>
-                      {provider.name} · {model.name}
-                    </small>
-                  </div>
-                  <StatusPill tone={available ? "ok" : "warn"}>
-                    {available ? provider.execution : "Unavailable"}
-                  </StatusPill>
-                </Button>
-              );
-            })}
-            <details
-              className="loadout-role-picker__optional"
-              open={OPTIONAL_ROLES.includes(activeRole) || undefined}
-            >
-              <summary>Optional visual routes</summary>
-              <div>
-                {OPTIONAL_ROLES.map((role) => {
-                  const route = selected.routes[role];
-                  const provider = providerFor(role, route.providerId);
-                  return (
-                    <Button
-                      key={role}
-                      className={`loadout-role-picker__item ${activeRole === role ? "is-selected" : ""}`}
-                      onPress={() => setActiveRole(role)}
-                      aria-pressed={activeRole === role}
-                    >
-                      <span>{ROLE_META[role].short}</span>
+          <div className="loadout-neural-bay">
+            <CyberwareAnatomy
+              activeRole={activeRole}
+              routes={selected.routes}
+              isAvailable={routeIsExecutable}
+              onSelect={setActiveRole}
+            />
+            <div className="loadout-roles" aria-label="Provider routes by role">
+              {[activeRole].map((role) => {
+                const route = selected.routes[role];
+                const provider = providerFor(role, route.providerId);
+                const model = modelFor(role, route);
+                const routeAvailable = routeIsExecutable(role, provider.id);
+                const stockVoicePreset =
+                  role === "tts" ? stockVoicePresetFor(provider.id) : null;
+                const usesCustomVoice = Boolean(
+                  role === "tts" &&
+                    route.voiceId &&
+                    stockVoicePreset &&
+                    route.voiceId !== stockVoicePreset.voiceId,
+                );
+                return (
+                  <article
+                    className={`loadout-role loadout-role--${provider.execution.toLowerCase()}`}
+                    key={role}
+                  >
+                    <header>
+                      <span className="loadout-role__code">
+                        {ROLE_META[role].short}
+                      </span>
                       <div>
-                        <strong>{ROLE_META[role].label}</strong>
-                        <small>{provider.name} · no qualified live route</small>
+                        <h4>{ROLE_META[role].label}</h4>
+                        <p>{ROLE_META[role].description}</p>
                       </div>
-                    </Button>
-                  );
-                })}
-              </div>
-            </details>
-          </nav>
-
-          <div className="loadout-roles" aria-label="Provider routes by role">
-            {[activeRole].map((role) => {
-              const route = selected.routes[role];
-              const provider = providerFor(role, route.providerId);
-              const model = modelFor(role, route);
-              const routeAvailable = routeIsExecutable(role, provider.id);
-              return (
-                <article
-                  className={`loadout-role loadout-role--${provider.execution.toLowerCase()}`}
-                  key={role}
-                >
-                  <header>
-                    <span className="loadout-role__code">
-                      {ROLE_META[role].short}
-                    </span>
-                    <div>
-                      <h4>{ROLE_META[role].label}</h4>
-                      <p>{ROLE_META[role].description}</p>
-                    </div>
-                    <StatusPill
-                      tone={
-                        !routeAvailable
-                          ? "warn"
-                          : provider.execution === "Cloud"
-                            ? "purple"
-                            : provider.execution === "Local"
-                              ? "teal"
-                              : "neutral"
-                      }
-                    >
-                      {routeAvailable ? provider.execution : "Unavailable"}
-                    </StatusPill>
-                  </header>
-                  <div className="loadout-role__selectors">
-                    <label>
-                      <span>PROVIDER</span>
-                      <select
-                        aria-label={`${ROLE_META[role].label} provider`}
-                        title={provider.name}
-                        value={provider.id}
-                        onChange={(event) =>
-                          changeRoute(role, "providerId", event.target.value)
+                      <StatusPill
+                        tone={
+                          !routeAvailable
+                            ? "warn"
+                            : provider.execution === "Cloud"
+                              ? "purple"
+                              : provider.execution === "Local"
+                                ? "teal"
+                                : "neutral"
                         }
                       >
-                        {ROUTE_OPTIONS[role].map((option) => {
-                          const executable = routeIsExecutable(role, option.id);
-                          const magpieNeedsVoice =
-                            role === "tts" &&
-                            option.id === "nvidia-nim-magpie" &&
-                            (stockVoices?.status !== "available" ||
-                              stockVoices.voices.length === 0);
-                          return (
+                        {routeAvailable ? provider.execution : "Unavailable"}
+                      </StatusPill>
+                    </header>
+                    <div className="loadout-role__selectors">
+                      <label>
+                        <span>PROVIDER</span>
+                        <select
+                          aria-label={`${ROLE_META[role].label} provider`}
+                          title={provider.name}
+                          value={provider.id}
+                          onChange={(event) => {
+                            if (role === "tts") setCustomVoiceEditing(false);
+                            changeRoute(role, "providerId", event.target.value);
+                          }}
+                        >
+                          {ROUTE_OPTIONS[role]
+                            .filter(
+                              (option) =>
+                                (routeIsExecutable(role, option.id) &&
+                                  option.selectable !== false) ||
+                                option.id === provider.id,
+                            )
+                            .map((option) => {
+                              const executable = routeIsExecutable(
+                                role,
+                                option.id,
+                              );
+                              const magpieNeedsVoice =
+                                role === "tts" &&
+                                option.id === "nvidia-nim-magpie" &&
+                                (stockVoices?.status !== "available" ||
+                                  stockVoices.voices.length === 0);
+                              return (
+                                <option
+                                  key={option.id}
+                                  value={option.id}
+                                  disabled={
+                                    !executable ||
+                                    option.selectable === false ||
+                                    magpieNeedsVoice
+                                  }
+                                >
+                                  {option.name}
+                                  {!executable
+                                    ? role === "stt"
+                                      ? " · not wired to push-to-talk"
+                                      : " · no qualified live route"
+                                    : option.selectable === false
+                                      ? " · qualification pending"
+                                      : magpieNeedsVoice
+                                        ? " · discover stock voices first"
+                                        : ""}
+                                </option>
+                              );
+                            })}
+                        </select>
+                      </label>
+                      <label>
+                        <span>MODEL / ENGINE</span>
+                        <select
+                          aria-label={`${ROLE_META[role].label} model`}
+                          title={model.name}
+                          value={model.id}
+                          disabled={!routeAvailable}
+                          onChange={(event) =>
+                            changeRoute(role, "modelId", event.target.value)
+                          }
+                        >
+                          {provider.models.map((option) => (
                             <option
                               key={option.id}
                               value={option.id}
-                              disabled={
-                                !executable ||
-                                option.selectable === false ||
-                                magpieNeedsVoice
-                              }
+                              disabled={option.selectable === false}
                             >
                               {option.name}
-                              {!executable
-                                ? role === "stt"
-                                  ? " · not wired to push-to-talk"
-                                  : " · no qualified live route"
-                                : option.selectable === false
-                                  ? " · qualification pending"
-                                  : magpieNeedsVoice
-                                    ? " · discover stock voices first"
-                                    : ""}
+                              {option.selectable === false
+                                ? " · qualification pending"
+                                : ""}
                             </option>
-                          );
-                        })}
-                      </select>
-                    </label>
-                    <label>
-                      <span>MODEL / ENGINE</span>
-                      <select
-                        aria-label={`${ROLE_META[role].label} model`}
-                        title={model.name}
-                        value={model.id}
-                        disabled={!routeAvailable}
-                        onChange={(event) =>
-                          changeRoute(role, "modelId", event.target.value)
-                        }
-                      >
-                        {provider.models.map((option) => (
-                          <option
-                            key={option.id}
-                            value={option.id}
-                            disabled={option.selectable === false}
-                          >
-                            {option.name}
-                            {option.selectable === false
-                              ? " · qualification pending"
-                              : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    {model.note && (
-                      <p className="loadout-role__note">{model.note}</p>
-                    )}
-                    {role === "tts" &&
-                      route.providerId !== "nvidia-nim-magpie" && (
-                        <label>
-                          <span>STOCK VOICE ID</span>
-                          <input
-                            aria-label="Character voice stock voice ID"
-                            value={route.voiceId ?? ""}
-                            placeholder="Provider default"
-                            maxLength={128}
-                            onChange={(event) =>
-                              changeVoiceId(event.target.value)
-                            }
-                            onBlur={() => {
-                              if (
-                                !nativeDocument ||
-                                nativeCatalogRevision === null
-                              )
-                                return;
-                              nativeUpdate(
-                                selected,
-                                nativeDocument,
-                                nativeCatalogRevision,
-                              )
-                                .then((snapshot) =>
-                                  acceptNativeSnapshot(
-                                    snapshot,
-                                    "Stock voice identifier saved in protected native state.",
-                                  ),
+                          ))}
+                        </select>
+                      </label>
+                      {role === "tts" &&
+                        route.providerId !== "nvidia-nim-magpie" &&
+                        stockVoicePreset && (
+                          <div className="loadout-voice-choice">
+                            <label>
+                              <span>STOCK VOICE</span>
+                              <select
+                                aria-label="Character voice stock voice"
+                                value={
+                                  customVoiceEditing || usesCustomVoice
+                                    ? "custom"
+                                    : route.voiceId === stockVoicePreset.voiceId
+                                      ? stockVoicePreset.voiceId
+                                      : "default"
+                                }
+                                onChange={(event) => {
+                                  if (event.target.value === "custom") {
+                                    setCustomVoiceEditing(true);
+                                    return;
+                                  }
+                                  setCustomVoiceEditing(false);
+                                  changeVoiceId(
+                                    event.target.value === "default"
+                                      ? ""
+                                      : event.target.value,
+                                  );
+                                }}
+                              >
+                                <option value={stockVoicePreset.voiceId}>
+                                  {stockVoicePreset.label}
+                                </option>
+                                <option value="default">
+                                  Provider default
+                                </option>
+                                <option value="custom">Custom voice…</option>
+                              </select>
+                            </label>
+                            <details
+                              className="custom-voice-id"
+                              open={customVoiceEditing || usesCustomVoice}
+                            >
+                              <summary>Custom voice ID</summary>
+                              <label>
+                                <span>PROVIDER VOICE ID</span>
+                                <input
+                                  aria-label="Character voice stock voice ID"
+                                  value={route.voiceId ?? ""}
+                                  placeholder="Paste a provider stock voice ID"
+                                  maxLength={128}
+                                  onChange={(event) =>
+                                    changeVoiceId(event.target.value)
+                                  }
+                                  onBlur={() => {
+                                    if (
+                                      !nativeDocument ||
+                                      nativeCatalogRevision === null
+                                    )
+                                      return;
+                                    nativeUpdate(
+                                      selected,
+                                      nativeDocument,
+                                      nativeCatalogRevision,
+                                    )
+                                      .then((snapshot) =>
+                                        acceptNativeSnapshot(
+                                          snapshot,
+                                          "Stock voice saved in protected native state.",
+                                        ),
+                                      )
+                                      .catch(() =>
+                                        nativeFailure("Stock voice update"),
+                                      );
+                                  }}
+                                />
+                              </label>
+                            </details>
+                          </div>
+                        )}
+                      {role === "tts" &&
+                        route.providerId === "nvidia-nim-magpie" && (
+                          <label>
+                            <span>DISCOVERED STOCK VOICE</span>
+                            <select
+                              aria-label="Character voice discovered stock voice"
+                              value={
+                                stockVoices?.voices.some(
+                                  (voice) => voice.voiceId === route.voiceId,
                                 )
-                                .catch(() =>
-                                  nativeFailure("Stock voice update"),
-                                );
-                            }}
-                          />
-                          <small>
-                            Use a provider-stock voice ID. This route stores the
-                            identifier; it does not discover, preview, or verify
-                            the voice.
-                          </small>
-                        </label>
-                      )}
-                    {role === "tts" &&
-                      route.providerId === "nvidia-nim-magpie" && (
-                        <label>
-                          <span>DISCOVERED STOCK VOICE</span>
-                          <select
-                            aria-label="Character voice discovered stock voice"
-                            value={
-                              stockVoices?.voices.some(
-                                (voice) => voice.voiceId === route.voiceId,
-                              )
-                                ? route.voiceId
-                                : ""
-                            }
-                            disabled={
-                              stockVoicesBusy ||
-                              stockVoices?.status !== "available" ||
-                              stockVoices.voices.length === 0
-                            }
-                            onChange={(event) =>
-                              updateSelected((loadout) => {
-                                loadout.routes.tts = {
-                                  ...loadout.routes.tts,
-                                  voiceId: event.target.value,
-                                };
-                                return loadout;
-                              }, "Authenticated NVIDIA stock voice saved for the next turn after activation.")
-                            }
-                          >
-                            <option value="" disabled>
-                              {stockVoicesBusy
-                                ? "Discovering voices…"
-                                : "Choose an authenticated stock voice"}
-                            </option>
-                            {stockVoices?.voices.map((voice) => (
-                              <option key={voice.voiceId} value={voice.voiceId}>
-                                {voice.displayName} · {voice.language}
-                                {voice.styles.length
-                                  ? ` · ${voice.styles.join(", ")}`
-                                  : ""}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      )}
-                  </div>
-                  {!routeAvailable && (
-                    <p className="loadout-role__note is-error" role="status">
-                      <Icon name="warning" size={14} />
-                      {role === "stt"
-                        ? "The current push-to-talk path supports AssemblyAI · Universal-3 Pro Streaming. Choose it before testing microphone input."
-                        : role === "vision"
-                          ? "No vision provider is executed by the current turn runtime. Keep this route off."
-                          : role === "lipSync"
-                            ? "No qualified live lip-sync pack is installed. Audio and subtitles remain available."
-                            : "This catalog route is not executable in the current runtime."}
-                    </p>
-                  )}
-                  {provider.execution === "Cloud" &&
-                    routeAvailable &&
-                    onManageProvider && (
-                      <ActionButton
-                        variant="outline"
-                        icon="shield"
-                        onPress={() =>
-                          onManageProvider(accountProviderId(provider.id))
-                        }
-                      >
-                        Connect or check {provider.name.split(" · ")[0]}
-                      </ActionButton>
-                    )}
-                  {role === "tts" && (
-                    <details
-                      className="stock-voice-discovery"
-                      open={provider.id === "nvidia-nim-magpie" || undefined}
-                    >
-                      <summary>
-                        <strong>NVIDIA Magpie stock voices</strong>
-                        <StatusPill
-                          tone={
-                            stockVoices?.status === "available"
-                              ? "ok"
-                              : "neutral"
-                          }
-                        >
-                          {stockVoices?.status === "available"
-                            ? `${stockVoices.voices.length} discovered`
-                            : nativeDocument
-                              ? "Private evaluation"
-                              : "Native only"}
-                        </StatusPill>
-                      </summary>
-                      <div className="stock-voice-discovery__body">
-                        <ActionButton
-                          variant="outline"
-                          icon="refresh"
-                          onPress={refreshStockVoices}
-                          isDisabled={!nativeDocument || stockVoicesBusy}
-                        >
-                          {stockVoicesBusy
-                            ? "Discovering NVIDIA voices…"
-                            : "Refresh NVIDIA stock voices"}
-                        </ActionButton>
-                        <p
-                          className={stockVoicesError ? "is-error" : ""}
-                          role="status"
-                        >
-                          {!nativeDocument
-                            ? "Installed .debug/.review private-evaluation namespace required. Browser preview and the base production namespace cannot select Magpie."
-                            : stockVoicesError
-                              ? `Unavailable: ${stockVoicesError}`
-                              : stockVoices?.status === "available"
-                                ? `${stockVoices.voices.length} authenticated NVIDIA provider-stock voice${stockVoices.voices.length === 1 ? "" : "s"} · ${stockVoices.refresh.cacheHit ? "authenticated cache" : "authenticated refresh"} · expires ${stockVoices.refresh.expiresAtEpochMs ? new Date(stockVoices.refresh.expiresAtEpochMs).toLocaleString() : "not reported"} · private-evaluation namespace only · promotion/publication unsupported`
-                                : "No authenticated NVIDIA stock-voice catalog is loaded. Only an isolated native .debug/.review private-evaluation namespace can discover or select Magpie voices."}
-                        </p>
-                      </div>
-                    </details>
-                  )}
-                  {(provider.id === "nvidia-nim" ||
-                    provider.id === "nvidia-nim-magpie") && (
-                    <section
-                      className="private-evaluation-acknowledgement"
-                      aria-label="NVIDIA provider private evaluation terms"
-                    >
-                      <details>
-                        <summary>
-                          <strong>NVIDIA private evaluation only</strong>
-                          <StatusPill
-                            tone={privateEvaluationReady ? "ok" : "warn"}
-                          >
-                            {privateEvaluationReady
-                              ? "Acknowledged"
-                              : "Acknowledgement required"}
-                          </StatusPill>
-                        </summary>
-                        <p>
-                          Review/activation/turn use for the selected NVIDIA
-                          routes requires the exact current terms
-                          acknowledgement and NVIDIA credential. Magpie also
-                          requires an unexpired discovered stock voice. Public
-                          production, promotion, and publication remain blocked.
-                        </p>
-                        <ul className="private-evaluation-egress">
-                          {selected.routes.llm.providerId === "nvidia-nim" && (
-                            <li>
-                              LLM: conversation text and derived game context
-                              leave this PC.
-                            </li>
-                          )}
-                          {selected.routes.embeddings.providerId ===
-                            "nvidia-nim" && (
-                            <li>
-                              Embeddings: selected memory or lore text leaves
-                              this PC.
-                            </li>
-                          )}
-                          {selected.routes.tts.providerId ===
-                            "nvidia-nim-magpie" && (
-                            <li>
-                              Magpie TTS: response text and its audio-generation
-                              request leave this PC; stock voices only, with no
-                              cloning.
-                            </li>
-                          )}
-                        </ul>
-                        {privateEvaluationPolicy ? (
-                          <dl className="private-evaluation-policy">
-                            <div>
-                              <dt>Provider</dt>
-                              <dd>{privateEvaluationPolicy.providerId}</dd>
-                            </div>
-                            <div>
-                              <dt>Restriction</dt>
-                              <dd>{privateEvaluationPolicy.mode}</dd>
-                            </div>
-                            <div>
-                              <dt>Current terms</dt>
-                              <dd>{privateEvaluationPolicy.termsRevision}</dd>
-                            </div>
-                            <div>
-                              <dt>Native namespace</dt>
-                              <dd>
-                                {privateEvaluationPolicy.applicationNamespace} ·{" "}
-                                {privateEvaluationPolicy.namespaceEligible
-                                  ? "eligible for private evaluation"
-                                  : "ineligible; acknowledgement blocked"}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt>Data egress</dt>
-                              <dd>
-                                {selectedNvidiaModalities.join(", ")} → NVIDIA
-                                provider cloud
-                              </dd>
-                            </div>
-                            <div>
-                              <dt>Promotion / publication</dt>
-                              <dd>false / false</dd>
-                            </div>
-                            <div>
-                              <dt>Access scope</dt>
-                              <dd>{privateEvaluationPolicy.accessScope}</dd>
-                            </div>
-                            <div>
-                              <dt>Affected selected modalities</dt>
-                              <dd>{selectedNvidiaModalities.join(", ")}</dd>
-                            </div>
-                            <div>
-                              <dt>Provider limits</dt>
-                              <dd>{privateEvaluationPolicy.rateLimitNote}</dd>
-                            </div>
-                            <div>
-                              <dt>Prohibited data</dt>
-                              <dd>
-                                {privateEvaluationPolicy.prohibitedData.join(
-                                  ", ",
-                                )}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt>Logging / improvement disclosure</dt>
-                              <dd>
-                                security abuse logging{" "}
-                                {privateEvaluationPolicy.securityAbuseLogging
-                                  ? "disclosed"
-                                  : "not disclosed"}
-                                {" · product improvement collection "}
-                                {privateEvaluationPolicy.productImprovementCollectionDisclosed
-                                  ? "disclosed"
-                                  : "not disclosed"}
-                              </dd>
-                            </div>
-                          </dl>
-                        ) : (
-                          <p className="is-error" role="status">
-                            {privateEvaluationPolicyError ??
-                              "Reading the native private-evaluation policy…"}
-                          </p>
-                        )}
-                        {privateEvaluationPolicy && (
-                          <a
-                            href={privateEvaluationPolicy.termsUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            Open NVIDIA API Trial Terms
-                          </a>
-                        )}
-                        {privateEvaluationAcknowledgement &&
-                          !privateEvaluationReady && (
-                            <small className="is-error">
-                              A prior acknowledgement is stale for the current
-                              terms, catalog, or native namespace. Re-review and
-                              acknowledge the policy below.
-                            </small>
-                          )}
-                        {privateEvaluationReady &&
-                          privateEvaluationAcknowledgement && (
-                            <small>
-                              {privateEvaluationAcknowledgement.termsRevision} ·
-                              catalog{" "}
-                              {privateEvaluationAcknowledgement.catalogRevision}
-                              {" · "}
-                              nonproduction namespace{" "}
-                              {
-                                privateEvaluationAcknowledgement.applicationNamespace
+                                  ? route.voiceId
+                                  : ""
                               }
-                              {" · "}
-                              {new Date(
-                                privateEvaluationAcknowledgement.acknowledgedAtEpochMs,
-                              ).toLocaleString()}
-                            </small>
-                          )}
-                        <label className="private-evaluation-consent">
-                          <input
-                            type="checkbox"
-                            checked={privateEvaluationConsentChecked}
-                            disabled={
-                              !nativeDocument ||
-                              !privateEvaluationPolicy?.namespaceEligible ||
-                              privateEvaluationReady ||
-                              privateEvaluationBusy
-                            }
-                            onChange={(event) => {
-                              setPrivateEvaluationConsentChecked(
-                                event.target.checked,
-                              );
-                              setPrivateEvaluationArmed(false);
-                            }}
-                          />
-                          <span>
-                            I reviewed the exact current NVIDIA trial terms and
-                            accept private-evaluation-only use, provider-cloud
-                            route egress, model-specific limits, reduced
-                            pre-release standards, retention/logging/improvement
-                            disclosures, restricted-data exclusions, and the
-                            production/promotion/publication prohibitions.
-                          </span>
-                        </label>
+                              disabled={
+                                stockVoicesBusy ||
+                                stockVoices?.status !== "available" ||
+                                stockVoices.voices.length === 0
+                              }
+                              onChange={(event) =>
+                                updateSelected((loadout) => {
+                                  loadout.routes.tts = {
+                                    ...loadout.routes.tts,
+                                    voiceId: event.target.value,
+                                  };
+                                  return loadout;
+                                }, "Authenticated NVIDIA stock voice saved for the next turn after activation.")
+                              }
+                            >
+                              <option value="" disabled>
+                                {stockVoicesBusy
+                                  ? "Discovering voices…"
+                                  : "Choose an authenticated stock voice"}
+                              </option>
+                              {stockVoices?.voices.map((voice) => (
+                                <option
+                                  key={voice.voiceId}
+                                  value={voice.voiceId}
+                                >
+                                  {voice.displayName} · {voice.language}
+                                  {voice.styles.length
+                                    ? ` · ${voice.styles.join(", ")}`
+                                    : ""}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
+                    </div>
+                    {!routeAvailable && (
+                      <p className="loadout-role__note is-error" role="status">
+                        <Icon name="warning" size={14} />
+                        {role === "stt"
+                          ? "The current push-to-talk path supports AssemblyAI · Universal-3 Pro Streaming. Choose it before testing microphone input."
+                          : role === "vision"
+                            ? "No vision provider is executed by the current turn runtime. Keep this route off."
+                            : role === "lipSync"
+                              ? "No qualified live lip-sync pack is installed. Audio and subtitles remain available."
+                              : "This catalog route is not executable in the current runtime."}
+                      </p>
+                    )}
+                    {provider.execution === "Cloud" &&
+                      routeAvailable &&
+                      onManageProvider && (
                         <ActionButton
                           variant="outline"
                           icon="shield"
-                          onPress={acknowledgePrivateEvaluation}
-                          isDisabled={
-                            !nativeDocument ||
-                            privateEvaluationBusy ||
-                            !privateEvaluationPolicy?.namespaceEligible ||
-                            !privateEvaluationConsentChecked ||
-                            privateEvaluationReady
+                          onPress={() =>
+                            onManageProvider(accountProviderId(provider.id))
                           }
                         >
-                          {privateEvaluationBusy
-                            ? "Persisting acknowledgement…"
-                            : privateEvaluationArmed
-                              ? "Confirm private-evaluation-only terms"
-                              : privateEvaluationReady
-                                ? "Current terms acknowledged"
-                                : "Review and acknowledge terms"}
+                          Connect or check {provider.name.split(" · ")[0]}
                         </ActionButton>
+                      )}
+                    {role === "tts" && provider.id === "nvidia-nim-magpie" && (
+                      <details className="stock-voice-discovery" open>
+                        <summary>
+                          <strong>NVIDIA Magpie stock voices</strong>
+                          <StatusPill
+                            tone={
+                              stockVoices?.status === "available"
+                                ? "ok"
+                                : "neutral"
+                            }
+                          >
+                            {stockVoices?.status === "available"
+                              ? `${stockVoices.voices.length} discovered`
+                              : nativeDocument
+                                ? "Private evaluation"
+                                : "Native only"}
+                          </StatusPill>
+                        </summary>
+                        <div className="stock-voice-discovery__body">
+                          <ActionButton
+                            variant="outline"
+                            icon="refresh"
+                            onPress={refreshStockVoices}
+                            isDisabled={!nativeDocument || stockVoicesBusy}
+                          >
+                            {stockVoicesBusy
+                              ? "Discovering NVIDIA voices…"
+                              : "Refresh NVIDIA stock voices"}
+                          </ActionButton>
+                          <p
+                            className={stockVoicesError ? "is-error" : ""}
+                            role="status"
+                          >
+                            {!nativeDocument
+                              ? "Installed .debug/.review private-evaluation namespace required. Browser preview and the base production namespace cannot select Magpie."
+                              : stockVoicesError
+                                ? `Unavailable: ${stockVoicesError}`
+                                : stockVoices?.status === "available"
+                                  ? `${stockVoices.voices.length} authenticated NVIDIA provider-stock voice${stockVoices.voices.length === 1 ? "" : "s"} · ${stockVoices.refresh.cacheHit ? "authenticated cache" : "authenticated refresh"} · expires ${stockVoices.refresh.expiresAtEpochMs ? new Date(stockVoices.refresh.expiresAtEpochMs).toLocaleString() : "not reported"} · private-evaluation namespace only · promotion/publication unsupported`
+                                  : "No authenticated NVIDIA stock-voice catalog is loaded. Only an isolated native .debug/.review private-evaluation namespace can discover or select Magpie voices."}
+                          </p>
+                        </div>
                       </details>
-                    </section>
-                  )}
-                  <details className="loadout-role__disclosure">
-                    <summary>Privacy, cost, and route details</summary>
-                    <dl className="loadout-role__facts">
-                      <div>
-                        <dt>EGRESS</dt>
-                        <dd>{provider.egress}</dd>
-                      </div>
-                      <div>
-                        <dt>COST</dt>
-                        <dd>{provider.cost}</dd>
-                      </div>
-                      <div>
-                        <dt>PRIVACY</dt>
-                        <dd>{provider.privacy}</dd>
-                      </div>
-                    </dl>
-                    {provider.note && (
-                      <p className="loadout-role__note">
-                        <Icon name="help" size={14} />
-                        {provider.note}
-                      </p>
                     )}
-                    {provider.id === "local-visual-worker" && (
-                      <p className="loadout-role__note">
-                        <Icon name="warning" size={14} />
-                        No qualified pack is installed, downloadable, or
-                        available for activation in this build.
-                      </p>
+                    {(provider.id === "nvidia-nim" ||
+                      provider.id === "nvidia-nim-magpie") && (
+                      <section
+                        className="private-evaluation-acknowledgement"
+                        aria-label="NVIDIA provider private evaluation terms"
+                      >
+                        <details>
+                          <summary>
+                            <strong>NVIDIA private evaluation only</strong>
+                            <StatusPill
+                              tone={privateEvaluationReady ? "ok" : "warn"}
+                            >
+                              {privateEvaluationReady
+                                ? "Acknowledged"
+                                : "Acknowledgement required"}
+                            </StatusPill>
+                          </summary>
+                          <p>
+                            Review the current trial terms once to use this
+                            route in the private review build. Magpie also needs
+                            a discovered stock voice.
+                          </p>
+                          <ul className="private-evaluation-egress">
+                            {selected.routes.llm.providerId ===
+                              "nvidia-nim" && (
+                              <li>
+                                LLM: conversation text and derived game context
+                                leave this PC.
+                              </li>
+                            )}
+                            {selected.routes.embeddings.providerId ===
+                              "nvidia-nim" && (
+                              <li>
+                                Embeddings: selected memory or lore text leaves
+                                this PC.
+                              </li>
+                            )}
+                            {selected.routes.tts.providerId ===
+                              "nvidia-nim-magpie" && (
+                              <li>
+                                Magpie TTS: response text and its
+                                audio-generation request leave this PC; stock
+                                voices only, with no cloning.
+                              </li>
+                            )}
+                          </ul>
+                          {privateEvaluationPolicy ? (
+                            <dl className="private-evaluation-policy">
+                              <div>
+                                <dt>Provider</dt>
+                                <dd>{privateEvaluationPolicy.providerId}</dd>
+                              </div>
+                              <div>
+                                <dt>Restriction</dt>
+                                <dd>{privateEvaluationPolicy.mode}</dd>
+                              </div>
+                              <div>
+                                <dt>Current terms</dt>
+                                <dd>{privateEvaluationPolicy.termsRevision}</dd>
+                              </div>
+                              <div>
+                                <dt>Native namespace</dt>
+                                <dd>
+                                  {privateEvaluationPolicy.applicationNamespace}{" "}
+                                  ·{" "}
+                                  {privateEvaluationPolicy.namespaceEligible
+                                    ? "eligible for private evaluation"
+                                    : "ineligible; acknowledgement blocked"}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt>Data egress</dt>
+                                <dd>
+                                  {selectedNvidiaModalities.join(", ")} → NVIDIA
+                                  provider cloud
+                                </dd>
+                              </div>
+                              <div>
+                                <dt>Promotion / publication</dt>
+                                <dd>false / false</dd>
+                              </div>
+                              <div>
+                                <dt>Access scope</dt>
+                                <dd>{privateEvaluationPolicy.accessScope}</dd>
+                              </div>
+                              <div>
+                                <dt>Affected selected modalities</dt>
+                                <dd>{selectedNvidiaModalities.join(", ")}</dd>
+                              </div>
+                              <div>
+                                <dt>Provider limits</dt>
+                                <dd>{privateEvaluationPolicy.rateLimitNote}</dd>
+                              </div>
+                              <div>
+                                <dt>Prohibited data</dt>
+                                <dd>
+                                  {privateEvaluationPolicy.prohibitedData.join(
+                                    ", ",
+                                  )}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt>Logging / improvement disclosure</dt>
+                                <dd>
+                                  security abuse logging{" "}
+                                  {privateEvaluationPolicy.securityAbuseLogging
+                                    ? "disclosed"
+                                    : "not disclosed"}
+                                  {" · product improvement collection "}
+                                  {privateEvaluationPolicy.productImprovementCollectionDisclosed
+                                    ? "disclosed"
+                                    : "not disclosed"}
+                                </dd>
+                              </div>
+                            </dl>
+                          ) : (
+                            <p className="is-error" role="status">
+                              {privateEvaluationPolicyError ??
+                                "Reading the native private-evaluation policy…"}
+                            </p>
+                          )}
+                          {privateEvaluationPolicy && (
+                            <a
+                              href={privateEvaluationPolicy.termsUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              Open NVIDIA API Trial Terms
+                            </a>
+                          )}
+                          {privateEvaluationAcknowledgement &&
+                            !privateEvaluationReady && (
+                              <small className="is-error">
+                                A prior acknowledgement is stale for the current
+                                terms, catalog, or native namespace. Re-review
+                                and acknowledge the policy below.
+                              </small>
+                            )}
+                          {privateEvaluationReady &&
+                            privateEvaluationAcknowledgement && (
+                              <small>
+                                {privateEvaluationAcknowledgement.termsRevision}{" "}
+                                · catalog{" "}
+                                {
+                                  privateEvaluationAcknowledgement.catalogRevision
+                                }
+                                {" · "}
+                                nonproduction namespace{" "}
+                                {
+                                  privateEvaluationAcknowledgement.applicationNamespace
+                                }
+                                {" · "}
+                                {new Date(
+                                  privateEvaluationAcknowledgement.acknowledgedAtEpochMs,
+                                ).toLocaleString()}
+                              </small>
+                            )}
+                          <label className="private-evaluation-consent">
+                            <input
+                              type="checkbox"
+                              checked={privateEvaluationConsentChecked}
+                              disabled={
+                                !nativeDocument ||
+                                !privateEvaluationPolicy?.namespaceEligible ||
+                                privateEvaluationReady ||
+                                privateEvaluationBusy
+                              }
+                              onChange={(event) => {
+                                setPrivateEvaluationConsentChecked(
+                                  event.target.checked,
+                                );
+                                setPrivateEvaluationArmed(false);
+                              }}
+                            />
+                            <span>
+                              I reviewed the exact current NVIDIA trial terms
+                              and accept private-evaluation use and provider
+                              cloud data processing.
+                            </span>
+                          </label>
+                          <ActionButton
+                            variant="outline"
+                            icon="shield"
+                            onPress={acknowledgePrivateEvaluation}
+                            isDisabled={
+                              !nativeDocument ||
+                              privateEvaluationBusy ||
+                              !privateEvaluationPolicy?.namespaceEligible ||
+                              !privateEvaluationConsentChecked ||
+                              privateEvaluationReady
+                            }
+                          >
+                            {privateEvaluationBusy
+                              ? "Persisting acknowledgement…"
+                              : privateEvaluationArmed
+                                ? "Confirm private-evaluation-only terms"
+                                : privateEvaluationReady
+                                  ? "Current terms acknowledged"
+                                  : "Review and acknowledge terms"}
+                          </ActionButton>
+                        </details>
+                      </section>
                     )}
-                  </details>
-                </article>
-              );
-            })}
+                    <details className="loadout-role__disclosure">
+                      <summary>Privacy, cost, and route details</summary>
+                      <dl className="loadout-role__facts">
+                        <div>
+                          <dt>EGRESS</dt>
+                          <dd>{provider.egress}</dd>
+                        </div>
+                        <div>
+                          <dt>COST</dt>
+                          <dd>{provider.cost}</dd>
+                        </div>
+                        <div>
+                          <dt>PRIVACY</dt>
+                          <dd>{provider.privacy}</dd>
+                        </div>
+                      </dl>
+                      {model.note && (
+                        <p className="loadout-role__note">
+                          <Icon name="help" size={14} />
+                          {model.note}
+                        </p>
+                      )}
+                      {provider.note && (
+                        <p className="loadout-role__note">
+                          <Icon name="help" size={14} />
+                          {provider.note}
+                        </p>
+                      )}
+                      {provider.id === "local-visual-worker" && (
+                        <p className="loadout-role__note">
+                          <Icon name="warning" size={14} />
+                          No qualified pack is installed, downloadable, or
+                          available for activation in this build.
+                        </p>
+                      )}
+                    </details>
+                  </article>
+                );
+              })}
+            </div>
           </div>
+
+          <footer className="loadout-editor__footer">
+            <div role="status" aria-live="polite">
+              <Icon name="shield" size={18} />
+              <span>{notice}</span>
+            </div>
+            <ActionButton
+              icon="check"
+              onPress={activateLoadout}
+              isDisabled={
+                selected.active ||
+                (selectedNvidiaModalities.length > 0 && !privateEvaluationReady)
+              }
+            >
+              {selected.active
+                ? "Active for next turn"
+                : "Activate for next turn"}
+            </ActionButton>
+            {selectedNvidiaModalities.length > 0 && !privateEvaluationReady && (
+              <small className="loadout-activation-reason">
+                Review the current NVIDIA trial terms before activating this
+                private evaluation route.
+              </small>
+            )}
+          </footer>
 
           <section
             className="manual-fallbacks"
@@ -1682,32 +1730,6 @@ export function ProviderLoadoutEditor({
               )}
             </details>
           </section>
-
-          <footer className="loadout-editor__footer">
-            <div role="status" aria-live="polite">
-              <Icon name="shield" size={18} />
-              <span>{notice}</span>
-            </div>
-            <ActionButton
-              icon="check"
-              onPress={activateLoadout}
-              isDisabled={
-                selected.active ||
-                (selectedNvidiaModalities.length > 0 && !privateEvaluationReady)
-              }
-            >
-              {selected.active
-                ? "Active for next turn"
-                : "Activate for next turn"}
-            </ActionButton>
-            {selectedNvidiaModalities.length > 0 && !privateEvaluationReady && (
-              <small className="loadout-activation-reason">
-                Activation is blocked until the exact current native terms,
-                catalog revision, and eligible .debug/.review application
-                namespace are explicitly acknowledged.
-              </small>
-            )}
-          </footer>
         </div>
       </div>
     </section>

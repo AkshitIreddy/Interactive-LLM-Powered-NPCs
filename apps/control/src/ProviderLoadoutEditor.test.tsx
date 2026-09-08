@@ -106,15 +106,15 @@ describe("provider and model loadouts", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("marks catalog-only speech routes unavailable and keeps AssemblyAI selectable", async () => {
+  it("hides catalog-only speech routes and keeps AssemblyAI selectable", async () => {
     const user = userEvent.setup();
     render(<ProviderLoadoutEditor initialRole="stt" />);
 
     expect(
-      screen.getByRole("option", {
-        name: /OpenAI.*not wired to push-to-talk/i,
-      }),
-    ).toBeDisabled();
+      screen
+        .getByLabelText("Speech recognition provider")
+        .querySelector('option[value="openai"]'),
+    ).toBeNull();
     expect(screen.getByRole("option", { name: "AssemblyAI" })).toBeEnabled();
     await user.selectOptions(
       screen.getByLabelText("Speech recognition provider"),
@@ -327,10 +327,10 @@ describe("provider and model loadouts", () => {
     render(<ProviderLoadoutEditor initialRole="lipSync" />);
 
     expect(
-      screen.getByRole("option", {
-        name: /Local visual worker · no qualified live route/,
-      }),
-    ).toBeDisabled();
+      screen
+        .getByLabelText("Optional lip-sync provider")
+        .querySelector('option[value="local-visual-worker"]'),
+    ).toBeNull();
     expect(screen.getByLabelText("Optional lip-sync provider")).toHaveValue(
       "disabled",
     );
@@ -340,8 +340,7 @@ describe("provider and model loadouts", () => {
     expect(document.body).not.toHaveTextContent("Download pack");
   });
 
-  it("keeps Magpie unavailable until native stock discovery proves exact membership", async () => {
-    const user = userEvent.setup();
+  it("keeps Magpie unavailable and hides unrelated discovery controls", () => {
     render(<ProviderLoadoutEditor initialRole="tts" />);
 
     expect(
@@ -349,20 +348,12 @@ describe("provider and model loadouts", () => {
         name: /NVIDIA NIM Magpie · private evaluation only · discover stock voices first/i,
       }),
     ).toBeDisabled();
-    await user.click(
-      screen.getByText("NVIDIA Magpie stock voices", { selector: "strong" }),
-    );
     expect(
-      screen.getByRole("button", { name: "Refresh NVIDIA stock voices" }),
-    ).toBeDisabled();
+      screen.queryByText("NVIDIA Magpie stock voices"),
+    ).not.toBeInTheDocument();
     expect(
-      screen.getByText(
-        "Installed .debug/.review private-evaluation namespace required. Browser preview and the base production namespace cannot select Magpie.",
-      ),
-    ).toBeInTheDocument();
-    expect(document.body).toHaveTextContent(
-      /base production namespace cannot select Magpie/i,
-    );
+      screen.queryByRole("button", { name: "Refresh NVIDIA stock voices" }),
+    ).not.toBeInTheDocument();
     expect(screen.getByLabelText("Character voice provider")).toHaveValue(
       "cartesia",
     );
