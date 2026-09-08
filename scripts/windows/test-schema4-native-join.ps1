@@ -10,7 +10,7 @@ param(
     [Parameter(Mandatory = $true)][string]$ProviderStateRoot,
     [Parameter(Mandatory = $true)][string]$JoinEvidenceRoot,
     [Parameter(Mandatory = $true)][string]$LogDirectory,
-    [string]$CargoTargetDirectory = 'E:\temp\InteractiveNPCs\cargo-target-schema4-join'
+    [string]$CargoTargetDirectory = 'E:\temp\InteractiveNPCs\cargo-target'
 )
 
 Set-StrictMode -Version 3.0

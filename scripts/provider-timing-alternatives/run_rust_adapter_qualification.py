@@ -25,7 +25,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--credentials", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--target-dir", type=Path, default=Path(r"E:\temp\InteractiveNPCs\cargo-adapter-live"))
+    parser.add_argument("--target-dir", type=Path, default=Path(r"E:\temp\InteractiveNPCs\cargo-target"))
     parser.add_argument("--report-file", type=Path)
     args = parser.parse_args()
 

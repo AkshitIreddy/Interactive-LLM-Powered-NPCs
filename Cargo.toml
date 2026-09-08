@@ -32,3 +32,9 @@ strip = "symbols"
 
 [profile.bench]
 debug = true
+
+# Avoid multi-gigabyte debug and incremental caches during normal development.
+# Tests inherit this profile; opt into symbols explicitly when debugging.
+[profile.dev]
+debug = 0
+incremental = false

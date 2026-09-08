@@ -86,3 +86,9 @@ dbg_macro = "deny"
 todo = "deny"
 undocumented_unsafe_blocks = "deny"
 unwrap_used = "warn"
+
+# Avoid multi-gigabyte debug and incremental caches during normal development.
+# Tests inherit this profile; opt into symbols explicitly when debugging.
+[profile.dev]
+debug = 0
+incremental = false

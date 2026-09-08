@@ -20,7 +20,7 @@ def main() -> int:
     parser.add_argument(
         "--target-dir",
         type=Path,
-        default=Path(r"E:\temp\InteractiveNPCs\cargo-target-native-slice"),
+        default=Path(r"E:\temp\InteractiveNPCs\cargo-target"),
     )
     args = parser.parse_args()
     credentials, _ = resolve_credentials(args.credentials)
