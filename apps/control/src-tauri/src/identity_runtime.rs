@@ -46,6 +46,8 @@ const REQUEST_CONTRACT: &str = "npc.identity-observation-request/v1";
 const MAX_GALLERY_BYTES: u64 = 8 * 1024 * 1024;
 const ACTOR_LOCK_SCHEMA_VERSION: u32 = 1;
 const MAX_ACTOR_LOCK_LIFETIME_MS: u64 = 250;
+const MAX_MANUAL_PICKER_FRAME_LIFETIME_MS: u64 = 15_500;
+const MAX_MANUAL_ACTOR_SELECTION_LIFETIME_MS: u64 = 15_000;
 const IDENTITY_OBSERVATION_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -693,7 +695,8 @@ impl NativeActorLockBusV1 {
             || request.captured_at_unix_ms == 0
             || now_unix_ms < request.captured_at_unix_ms
             || now_unix_ms >= request.expires_at_unix_ms
-            || request.expires_at_unix_ms - request.captured_at_unix_ms > MAX_ACTOR_LOCK_LIFETIME_MS
+            || request.expires_at_unix_ms - request.captured_at_unix_ms
+                > MAX_MANUAL_PICKER_FRAME_LIFETIME_MS
             || receipt.receipt_nonce_high == 0 && receipt.receipt_nonce_low == 0
             || receipt.began_qpc < receipt.source_frame_qpc
             || receipt.clicked_qpc < receipt.began_qpc
@@ -751,18 +754,6 @@ impl NativeActorLockBusV1 {
                 current.checked_add(1)
             })
             .map_err(|_| IdentityRuntimeError::GenerationExhausted)?;
-        let digest = hex::decode(&receipt.candidate_set_sha256)
-            .map_err(|_| IdentityRuntimeError::ManualActorClickEvidenceMismatch)?;
-        let digest_high = u64::from_le_bytes(
-            digest[0..8]
-                .try_into()
-                .map_err(|_| IdentityRuntimeError::ManualActorClickEvidenceMismatch)?,
-        );
-        let digest_low = u64::from_le_bytes(
-            digest[8..16]
-                .try_into()
-                .map_err(|_| IdentityRuntimeError::ManualActorClickEvidenceMismatch)?,
-        );
         let selected = Arc::new(NativeSelectedActorLockV1 {
             schema_version: ACTOR_LOCK_SCHEMA_VERSION,
             lock_generation,
@@ -779,6 +770,8 @@ impl NativeActorLockBusV1 {
             selected_process_id: request.selected_process_id,
             selected_window_handle: request.selected_window_handle,
             selected_executable_name: request.selected_executable_name.clone(),
+            // A generic native click proves only which on-screen track the
+            // user selected. It never proves a semantic character identity.
             character_id: String::new(),
             selection_authority: NativeActorSelectionAuthorityV1::SealedNativeClick,
             actor_id: format!("sealed-click-{}", candidate.actor_id),
@@ -795,12 +788,14 @@ impl NativeActorLockBusV1 {
             },
             appearance_hysteresis_latched: false,
             appearance_descriptor_revision: 1,
-            expected_appearance_digest_high: digest_high,
-            expected_appearance_digest_low: digest_low,
-            observed_appearance_digest_high: digest_high,
-            observed_appearance_digest_low: digest_low,
-            appearance_similarity: 1.0,
-            temporal_iou: 1.0,
+            // Candidate-set integrity proves the native click receipt, not the
+            // face's semantic identity or an appearance descriptor.
+            expected_appearance_digest_high: 0,
+            expected_appearance_digest_low: 0,
+            observed_appearance_digest_high: 0,
+            observed_appearance_digest_low: 0,
+            appearance_similarity: 0.0,
+            temporal_iou: 0.0,
             blocker_coverage: 0.0,
             scene_transition_detected: false,
             identity_confidence: 0.0,
@@ -812,7 +807,7 @@ impl NativeActorLockBusV1 {
             captured_at_unix_ms: request.captured_at_unix_ms,
             device_generation: request.source_device_generation,
             geometry_epoch: request.source_geometry_epoch,
-            expires_at_unix_ms: request.expires_at_unix_ms,
+            expires_at_unix_ms: now_unix_ms.saturating_add(MAX_MANUAL_ACTOR_SELECTION_LIFETIME_MS),
             cancellation_generation: request.cancellation_generation,
         });
         self.state

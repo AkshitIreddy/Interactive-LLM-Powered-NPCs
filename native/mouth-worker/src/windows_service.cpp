@@ -453,6 +453,7 @@ void render_resolved_current_frame(MouthProductRuntime& runtime,
                                    const MouthDrive& drive,
                                    CpuFrame source,
                                    const Nanoseconds deadline_ns,
+                                   const bool sealed_click_source_only,
                                    const Nanoseconds now) {
     const double detector_confidence = landmarks.detector_confidence;
     const double landmark_confidence = landmarks.landmark_confidence;
@@ -515,6 +516,7 @@ void render_resolved_current_frame(MouthProductRuntime& runtime,
     request.resources = resources;
     request.drive = drive;
     request.deadline_ns = deadline_ns;
+    request.sealed_click_source_only = sealed_click_source_only;
     auto submission = runtime.submit(std::move(request), frame, now);
     if (submission.receipt.disposition != PresentationDisposition::queued) {
         response.receipt = std::move(submission.receipt);
@@ -655,8 +657,8 @@ int run_windows_service(const WindowsServiceConfig& config,
                 render_resolved_current_frame(runtime, renderer, response, command->request,
                                               command->source, command->track, command->frame,
                                               command->landmarks, command->appearance,
-                                              command->resources, command->drive,
-                                              std::move(source), command->deadline_ns, now);
+                                               command->resources, command->drive,
+                                               std::move(source), command->deadline_ns, false, now);
                 break;
             }
             case CommandKind::render_with_admitted_landmarks: {
@@ -708,7 +710,68 @@ int run_windows_service(const WindowsServiceConfig& config,
                     runtime, renderer, response, command->request, command->source,
                     command->track, command->frame, std::move(*produced.packet),
                     command->appearance, command->resources, command->drive,
-                    std::move(resolved_work.source), command->deadline_ns, resolved_now);
+                    std::move(resolved_work.source), command->deadline_ns,
+                    command->sealed_click_source_only, resolved_now);
+                break;
+            }
+            case CommandKind::discover_actor_candidates: {
+                const auto command = decode_actor_candidate_discovery(envelope->payload);
+                if (!command || !landmark_coordinator ||
+                    command->source.session.nonce != config.session.nonce ||
+                    command->source.session.session_id_high != config.session.session_id_high ||
+                    command->source.session.session_id_low != config.session.session_id_low ||
+                    command->discovery_track.actor_id == 0U ||
+                    command->discovery_track.track_id == 0U ||
+                    command->discovery_track.track_epoch == 0U ||
+                    command->discovery_track.cancellation_generation !=
+                        runtime.active_generation() ||
+                    command->frame.sequence == 0U || command->deadline_ns < now) {
+                    response.status = landmark_coordinator
+                        ? StatusCode::payload_invalid
+                        : StatusCode::capability_unavailable;
+                    response.detail = landmark_coordinator
+                        ? "actor_candidate_discovery_contract_invalid"
+                        : "admitted_landmark_provider_unavailable";
+                    break;
+                }
+                CpuFrame source;
+                std::string failure;
+                if (!renderer.read_source(command->source, command->frame, source, failure)) {
+                    response.status = StatusCode::capability_unavailable;
+                    response.detail = std::move(failure);
+                    break;
+                }
+                LandmarkInferenceWorkV1 work{};
+                work.track = command->discovery_track;
+                work.frame = command->frame;
+                work.source_frame_qpc = command->source.source_frame_qpc;
+                work.qpc_frequency = command->source.qpc_frequency;
+                work.seed_face_bounds = {0.0, 0.0, 1.0, 1.0};
+                work.source = std::move(source);
+                work.deadline_ns = command->deadline_ns;
+                const auto queued = landmark_coordinator->submit(std::move(work), now);
+                if (queued.disposition != LandmarkProviderDispositionV1::ready) {
+                    response.status = StatusCode::capability_unavailable;
+                    response.detail = "actor_candidate_discovery_bypass:" + queued.detail;
+                    break;
+                }
+                auto produced = landmark_coordinator->process_latest(monotonic_ns());
+                if (!produced.produced_packet()) {
+                    response.status = StatusCode::capability_unavailable;
+                    response.detail = "actor_candidate_discovery_bypass:" + produced.detail;
+                    break;
+                }
+                const auto& packet = *produced.packet;
+                response.receipt.track = command->discovery_track;
+                response.receipt.source_frame = command->frame;
+                response.actor_candidates.push_back({
+                    command->discovery_track.actor_id,
+                    command->discovery_track.track_id,
+                    command->discovery_track.track_epoch,
+                    packet.face_bounds,
+                    packet.detector_confidence,
+                });
+                response.detail = "admitted_actor_candidate_ready";
                 break;
             }
             case CommandKind::configure_admitted_landmark_provider: {

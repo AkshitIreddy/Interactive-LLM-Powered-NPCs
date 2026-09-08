@@ -391,6 +391,7 @@ void append_ring(std::vector<std::byte>& output, const SharedPcmRing* ring) {
             visual_allocation->actor_id,
             visual_allocation->track_id,
             visual_allocation->track_epoch,
+            visual_allocation->reserve_for_actor_picker,
         };
         if (!broker.platform().allocate_visual_source(request, lease, failure)) {
             response.status = failure.code == FailureCode::timeout

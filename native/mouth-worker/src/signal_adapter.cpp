@@ -255,6 +255,24 @@ constexpr double closed_mouth_semantic_gap_over_contour_height = 0.005;
                                               hard_maximum_blocker_coverage);
 }
 
+[[nodiscard]] bool source_only_selection_valid(
+    const AppearanceGateEvidenceV1& value,
+    const TrackBinding& track,
+    const OpenSeeFaceAdapterPolicy& policy) noexcept {
+    return value.schema_version == 1U && value.runtime_actor_id == track.actor_id &&
+           value.descriptor_revision != 0U &&
+           value.expected_descriptor_digest_high == 0U &&
+           value.expected_descriptor_digest_low == 0U &&
+           value.observed_descriptor_digest_high == 0U &&
+           value.observed_descriptor_digest_low == 0U &&
+           !value.identity_locked && value.target_visible && !value.scene_transition &&
+           finite_probability(value.similarity) && value.similarity == 0.0 &&
+           finite_probability(value.temporal_iou) && value.temporal_iou == 0.0 &&
+           finite_probability(value.blocker_coverage) &&
+           value.blocker_coverage <= std::min(policy.maximum_blocker_coverage,
+                                              hard_maximum_blocker_coverage);
+}
+
 } // namespace
 
 OpenSeeFaceSignalAdapter::OpenSeeFaceSignalAdapter(const std::uint64_t initial_generation,
@@ -266,6 +284,25 @@ SignalDecision OpenSeeFaceSignalAdapter::adapt(const OpenSeeFaceLandmarkPacketV1
                                                const VisualResourceStateV1& resources,
                                                const FrameIdentity& current_frame,
                                                const Nanoseconds now_ns) {
+    return adapt_impl(packet, appearance, resources, current_frame, now_ns, false);
+}
+
+SignalDecision OpenSeeFaceSignalAdapter::adapt_source_only_selected(
+    const OpenSeeFaceLandmarkPacketV1& packet,
+    const AppearanceGateEvidenceV1& appearance,
+    const VisualResourceStateV1& resources,
+    const FrameIdentity& current_frame,
+    const Nanoseconds now_ns) {
+    return adapt_impl(packet, appearance, resources, current_frame, now_ns, true);
+}
+
+SignalDecision OpenSeeFaceSignalAdapter::adapt_impl(
+    const OpenSeeFaceLandmarkPacketV1& packet,
+    const AppearanceGateEvidenceV1& appearance,
+    const VisualResourceStateV1& resources,
+    const FrameIdentity& current_frame,
+    const Nanoseconds now_ns,
+    const bool source_only_selection) {
     const std::uint32_t rate = admitted_rate(resources);
     if (rate == 0U) {
         reset_track();
@@ -324,7 +361,10 @@ SignalDecision OpenSeeFaceSignalAdapter::adapt(const OpenSeeFaceLandmarkPacketV1
         }
         return bypass(SignalDisposition::bypass_occluded, rate);
     }
-    if (!appearance_valid(appearance, packet.track, policy_)) {
+    const bool admitted_appearance = source_only_selection
+        ? source_only_selection_valid(appearance, packet.track, policy_)
+        : appearance_valid(appearance, packet.track, policy_);
+    if (!admitted_appearance) {
         if (appearance.runtime_actor_id != 0U && appearance.runtime_actor_id != packet.track.actor_id) {
             reset_track();
             return bypass(SignalDisposition::bypass_wrong_actor, rate);

@@ -98,6 +98,7 @@ RenderWithAdmittedLandmarksCommandV1 admitted_render_command() {
     value.resources = supplied.resources;
     value.drive = supplied.drive;
     value.deadline_ns = supplied.deadline_ns;
+    value.sealed_click_source_only = true;
     return value;
 }
 
@@ -247,13 +248,53 @@ void test_admitted_provider_command_round_trip() {
                decoded->source.qpc_frequency == source.source.qpc_frequency,
            "provider command preserves exact source QPC binding");
     expect(decoded && decoded->seed_face_bounds.x == source.seed_face_bounds.x &&
-               decoded->seed_face_bounds.width == source.seed_face_bounds.width,
+                decoded->seed_face_bounds.width == source.seed_face_bounds.width,
            "provider command carries only the identity-authoritative seed face ROI");
+    expect(decoded && decoded->sealed_click_source_only,
+           "provider command preserves the explicit source-only click scope");
 
     auto truncated = *encoded;
     truncated.pop_back();
     expect(!decode_admitted_render_command(truncated),
            "truncated admitted-provider command fails closed");
+}
+
+void test_actor_candidate_discovery_round_trip() {
+    const auto admitted = admitted_render_command();
+    DiscoverActorCandidatesCommandV1 source{};
+    source.source = admitted.source;
+    source.discovery_track = admitted.track;
+    source.frame = admitted.frame;
+    source.deadline_ns = admitted.deadline_ns;
+    const auto encoded = encode_actor_candidate_discovery(source);
+    const auto decoded = encoded ? decode_actor_candidate_discovery(*encoded) : std::nullopt;
+    expect(decoded && decoded->source.source_frame_qpc == source.source.source_frame_qpc &&
+               decoded->discovery_track == source.discovery_track &&
+               decoded->frame == source.frame && decoded->deadline_ns == source.deadline_ns,
+           "candidate discovery stays bound to the exact native source frame and track");
+
+    WorkerResponseV1 response{};
+    response.response_to_sequence = 77U;
+    response.cancellation_generation = 10U;
+    response.receipt.source_frame = source.frame;
+    response.actor_candidates.push_back({
+        source.discovery_track.actor_id,
+        source.discovery_track.track_id,
+        source.discovery_track.track_epoch,
+        {0.2, 0.1, 0.4, 0.7},
+        0.96,
+    });
+    response.detail = "admitted_actor_candidate_ready";
+    const auto response_wire = encode_response(response);
+    const auto response_round_trip = response_wire ? decode_response(*response_wire) : std::nullopt;
+    expect(response_round_trip && response_round_trip->actor_candidates.size() == 1U &&
+               response_round_trip->receipt.source_frame.sequence == source.frame.sequence &&
+               response_round_trip->actor_candidates.front().track_id ==
+                   source.discovery_track.track_id,
+           "detected candidate response preserves exact source-frame and native track binding");
+
+    response.actor_candidates.front().bounds.width = 0.0;
+    expect(!encode_response(response), "invalid detected candidate geometry fails closed");
 }
 
 void test_provider_configuration_round_trip() {
@@ -434,6 +475,7 @@ int main() {
     test_render_and_response_round_trip();
     test_authenticated_envelope_and_framing();
     test_admitted_provider_command_round_trip();
+    test_actor_candidate_discovery_round_trip();
     test_provider_configuration_round_trip();
     test_character_mouth_atlas_round_trip();
     test_malformed_and_bounded_payloads();

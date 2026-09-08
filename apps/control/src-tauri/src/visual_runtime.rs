@@ -16,7 +16,8 @@ use crate::local_resources::{
 };
 use crate::media_broker::{
     AudioPlaybackLease, BrokerOcclusionEvidence, BrokerPresentationReceipt, BrokerResidualProposal,
-    CapturePixelScope, CapturePixelSource, MediaBrokerSupervisor, VisualAudioEnvelope,
+    CapturePixelScope, CapturePixelSource, MediaBrokerSupervisor, NativeCaptureEvidence,
+    NativeManualActorCandidateV1, NativeManualActorPickerRequestV1, VisualAudioEnvelope,
     VisualAudioEnvelopeQuery, VisualSourceLease, VisualTrackBinding, VisualWorkerIdentity,
     MAX_PLAYBACK_LEASES_PER_TURN,
 };
@@ -42,7 +43,7 @@ const WORKER_FILE_NAME: &str = if cfg!(windows) {
     "npc-mouth-worker"
 };
 const PROTOCOL_MAGIC: u32 = 0x3152_574d;
-const PROTOCOL_VERSION: u16 = 2;
+const PROTOCOL_VERSION: u16 = 3;
 const MAX_ATLAS_BYTES: usize = 16 * 1024 * 1024;
 const MAX_MESSAGE_BYTES: usize = MAX_ATLAS_BYTES + 512 * 1024;
 const FULL_LIP_ATLAS_SCHEMA: u32 = 1;
@@ -321,6 +322,9 @@ pub(crate) struct AdmittedVisualFrameRequest {
     pub admitted_signal_rate_hz: u32,
     pub audio: VisualAudioBinding,
     pub deadline_ns: i64,
+    /// The authenticated native controller must reacquire this sealed-click
+    /// seed against a fresh WGC frame. It carries no semantic character claim.
+    pub sealed_click_source_only: bool,
 }
 
 /// Exact causal address of the active one-sentence playback lease. The native
@@ -816,7 +820,6 @@ fn admitted_request_from_actor_lock(
     now_ns: i64,
 ) -> Option<AdmittedVisualFrameRequest> {
     let captured_ns = qpc_value_to_ns(lock.source_frame_qpc, lock.qpc_frequency).ok()?;
-    let deadline_ns = captured_ns.checked_add(VISUAL_FRAME_DEADLINE_NS)?;
     let roi = lock.full_source_roi;
     let lower_sha256 = |value: &str| {
         value.len() == 64
@@ -824,6 +827,13 @@ fn admitted_request_from_actor_lock(
                 .bytes()
                 .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
     };
+    let sealed_click_source_only = matches!(
+        (&lock.selection_authority, &lock.provenance),
+        (
+            NativeActorSelectionAuthorityV1::SealedNativeClick,
+            NativeActorLockProvenanceV1::SealedNativeClick { .. }
+        )
+    );
     let authority_admitted = match (&lock.selection_authority, &lock.provenance) {
         (
             NativeActorSelectionAuthorityV1::Consensus,
@@ -869,8 +879,9 @@ fn admitted_request_from_actor_lock(
         || lock.selected_executable_name.is_empty()
         || !authority_admitted
         || lock.scene_transition_detected
-        || now_ns < captured_ns
-        || now_ns > deadline_ns
+        || (!sealed_click_source_only
+            && (now_ns < captured_ns
+                || now_ns > captured_ns.checked_add(VISUAL_FRAME_DEADLINE_NS)?))
         || roi.source_width == 0
         || roi.source_height == 0
     {
@@ -916,21 +927,50 @@ fn admitted_request_from_actor_lock(
         seed_face_height: f64::from(roi.height),
         appearance: AppearanceGateEvidence {
             descriptor_revision: lock.appearance_descriptor_revision,
-            expected_digest_high: lock.expected_appearance_digest_high,
-            expected_digest_low: lock.expected_appearance_digest_low,
-            observed_digest_high: lock.observed_appearance_digest_high,
-            observed_digest_low: lock.observed_appearance_digest_low,
-            similarity: f64::from(lock.appearance_similarity),
-            temporal_iou: f64::from(lock.temporal_iou),
+            expected_digest_high: if sealed_click_source_only {
+                0
+            } else {
+                lock.expected_appearance_digest_high
+            },
+            expected_digest_low: if sealed_click_source_only {
+                0
+            } else {
+                lock.expected_appearance_digest_low
+            },
+            observed_digest_high: if sealed_click_source_only {
+                0
+            } else {
+                lock.observed_appearance_digest_high
+            },
+            observed_digest_low: if sealed_click_source_only {
+                0
+            } else {
+                lock.observed_appearance_digest_low
+            },
+            similarity: if sealed_click_source_only {
+                0.0
+            } else {
+                f64::from(lock.appearance_similarity)
+            },
+            temporal_iou: if sealed_click_source_only {
+                0.0
+            } else {
+                f64::from(lock.temporal_iou)
+            },
             blocker_coverage: f64::from(lock.blocker_coverage),
-            identity_locked: true,
+            identity_locked: !sealed_click_source_only,
             target_visible: true,
             scene_transition: lock.scene_transition_detected,
         },
         pressure: VisualPressure::Nominal,
         admitted_signal_rate_hz: 15,
         audio: audio.clone(),
-        deadline_ns,
+        deadline_ns: if sealed_click_source_only {
+            now_ns.checked_add(VISUAL_FRAME_DEADLINE_NS)?
+        } else {
+            captured_ns.checked_add(VISUAL_FRAME_DEADLINE_NS)?
+        },
+        sealed_click_source_only,
     })
 }
 
@@ -1043,6 +1083,145 @@ impl MouthWorkerSupervisor {
     ) -> Self {
         self.character_mouth_packs = Some(character_mouth_packs);
         self
+    }
+
+    /// Produces one native detector candidate from an exact broker-reserved WGC
+    /// frame. The private result can only feed command 31; neither pixels nor
+    /// ROI/track data cross the WebView boundary.
+    pub(crate) async fn discover_native_actor_candidates(
+        &self,
+        resources: &LocalResourceManager,
+        game_profile_id: &str,
+    ) -> Result<NativeManualActorPickerRequestV1, VisualRuntimeError> {
+        if game_profile_id.is_empty() || game_profile_id.len() > 128 {
+            return Err(VisualRuntimeError::InvalidRequest);
+        }
+        let _frame = self.frame_gate.lock().await;
+        let launch = resources
+            .resolve_admitted_openseeface_launch()
+            .map_err(|error| VisualRuntimeError::Admission(error.to_string()))?;
+        validate_admitted_launch(&launch)?;
+        let evidence = self.broker.native_capture_evidence().await?;
+        if evidence.selected_process_id != launch.exact_target_pid
+            || evidence.pixel_source != CapturePixelSource::WindowsGraphicsCaptureTexture
+            || evidence.pixel_scope != CapturePixelScope::ExactSelectedWindow
+            || !evidence.external_display_overlay_pixels_excluded
+            || !evidence.desktop_luminance_excluded_from_pixel_evidence
+            || evidence.selected_window_handle == 0
+            || evidence.latest_frame_sequence == 0
+            || evidence.latest_frame_qpc == 0
+            || evidence.device_generation == 0
+            || evidence.geometry_epoch == 0
+            || evidence.content_width == 0
+            || evidence.content_height == 0
+        {
+            return Err(VisualRuntimeError::CaptureAuthority);
+        }
+        let generation = self.broker.diagnostics().await?.cancellation_generation;
+        if generation == 0 {
+            return Err(VisualRuntimeError::NoSelectedTarget);
+        }
+        let capture_session_id = self.broker.native_capture_session_id().await?;
+        let (client, worker) = self.ensure_ready(generation).await?;
+        self.configure_admitted_provider(&client, generation, &launch)
+            .await?;
+        let identity_material = format!(
+            "{}:{}:{}:{}:{}",
+            capture_session_id,
+            generation,
+            evidence.device_generation,
+            evidence.geometry_epoch,
+            evidence.latest_frame_sequence
+        );
+        let discovery_track = VisualTrackBinding {
+            actor_id: stable_nonzero_id(&format!("actor:{identity_material}")),
+            track_id: stable_nonzero_id(&format!("track:{identity_material}")),
+            track_epoch: generation,
+        };
+        let lease = self
+            .broker
+            .allocate_actor_discovery_source(&worker, &discovery_track)
+            .await?;
+        if lease.cancellation_generation != generation
+            || lease.source_device_generation != evidence.device_generation
+            || lease.source_geometry_epoch != evidence.geometry_epoch
+            || lease.width != evidence.content_width
+            || lease.height != evidence.content_height
+            || lease.source_frame_sequence < evidence.latest_frame_sequence
+            || lease.source_frame_qpc < evidence.latest_frame_qpc
+        {
+            self.abandon_unsubmitted_visual_source(&lease).await;
+            return Err(VisualRuntimeError::CaptureAuthority);
+        }
+        let payload = match encode_actor_candidate_discovery_command(&lease, client.session()) {
+            Ok(payload) => payload,
+            Err(error) => {
+                self.abandon_unsubmitted_visual_source(&lease).await;
+                return Err(error);
+            }
+        };
+        let candidates = client
+            .discover_actor_candidates(generation, lease.source_frame_sequence, payload)
+            .await;
+        let candidates = match candidates {
+            Ok(candidates) => {
+                let _ = self.broker.release_visual_source(&lease).await;
+                candidates
+            }
+            Err(error) => {
+                // A rejected/decode-failed discovery may not have imported and
+                // closed its duplicated handle. Kill and wait for the isolated
+                // worker before dropping broker metadata.
+                self.abandon_unsubmitted_visual_source(&lease).await;
+                return Err(error);
+            }
+        };
+        if candidates.len() != 1
+            || candidates[0].actor_id != discovery_track.actor_id
+            || candidates[0].track_id != discovery_track.track_id
+            || candidates[0].track_epoch != discovery_track.track_epoch
+        {
+            return Err(VisualRuntimeError::Malformed);
+        }
+        let candidate = &candidates[0];
+        let now_unix_ms = current_unix_millis();
+        let frame_at_ns = qpc_to_ns(lease.source_frame_qpc, &lease)?;
+        let now_ns = monotonic_ns()?;
+        let age_ms = now_ns
+            .saturating_sub(frame_at_ns)
+            .max(0)
+            .saturating_div(1_000_000) as u64;
+        let captured_at_unix_ms = now_unix_ms.saturating_sub(age_ms);
+        Ok(NativeManualActorPickerRequestV1 {
+            request_id: String::new(),
+            visual_pack_id: launch.identity.pack_id.as_str().to_owned(),
+            visual_pack_admission_sha256: launch.measured_envelope_sha256.as_str().to_owned(),
+            game_profile_id: game_profile_id.to_owned(),
+            capture_session_id,
+            cancellation_generation: generation,
+            selected_process_id: evidence.selected_process_id,
+            selected_window_handle: evidence.selected_window_handle,
+            selected_executable_name: evidence.selected_executable_name,
+            source_device_generation: lease.source_device_generation,
+            source_geometry_epoch: lease.source_geometry_epoch,
+            source_frame_sequence: lease.source_frame_sequence,
+            source_frame_qpc: lease.source_frame_qpc,
+            qpc_frequency: lease.qpc_frequency,
+            captured_at_unix_ms,
+            expires_at_unix_ms: now_unix_ms.saturating_add(15_000),
+            source_width: lease.width,
+            source_height: lease.height,
+            timeout_ms: 15_000,
+            candidates: vec![NativeManualActorCandidateV1 {
+                actor_id: candidate.actor_id,
+                track_id: candidate.track_id,
+                track_epoch: candidate.track_epoch,
+                left: candidate.x,
+                top: candidate.y,
+                right: candidate.x + candidate.width,
+                bottom: candidate.y + candidate.height,
+            }],
+        })
     }
 
     /// Runs one exact-frame visual attempt. Contention, stale tracker output,
@@ -1258,53 +1437,30 @@ impl MouthWorkerSupervisor {
         request: &AdmittedVisualFrameRequest,
         now_monotonic_millis: u64,
     ) -> Result<VisualPresentationReceipt, VisualRuntimeError> {
-        validate_admitted_frame_request(request)?;
+        let mut request = request.clone();
+        validate_admitted_frame_request(&request)?;
         let launch = resources
             .resolve_admitted_openseeface_launch()
             .map_err(|error| VisualRuntimeError::Admission(error.to_string()))?;
         validate_admitted_launch(&launch)?;
-        let enabled_atlas = self
-            .character_mouth_packs
-            .as_ref()
-            .ok_or_else(|| {
-                VisualRuntimeError::Admission(
-                    "no private character mouth-pack registry is configured".into(),
-                )
-            })?
-            .resolve_enabled(&request.game_profile_id, &request.character_id)
-            .map_err(|error| VisualRuntimeError::Admission(error.to_string()))?
-            .ok_or_else(|| {
-                VisualRuntimeError::Admission(
-                    "no reviewed mouth pack is explicitly enabled for the selected character"
-                        .into(),
-                )
-            })?;
+        let enabled_atlas = match (
+            request.sealed_click_source_only,
+            self.character_mouth_packs.as_ref(),
+        ) {
+            (true, _) => None,
+            (false, Some(registry)) => registry
+                .resolve_enabled(&request.game_profile_id, &request.character_id)
+                .map_err(|error| VisualRuntimeError::Admission(error.to_string()))?,
+            (false, None) => None,
+        };
         let evidence = self.broker.native_capture_evidence().await?;
         let authority_checked_at_ns = monotonic_ns()?;
-        if evidence.selected_process_id != launch.exact_target_pid
-            || evidence.selected_process_id != request.selected_process_id
-            || evidence.selected_window_handle != request.selected_window_handle
-            || evidence.selected_executable_name != request.selected_executable_name
-            || evidence.pixel_source != CapturePixelSource::WindowsGraphicsCaptureTexture
-            || evidence.pixel_scope != CapturePixelScope::ExactSelectedWindow
-            || !evidence.external_display_overlay_pixels_excluded
-            || !evidence.desktop_luminance_excluded_from_pixel_evidence
-            || !bounded_frame_progression(
-                request.expected_frame_sequence,
-                request.expected_frame_qpc,
-                evidence.latest_frame_sequence,
-                evidence.latest_frame_qpc,
-                request.qpc_frequency,
-                authority_checked_at_ns,
-            )
-            || evidence.device_generation != request.expected_device_generation
-            || evidence.geometry_epoch != request.expected_geometry_epoch
-            || evidence.content_width != request.expected_source_width
-            || evidence.content_height != request.expected_source_height
-            || request.qpc_frequency == 0
-        {
-            return Err(VisualRuntimeError::CaptureAuthority);
-        }
+        bind_admitted_request_to_capture(
+            &mut request,
+            &evidence,
+            launch.exact_target_pid,
+            authority_checked_at_ns,
+        )?;
         let generation = self.broker.diagnostics().await?.cancellation_generation;
         if generation == 0 || generation != request.cancellation_generation {
             return Err(VisualRuntimeError::NoSelectedTarget);
@@ -1351,8 +1507,13 @@ impl MouthWorkerSupervisor {
         let (client, worker) = self.ensure_ready(generation).await?;
         self.configure_admitted_provider(&client, generation, &launch)
             .await?;
-        self.configure_enabled_character_atlas(&client, generation, request, &enabled_atlas)
-            .await?;
+        self.configure_optional_character_atlas(
+            &client,
+            generation,
+            &request,
+            enabled_atlas.as_ref(),
+        )
+        .await?;
         // Finish every fallible/awaiting audio operation before asking the
         // broker to duplicate a source texture into the worker. Once a lease
         // exists, no cancellation point is crossed until the worker request
@@ -1643,6 +1804,7 @@ impl MouthWorkerSupervisor {
             admitted_signal_rate_hz: 15,
             audio: audio_binding.clone(),
             deadline_ns,
+            sealed_click_source_only: false,
         };
         if let Err(error) = validate_admitted_frame_request(&request) {
             self.abandon_unsubmitted_visual_source(&lease).await;
@@ -1990,6 +2152,38 @@ impl MouthWorkerSupervisor {
         }
         self.configure_character_mouth_atlas(client, generation, &atlas)
             .await
+    }
+
+    async fn configure_optional_character_atlas(
+        &self,
+        client: &WorkerClient,
+        generation: u64,
+        request: &AdmittedVisualFrameRequest,
+        enabled: Option<&ResolvedCharacterMouthPackV1>,
+    ) -> Result<(), VisualRuntimeError> {
+        if let Some(enabled) = enabled {
+            return self
+                .configure_enabled_character_atlas(client, generation, request, enabled)
+                .await;
+        }
+        let has_atlas = self
+            .managed
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|worker| worker.atlas_binding.as_ref())
+            .is_some();
+        if !has_atlas {
+            return Ok(());
+        }
+        client.clear_atlas(generation).await?;
+        let mut managed = self.managed.lock().await;
+        let worker = managed.as_mut().ok_or(VisualRuntimeError::State)?;
+        if worker.generation != generation {
+            return Err(VisualRuntimeError::State);
+        }
+        worker.atlas_binding = None;
+        Ok(())
     }
 
     pub async fn shutdown(&self) {
@@ -2546,6 +2740,39 @@ impl WorkerClient {
             .ok_or(VisualRuntimeError::Worker(response.detail))
     }
 
+    async fn discover_actor_candidates(
+        &self,
+        generation: u64,
+        expected_source_frame_sequence: u64,
+        payload: Vec<u8>,
+    ) -> Result<Vec<WorkerActorCandidate>, VisualRuntimeError> {
+        let response = self
+            .request(WorkerCommand::DiscoverActorCandidates, generation, payload)
+            .await?;
+        if response.status != 0
+            || response.detail != "admitted_actor_candidate_ready"
+            || response.residual.is_some()
+            || response.receipt.source_frame_sequence != expected_source_frame_sequence
+            || response.actor_candidates.len() != 1
+        {
+            return Err(VisualRuntimeError::Worker(response.detail));
+        }
+        Ok(response.actor_candidates)
+    }
+
+    async fn clear_atlas(&self, generation: u64) -> Result<(), VisualRuntimeError> {
+        let response = self
+            .request(
+                WorkerCommand::ClearCharacterMouthAtlas,
+                generation,
+                Vec::new(),
+            )
+            .await?;
+        (response.status == 0 && response.detail == "character_mouth_atlas_cleared")
+            .then_some(())
+            .ok_or(VisualRuntimeError::Worker(response.detail))
+    }
+
     async fn shutdown(&self, generation: u64) -> Result<(), VisualRuntimeError> {
         self.request(WorkerCommand::Shutdown, generation, Vec::new())
             .await
@@ -2593,7 +2820,9 @@ enum WorkerCommand {
     RenderWithAdmittedLandmarks = 6,
     ConfigureAdmittedLandmarkProvider = 7,
     InstallCharacterMouthAtlas = 8,
+    ClearCharacterMouthAtlas = 9,
     SelfTestAdmittedLandmarkProvider = 10,
+    DiscoverActorCandidates = 11,
 }
 
 fn worker_request_blocking(
@@ -2738,7 +2967,20 @@ struct WorkerResponse {
     generation: u64,
     receipt: WorkerReceipt,
     residual: Option<WorkerResidual>,
+    actor_candidates: Vec<WorkerActorCandidate>,
     detail: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct WorkerActorCandidate {
+    actor_id: u64,
+    track_id: u64,
+    track_epoch: u64,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    confidence: f64,
 }
 
 // Remaining codec/process helpers are kept below so the public product API
@@ -2870,7 +3112,9 @@ fn validate_admitted_frame_request(
         || (request.turn_id_high == 0 && request.turn_id_low == 0)
         || request.sentence_id == 0
         || !is_review_semantic_identifier(&request.game_profile_id)
-        || !is_review_semantic_identifier(&request.character_id)
+        || (request.sealed_click_source_only && !request.character_id.is_empty())
+        || (!request.sealed_click_source_only
+            && !is_review_semantic_identifier(&request.character_id))
         || request.selected_process_id == 0
         || request.selected_window_handle == 0
         || request.selected_executable_name.is_empty()
@@ -2906,6 +3150,14 @@ fn validate_admitted_frame_request(
         || request.audio.generation == 0
         || request.audio.stream_id.is_empty()
         || request.audio.stream_id.len() > 128
+        || (request.sealed_click_source_only
+            && (request.appearance.expected_digest_high != 0
+                || request.appearance.expected_digest_low != 0
+                || request.appearance.observed_digest_high != 0
+                || request.appearance.observed_digest_low != 0
+                || request.appearance.identity_locked
+                || request.appearance.similarity != 0.0
+                || request.appearance.temporal_iou != 0.0))
     {
         return Err(VisualRuntimeError::InvalidRequest);
     }
@@ -3026,7 +3278,50 @@ fn encode_admitted_render_command(
     wire.u32(request.admitted_signal_rate_hz);
     wire.boolean(true);
     write_drive(&mut wire, drive);
+    wire.boolean(request.sealed_click_source_only);
     wire.i64(request.deadline_ns);
+    let bytes = wire.take();
+    (bytes.len() <= MAX_MESSAGE_BYTES)
+        .then_some(bytes)
+        .ok_or(VisualRuntimeError::Payload)
+}
+
+fn encode_actor_candidate_discovery_command(
+    source: &VisualSourceLease,
+    session: SessionBinding,
+) -> Result<Vec<u8>, VisualRuntimeError> {
+    let captured_at_ns = qpc_to_ns(source.source_frame_qpc, source)?;
+    let expires_at_ns = qpc_to_ns(source.expires_qpc, source)?;
+    let mut wire = WireWriter::default();
+    wire.u32(1);
+    write_session(&mut wire, session);
+    write_texture(
+        &mut wire,
+        TextureWire {
+            transport: 1,
+            nonce_high: source.lease_nonce_high,
+            nonce_low: source.lease_nonce_low,
+            owner_process_id: source.broker_process_id,
+            intended_consumer_process_id: source.worker.process_id,
+            handle: source.worker_handle_value,
+            adapter_luid: source.adapter_luid,
+            acquire_key: source.keyed_mutex_acquire_key,
+            release_key: source.keyed_mutex_release_key,
+            width: source.width,
+            height: source.height,
+            stride: source.stride_bytes,
+            format: source.dxgi_format,
+            expires_at_ns,
+        },
+    );
+    wire.u32(source.broker_process_id);
+    wire.u64(source.broker_process_creation_time);
+    wire.string(&source.broker_executable_name)?;
+    wire.u64(source.source_frame_qpc);
+    wire.u64(source.qpc_frequency);
+    write_track(&mut wire, source.cancellation_generation, &source.track);
+    write_frame(&mut wire, source, captured_at_ns);
+    wire.i64(expires_at_ns);
     let bytes = wire.take();
     (bytes.len() <= MAX_MESSAGE_BYTES)
         .then_some(bytes)
@@ -3720,6 +4015,41 @@ fn decode_worker_response(bytes: &[u8]) -> Result<WorkerResponse, VisualRuntimeE
     } else {
         None
     };
+    let candidate_count = reader.u32()?;
+    if candidate_count > 64 {
+        return Err(VisualRuntimeError::Malformed);
+    }
+    let mut actor_candidates = Vec::with_capacity(candidate_count as usize);
+    for _ in 0..candidate_count {
+        let candidate = WorkerActorCandidate {
+            actor_id: reader.u64()?,
+            track_id: reader.u64()?,
+            track_epoch: reader.u64()?,
+            x: reader.f64()?,
+            y: reader.f64()?,
+            width: reader.f64()?,
+            height: reader.f64()?,
+            confidence: reader.f64()?,
+        };
+        let valid = candidate.actor_id != 0
+            && candidate.track_id != 0
+            && candidate.track_epoch != 0
+            && [candidate.x, candidate.y, candidate.width, candidate.height]
+                .into_iter()
+                .all(f64::is_finite)
+            && candidate.x >= 0.0
+            && candidate.y >= 0.0
+            && candidate.width >= 0.005
+            && candidate.height >= 0.005
+            && candidate.x + candidate.width <= 1.0
+            && candidate.y + candidate.height <= 1.0
+            && candidate.confidence.is_finite()
+            && (0.0..=1.0).contains(&candidate.confidence);
+        if !valid {
+            return Err(VisualRuntimeError::Malformed);
+        }
+        actor_candidates.push(candidate);
+    }
     let detail = reader.string(1024)?;
     if !reader.done() {
         return Err(VisualRuntimeError::Malformed);
@@ -3737,6 +4067,7 @@ fn decode_worker_response(bytes: &[u8]) -> Result<WorkerResponse, VisualRuntimeE
             queue_replacements,
         },
         residual,
+        actor_candidates,
         detail,
     })
 }
@@ -4193,6 +4524,64 @@ fn bounded_frame_progression(
     observed_at_ns >= authority_at_ns
         && observed_at_ns <= deadline_ns
         && candidate_at_ns <= maximum_clock_lead_ns
+}
+
+fn bind_admitted_request_to_capture(
+    request: &mut AdmittedVisualFrameRequest,
+    evidence: &NativeCaptureEvidence,
+    exact_target_pid: u32,
+    authority_checked_at_ns: i64,
+) -> Result<(), VisualRuntimeError> {
+    let common_binding_valid = evidence.selected_process_id == exact_target_pid
+        && evidence.selected_process_id == request.selected_process_id
+        && evidence.selected_window_handle == request.selected_window_handle
+        && evidence.selected_executable_name == request.selected_executable_name
+        && evidence.pixel_source == CapturePixelSource::WindowsGraphicsCaptureTexture
+        && evidence.pixel_scope == CapturePixelScope::ExactSelectedWindow
+        && evidence.external_display_overlay_pixels_excluded
+        && evidence.desktop_luminance_excluded_from_pixel_evidence
+        && evidence.device_generation == request.expected_device_generation
+        && evidence.geometry_epoch == request.expected_geometry_epoch
+        && evidence.content_width == request.expected_source_width
+        && evidence.content_height == request.expected_source_height
+        && request.qpc_frequency != 0;
+    if !common_binding_valid {
+        return Err(VisualRuntimeError::CaptureAuthority);
+    }
+
+    if request.sealed_click_source_only {
+        // The click selected only a spatial seed. Rebind that seed to a frame
+        // that is current now; the reserved discovery texture is never reused
+        // as mouth-presentation authority.
+        if evidence.latest_frame_sequence < request.expected_frame_sequence
+            || evidence.latest_frame_qpc < request.expected_frame_qpc
+            || !bounded_frame_progression(
+                evidence.latest_frame_sequence,
+                evidence.latest_frame_qpc,
+                evidence.latest_frame_sequence,
+                evidence.latest_frame_qpc,
+                request.qpc_frequency,
+                authority_checked_at_ns,
+            )
+        {
+            return Err(VisualRuntimeError::CaptureAuthority);
+        }
+        request.expected_frame_sequence = evidence.latest_frame_sequence;
+        request.expected_frame_qpc = evidence.latest_frame_qpc;
+        request.deadline_ns = qpc_value_to_ns(evidence.latest_frame_qpc, request.qpc_frequency)?
+            .checked_add(VISUAL_FRAME_DEADLINE_NS)
+            .ok_or(VisualRuntimeError::Clock)?;
+    } else if !bounded_frame_progression(
+        request.expected_frame_sequence,
+        request.expected_frame_qpc,
+        evidence.latest_frame_sequence,
+        evidence.latest_frame_qpc,
+        request.qpc_frequency,
+        authority_checked_at_ns,
+    ) {
+        return Err(VisualRuntimeError::CaptureAuthority);
+    }
+    Ok(())
 }
 
 fn stable_nonzero_id(value: &str) -> u64 {
@@ -6643,8 +7032,12 @@ mod tests {
             stream_id: "pcm-native-click".into(),
         };
         let now_ns = monotonic_ns().expect("QPC clock");
-        let mut lock =
-            native_actor_lock_fixture(generation, now_ns as u64, current_unix_millis() + 200);
+        let old_frame_ns = now_ns - VISUAL_FRAME_DEADLINE_NS - 100_000_000;
+        let mut lock = native_actor_lock_fixture(
+            generation,
+            old_frame_ns as u64,
+            current_unix_millis() + 1_000,
+        );
         lock.character_id.clear();
         lock.selection_authority = NativeActorSelectionAuthorityV1::SealedNativeClick;
         lock.provenance = NativeActorLockProvenanceV1::SealedNativeClick {
@@ -6655,7 +7048,12 @@ mod tests {
             receipt_nonce_high: 1,
             receipt_nonce_low: 2,
         };
-        assert!(admitted_request_from_actor_lock(1, &lock, &audio, 1, now_ns).is_some());
+        let request = admitted_request_from_actor_lock(1, &lock, &audio, 1, now_ns)
+            .expect("short-lived sealed click remains eligible for current-frame reacquisition");
+        assert!(request.sealed_click_source_only);
+        assert!(request.character_id.is_empty());
+        assert!(!request.appearance.identity_locked);
+        assert_eq!(request.appearance.expected_digest_high, 0);
 
         lock.provenance = NativeActorLockProvenanceV1::QualifiedIdentity {
             qualification_id: "must-not-cross-domains".into(),
@@ -6663,6 +7061,67 @@ mod tests {
             admission_receipt_sha256: "b".repeat(64),
         };
         assert!(admitted_request_from_actor_lock(2, &lock, &audio, 1, now_ns).is_none());
+    }
+
+    #[test]
+    fn sealed_click_rebinds_to_fresh_exact_capture_without_reusing_picker_frame() {
+        let mut request = valid_admitted_request();
+        request.character_id.clear();
+        request.sealed_click_source_only = true;
+        request.expected_frame_sequence = 9;
+        request.expected_frame_qpc = 9_000_000;
+        request.appearance.expected_digest_high = 0;
+        request.appearance.expected_digest_low = 0;
+        request.appearance.observed_digest_high = 0;
+        request.appearance.observed_digest_low = 0;
+        request.appearance.similarity = 0.0;
+        request.appearance.temporal_iou = 0.0;
+        request.appearance.identity_locked = false;
+        let evidence = NativeCaptureEvidence {
+            schema_version: 1,
+            selected_process_id: request.selected_process_id,
+            selected_window_handle: request.selected_window_handle,
+            device_generation: request.expected_device_generation,
+            geometry_epoch: request.expected_geometry_epoch,
+            latest_frame_sequence: 10,
+            latest_frame_qpc: 10_000_000,
+            initial_content_hash: 1,
+            latest_content_hash: 2,
+            content_hash_changes: 1,
+            geometry_changes: 0,
+            nonadvancing_frames: 0,
+            content_width: request.expected_source_width,
+            content_height: request.expected_source_height,
+            overlay_capture_excluded: true,
+            overlay_visuals_allowed: true,
+            pixel_source: CapturePixelSource::WindowsGraphicsCaptureTexture,
+            pixel_scope: CapturePixelScope::ExactSelectedWindow,
+            external_display_overlay_pixels_excluded: true,
+            desktop_luminance_excluded_from_pixel_evidence: true,
+            external_display_overlays_may_change_perceived_brightness: true,
+            selected_executable_name: request.selected_executable_name.clone(),
+        };
+        bind_admitted_request_to_capture(&mut request, &evidence, 42, 1_000_000_000)
+            .expect("fresh exact capture reacquires sealed click");
+        assert_eq!(request.expected_frame_sequence, 10);
+        assert_eq!(request.expected_frame_qpc, 10_000_000);
+        assert_eq!(request.deadline_ns, 1_150_000_000);
+
+        let mut mismatched = request.clone();
+        let mut changed_geometry = evidence.clone();
+        changed_geometry.geometry_epoch += 1;
+        assert!(matches!(
+            bind_admitted_request_to_capture(&mut mismatched, &changed_geometry, 42, 1_000_000_000),
+            Err(VisualRuntimeError::CaptureAuthority)
+        ));
+
+        let mut stale = request;
+        let mut stale_evidence = evidence;
+        stale_evidence.latest_frame_qpc = 8_000_000;
+        assert!(matches!(
+            bind_admitted_request_to_capture(&mut stale, &stale_evidence, 42, 1_000_000_000),
+            Err(VisualRuntimeError::CaptureAuthority)
+        ));
     }
 
     #[test]
@@ -6678,6 +7137,42 @@ mod tests {
         trailing.u8(9);
         assert!(matches!(
             decode_worker_response(&trailing.take()),
+            Err(VisualRuntimeError::Malformed)
+        ));
+    }
+
+    #[test]
+    fn worker_response_codec_preserves_native_candidate_frame_payload() {
+        let mut wire = response_wire_prefix();
+        wire.u32(1);
+        wire.u64(41);
+        wire.u64(42);
+        wire.u64(43);
+        wire.f64(0.2);
+        wire.f64(0.1);
+        wire.f64(0.4);
+        wire.f64(0.7);
+        wire.f64(0.96);
+        wire.string("admitted_actor_candidate_ready")
+            .expect("bounded detail");
+        let decoded = decode_worker_response(&wire.take()).expect("candidate response");
+        assert_eq!(decoded.receipt.source_frame_sequence, 9);
+        assert_eq!(decoded.actor_candidates.len(), 1);
+        assert_eq!(decoded.actor_candidates[0].track_id, 42);
+
+        let mut invalid = response_wire_prefix();
+        invalid.u32(1);
+        for value in [41_u64, 42, 43] {
+            invalid.u64(value);
+        }
+        invalid.f64(0.2);
+        invalid.f64(0.1);
+        invalid.f64(0.0);
+        invalid.f64(0.7);
+        invalid.f64(0.96);
+        invalid.string("invalid").expect("bounded detail");
+        assert!(matches!(
+            decode_worker_response(&invalid.take()),
             Err(VisualRuntimeError::Malformed)
         ));
     }
@@ -6798,10 +7293,11 @@ mod tests {
                 stream_id: "pcm-001".into(),
             },
             deadline_ns: 2_000_000,
+            sealed_click_source_only: false,
         }
     }
 
-    fn empty_response_wire() -> WireWriter {
+    fn response_wire_prefix() -> WireWriter {
         let mut wire = WireWriter::default();
         wire.u32(PROTOCOL_MAGIC);
         wire.u16(PROTOCOL_VERSION);
@@ -6829,6 +7325,12 @@ mod tests {
         wire.i64(2);
         wire.u64(0);
         wire.boolean(false);
+        wire
+    }
+
+    fn empty_response_wire() -> WireWriter {
+        let mut wire = response_wire_prefix();
+        wire.u32(0);
         wire
     }
 }

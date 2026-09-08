@@ -15,10 +15,10 @@
 namespace npc::mouth::service {
 
 inline constexpr std::uint32_t protocol_magic = 0x3152574dU; // MWR framing magic, little endian
-// Version 2 adds an exact bounded audio sample interval to every render drive.
-// Keeping a distinct version makes old clients fail closed instead of
-// misreading the extended clock fields as sample-rate/channel data.
-inline constexpr std::uint16_t protocol_version = 2U;
+// Version 3 adds native detector candidates to worker responses. Keeping a
+// distinct version makes old clients fail closed instead of interpreting the
+// bounded candidate vector as response detail.
+inline constexpr std::uint16_t protocol_version = 3U;
 inline constexpr std::size_t session_nonce_bytes = 32U;
 inline constexpr std::uint32_t maximum_atlas_bytes = 16U * 1024U * 1024U;
 inline constexpr std::uint32_t maximum_message_bytes = maximum_atlas_bytes + 512U * 1024U;
@@ -40,6 +40,9 @@ enum class CommandKind : std::uint16_t {
     // Loads and immediately unloads an admitted provider for setup. This
     // command accepts no target process authority and can never render.
     self_test_admitted_landmark_provider = 10,
+    // Runs the admitted detector against one broker-leased exact WGC frame.
+    // The result is selection evidence only and can never produce a residual.
+    discover_actor_candidates = 11,
 };
 
 enum class StatusCode : std::uint16_t {
@@ -95,6 +98,7 @@ struct RenderWithAdmittedLandmarksCommandV1 {
     VisualResourceStateV1 resources;
     MouthDrive drive;
     Nanoseconds deadline_ns{};
+    bool sealed_click_source_only{};
 };
 
 struct CancelGenerationCommandV1 {
@@ -107,6 +111,21 @@ struct ConfigureAdmittedLandmarkProviderCommandV1 {
 
 struct InstallCharacterMouthAtlasCommandV1 {
     CharacterMouthAtlas atlas;
+};
+
+struct DiscoverActorCandidatesCommandV1 {
+    SourceTextureLeaseV1 source;
+    TrackBinding discovery_track;
+    FrameIdentity frame;
+    Nanoseconds deadline_ns{};
+};
+
+struct DetectedActorCandidateV1 {
+    std::uint64_t actor_id{};
+    std::uint64_t track_id{};
+    std::uint64_t track_epoch{};
+    NormalizedRect bounds;
+    double confidence{};
 };
 
 struct AcknowledgeResidualCommandV1 {
@@ -158,6 +177,7 @@ struct WorkerResponseV1 {
     std::uint64_t cancellation_generation{};
     PresentationReceiptV1 receipt;
     std::optional<ResidualProposalV1> residual;
+    std::vector<DetectedActorCandidateV1> actor_candidates;
     std::string detail;
 };
 
@@ -202,6 +222,10 @@ decode_provider_configuration(std::span<const std::byte> bytes);
     const InstallCharacterMouthAtlasCommandV1& command);
 [[nodiscard]] std::optional<InstallCharacterMouthAtlasCommandV1>
 decode_character_mouth_atlas(std::span<const std::byte> bytes);
+[[nodiscard]] std::optional<std::vector<std::byte>> encode_actor_candidate_discovery(
+    const DiscoverActorCandidatesCommandV1& command);
+[[nodiscard]] std::optional<DiscoverActorCandidatesCommandV1>
+decode_actor_candidate_discovery(std::span<const std::byte> bytes);
 [[nodiscard]] std::vector<std::byte> encode_cancel_command(
     const CancelGenerationCommandV1& command);
 [[nodiscard]] std::optional<CancelGenerationCommandV1> decode_cancel_command(

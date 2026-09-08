@@ -28,8 +28,13 @@ ProductSubmissionResult MouthProductRuntime::submit(ProductFrameRequest request,
                                    *installed_atlas_actor_ != actor;
     adapter_.set_current_frame_geometry(actor_has_no_pack ||
         (current_pixel_actor_.has_value() && *current_pixel_actor_ == actor));
-    const auto signal = adapter_.adapt(request.landmarks, request.appearance,
-                                       request.resources, current_frame, now_ns);
+    const bool admitted_source_only_selection = request.sealed_click_source_only &&
+                                                !installed_atlas_actor_.has_value();
+    const auto signal = admitted_source_only_selection
+        ? adapter_.adapt_source_only_selected(request.landmarks, request.appearance,
+                                              request.resources, current_frame, now_ns)
+        : adapter_.adapt(request.landmarks, request.appearance,
+                         request.resources, current_frame, now_ns);
     if (!valid_request_identity(request.identity) || !signal.accepted()) {
         // A 30 Hz capture source routinely lands between the admitted 15 Hz
         // inference samples. That cadence drop does not break the audio or

@@ -132,6 +132,13 @@ public:
                                        const FrameIdentity& current_frame,
                                        Nanoseconds now_ns);
 
+    [[nodiscard]] SignalDecision adapt_source_only_selected(
+        const OpenSeeFaceLandmarkPacketV1& packet,
+        const AppearanceGateEvidenceV1& appearance,
+        const VisualResourceStateV1& resources,
+        const FrameIdentity& current_frame,
+        Nanoseconds now_ns);
+
     [[nodiscard]] bool cancel_to(std::uint64_t generation) noexcept;
     void reset_track() noexcept;
     // Source-preserving renderers filter shape in current mouth coordinates;
@@ -142,6 +149,12 @@ public:
     [[nodiscard]] bool appearance_latched() const noexcept;
 
 private:
+    [[nodiscard]] SignalDecision adapt_impl(const OpenSeeFaceLandmarkPacketV1& packet,
+                                            const AppearanceGateEvidenceV1& appearance,
+                                            const VisualResourceStateV1& resources,
+                                            const FrameIdentity& current_frame,
+                                            Nanoseconds now_ns,
+                                            bool source_only_selection);
     struct StableState {
         TrackBinding track;
         NormalizedRect mouth_bounds;

@@ -27,6 +27,9 @@ struct ProductFrameRequest {
     VisualResourceStateV1 resources;
     MouthDrive drive;
     Nanoseconds deadline_ns{};
+    // Vouched for by the authenticated native controller after a sealed click.
+    // This is a short-lived spatial selection and carries no identity claim.
+    bool sealed_click_source_only{};
 };
 
 enum class PresentationDisposition : std::uint8_t {

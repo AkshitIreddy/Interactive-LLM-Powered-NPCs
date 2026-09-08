@@ -365,6 +365,7 @@ struct AllocateVisualSourceCommand {
     std::uint64_t actor_id{};
     std::uint64_t track_id{};
     std::uint64_t track_epoch{};
+    bool reserve_for_actor_picker{};
 };
 
 struct ReleaseVisualSourceCommand {

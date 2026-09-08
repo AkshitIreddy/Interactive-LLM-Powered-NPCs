@@ -178,7 +178,6 @@ impl ManualActorPickerControllerV1 {
         }
     }
 
-    #[allow(dead_code)]
     async fn publish_native_candidate_set(&self, mut request: NativeManualActorPickerRequestV1) {
         // Request identity is always minted at start; visual producers cannot
         // choose it and the WebView can never observe it.
@@ -1267,19 +1266,23 @@ pub fn discover_game_targets(
 }
 
 #[tauri::command]
-pub fn select_game_target(
+pub async fn select_game_target(
     request: SelectGameTargetRequest,
     state: State<'_, AppState>,
 ) -> Result<GameTargetSelection, CommandError> {
     record_native_product_event(&state, "game-target", "selection.requested");
-    let selected = state
+    state
         .game_targets
         .select(&state.resources, request)
         .map_err(product_error)?;
     let revocation = state.local_resources.revoke_active_loadout_admission();
     state.identity_runtime.invalidate_and_reconcile_background();
     revocation.map_err(product_error)?;
-    Ok(selected)
+    state
+        .game_targets
+        .bind_selected_capture(&state.resources, &state.media_broker)
+        .await
+        .map_err(product_error)
 }
 
 #[tauri::command]
@@ -1469,6 +1472,46 @@ async fn settle_manual_actor_picker_receipt(
 pub async fn start_manual_actor_picker(
     state: State<'_, AppState>,
 ) -> Result<ManualActorPickerPresentationV1, CommandError> {
+    let needs_candidates = {
+        let picker = state.manual_actor_picker.state.lock().await;
+        picker.active.is_none() && picker.candidate_set.is_none()
+    };
+    if needs_candidates {
+        let game_profile_id = match state.game_targets.snapshot().map_err(product_error)? {
+            Some(selected) => selected.game_profile_id,
+            None => return Ok(manual_actor_no_candidate_set()),
+        };
+        let mut capture_verified = false;
+        for attempt in 0..15_u8 {
+            if state
+                .game_targets
+                .verify_capture(&state.media_broker)
+                .await
+                .is_ok()
+            {
+                capture_verified = true;
+                break;
+            }
+            if attempt < 14 {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        }
+        if !capture_verified {
+            return Ok(manual_actor_no_candidate_set());
+        }
+        let discovered = match state
+            .visual_runtime
+            .discover_native_actor_candidates(&state.local_resources, &game_profile_id)
+            .await
+        {
+            Ok(discovered) => discovered,
+            Err(_) => return Ok(manual_actor_no_candidate_set()),
+        };
+        state
+            .manual_actor_picker
+            .publish_native_candidate_set(discovered)
+            .await;
+    }
     let request = {
         let mut picker = state.manual_actor_picker.state.lock().await;
         if picker.active.is_some() {

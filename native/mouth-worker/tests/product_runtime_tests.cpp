@@ -958,6 +958,52 @@ void test_cancel_pressure_and_invalid_identity_receipts() {
            "untraceable product requests cannot produce a residual");
 }
 
+void mark_sealed_click_source_only(ProductFrameRequest& request) {
+    request.sealed_click_source_only = true;
+    request.appearance.expected_descriptor_digest_high = 0U;
+    request.appearance.expected_descriptor_digest_low = 0U;
+    request.appearance.observed_descriptor_digest_high = 0U;
+    request.appearance.observed_descriptor_digest_low = 0U;
+    request.appearance.similarity = 0.0;
+    request.appearance.temporal_iou = 0.0;
+    request.appearance.identity_locked = false;
+}
+
+void test_sealed_click_source_only_requires_no_installed_atlas() {
+    MouthProductRuntime source_only;
+    auto admitted = make_request(170U, 170U, 20'000'000'000);
+    mark_sealed_click_source_only(admitted);
+    const auto admitted_frame = admitted.source.identity;
+    const auto admitted_result =
+        source_only.submit(std::move(admitted), admitted_frame, 20'005'000'000);
+    expect(admitted_result.receipt.disposition == PresentationDisposition::queued &&
+               admitted_result.receipt.signal_disposition == SignalDisposition::accepted,
+           "sealed native click admits source-only geometry without inventing appearance identity");
+
+    MouthProductRuntime unvouched;
+    auto strict = make_request(171U, 171U, 20'100'000'000);
+    mark_sealed_click_source_only(strict);
+    strict.sealed_click_source_only = false;
+    const auto strict_frame = strict.source.identity;
+    const auto strict_result = unvouched.submit(std::move(strict), strict_frame, 20'105'000'000);
+    expect(strict_result.receipt.disposition == PresentationDisposition::bypassed_signal &&
+               strict_result.receipt.signal_disposition == SignalDisposition::bypass_appearance,
+           "zero appearance evidence remains rejected without explicit source-only authority");
+
+    MouthProductRuntime atlas_bound;
+    expect(atlas_bound.install_atlas(make_source_only_schema_four_atlas()),
+           "source-only scope guard fixture installs an actor atlas");
+    auto conflicting = make_request(172U, 172U, 20'200'000'000);
+    mark_sealed_click_source_only(conflicting);
+    const auto conflicting_frame = conflicting.source.identity;
+    const auto conflicting_result =
+        atlas_bound.submit(std::move(conflicting), conflicting_frame, 20'205'000'000);
+    expect(conflicting_result.receipt.disposition == PresentationDisposition::bypassed_signal &&
+               conflicting_result.receipt.signal_disposition ==
+                   SignalDisposition::bypass_appearance,
+           "source-only authority fails closed while any character atlas remains installed");
+}
+
 } // namespace
 
 int main() {
@@ -975,6 +1021,7 @@ int main() {
     test_product_queue_receipts_and_exact_current_frame();
     test_routine_rate_limit_preserves_current_pixel_history();
     test_cancel_pressure_and_invalid_identity_receipts();
+    test_sealed_click_source_only_requires_no_installed_atlas();
     if (failures != 0) {
         std::cerr << failures << " product runtime assertion(s) failed\n";
         return 1;

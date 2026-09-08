@@ -788,6 +788,7 @@ void test_ipc_codec_is_deterministic_and_typed() {
         .actor_id = 5,
         .track_id = 6,
         .track_epoch = 4,
+        .reserve_for_actor_picker = true,
     };
     const auto encoded_visual_allocation =
         encode_command(CommandKind::allocate_visual_source, visual_allocation);
@@ -797,6 +798,8 @@ void test_ipc_codec_is_deterministic_and_typed() {
     CHECK(decoded_visual_allocation &&
           std::holds_alternative<AllocateVisualSourceCommand>(*decoded_visual_allocation));
     CHECK(std::get<AllocateVisualSourceCommand>(*decoded_visual_allocation).actor_id == 5U);
+    CHECK(std::get<AllocateVisualSourceCommand>(*decoded_visual_allocation)
+              .reserve_for_actor_picker);
     const Command visual_release = ReleaseVisualSourceCommand{
         .worker_process_id = 444,
         .lease_nonce_high = 0x3000,

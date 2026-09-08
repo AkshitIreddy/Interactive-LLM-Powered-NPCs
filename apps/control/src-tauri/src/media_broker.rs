@@ -840,6 +840,8 @@ struct AllocateVisualSourcePayload {
     track_id: u64,
     #[prost(uint64, tag = "6")]
     track_epoch: u64,
+    #[prost(bool, tag = "7")]
+    reserve_for_actor_picker: bool,
 }
 
 #[derive(Clone, PartialEq, Message)]
@@ -2334,6 +2336,7 @@ impl BrokerClient {
         &self,
         worker: &VisualWorkerIdentity,
         track: &VisualTrackBinding,
+        reserve_for_actor_picker: bool,
     ) -> Result<VisualSourceLease, MediaBrokerError> {
         let wire = AllocateVisualSourcePayload {
             worker_process_id: worker.process_id,
@@ -2342,6 +2345,7 @@ impl BrokerClient {
             actor_id: track.actor_id,
             track_id: track.track_id,
             track_epoch: track.track_epoch,
+            reserve_for_actor_picker,
         };
         let response = self
             .request_with_payload(BrokerCommand::AllocateVisualSource, wire.encode_to_vec())
@@ -3086,6 +3090,41 @@ impl MediaBrokerSupervisor {
         client.capture_evidence().await
     }
 
+    /// Binds one already policy-validated native game window to the broker's
+    /// production capture path. The broker independently inspects the HWND,
+    /// PID, process name, protected-content state, and anti-cheat policy before
+    /// starting WGC; callers must still verify advancing exact-window evidence.
+    pub(crate) async fn bind_game_capture_target(
+        &self,
+        native_window: u64,
+        process_id: u32,
+        executable_basename: &str,
+    ) -> Result<(), MediaBrokerError> {
+        if native_window == 0
+            || process_id == 0
+            || executable_basename.is_empty()
+            || executable_basename.len() > 260
+            || executable_basename
+                .bytes()
+                .any(|byte| matches!(byte, b'/' | b'\\'))
+        {
+            return Err(MediaBrokerError::InvalidVisualRequest);
+        }
+        self.ensure_ready()
+            .await?
+            .select_target(native_window, process_id, executable_basename)
+            .await
+    }
+
+    pub(crate) async fn native_capture_session_id(&self) -> Result<String, MediaBrokerError> {
+        let client = self.ensure_ready().await?;
+        client
+            .0
+            .lock()
+            .map(|connection| connection.session_id.clone())
+            .map_err(|_| MediaBrokerError::State)
+    }
+
     /// Native-only display and capture attestation for trusted subtitle
     /// placement. This must never be sourced from or round-tripped through the
     /// WebView.
@@ -3427,7 +3466,19 @@ impl MediaBrokerSupervisor {
         validate_visual_identity(worker, track)?;
         self.ensure_ready()
             .await?
-            .allocate_visual_source(worker, track)
+            .allocate_visual_source(worker, track, false)
+            .await
+    }
+
+    pub(crate) async fn allocate_actor_discovery_source(
+        &self,
+        worker: &VisualWorkerIdentity,
+        track: &VisualTrackBinding,
+    ) -> Result<VisualSourceLease, MediaBrokerError> {
+        validate_visual_identity(worker, track)?;
+        self.ensure_ready()
+            .await?
+            .allocate_visual_source(worker, track, true)
             .await
     }
 

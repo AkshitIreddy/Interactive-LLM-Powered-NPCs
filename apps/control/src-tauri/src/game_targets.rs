@@ -1,7 +1,9 @@
 use crate::catalog::ResourceCatalog;
 use crate::media_broker::{
-    CapturePixelScope, CapturePixelSource, MediaBrokerSupervisor, NativeCaptureEvidence,
+    CapturePixelScope, CapturePixelSource, MediaBrokerError, MediaBrokerSupervisor,
+    NativeCaptureEvidence,
 };
+use async_trait::async_trait;
 use npc_game_discovery::{
     BoundGameTarget, ProcessWindowRule, RunningGameWindow, TargetPolicy, TargetRevalidationError,
     TargetSelectionError,
@@ -81,6 +83,39 @@ pub enum GameTargetError {
     State,
 }
 
+#[async_trait]
+pub(crate) trait GameCaptureBroker: Sync {
+    async fn bind_exact_target(
+        &self,
+        native_window: u64,
+        process_id: u32,
+        executable_basename: &str,
+    ) -> Result<(), MediaBrokerError>;
+    async fn capture_evidence(&self) -> Result<NativeCaptureEvidence, MediaBrokerError>;
+    async fn clear_target(&self) -> Result<(), MediaBrokerError>;
+}
+
+#[async_trait]
+impl GameCaptureBroker for MediaBrokerSupervisor {
+    async fn bind_exact_target(
+        &self,
+        native_window: u64,
+        process_id: u32,
+        executable_basename: &str,
+    ) -> Result<(), MediaBrokerError> {
+        self.bind_game_capture_target(native_window, process_id, executable_basename)
+            .await
+    }
+
+    async fn capture_evidence(&self) -> Result<NativeCaptureEvidence, MediaBrokerError> {
+        self.native_capture_evidence().await
+    }
+
+    async fn clear_target(&self) -> Result<(), MediaBrokerError> {
+        self.clear_bound_target().await
+    }
+}
+
 #[derive(Debug)]
 struct SelectedTarget {
     game_profile_id: String,
@@ -149,6 +184,8 @@ impl GameTargetManager {
             .revalidate(&binding, &eligible)
             .map_err(revalidation_error)?;
         let target = candidate(observation);
+        let supported_profile_user_confirmed = request.game_profile_id == "cyberpunk-2077"
+            && request.explicit_user_confirmed_offline_single_player;
         *self.selected.lock().map_err(|_| GameTargetError::State)? = Some(SelectedTarget {
             game_profile_id: request.game_profile_id.clone(),
             binding,
@@ -167,8 +204,16 @@ impl GameTargetManager {
             user_confirmed_offline_single_player: request
                 .explicit_user_confirmed_offline_single_player,
             capture_authorized: false,
-            safety_state: "unverified".into(),
-            safety_detail: "The target is PID/HWND/process-instance bound, but a user confirmation cannot prove offline or anti-cheat state. Visual capture stays blocked; audio/subtitle-only conversation remains available.".into(),
+            safety_state: if supported_profile_user_confirmed {
+                "supported_profile_user_confirmed".into()
+            } else {
+                "unverified".into()
+            },
+            safety_detail: if supported_profile_user_confirmed {
+                "The selected executable matches the supported Cyberpunk 2077 profile and the user chose a single-player session. This is user-provided provenance, not machine-proven offline or anti-cheat evidence; broker binding is still required.".into()
+            } else {
+                "The target is PID/HWND/process-instance bound, but a user confirmation alone does not authorize visual capture.".into()
+            },
         })
     }
 
@@ -179,6 +224,96 @@ impl GameTargetManager {
         }))
     }
 
+    /// Binds the exact selected Cyberpunk window to the production broker.
+    ///
+    /// The bundled profile and explicit single-player user choice permit this
+    /// bounded operation. They are recorded separately from capture proof and
+    /// never stand in for anti-cheat, network-state, or advancing-frame
+    /// evidence.
+    pub async fn bind_selected_capture(
+        &self,
+        resources: &ResourceCatalog,
+        broker: &MediaBrokerSupervisor,
+    ) -> Result<GameTargetSelection, GameTargetError> {
+        self.bind_selected_capture_with_observer(resources, broker, observe_running_windows)
+            .await
+    }
+
+    async fn bind_selected_capture_with_observer<B, F>(
+        &self,
+        resources: &ResourceCatalog,
+        broker: &B,
+        mut observe: F,
+    ) -> Result<GameTargetSelection, GameTargetError>
+    where
+        B: GameCaptureBroker,
+        F: FnMut() -> Result<Vec<RunningGameWindow>, GameTargetError>,
+    {
+        let before = observe()?;
+        let (binding, _) = self.revalidate_supported_capture(resources, &before)?;
+        broker
+            .bind_exact_target(binding.hwnd, binding.pid, &binding.executable_leaf)
+            .await
+            .map_err(|error| GameTargetError::Broker(error.to_string()))?;
+
+        let after = match observe()
+            .and_then(|observations| self.revalidate_supported_capture(resources, &observations))
+        {
+            Ok((_, current)) => current,
+            Err(error) => {
+                let _ = broker.clear_target().await;
+                return Err(error);
+            }
+        };
+        let update = (|| {
+            let mut selected = self.selected.lock().map_err(|_| GameTargetError::State)?;
+            let target = selected
+                .as_mut()
+                .ok_or_else(|| GameTargetError::Invalid("no game target is selected".into()))?;
+            if target.binding != binding {
+                return Err(GameTargetError::Revalidation(
+                    "selected target changed while the broker was binding".into(),
+                ));
+            }
+            target.broker_bound = true;
+            target.previous_capture_sequence = 0;
+            target.verified_capture = None;
+            Ok(selection_snapshot(target, candidate(&after)))
+        })();
+        if update.is_err() {
+            let _ = broker.clear_target().await;
+        }
+        update
+    }
+
+    fn revalidate_supported_capture(
+        &self,
+        resources: &ResourceCatalog,
+        observations: &[RunningGameWindow],
+    ) -> Result<(BoundGameTarget, RunningGameWindow), GameTargetError> {
+        let (game_profile_id, binding, user_confirmed) = {
+            let selected = self.selected.lock().map_err(|_| GameTargetError::State)?;
+            let selected = selected
+                .as_ref()
+                .ok_or_else(|| GameTargetError::Invalid("no game target is selected".into()))?;
+            (
+                selected.game_profile_id.clone(),
+                selected.binding.clone(),
+                selected.user_confirmed_offline,
+            )
+        };
+        if game_profile_id != "cyberpunk-2077" || !user_confirmed {
+            return Err(GameTargetError::SafetyUnverified);
+        }
+        let (rules, excluded_titles) = profile_policy(resources, &game_profile_id)?;
+        let policy = TargetPolicy::new(rules, excluded_titles)
+            .map_err(|error| GameTargetError::Invalid(error.to_string()))?;
+        let current = policy
+            .revalidate(&binding, observations)
+            .map_err(revalidation_error)?;
+        Ok((binding, current.clone()))
+    }
+
     /// Revalidate PID, process creation identity, HWND, full executable path,
     /// and current profile window policy against a fresh native observation.
     /// Resource admission and benchmarks use this instead of trusting a stale
@@ -187,7 +322,7 @@ impl GameTargetManager {
         &self,
         resources: &ResourceCatalog,
     ) -> Result<Option<GameTargetSelection>, GameTargetError> {
-        let (game_profile_id, binding, user_confirmed_offline, capture_verified) = {
+        let (game_profile_id, binding, user_confirmed_offline, broker_bound, capture_verified) = {
             let selected = self.selected.lock().map_err(|_| GameTargetError::State)?;
             let Some(selected) = selected.as_ref() else {
                 return Ok(None);
@@ -196,6 +331,7 @@ impl GameTargetManager {
                 selected.game_profile_id.clone(),
                 selected.binding.clone(),
                 selected.user_confirmed_offline,
+                selected.broker_bound,
                 selected.broker_bound && selected.verified_capture.is_some(),
             )
         };
@@ -206,6 +342,12 @@ impl GameTargetManager {
         let current = policy
             .revalidate(&binding, &observations)
             .map_err(revalidation_error)?;
+        let (safety_state, safety_detail) = capture_status(
+            &game_profile_id,
+            user_confirmed_offline,
+            broker_bound,
+            capture_verified,
+        );
         Ok(Some(GameTargetSelection {
             schema_version: 1,
             game_profile_id,
@@ -213,16 +355,8 @@ impl GameTargetManager {
             process_instance_bound: true,
             user_confirmed_offline_single_player: user_confirmed_offline,
             capture_authorized: capture_verified,
-            safety_state: if capture_verified {
-                "verified_synthetic_fixture".into()
-            } else {
-                "unverified".into()
-            },
-            safety_detail: if capture_verified {
-                "The exact selected synthetic target passed fresh PID/HWND/process-instance/executable revalidation and has advancing exact-window broker evidence.".into()
-            } else {
-                "The exact selected target passed a fresh PID/HWND/process-instance/executable revalidation. Visual capture remains fail-closed without trusted runtime evidence.".into()
-            },
+            safety_state: safety_state.into(),
+            safety_detail: safety_detail.into(),
         }))
     }
 
@@ -269,9 +403,6 @@ impl GameTargetManager {
         Ok(())
     }
 
-    /// Only the task-owned synthetic review target can produce capture proof.
-    /// Commercial game selections remain fail-closed even when a caller invokes
-    /// the same registered command.
     pub async fn verify_capture(
         &self,
         broker: &MediaBrokerSupervisor,
@@ -301,8 +432,38 @@ impl GameTargetManager {
                 return Ok(verification);
             }
         }
-        let _ = broker;
-        Err(GameTargetError::SafetyUnverified)
+        self.verify_supported_capture_with_observer(broker, observe_running_windows)
+            .await
+    }
+
+    async fn verify_supported_capture_with_observer<B, F>(
+        &self,
+        broker: &B,
+        mut observe: F,
+    ) -> Result<GameCaptureVerification, GameTargetError>
+    where
+        B: GameCaptureBroker,
+        F: FnMut() -> Result<Vec<RunningGameWindow>, GameTargetError>,
+    {
+        let supported_and_bound = self
+            .selected
+            .lock()
+            .map_err(|_| GameTargetError::State)?
+            .as_ref()
+            .is_some_and(|target| {
+                target.game_profile_id == "cyberpunk-2077"
+                    && target.user_confirmed_offline
+                    && target.broker_bound
+            });
+        if !supported_and_bound {
+            return Err(GameTargetError::SafetyUnverified);
+        }
+        let evidence = broker
+            .capture_evidence()
+            .await
+            .map_err(|error| GameTargetError::Broker(error.to_string()))?;
+        let observations = observe()?;
+        self.verify_evidence_from_observations(&observations, evidence)
     }
 
     #[cfg(test)]
@@ -372,7 +533,11 @@ impl GameTargetManager {
             exact_pid_hwnd_executable_match: true,
             capture: evidence,
             review_fixture_motion_mode: None,
-            safety_state: "verified_synthetic_fixture".into(),
+            safety_state: if selected.game_profile_id == "cyberpunk-2077" {
+                "verified_exact_window_wgc".into()
+            } else {
+                "verified_synthetic_fixture".into()
+            },
         })
     }
 }
@@ -382,6 +547,12 @@ fn selection_snapshot(
     target: GameTargetCandidate,
 ) -> GameTargetSelection {
     let capture_verified = selected.broker_bound && selected.verified_capture.is_some();
+    let (safety_state, safety_detail) = capture_status(
+        &selected.game_profile_id,
+        selected.user_confirmed_offline,
+        selected.broker_bound,
+        capture_verified,
+    );
     GameTargetSelection {
         schema_version: 1,
         game_profile_id: selected.game_profile_id.clone(),
@@ -389,17 +560,43 @@ fn selection_snapshot(
         process_instance_bound: true,
         user_confirmed_offline_single_player: selected.user_confirmed_offline,
         capture_authorized: capture_verified,
-        safety_state: if capture_verified {
-            "verified_synthetic_fixture".into()
-        } else {
-            "unverified".into()
-        },
-        safety_detail: if capture_verified {
-            "The task-owned synthetic target has advancing exact-window broker evidence bound to this PID/HWND/process instance.".into()
-        } else {
-            "Visual capture remains fail-closed until trusted runtime safety evidence is available."
-                .into()
-        },
+        safety_state: safety_state.into(),
+        safety_detail: safety_detail.into(),
+    }
+}
+
+fn capture_status(
+    game_profile_id: &str,
+    user_confirmed_offline: bool,
+    broker_bound: bool,
+    capture_verified: bool,
+) -> (&'static str, &'static str) {
+    let supported_cyberpunk = game_profile_id == "cyberpunk-2077" && user_confirmed_offline;
+    if capture_verified && supported_cyberpunk {
+        (
+            "verified_exact_window_wgc",
+            "The supported Cyberpunk 2077 target has fresh PID/HWND/process-instance/executable revalidation and an advancing exact-window WGC receipt. The single-player state remains the user's explicit choice, not a machine network-state claim.",
+        )
+    } else if capture_verified {
+        (
+            "verified_synthetic_fixture",
+            "The task-owned synthetic target has advancing exact-window broker evidence bound to this PID/HWND/process instance.",
+        )
+    } else if broker_bound && supported_cyberpunk {
+        (
+            "capture_pending",
+            "The supported Cyberpunk 2077 profile and explicit single-player choice allowed exact broker binding. Capture remains pending until an advancing exact-window WGC receipt is verified.",
+        )
+    } else if supported_cyberpunk {
+        (
+            "supported_profile_user_confirmed",
+            "The selected executable matches the supported Cyberpunk 2077 profile and the user chose a single-player session. This is user-provided provenance, not machine-proven offline or anti-cheat evidence; broker binding is still required.",
+        )
+    } else {
+        (
+            "unverified",
+            "Visual capture remains fail-closed until a supported target is bound and exact-window evidence is verified.",
+        )
     }
 }
 
@@ -628,6 +825,92 @@ mod windows_observer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::media_broker::{BrokerStatus, MediaBrokerError};
+    use async_trait::async_trait;
+    use std::collections::VecDeque;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Debug)]
+    struct MockCaptureBroker {
+        block_target: bool,
+        evidence: Mutex<Option<NativeCaptureEvidence>>,
+        bound: Mutex<Vec<(u64, u32, String)>>,
+        clear_count: AtomicUsize,
+    }
+
+    impl MockCaptureBroker {
+        fn accepting(evidence: NativeCaptureEvidence) -> Self {
+            Self {
+                block_target: false,
+                evidence: Mutex::new(Some(evidence)),
+                bound: Mutex::new(Vec::new()),
+                clear_count: AtomicUsize::new(0),
+            }
+        }
+
+        fn protected_target() -> Self {
+            Self {
+                block_target: true,
+                evidence: Mutex::new(None),
+                bound: Mutex::new(Vec::new()),
+                clear_count: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl GameCaptureBroker for MockCaptureBroker {
+        async fn bind_exact_target(
+            &self,
+            native_window: u64,
+            process_id: u32,
+            executable_basename: &str,
+        ) -> Result<(), MediaBrokerError> {
+            self.bound.lock().expect("bound calls").push((
+                native_window,
+                process_id,
+                executable_basename.to_owned(),
+            ));
+            if self.block_target {
+                Err(MediaBrokerError::Remote(BrokerStatus::TargetBlocked))
+            } else {
+                Ok(())
+            }
+        }
+
+        async fn capture_evidence(&self) -> Result<NativeCaptureEvidence, MediaBrokerError> {
+            self.evidence
+                .lock()
+                .expect("evidence")
+                .clone()
+                .ok_or(MediaBrokerError::Malformed)
+        }
+
+        async fn clear_target(&self) -> Result<(), MediaBrokerError> {
+            self.clear_count.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    fn cyberpunk_rules() -> Vec<ProcessWindowRule> {
+        vec![ProcessWindowRule {
+            executable: "Cyberpunk2077.exe".into(),
+            required: true,
+            window_title_regex: Some("(?i)^Cyberpunk 2077$".into()),
+        }]
+    }
+
+    fn observations(
+        before: RunningGameWindow,
+        after: RunningGameWindow,
+    ) -> impl FnMut() -> Result<Vec<RunningGameWindow>, GameTargetError> {
+        let mut values = VecDeque::from([vec![before], vec![after]]);
+        move || {
+            values.pop_front().ok_or_else(|| {
+                GameTargetError::Observation("test observation sequence exhausted".into())
+            })
+        }
+    }
 
     fn observation(pid: u32, hwnd: u64, executable: &str) -> RunningGameWindow {
         let executable_path = if cfg!(windows) {
@@ -840,5 +1123,239 @@ mod tests {
         assert!(manager
             .verify_evidence_from_observations(&[reused], evidence(7, 22, "fixture.exe", 3))
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn supported_cyberpunk_selection_binds_exact_target_but_awaits_capture_proof() {
+        let resources = ResourceCatalog::new(None);
+        let manager = GameTargetManager::default();
+        let mut current = observation(2077, 0x2077, "Cyberpunk2077.exe");
+        current.title = "Cyberpunk 2077".into();
+        manager
+            .select_from_observations(
+                "cyberpunk-2077",
+                cyberpunk_rules(),
+                vec![],
+                std::slice::from_ref(&current),
+            )
+            .expect("select Cyberpunk");
+        let broker = MockCaptureBroker::accepting(evidence(
+            current.pid,
+            current.hwnd,
+            "Cyberpunk2077.exe",
+            2,
+        ));
+
+        let selection = manager
+            .bind_selected_capture_with_observer(
+                &resources,
+                &broker,
+                observations(current.clone(), current),
+            )
+            .await
+            .expect("bind supported target");
+
+        assert_eq!(
+            broker.bound.lock().expect("bound calls").as_slice(),
+            &[(0x2077, 2077, "Cyberpunk2077.exe".into())]
+        );
+        assert!(!selection.capture_authorized);
+        assert_eq!(selection.safety_state, "capture_pending");
+        assert!(selection
+            .safety_detail
+            .contains("supported Cyberpunk 2077 profile"));
+    }
+
+    #[tokio::test]
+    async fn changed_process_path_after_broker_binding_revokes_the_target() {
+        let resources = ResourceCatalog::new(None);
+        let manager = GameTargetManager::default();
+        let mut before = observation(2077, 0x2077, "Cyberpunk2077.exe");
+        before.title = "Cyberpunk 2077".into();
+        manager
+            .select_from_observations(
+                "cyberpunk-2077",
+                cyberpunk_rules(),
+                vec![],
+                std::slice::from_ref(&before),
+            )
+            .expect("select Cyberpunk");
+        let mut changed = before.clone();
+        changed.executable_path = if cfg!(windows) {
+            PathBuf::from(r"C:\Modded\Cyberpunk2077.exe")
+        } else {
+            PathBuf::from("/modded/Cyberpunk2077.exe")
+        };
+        let broker =
+            MockCaptureBroker::accepting(evidence(before.pid, before.hwnd, "Cyberpunk2077.exe", 2));
+
+        let result = manager
+            .bind_selected_capture_with_observer(&resources, &broker, observations(before, changed))
+            .await;
+
+        assert!(matches!(result, Err(GameTargetError::Revalidation(_))));
+        assert_eq!(broker.clear_count.load(Ordering::SeqCst), 1);
+        assert!(
+            !manager
+                .snapshot()
+                .expect("snapshot")
+                .expect("selected")
+                .capture_authorized
+        );
+    }
+
+    #[tokio::test]
+    async fn broker_protected_target_refusal_does_not_mark_capture_bound() {
+        let resources = ResourceCatalog::new(None);
+        let manager = GameTargetManager::default();
+        let mut current = observation(2077, 0x2077, "Cyberpunk2077.exe");
+        current.title = "Cyberpunk 2077".into();
+        manager
+            .select_from_observations(
+                "cyberpunk-2077",
+                cyberpunk_rules(),
+                vec![],
+                std::slice::from_ref(&current),
+            )
+            .expect("select Cyberpunk");
+        let broker = MockCaptureBroker::protected_target();
+
+        let result = manager
+            .bind_selected_capture_with_observer(
+                &resources,
+                &broker,
+                observations(current.clone(), current),
+            )
+            .await;
+
+        assert!(matches!(result, Err(GameTargetError::Broker(_))));
+        let snapshot = manager.snapshot().expect("snapshot").expect("selected");
+        assert!(!snapshot.capture_authorized);
+        assert_eq!(snapshot.safety_state, "supported_profile_user_confirmed");
+    }
+
+    #[tokio::test]
+    async fn checkbox_absence_cannot_bind_even_the_supported_profile() {
+        let resources = ResourceCatalog::new(None);
+        let manager = GameTargetManager::default();
+        let mut current = observation(2077, 0x2077, "Cyberpunk2077.exe");
+        current.title = "Cyberpunk 2077".into();
+        manager
+            .select_from_observations(
+                "cyberpunk-2077",
+                cyberpunk_rules(),
+                vec![],
+                std::slice::from_ref(&current),
+            )
+            .expect("select Cyberpunk");
+        manager
+            .selected
+            .lock()
+            .expect("selected target")
+            .as_mut()
+            .expect("selected target")
+            .user_confirmed_offline = false;
+        let broker = MockCaptureBroker::accepting(evidence(
+            current.pid,
+            current.hwnd,
+            "Cyberpunk2077.exe",
+            2,
+        ));
+
+        let result = manager
+            .bind_selected_capture_with_observer(
+                &resources,
+                &broker,
+                observations(current.clone(), current),
+            )
+            .await;
+
+        assert!(matches!(result, Err(GameTargetError::SafetyUnverified)));
+        assert!(broker.bound.lock().expect("bound calls").is_empty());
+    }
+
+    #[tokio::test]
+    async fn desktop_duplication_cannot_verify_supported_cyberpunk_capture() {
+        let resources = ResourceCatalog::new(None);
+        let manager = GameTargetManager::default();
+        let mut current = observation(2077, 0x2077, "Cyberpunk2077.exe");
+        current.title = "Cyberpunk 2077".into();
+        manager
+            .select_from_observations(
+                "cyberpunk-2077",
+                cyberpunk_rules(),
+                vec![],
+                std::slice::from_ref(&current),
+            )
+            .expect("select Cyberpunk");
+        let mut fallback = evidence(2077, 0x2077, "Cyberpunk2077.exe", 2);
+        fallback.pixel_source = CapturePixelSource::DesktopDuplicationTexture;
+        fallback.pixel_scope = CapturePixelScope::FullDisplayOutput;
+        fallback.external_display_overlay_pixels_excluded = false;
+        fallback.desktop_luminance_excluded_from_pixel_evidence = false;
+        let broker = MockCaptureBroker::accepting(fallback);
+        manager
+            .bind_selected_capture_with_observer(
+                &resources,
+                &broker,
+                observations(current.clone(), current.clone()),
+            )
+            .await
+            .expect("bind supported target");
+
+        let result = manager
+            .verify_supported_capture_with_observer(&broker, move || Ok(vec![current.clone()]))
+            .await;
+
+        assert!(matches!(result, Err(GameTargetError::Revalidation(_))));
+        assert!(
+            !manager
+                .snapshot()
+                .expect("snapshot")
+                .expect("selected")
+                .capture_authorized
+        );
+    }
+
+    #[tokio::test]
+    async fn advancing_exact_window_wgc_receipt_authorizes_supported_capture() {
+        let resources = ResourceCatalog::new(None);
+        let manager = GameTargetManager::default();
+        let mut current = observation(2077, 0x2077, "Cyberpunk2077.exe");
+        current.title = "Cyberpunk 2077".into();
+        manager
+            .select_from_observations(
+                "cyberpunk-2077",
+                cyberpunk_rules(),
+                vec![],
+                std::slice::from_ref(&current),
+            )
+            .expect("select Cyberpunk");
+        let broker = MockCaptureBroker::accepting(evidence(
+            current.pid,
+            current.hwnd,
+            "Cyberpunk2077.exe",
+            2,
+        ));
+        manager
+            .bind_selected_capture_with_observer(
+                &resources,
+                &broker,
+                observations(current.clone(), current.clone()),
+            )
+            .await
+            .expect("bind supported target");
+
+        let verification = manager
+            .verify_supported_capture_with_observer(&broker, move || Ok(vec![current.clone()]))
+            .await
+            .expect("verify exact-window WGC");
+
+        assert_eq!(verification.safety_state, "verified_exact_window_wgc");
+        assert!(verification.exact_pid_hwnd_executable_match);
+        assert!(verification.frame_sequence_advanced);
+        let snapshot = manager.snapshot().expect("snapshot").expect("selected");
+        assert!(snapshot.capture_authorized);
+        assert_eq!(snapshot.safety_state, "verified_exact_window_wgc");
     }
 }

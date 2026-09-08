@@ -359,6 +359,20 @@ public:
         std::uint64_t track_epoch{};
     };
 
+    struct ReservedActorDiscoveryFrame {
+        ComPtr<ID3D11Texture2D> texture;
+        TargetGeometry geometry;
+        std::uint64_t expires_qpc{};
+        std::uint64_t cancellation_generation{};
+        std::uint64_t device_generation{};
+        std::uint64_t geometry_epoch{};
+        std::uint64_t frame_sequence{};
+        std::uint64_t frame_qpc{};
+        std::uint64_t actor_id{};
+        std::uint64_t track_id{};
+        std::uint64_t track_epoch{};
+    };
+
     struct ExportedIdentityFrame {
         UniqueHandle mapping;
         UniqueHandle worker_process;
@@ -551,7 +565,8 @@ public:
         cleanup_visual_source_leases(now_qpc);
         if (capture_backend_ != CaptureBackend::windows_graphics_capture || !latest_frame_texture_ ||
             latest_frame_sequence_ == 0U || latest_frame_qpc_ == 0U || geometry_epoch_ == 0U ||
-            !d3d_device_ || !d3d_context_) {
+            !d3d_device_ || !d3d_context_ ||
+            (request.reserve_for_actor_picker && !last_target_geometry_)) {
             failure = {FailureDomain::capture, FailureCode::unsupported_path, true,
                        "Visual source leasing requires a current Windows Graphics Capture frame"};
             return false;
@@ -604,6 +619,34 @@ public:
             failure = {FailureDomain::capture, FailureCode::invalid_geometry, false,
                        "Current WGC frame format cannot be leased to the mouth worker"};
             return false;
+        }
+        ComPtr<ID3D11Texture2D> reserved_picker_texture;
+        if (request.reserve_for_actor_picker) {
+            const auto reserved_byte_length = static_cast<std::uint64_t>(source_description.Width) *
+                                              source_description.Height * 4U;
+            if (source_description.Width > 8192U || source_description.Height > 8192U ||
+                reserved_byte_length == 0U ||
+                reserved_byte_length > 256U * 1024U * 1024U) {
+                failure = {FailureDomain::capture, FailureCode::invalid_geometry, false,
+                           "Actor discovery supports only bounded BGRA8 WGC frames"};
+                return false;
+            }
+            auto reserved_description = source_description;
+            reserved_description.Usage = D3D11_USAGE_DEFAULT;
+            reserved_description.CPUAccessFlags = 0U;
+            reserved_description.BindFlags = 0U;
+            reserved_description.MiscFlags = 0U;
+            const HRESULT reserved_result = d3d_device_->CreateTexture2D(
+                &reserved_description, nullptr, &reserved_picker_texture);
+            if (FAILED(reserved_result) || !reserved_picker_texture) {
+                failure = hresult_failure(
+                    FailureDomain::capture, FailureCode::backend_unavailable,
+                    reserved_result,
+                    "Actor discovery could not reserve an immutable WGC frame", true);
+                return false;
+            }
+            d3d_context_->CopyResource(reserved_picker_texture.Get(),
+                                       latest_frame_texture_.Get());
         }
         D3D11_TEXTURE2D_DESC shared_description = source_description;
         shared_description.Usage = D3D11_USAGE_DEFAULT;
@@ -722,6 +765,16 @@ public:
             acknowledgement_expiry, request.cancellation_generation, device_generation_,
             geometry_epoch_, latest_frame_sequence_, latest_frame_qpc_, request.actor_id,
             request.track_id, request.track_epoch});
+        if (request.reserve_for_actor_picker) {
+            constexpr std::uint64_t picker_discovery_retention_ms = 15'000U;
+            reserved_actor_discovery_frame_ = ReservedActorDiscoveryFrame{
+                std::move(reserved_picker_texture), *last_target_geometry_,
+                now_qpc + static_cast<std::uint64_t>(frequency.QuadPart) *
+                              picker_discovery_retention_ms / 1000U,
+                request.cancellation_generation, device_generation_, geometry_epoch_,
+                latest_frame_sequence_, latest_frame_qpc_, request.actor_id,
+                request.track_id, request.track_epoch};
+        }
         return true;
     }
 
@@ -744,6 +797,7 @@ public:
         // Remote source handles were transferred to the worker and may already
         // have been closed/reused. Cancellation revokes lease identity only.
         exported_visual_sources_.clear();
+        reserved_actor_discovery_frame_.reset();
     }
 
     bool allocate_identity_frame(const IdentityFrameLeaseRequest& request,
@@ -1142,21 +1196,46 @@ public:
             return false;
         }
         const auto now_qpc = static_cast<std::uint64_t>(now_counter.QuadPart);
+        cleanup_visual_source_leases(now_qpc);
         constexpr std::uint64_t maximum_source_age_ms = 80U;
         DWORD target_process_id{};
         if (target_window_) GetWindowThreadProcessId(target_window_, &target_process_id);
         const auto selected_name = process_basename(target_process_id);
+        const auto* reserved = reserved_actor_discovery_frame_ &&
+                reserved_actor_discovery_frame_->expires_qpc >= now_qpc &&
+                reserved_actor_discovery_frame_->cancellation_generation ==
+                    request.cancellation_generation &&
+                reserved_actor_discovery_frame_->device_generation ==
+                    request.source_device_generation &&
+                reserved_actor_discovery_frame_->geometry_epoch ==
+                    request.source_geometry_epoch &&
+                reserved_actor_discovery_frame_->frame_sequence ==
+                    request.source_frame_sequence &&
+                reserved_actor_discovery_frame_->frame_qpc == request.source_frame_qpc
+            ? &*reserved_actor_discovery_frame_
+            : nullptr;
+        const auto bound_device_generation = reserved
+            ? reserved->device_generation : device_generation_;
+        const auto bound_geometry_epoch = reserved
+            ? reserved->geometry_epoch : geometry_epoch_;
+        const auto bound_frame_sequence = reserved
+            ? reserved->frame_sequence : latest_frame_sequence_;
+        const auto bound_frame_qpc = reserved ? reserved->frame_qpc : latest_frame_qpc_;
+        auto* frozen_texture = reserved ? reserved->texture.Get() : latest_frame_texture_.Get();
+        const auto* frozen_geometry = reserved ? &reserved->geometry
+                                               : last_target_geometry_ ? &*last_target_geometry_
+                                                                       : nullptr;
         const bool exact_binding =
             request.selected_process_id == target_process_id &&
             request.selected_window_handle == reinterpret_cast<std::uint64_t>(target_window_) &&
-            request.source_device_generation == device_generation_ &&
-            request.source_geometry_epoch == geometry_epoch_ &&
-            request.source_frame_sequence == latest_frame_sequence_ &&
-            request.source_frame_qpc == latest_frame_qpc_;
+            request.source_device_generation == bound_device_generation &&
+            request.source_geometry_epoch == bound_geometry_epoch &&
+            request.source_frame_sequence == bound_frame_sequence &&
+            request.source_frame_qpc == bound_frame_qpc;
         if (capture_backend_ != CaptureBackend::windows_graphics_capture ||
             !target_window_ || !IsWindow(target_window_) || IsIconic(target_window_) ||
-            !latest_frame_texture_ || !d3d_device_ || !d3d_context_ ||
-            !last_target_geometry_ || !advancing_frame_verified_ ||
+            !frozen_texture || !d3d_device_ || !d3d_context_ ||
+            !frozen_geometry || !advancing_frame_verified_ ||
             !residual_overlay_.capture_excluded() || request.request_id.empty() ||
             request.request_id.size() > 128U || request.capture_session_id.empty() ||
             request.capture_session_id.size() > 64U || request.cancellation_generation == 0U ||
@@ -1167,14 +1246,14 @@ public:
                        "Manual actor picker requires an exact current advancing WGC frame binding"};
             return false;
         }
-        if (latest_frame_qpc_ > now_qpc ||
+        if (!reserved && (latest_frame_qpc_ > now_qpc ||
             now_qpc - latest_frame_qpc_ >
-                static_cast<std::uint64_t>(frequency.QuadPart) * maximum_source_age_ms / 1000U) {
+                static_cast<std::uint64_t>(frequency.QuadPart) * maximum_source_age_ms / 1000U)) {
             failure = {FailureDomain::overlay, FailureCode::timeout, true,
                        "Manual actor picker source frame is no longer current"};
             return false;
         }
-        const auto overlay = calculate_overlay_geometry(*last_target_geometry_);
+        const auto overlay = calculate_overlay_geometry(*frozen_geometry);
         if (!overlay) {
             failure = {FailureDomain::overlay, FailureCode::invalid_geometry, false,
                        "Manual actor picker target geometry cannot be projected"};
@@ -1202,8 +1281,17 @@ public:
                 }
             }
         }
+        if (reserved &&
+            (request.candidates.size() != 1U ||
+             request.candidates.front().actor_id != reserved->actor_id ||
+             request.candidates.front().track_id != reserved->track_id ||
+             request.candidates.front().track_epoch != reserved->track_epoch)) {
+            failure = {FailureDomain::overlay, FailureCode::access_denied, false,
+                       "Detected actor does not match the reserved native discovery lease"};
+            return false;
+        }
         D3D11_TEXTURE2D_DESC source{};
-        latest_frame_texture_->GetDesc(&source);
+        frozen_texture->GetDesc(&source);
         const auto byte_length = static_cast<std::uint64_t>(source.Width) * source.Height * 4U;
         if (source.Format != DXGI_FORMAT_B8G8R8A8_UNORM || source.Width == 0U ||
             source.Height == 0U || source.Width > 8192U || source.Height > 8192U ||
@@ -1225,7 +1313,7 @@ public:
                                       hr, "Create manual actor frozen-frame staging texture failed");
             return false;
         }
-        d3d_context_->CopyResource(staging.Get(), latest_frame_texture_.Get());
+        d3d_context_->CopyResource(staging.Get(), frozen_texture);
         D3D11_MAPPED_SUBRESOURCE mapped{};
         hr = d3d_context_->Map(staging.Get(), 0U, D3D11_MAP_READ, 0U, &mapped);
         if (FAILED(hr)) {
@@ -1262,20 +1350,20 @@ public:
             receipt_nonce_high, receipt_nonce_low, request.capture_session_id,
             request.cancellation_generation, target_process_id,
             reinterpret_cast<std::uint64_t>(target_window_), selected_name,
-            device_generation_, geometry_epoch_, latest_frame_sequence_, latest_frame_qpc_,
+            bound_device_generation, bound_geometry_epoch, bound_frame_sequence, bound_frame_qpc,
             0U, 0U, 0U, static_cast<std::uint32_t>(request.candidates.size()),
             candidate_digest, now_qpc, 0U, now_qpc,
             static_cast<std::uint64_t>(frequency.QuadPart), ManualActorPointerKind::none,
             true, true, true, false, true, true};
         const auto expected_window = target_window_;
         const auto expected_process = target_process_id;
-        const auto expected_geometry = *last_target_geometry_;
-        const auto expected_device_generation = device_generation_;
-        const auto expected_geometry_epoch = geometry_epoch_;
+        const auto expected_geometry = *frozen_geometry;
+        const auto expected_device_generation = bound_device_generation;
+        const auto expected_geometry_epoch = bound_geometry_epoch;
         const auto expected_capture_session = request.capture_session_id;
         const auto expected_cancellation_generation = request.cancellation_generation;
         windows::ManualActorPickerStartContext context{
-            target_window_, *last_target_geometry_, *overlay,
+            target_window_, *frozen_geometry, *overlay,
             {static_cast<std::int32_t>(source.Width), static_cast<std::int32_t>(source.Height)},
             source.Width * 4U, std::move(frozen), request.candidates, pending,
             request.timeout_ms,
@@ -1322,6 +1410,7 @@ public:
             picker_capture_session_ = expected_capture_session;
             picker_cancellation_generation_ = expected_cancellation_generation;
         }
+        if (reserved) reserved_actor_discovery_frame_.reset();
         if (!manual_actor_picker_.begin(std::move(context), receipt, failure)) {
             clear_manual_actor_picker_authority(expected_capture_session,
                                                 expected_cancellation_generation);
@@ -1937,6 +2026,10 @@ private:
                 ++iterator;
             }
         }
+        if (reserved_actor_discovery_frame_ &&
+            reserved_actor_discovery_frame_->expires_qpc < now_qpc) {
+            reserved_actor_discovery_frame_.reset();
+        }
     }
 
     void cleanup_identity_frame_leases(const std::uint64_t now_qpc) noexcept {
@@ -1960,6 +2053,7 @@ private:
             // Invalidate picker authority before publishing a new geometry
             // epoch so a click commit cannot observe a half-transitioned bind.
             cancel_manual_actor_picker();
+            reserved_actor_discovery_frame_.reset();
             ++geometry_epoch_;
         }
         geometry.geometry_epoch = geometry_epoch_;
@@ -2043,6 +2137,7 @@ private:
     std::unique_ptr<ImportedResidual> imported_residual_;
     std::deque<SeenLeaseNonce> seen_lease_nonces_;
     std::deque<ExportedVisualSource> exported_visual_sources_;
+    std::optional<ReservedActorDiscoveryFrame> reserved_actor_discovery_frame_;
     std::deque<ExportedIdentityFrame> exported_identity_frames_;
 };
 

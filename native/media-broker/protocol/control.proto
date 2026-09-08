@@ -388,6 +388,9 @@ message AllocateVisualSource {
   uint64 actor_id = 4;
   uint64 track_id = 5;
   uint64 track_epoch = 6;
+  // Native Control may retain this exact leased WGC texture briefly for the
+  // command-31 actor picker. It never exposes the frame to the WebView.
+  bool reserve_for_actor_picker = 7;
 }
 
 // Acknowledges that the worker consumed and closed its transferred source

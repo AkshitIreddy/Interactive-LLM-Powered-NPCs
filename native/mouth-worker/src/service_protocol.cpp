@@ -386,6 +386,17 @@ void write_receipt(Writer& writer, const PresentationReceiptV1& value) {
     return nonce_nonzero && (value.session_id_high != 0U || value.session_id_low != 0U);
 }
 
+[[nodiscard]] bool valid_actor_candidate(const DetectedActorCandidateV1& value) noexcept {
+    const auto& bounds = value.bounds;
+    return value.actor_id != 0U && value.track_id != 0U && value.track_epoch != 0U &&
+           std::isfinite(bounds.x) && std::isfinite(bounds.y) &&
+           std::isfinite(bounds.width) && std::isfinite(bounds.height) &&
+           bounds.x >= 0.0 && bounds.y >= 0.0 && bounds.width >= 0.005 &&
+           bounds.height >= 0.005 && bounds.right() <= 1.0 && bounds.bottom() <= 1.0 &&
+           std::isfinite(value.confidence) && value.confidence >= 0.0 &&
+           value.confidence <= 1.0;
+}
+
 [[nodiscard]] std::string path_utf8(const std::filesystem::path& value) {
     const auto encoded = value.generic_u8string();
     return {reinterpret_cast<const char*>(encoded.data()), encoded.size()};
@@ -502,6 +513,16 @@ std::optional<std::vector<std::byte>> encode_response(const WorkerResponseV1& re
         }
         writer.scalar(value.produced_at_ns);
     }
+    if (response.actor_candidates.size() > 64U) return std::nullopt;
+    writer.scalar(static_cast<std::uint32_t>(response.actor_candidates.size()));
+    for (const auto& candidate : response.actor_candidates) {
+        if (!valid_actor_candidate(candidate)) return std::nullopt;
+        writer.scalar(candidate.actor_id);
+        writer.scalar(candidate.track_id);
+        writer.scalar(candidate.track_epoch);
+        write_rect(writer, candidate.bounds);
+        writer.floating(candidate.confidence);
+    }
     if (response.detail.size() > 1024U) return std::nullopt;
     writer.string(response.detail);
     auto result = std::move(writer).take();
@@ -552,6 +573,18 @@ std::optional<WorkerResponseV1> decode_response(const std::span<const std::byte>
         }
         if (!reader.scalar(residual.produced_at_ns)) return std::nullopt;
         value.residual = std::move(residual);
+    }
+    std::uint32_t candidate_count{};
+    if (!reader.scalar(candidate_count) || candidate_count > 64U) return std::nullopt;
+    value.actor_candidates.reserve(candidate_count);
+    for (std::uint32_t index = 0U; index < candidate_count; ++index) {
+        DetectedActorCandidateV1 candidate{};
+        if (!reader.scalar(candidate.actor_id) || !reader.scalar(candidate.track_id) ||
+            !reader.scalar(candidate.track_epoch) || !read_rect(reader, candidate.bounds) ||
+            !reader.floating(candidate.confidence) || !valid_actor_candidate(candidate)) {
+            return std::nullopt;
+        }
+        value.actor_candidates.push_back(candidate);
     }
     if (!reader.string(value.detail, 1024U) || !reader.done()) return std::nullopt;
     return value;
@@ -643,6 +676,7 @@ std::optional<std::vector<std::byte>> encode_admitted_render_command(
     write_appearance(writer, command.appearance);
     write_resources(writer, command.resources);
     write_drive(writer, command.drive);
+    writer.boolean(command.sealed_click_source_only);
     writer.scalar(command.deadline_ns);
     auto result = std::move(writer).take();
     if (result.size() > maximum_message_bytes) return std::nullopt;
@@ -658,6 +692,34 @@ std::optional<RenderWithAdmittedLandmarksCommandV1> decode_admitted_render_comma
         !read_track(reader, value.track) || !read_frame(reader, value.frame) ||
         !read_rect(reader, value.seed_face_bounds) || !read_appearance(reader, value.appearance) ||
         !read_resources(reader, value.resources) || !read_drive(reader, value.drive) ||
+        !reader.boolean(value.sealed_click_source_only) ||
+        !reader.scalar(value.deadline_ns) || !reader.done()) {
+        return std::nullopt;
+    }
+    return value;
+}
+
+std::optional<std::vector<std::byte>> encode_actor_candidate_discovery(
+    const DiscoverActorCandidatesCommandV1& command) {
+    if (command.source.broker_executable_name.size() > 260U) return std::nullopt;
+    Writer writer;
+    write_source(writer, command.source);
+    write_track(writer, command.discovery_track);
+    write_frame(writer, command.frame);
+    writer.scalar(command.deadline_ns);
+    auto result = std::move(writer).take();
+    return result.size() <= maximum_message_bytes
+        ? std::optional<std::vector<std::byte>>{std::move(result)}
+        : std::nullopt;
+}
+
+std::optional<DiscoverActorCandidatesCommandV1> decode_actor_candidate_discovery(
+    const std::span<const std::byte> bytes) {
+    if (bytes.empty() || bytes.size() > maximum_message_bytes) return std::nullopt;
+    Reader reader(bytes);
+    DiscoverActorCandidatesCommandV1 value{};
+    if (!read_source(reader, value.source) ||
+        !read_track(reader, value.discovery_track) || !read_frame(reader, value.frame) ||
         !reader.scalar(value.deadline_ns) || !reader.done()) {
         return std::nullopt;
     }

@@ -830,6 +830,7 @@ std::optional<std::vector<std::byte>> encode_command(const CommandKind kind, con
         writer.varint_field(4, value->actor_id);
         writer.varint_field(5, value->track_id);
         writer.varint_field(6, value->track_epoch);
+        writer.varint_field(7, value->reserve_for_actor_picker ? 1U : 0U);
         break;
     }
     case CommandKind::release_visual_source: {
@@ -1353,6 +1354,10 @@ std::optional<Command> decode_command(const CommandKind kind, const std::span<co
             } else if (field->number == 6) {
                 epoch_seen = read_varint_as(reader, *field, result.track_epoch);
                 if (!epoch_seen) return std::nullopt;
+            } else if (field->number == 7) {
+                const auto value = reader.read_varint(*field);
+                if (!value || *value > 1U) return std::nullopt;
+                result.reserve_for_actor_picker = *value == 1U;
             } else if (!reader.skip(*field)) {
                 return std::nullopt;
             }
