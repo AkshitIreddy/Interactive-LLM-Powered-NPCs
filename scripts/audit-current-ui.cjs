@@ -62,7 +62,7 @@ const surfaceCatalog = [
   {
     id: "voice-advanced",
     url: "/?page=voice",
-    openDetails: ".advanced-profiles",
+    openDetails: ".loadout-overview-details",
   },
   {
     id: "voice-accounts",
@@ -81,13 +81,13 @@ const surfaceCatalog = [
     id: "voice-tts-stock",
     url: "/?page=voice",
     clickRoleButton: "Character voice",
-    openDetails: ".stock-voice-discovery",
+    openDetails: ".custom-voice-id",
     closeupSelectors: [
       ".product-rail nav",
       ".product-topbar",
       ".workspace-section-nav",
-      ".loadout-role-picker",
-      ".stock-voice-discovery",
+      ".cyberware-anatomy",
+      ".custom-voice-id",
     ],
     optIn: true,
   },
