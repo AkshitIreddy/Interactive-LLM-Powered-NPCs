@@ -651,7 +651,7 @@ describe("native evidence in the product console", () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
-    await user.click(screen.getByRole("button", { name: "Settings & help" }));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
     await user.click(screen.getByRole("button", { name: /Audio devices/i }));
 
     const output = await screen.findByRole("combobox", {
@@ -685,7 +685,7 @@ describe("native evidence in the product console", () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
-    await user.click(screen.getByRole("button", { name: "Settings & help" }));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
     await user.click(screen.getByRole("button", { name: /Audio devices/i }));
 
     const input = await screen.findByRole("combobox", {
@@ -706,7 +706,7 @@ describe("native evidence in the product console", () => {
     ).not.toHaveLength(0);
     expect(screen.getAllByText("Not measured")).toHaveLength(4);
     expect(document.body).toHaveTextContent(
-      /Endpoint selection does not prove microphone allocation, physical PTT, audio frames, speech recognition, or a final transcript/i,
+      /Choosing a microphone does not start recording or measure signal levels/i,
     );
 
     bridge.inputSelect.mockRejectedValueOnce(
@@ -746,24 +746,19 @@ describe("native evidence in the product console", () => {
     await screen.findByText("Runtime and media broker authenticated");
 
     const arm = await screen.findByRole("button", {
-      name: "Arm live PTT capture",
+      name: "Enable push-to-talk",
     });
-    await waitFor(() => expect(arm).toBeDisabled());
+    await waitFor(() => expect(arm).toBeEnabled());
     expect(document.body).toHaveTextContent(
-      /Sends microphone audio to AssemblyAI/i,
+      /Speech recognition by AssemblyAI/i,
     );
     expect(document.body).toHaveTextContent(/u3-rt-pro/i);
-    expect(document.body).toHaveTextContent(
-      /Provider charges and data terms apply/i,
-    );
     await user.click(screen.getByText("Microphone connection details"));
     expect(document.body).toHaveTextContent(/Automatic fallback false/i);
 
-    await user.click(
-      screen.getByRole("checkbox", {
-        name: /I approve this AssemblyAI cloud STT attempt/i,
-      }),
-    );
+    expect(
+      screen.queryByRole("checkbox", { name: /I approve this AssemblyAI/i }),
+    ).not.toBeInTheDocument();
     expect(arm).toBeEnabled();
     await user.click(arm);
     expect(selectedStt.start).toHaveBeenCalledWith(
@@ -822,7 +817,7 @@ describe("native evidence in the product console", () => {
     expect(bridge.start).not.toHaveBeenCalled();
 
     await user.click(
-      screen.getByRole("button", { name: /Send receipt-backed PTT turn/i }),
+      screen.getByRole("button", { name: /Send voice message/i }),
     );
     expect(bridge.start.mock.calls.at(-1)?.[2]).toMatchObject({
       selectedSttReceipt: {
@@ -976,18 +971,13 @@ describe("native evidence in the product console", () => {
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
     await user.click(
-      screen.getByRole("checkbox", {
-        name: /I approve this AssemblyAI cloud STT attempt/i,
-      }),
-    );
-    await user.click(
-      screen.getByRole("button", { name: "Arm live PTT capture" }),
+      screen.getByRole("button", { name: "Enable push-to-talk" }),
     );
     expect(await screen.findByText(/Armed for physical F8/i)).toBeVisible();
     expect(document.body).toHaveTextContent(/press F8 within 8 seconds/i);
     expect(document.body).toHaveTextContent(/speak for up to 10 seconds/i);
     const cancel = screen.getByRole("button", {
-      name: "Cancel native capture",
+      name: "Stop listening",
     });
     expect(cancel).toBeEnabled();
     await user.click(cancel);
@@ -1181,9 +1171,8 @@ describe("native evidence in the product console", () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
-    await user.click(
-      screen.getByRole("button", { name: "Games & characters" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Night City" }));
+    await user.click(screen.getByText("Practice environment"));
     expect(
       screen.getByRole("button", { name: "Verify live capture" }),
     ).toBeDisabled();
@@ -1231,9 +1220,7 @@ describe("native evidence in the product console", () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
-    await user.click(
-      screen.getByRole("button", { name: "Games & characters" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Night City" }));
     await user.click(screen.getByText("Character recognition"));
     expect(document.body).toHaveTextContent(
       "Identity reference enrollment is blocked until the signed identity pack is admitted.",
@@ -1259,9 +1246,7 @@ describe("native evidence in the product console", () => {
     });
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
-    await user.click(
-      screen.getByRole("button", { name: "Games & characters" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Night City" }));
     await user.click(
       screen.getByRole("button", { name: "Select synthetic target" }),
     );
@@ -1286,9 +1271,7 @@ describe("native evidence in the product console", () => {
     );
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
-    await user.click(
-      screen.getByRole("button", { name: "Games & characters" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Night City" }));
     await user.click(
       screen.getByRole("button", { name: "Select synthetic target" }),
     );
@@ -1308,7 +1291,7 @@ describe("native evidence in the product console", () => {
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
     await user.click(screen.getByRole("button", { name: "Typed message" }));
-    await user.click(screen.getByRole("button", { name: /Send typed turn/i }));
+    await user.click(screen.getByRole("button", { name: /Send message/i }));
     act(() =>
       bridge.callback?.({
         type: "completed",
@@ -1324,7 +1307,7 @@ describe("native evidence in the product console", () => {
       screen.getByText("Delivered by the runtime fixture."),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/no live provider or audible delivery claimed/i),
+      screen.getByText(/Practice response · simulated dialogue/i),
     ).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(
       "Live provider audio delivered",
@@ -1336,7 +1319,7 @@ describe("native evidence in the product console", () => {
     render(<App />);
     await screen.findByLabelText("Selected AssemblyAI push-to-talk");
     await user.click(screen.getByRole("button", { name: "Typed message" }));
-    await user.click(screen.getByRole("button", { name: /Send typed turn/i }));
+    await user.click(screen.getByRole("button", { name: /Send message/i }));
     expect(bridge.start).toHaveBeenCalledWith(
       "cloud",
       expect.any(Function),
@@ -1349,7 +1332,7 @@ describe("native evidence in the product console", () => {
     expect(bridge.start.mock.calls[0][2]).not.toHaveProperty("devLiveTts");
   });
 
-  it("resumes a persisted authored character and starts the selected native session in one primary action", async () => {
+  it("starts in Night City after a matching native Cyberpunk inspection", async () => {
     const user = userEvent.setup();
     bridge.loadBootstrap.mockResolvedValueOnce({
       ...authenticatedBootstrap,
@@ -1357,12 +1340,12 @@ describe("native evidence in the product console", () => {
         ...authenticatedBootstrap.snapshot,
         onboarding: {
           ...authenticatedBootstrap.snapshot.onboarding,
-          selectedGameId: "skyrim-special-edition",
+          selectedGameId: "eclipse-harbor",
         },
         gameProfiles: [
           {
-            id: "skyrim-special-edition",
-            displayName: "Skyrim Special Edition",
+            id: "cyberpunk-2077",
+            displayName: "Cyberpunk 2077",
             wave: "1",
             safety: "singlePlayerOnly",
             catalogState: "bundled",
@@ -1373,13 +1356,13 @@ describe("native evidence in the product console", () => {
     });
     bridge.inspect.mockResolvedValueOnce({
       schemaVersion: 1,
-      gameProfileId: "skyrim-special-edition",
-      gameDisplayName: "Skyrim Special Edition",
-      selectedCharacterId: "lydia",
+      gameProfileId: "cyberpunk-2077",
+      gameDisplayName: "Cyberpunk 2077",
+      selectedCharacterId: "misty-olzewski",
       character: {
-        id: "lydia",
-        displayName: "Lydia",
-        promptRole: "Housecarl",
+        id: "misty-olzewski",
+        displayName: "Misty Olszewski",
+        promptRole: "Esoterica owner",
       },
       authoredKnowledge: [],
       provenance: [],
@@ -1390,26 +1373,31 @@ describe("native evidence in the product console", () => {
     });
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Lydia" })).toBeVisible();
     expect(
-      screen.getByRole("button", { name: "Selected native character" }),
+      await screen.findByRole("heading", { name: "Misty Olszewski" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Selected character" }),
     ).toHaveAttribute("aria-pressed", "true");
     const primaryActions = 1;
     await user.click(screen.getByRole("button", { name: "Typed message" }));
-    await user.click(screen.getByRole("button", { name: /Send typed turn/i }));
+    expect(screen.getByLabelText("Turn transcript")).toHaveValue(
+      "What has this city been like for you lately?",
+    );
+    await user.click(screen.getByRole("button", { name: /Send message/i }));
     expect(primaryActions).toBeLessThanOrEqual(2);
     expect(bridge.start).toHaveBeenCalledWith(
       "cloud",
       expect.any(Function),
       expect.objectContaining({
-        gameProfileId: "skyrim-special-edition",
-        characterId: "lydia",
-        characterName: "Lydia",
+        gameProfileId: "cyberpunk-2077",
+        characterId: "misty-olzewski",
+        characterName: "Misty Olszewski",
       }),
     );
   });
 
-  it("keeps an explicit synthetic-world choice when persisted character inspection finishes later", async () => {
+  it("keeps an explicit practice choice when Cyberpunk inspection finishes later", async () => {
     const user = userEvent.setup();
     bridge.loadBootstrap.mockResolvedValueOnce({
       ...authenticatedBootstrap,
@@ -1417,12 +1405,12 @@ describe("native evidence in the product console", () => {
         ...authenticatedBootstrap.snapshot,
         onboarding: {
           ...authenticatedBootstrap.snapshot.onboarding,
-          selectedGameId: "skyrim-special-edition",
+          selectedGameId: "cyberpunk-2077",
         },
         gameProfiles: [
           {
-            id: "skyrim-special-edition",
-            displayName: "Skyrim Special Edition",
+            id: "cyberpunk-2077",
+            displayName: "Cyberpunk 2077",
             wave: "1",
             safety: "singlePlayerOnly",
             catalogState: "bundled",
@@ -1441,7 +1429,7 @@ describe("native evidence in the product console", () => {
     render(<App />);
 
     const synthetic = await screen.findByRole("button", {
-      name: "Synthetic review game",
+      name: "Practice game",
     });
     await waitFor(() => expect(bridge.inspect).toHaveBeenCalled());
     await user.click(synthetic);
@@ -1449,13 +1437,13 @@ describe("native evidence in the product console", () => {
     await act(async () => {
       resolveInspection?.({
         schemaVersion: 1,
-        gameProfileId: "skyrim-special-edition",
-        gameDisplayName: "Skyrim Special Edition",
-        selectedCharacterId: "lydia",
+        gameProfileId: "cyberpunk-2077",
+        gameDisplayName: "Cyberpunk 2077",
+        selectedCharacterId: "misty-olzewski",
         character: {
-          id: "lydia",
-          displayName: "Lydia",
-          promptRole: "Housecarl",
+          id: "misty-olzewski",
+          displayName: "Misty Olszewski",
+          promptRole: "Esoterica owner",
         },
         authoredKnowledge: [],
         provenance: [],
@@ -1466,11 +1454,59 @@ describe("native evidence in the product console", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "Selected native character" }),
+        screen.getByRole("button", { name: "Selected character" }),
       ).not.toBeDisabled(),
     );
     expect(synthetic).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("heading", { name: "Mara Venn" })).toBeVisible();
+  });
+
+  it("does not activate Night City from a mismatched inspection", async () => {
+    bridge.loadBootstrap.mockResolvedValueOnce({
+      ...authenticatedBootstrap,
+      snapshot: {
+        ...authenticatedBootstrap.snapshot,
+        onboarding: {
+          ...authenticatedBootstrap.snapshot.onboarding,
+          selectedGameId: "cyberpunk-2077",
+        },
+        gameProfiles: [
+          {
+            id: "cyberpunk-2077",
+            displayName: "Cyberpunk 2077",
+            wave: "1",
+            safety: "singlePlayerOnly",
+            catalogState: "bundled",
+            defaultFallback: "audioOnly",
+          },
+        ],
+      },
+    });
+    bridge.inspect.mockResolvedValueOnce({
+      schemaVersion: 1,
+      gameProfileId: "eclipse-harbor",
+      gameDisplayName: "Eclipse Harbor",
+      selectedCharacterId: "mara-venn",
+      character: {
+        id: "mara-venn",
+        displayName: "Mara Venn",
+        promptRole: "Lighthouse keeper",
+      },
+      authoredKnowledge: [],
+      provenance: [],
+      deliveredMemory: [],
+      memoryScope: { crossGameWideningAllowed: false },
+    });
+
+    render(<App />);
+    await waitFor(() => expect(bridge.inspect).toHaveBeenCalled());
+
+    expect(
+      screen.getByRole("button", { name: "Selected character" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Practice game" }),
+    ).toHaveAttribute("aria-pressed", "true");
   });
 
   it("does not turn a non-fixture completion flag into an audio-delivery claim", async () => {
@@ -1478,7 +1514,7 @@ describe("native evidence in the product console", () => {
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
     await user.click(screen.getByRole("button", { name: "Typed message" }));
-    await user.click(screen.getByRole("button", { name: /Send typed turn/i }));
+    await user.click(screen.getByRole("button", { name: /Send message/i }));
     act(() =>
       bridge.callback?.({
         type: "completed",
@@ -1515,9 +1551,7 @@ describe("native evidence in the product console", () => {
         },
       }),
     );
-    expect(
-      screen.getByText(/audio delivery not proven by this event/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/audio not confirmed/i)).toBeInTheDocument();
     await user.click(screen.getByText("Delivery & identity details"));
     expect(
       screen.getByText(/requires live TTS \+ submission \+ drain receipts/i),
@@ -1532,7 +1566,7 @@ describe("native evidence in the product console", () => {
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
     await user.click(screen.getByRole("button", { name: "Typed message" }));
-    await user.click(screen.getByRole("button", { name: /Send typed turn/i }));
+    await user.click(screen.getByRole("button", { name: /Send message/i }));
     act(() =>
       bridge.callback?.({
         type: "completed",
@@ -1627,7 +1661,7 @@ describe("native evidence in the product console", () => {
       }),
     );
     expect(
-      screen.getByText("Receipt-backed provider audio submitted and drained"),
+      screen.getByText("Reply sent to your audio device"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/1 submitted \+ drained receipt.*audio-receipt-live-1/i),
@@ -1662,7 +1696,7 @@ describe("native evidence in the product console", () => {
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
     await user.click(screen.getByRole("button", { name: "Typed message" }));
-    await user.click(screen.getByRole("button", { name: /Send typed turn/i }));
+    await user.click(screen.getByRole("button", { name: /Send message/i }));
     act(() =>
       bridge.callback?.({
         type: "failed",
@@ -1734,7 +1768,7 @@ describe("native evidence in the product console", () => {
     const transcript = screen.getByLabelText("Turn transcript");
     await user.clear(transcript);
     await user.type(transcript, "What is beyond the breakwater?");
-    await user.click(screen.getByRole("button", { name: /Send typed turn/i }));
+    await user.click(screen.getByRole("button", { name: /Send message/i }));
     expect(bridge.start).toHaveBeenCalledWith(
       "cloud",
       expect.any(Function),
@@ -1756,7 +1790,7 @@ describe("native evidence in the product console", () => {
     ).toBeInTheDocument();
 
     const subtitles = screen.getByRole("checkbox", {
-      name: /Show delivered subtitles/i,
+      name: /Subtitles/i,
     });
     await waitFor(() => expect(subtitles).toBeEnabled());
     await user.click(subtitles);
@@ -1797,8 +1831,13 @@ describe("native evidence in the product console", () => {
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
     await user.click(screen.getByRole("button", { name: "Typed message" }));
-    await user.click(screen.getByRole("button", { name: /Send typed turn/i }));
-    await user.click(screen.getByRole("button", { name: /Diagnostics/i }));
+    await user.click(screen.getByRole("button", { name: /Send message/i }));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("button", { name: /^Help/i }));
+    await user.click(screen.getByRole("button", { name: /^Troubleshooting/i }));
+    await user.click(
+      screen.getByRole("button", { name: "Run native diagnostics" }),
+    );
     await user.click(
       screen.getByRole("button", { name: "Refresh native checks" }),
     );
@@ -1839,7 +1878,12 @@ describe("native evidence in the product console", () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
-    await user.click(screen.getByRole("button", { name: /Diagnostics/i }));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("button", { name: /^Help/i }));
+    await user.click(screen.getByRole("button", { name: /^Troubleshooting/i }));
+    await user.click(
+      screen.getByRole("button", { name: "Run native diagnostics" }),
+    );
     await user.click(
       screen.getByRole("button", { name: "Export local diagnostics" }),
     );
@@ -1858,7 +1902,12 @@ describe("native evidence in the product console", () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
-    await user.click(screen.getByRole("button", { name: /Diagnostics/i }));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("button", { name: /^Help/i }));
+    await user.click(screen.getByRole("button", { name: /^Troubleshooting/i }));
+    await user.click(
+      screen.getByRole("button", { name: "Run native diagnostics" }),
+    );
     await user.click(
       screen.getByRole("button", { name: "Refresh native checks" }),
     );
@@ -1867,7 +1916,7 @@ describe("native evidence in the product console", () => {
       screen.getAllByRole("button", { name: "Open provider settings" })[0],
     );
     expect(
-      screen.getByRole("heading", { name: "Voice & models" }),
+      screen.getByRole("heading", { name: "Neural loadout" }),
     ).toBeInTheDocument();
   });
 });

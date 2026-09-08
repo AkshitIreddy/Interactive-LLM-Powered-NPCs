@@ -248,7 +248,9 @@ describe("native product preferences", () => {
         characterId="lydia"
       />,
     );
-    expect(screen.getByText("No browser preference fixtures")).toBeVisible();
+    expect(
+      screen.getByText("Your preferences live in the desktop app"),
+    ).toBeVisible();
     expect(screen.queryByLabelText("Execution preset")).not.toBeInTheDocument();
     expect(bridge.readProductPreferences).not.toHaveBeenCalled();
   });
@@ -278,9 +280,9 @@ describe("native product preferences", () => {
     expect(
       screen.getByText(/initialized from legacy onboarding intent/i),
     ).toBeVisible();
-    expect(
-      screen.getByText(/Webcam presence is consent intent only/i),
-    ).toBeVisible();
+    expect(document.body).toHaveTextContent(
+      "Webcam presence is not available yet; this stores your preference.",
+    );
     expect(document.body).toHaveTextContent("Automatic fallback off");
     expect(onSnapshot).toHaveBeenCalledWith(snapshot);
     expect(

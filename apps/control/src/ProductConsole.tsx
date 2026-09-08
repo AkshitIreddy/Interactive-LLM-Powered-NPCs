@@ -155,11 +155,10 @@ const DEFAULT_PREFERENCES: AppPreferences = {
 };
 
 const NAV: Array<{ id: ProductPage; label: string; icon: IconName }> = [
-  { id: "session", label: "Session", icon: "conversation" },
-  { id: "world", label: "Games & characters", icon: "games" },
-  { id: "voice", label: "Voice & models", icon: "headphones" },
-  { id: "diagnostics", label: "Diagnostics", icon: "performance" },
-  { id: "settings", label: "Settings & help", icon: "settings" },
+  { id: "session", label: "Channel", icon: "conversation" },
+  { id: "world", label: "Night City", icon: "games" },
+  { id: "voice", label: "Loadout", icon: "headphones" },
+  { id: "settings", label: "Settings", icon: "settings" },
 ];
 
 const ONBOARDING_STEPS: Array<{ id: NativeOnboardingStep; label: string }> = [
@@ -185,6 +184,7 @@ const nowSnapshot = (
 function initialPage(): ProductPage {
   const requested = new URLSearchParams(window.location.search).get("page");
   if (!requested) return "session";
+  if (requested === "diagnostics") return "diagnostics";
   if (NAV.some((item) => item.id === requested))
     return requested as ProductPage;
   return PAGE_ALIASES[requested] ?? "session";
@@ -380,7 +380,7 @@ export function ProductConsole() {
   >(null);
   const turnRequestEpochRef = useRef(0);
   const [selectedGameProfileId, setSelectedGameProfileId] =
-    useState("eclipse-harbor");
+    useState("cyberpunk-2077");
   const [selectedCharacter, setSelectedCharacter] =
     useState<NativeCharacterInspection | null>(null);
   const [selectedTarget, setSelectedTarget] =
@@ -388,12 +388,12 @@ export function ProductConsole() {
   const [turnWorldMode, setTurnWorldMode] = useState<
     "syntheticReview" | "selectedWorld"
   >("syntheticReview");
-  const resumeWorldOnInspection = useRef(false);
+  const explicitWorldModeChoice = useRef(false);
   const [turnInputMode, setTurnInputMode] = useState<"typed" | "ptt">(
     DEFAULT_PREFERENCES.ptt ? "ptt" : "typed",
   );
   const [turnPrompt, setTurnPrompt] = useState(
-    "Did you ever make it to the old lighthouse?",
+    "What has this city been like for you lately?",
   );
   const [turnError, setTurnError] = useState<string | null>(null);
   const [turnRoute, setTurnRoute] = useState<{
@@ -837,17 +837,16 @@ export function ProductConsole() {
         if (health.kind !== "snapshot") return;
         const onboarding = health.snapshot.onboarding;
         const requestedGameId = onboarding?.selectedGameId;
-        const nativeGameId = health.snapshot.gameProfiles?.some(
-          (profile) => profile.id === requestedGameId,
-        )
-          ? requestedGameId
-          : health.snapshot.gameProfiles?.[0]?.id;
+        const nativeGameId =
+          health.snapshot.gameProfiles?.find(
+            (profile) => profile.id === "cyberpunk-2077",
+          )?.id ??
+          (health.snapshot.gameProfiles?.some(
+            (profile) => profile.id === requestedGameId,
+          )
+            ? requestedGameId
+            : health.snapshot.gameProfiles?.[0]?.id);
         if (nativeGameId) setSelectedGameProfileId(nativeGameId);
-        resumeWorldOnInspection.current = Boolean(
-          requestedGameId &&
-            nativeGameId === requestedGameId &&
-            requestedGameId !== "eclipse-harbor",
-        );
         if (onboarding) {
           setPreferences(onboarding.preferences);
           setTurnInputMode(onboarding.preferences.ptt ? "ptt" : "typed");
@@ -968,11 +967,17 @@ export function ProductConsole() {
     let active = true;
     void inspectCharacterDatabase(selectedGameProfileId)
       .then((inspection) => {
-        if (active && inspection) {
+        if (
+          active &&
+          inspection &&
+          inspection.gameProfileId === selectedGameProfileId
+        ) {
           setSelectedCharacter(inspection);
-          if (resumeWorldOnInspection.current) {
+          if (
+            inspection.gameProfileId === "cyberpunk-2077" &&
+            !explicitWorldModeChoice.current
+          ) {
             setTurnWorldMode("selectedWorld");
-            resumeWorldOnInspection.current = false;
           }
         }
       })
@@ -1641,7 +1646,7 @@ export function ProductConsole() {
   };
 
   return (
-    <div className="product-shell">
+    <div className={`product-shell cyberpunk-shell page-${page}`}>
       <aside
         className="product-rail"
         aria-label="Primary navigation"
@@ -1654,8 +1659,8 @@ export function ProductConsole() {
         >
           <span className="brand-mark">N2</span>
           <span>
-            <b>NPC 2.0</b>
-            <small>Conversation system</small>
+            <b>NPC / LINK</b>
+            <small>Interactive worlds</small>
           </span>
         </button>
         <nav>
@@ -1672,13 +1677,9 @@ export function ProductConsole() {
           ))}
         </nav>
         <div className="rail-safety">
-          <Icon name="shield" size={18} />
-          <b>Local review</b>
-          <small>
-            Single-player games
-            <br />
-            Updates disabled
-          </small>
+          <span className="status-dot" />
+          <b>Cyberpunk 2077</b>
+          <small>Personal build</small>
         </div>
       </aside>
 
@@ -1686,7 +1687,9 @@ export function ProductConsole() {
         <header className="product-topbar">
           <div>
             <span className="eyebrow">
-              NPC 2.0 / {NAV.find((item) => item.id === page)?.label}
+              {page === "diagnostics"
+                ? "Settings / Troubleshooting"
+                : `Your workspace / ${NAV.find((item) => item.id === page)?.label}`}
             </span>
           </div>
           <div className={`runtime-chip ${runtimeSummary(bootstrap).tone}`}>
@@ -1740,7 +1743,7 @@ export function ProductConsole() {
             selectedTarget={selectedTarget}
             turnWorldMode={turnWorldMode}
             setTurnWorldMode={(value) => {
-              resumeWorldOnInspection.current = false;
+              explicitWorldModeChoice.current = true;
               setTurnWorldMode(value);
             }}
             inputMode={turnInputMode}
@@ -1797,12 +1800,13 @@ export function ProductConsole() {
             gameProfiles={snapshot?.gameProfiles ?? []}
             gameProfileId={selectedGameProfileId}
             onGameProfileChange={(gameProfileId) => {
-              resumeWorldOnInspection.current = false;
+              explicitWorldModeChoice.current = true;
               setSelectedGameProfileId(gameProfileId);
               setSelectedCharacter(null);
             }}
             onTargetChange={setSelectedTarget}
             onCharacterChange={(inspection) => {
+              explicitWorldModeChoice.current = true;
               setSelectedCharacter(inspection);
               setTurnWorldMode("selectedWorld");
             }}
@@ -2130,7 +2134,6 @@ function SelectedSttControl({
   compact?: boolean;
 }) {
   const startReasonId = useId();
-  const [egressConsent, setEgressConsent] = useState(false);
   const capturing =
     capture?.status === "capturing" || status?.status === "capturing";
   const arming = status?.status === "arming";
@@ -2201,32 +2204,20 @@ function SelectedSttControl({
         </dl>
       </details>
       <p className="selected-stt-physical-note">
-        Click Arm, then hold F8 within 8 seconds. Speak for up to 10 seconds and
-        release.
+        Enable push-to-talk, then hold F8 within 8 seconds. Speak for up to 10
+        seconds and release.
       </p>
-      <label className="selected-stt-consent">
-        <input
-          type="checkbox"
-          checked={egressConsent}
-          disabled={!readiness.ready || active || busy}
-          onChange={(event) => setEgressConsent(event.target.checked)}
-        />
-        <span>
-          <b>I approve this AssemblyAI cloud STT attempt</b>
-          <small>
-            Sends microphone audio to AssemblyAI u3-rt-pro. Provider charges and
-            data terms apply.
-          </small>
-        </span>
-      </label>
+      <p className="stt-service-label">
+        Speech recognition by AssemblyAI · microphone starts when you hold F8.
+      </p>
       <div className="selected-stt-actions">
         <button
           className="secondary-action"
-          disabled={!readiness.ready || !egressConsent || active || busy}
+          disabled={!readiness.ready || active || busy}
           aria-describedby={startReasonId}
           onClick={onStart}
         >
-          {busy ? "Requesting native capture…" : "Arm live PTT capture"}
+          {busy ? "Preparing microphone…" : "Enable push-to-talk"}
         </button>
         {active && (
           <button
@@ -2234,7 +2225,7 @@ function SelectedSttControl({
             disabled={busy && !arming}
             onClick={onCancel}
           >
-            Cancel native capture
+            Stop listening
           </button>
         )}
         {terminal?.status === "failed" && terminal.retryable && (
@@ -2449,14 +2440,14 @@ function SessionPage({
   );
   const visibleTurnError = turnError ?? manualRetry?.reason ?? null;
   const completionLabel = audioDelivered
-    ? "Receipt-backed provider audio submitted and drained"
+    ? "Reply sent to your audio device"
     : subtitleDelivered
-      ? "Receipt-backed native subtitle surface committed"
+      ? "Reply shown in subtitles"
       : deliveredTurn?.runtimeFixtureOnly
-        ? "Deterministic runtime fixture — no live provider or audible delivery claimed"
+        ? "Practice response · simulated dialogue"
         : deliveredTurn
-          ? "Runtime text completed — audio delivery not proven by this event"
-          : "No delivered turn in this session";
+          ? "Text reply ready · audio not confirmed"
+          : "Your conversation starts here";
   return (
     <div className="page-grid session-grid">
       <section className="instrument-panel primary-instrument">
@@ -2510,7 +2501,7 @@ function SessionPage({
                 aria-pressed={turnWorldMode === "syntheticReview"}
                 onClick={() => setTurnWorldMode("syntheticReview")}
               >
-                Synthetic review game
+                Practice game
               </button>
               <button
                 className={turnWorldMode === "selectedWorld" ? "active" : ""}
@@ -2518,7 +2509,7 @@ function SessionPage({
                 disabled={!selectedCharacter}
                 onClick={() => setTurnWorldMode("selectedWorld")}
               >
-                Selected native character
+                Selected character
               </button>
             </div>
             <button className="text-action" onClick={() => onNavigate("world")}>
@@ -2550,6 +2541,11 @@ function SessionPage({
               <textarea
                 aria-label="Turn transcript"
                 value={prompt}
+                placeholder={
+                  turnWorldMode === "selectedWorld" && selectedCharacter
+                    ? `Talk to ${selectedCharacter.character.displayName}…`
+                    : "Ask the practice character something…"
+                }
                 maxLength={500}
                 rows={4}
                 disabled={running}
@@ -2592,14 +2588,14 @@ function SessionPage({
             {running
               ? "Turn in progress"
               : inputMode === "typed"
-                ? "Send typed turn"
+                ? "Send message"
                 : selectedSttTerminal?.status === "transcriptReady" &&
                     selectedSttReceiptDisposition === "ready"
-                  ? "Send receipt-backed PTT turn"
+                  ? "Send voice message"
                   : selectedSttReceiptDisposition === "submitted" ||
                       selectedSttReceiptDisposition === "rejected"
-                    ? "Receipt spent — capture again"
-                    : "Capture a PTT receipt first"}
+                    ? "Record another message"
+                    : "Record a message first"}
             <span>
               {nativeAvailable ? "Native runtime" : "Desktop runtime required"}
             </span>
@@ -2619,7 +2615,7 @@ function SessionPage({
               onChange={(event) => setSubtitles(event.target.checked)}
             />
             <span>
-              <b>Show delivered subtitles</b>
+              <b>Subtitles</b>
               <small>
                 {!nativeAvailable
                   ? "Installed app required"
@@ -2897,7 +2893,7 @@ function SessionPage({
       <aside className="session-side">
         <section className="instrument-panel compact-panel">
           <div className="panel-title">
-            <h2>Connection checklist</h2>
+            <h2>Your connection</h2>
             <span className={providerPresent ? "badge good" : "badge wait"}>
               {providerPresent
                 ? "Credential ready"
@@ -2949,7 +2945,7 @@ function SessionPage({
             <span>
               <b>Audio & subtitles first</b>
               <small>
-                Moving-mouth animation is experimental and not qualified.
+                Add a character mouth pack for the reviewed lip-sync mode.
               </small>
             </span>
           </div>
@@ -3150,11 +3146,11 @@ function WorldPage({
     <div className="page-stack">
       <header className="page-heading">
         <span className="eyebrow">Choose who answers</span>
-        <h1>Games & characters</h1>
+        <h1>Night City</h1>
         <p>
           {nativeAvailable
-            ? "Find a running game, then select a character from its profile."
-            : "Open the Windows app to find running games and manage their characters."}
+            ? "Connect Cyberpunk 2077. Choose who you want to talk to."
+            : "Your Cyberpunk characters, voices and memories. Connect a game in the desktop app."}
         </p>
       </header>
       <GameTargetWorkspace
@@ -3164,169 +3160,178 @@ function WorldPage({
         onGameProfileChange={onGameProfileChange}
         onSelectionChange={onTargetChange}
       />
-      <div className="world-layout">
-        <section className="instrument-panel world-visual">
-          <div className="world-horizon">
-            <div className="moon" />
-            <div className="lighthouse">
-              <i />
-              <span />
+      <details className="practice-lab evidence-disclosure">
+        <summary>
+          Practice environment{" "}
+          <span>Try a conversation in the included test game</span>
+        </summary>
+        <div className="world-layout">
+          <section className="instrument-panel world-visual">
+            <div className="world-horizon">
+              <div className="moon" />
+              <div className="lighthouse">
+                <i />
+                <span />
+              </div>
+              <div className="harbor-lines" />
             </div>
-            <div className="harbor-lines" />
-          </div>
-          <div className="world-overlay">
-            <span
-              className={
-                captureProof?.receipt?.verified ? "badge good" : "badge wait"
-              }
-            >
-              {captureProof?.receipt?.verified
-                ? "Synthetic WGC verified"
-                : captureProof
-                  ? "Synthetic target selected"
-                  : "Debug fixture only"}
-            </span>
-            <h2>Eclipse Harbor</h2>
-            <p>An original test world for your first conversation</p>
-          </div>
-        </section>
-        <section className="instrument-panel">
-          <div className="panel-title">
-            <h2>Connect the test game</h2>
-            <span className="badge">Debug only</span>
-          </div>
-          <dl className="facts spacious">
-            <div>
-              <dt>Executable</dt>
-              <dd>interactive-npcs-synthetic-target.exe</dd>
+            <div className="world-overlay">
+              <span
+                className={
+                  captureProof?.receipt?.verified ? "badge good" : "badge wait"
+                }
+              >
+                {captureProof?.receipt?.verified
+                  ? "Synthetic WGC verified"
+                  : captureProof
+                    ? "Synthetic target selected"
+                    : "Debug fixture only"}
+              </span>
+              <h2>Eclipse Harbor</h2>
+              <p>An original test world for your first conversation</p>
             </div>
-            <div>
-              <dt>Policy</dt>
-              <dd>Single-player only</dd>
+          </section>
+          <section className="instrument-panel">
+            <div className="panel-title">
+              <h2>Connect the test game</h2>
+              <span className="badge">Debug only</span>
             </div>
-            <div>
-              <dt>Evidence</dt>
-              <dd>
-                {captureProof
-                  ? `PID ${captureProof.pid} · HWND ${captureProof.hwnd}`
-                  : "PID · HWND · frame counters"}
-              </dd>
-            </div>
-            <div>
-              <dt>Backend</dt>
-              <dd>Windows Graphics Capture</dd>
-            </div>
-          </dl>
-          <div className="capture-verification-actions">
-            <button
-              className="primary-action"
-              disabled={!reviewLaunchAvailable || captureBusy}
-              onClick={onConnectReviewGame}
-            >
-              {captureBusy
-                ? "Connecting…"
-                : captureProof?.receipt?.verified
-                  ? "Reconnect test game"
-                  : "Start & connect test game"}
-            </button>
-            <button
-              className="secondary-action"
-              disabled={!captureAvailable}
-              onClick={onCapture}
-            >
-              {captureProof
-                ? "Reselect synthetic target"
-                : captureAvailable
-                  ? "Select synthetic target"
-                  : "Native debug target unavailable"}
-            </button>
-            <button
-              className="primary-action"
-              disabled={!captureAvailable || !captureProof}
-              aria-describedby="verify-capture-reason"
-              onClick={onVerifyCapture}
-            >
-              Verify live capture
-            </button>
-          </div>
-          <small id="verify-capture-reason" className="control-reason">
-            {!captureAvailable
-              ? "Requires the native debug build and task-owned synthetic target. Ordinary commercial-game capture remains fail-closed."
-              : !captureProof
-                ? "Select the exact task-owned synthetic target first."
-                : "Calls the canonical native selected-target verifier and requires exact PID, HWND, executable, an advancing frame sequence, and overlay exclusion."}
-          </small>
-          {captureProof?.receipt && (
-            <dl className="capture-receipt" aria-label="Synthetic WGC receipt">
+            <dl className="facts spacious">
               <div>
-                <dt>Exact target</dt>
+                <dt>Executable</dt>
+                <dd>interactive-npcs-synthetic-target.exe</dd>
+              </div>
+              <div>
+                <dt>Policy</dt>
+                <dd>Single-player only</dd>
+              </div>
+              <div>
+                <dt>Evidence</dt>
                 <dd>
-                  {captureProof.receipt.exactTargetMatch
-                    ? "Matched PID · HWND · executable"
-                    : "Mismatch"}
+                  {captureProof
+                    ? `PID ${captureProof.pid} · HWND ${captureProof.hwnd}`
+                    : "PID · HWND · frame counters"}
                 </dd>
               </div>
               <div>
-                <dt>Frame sequence</dt>
-                <dd>
-                  {captureProof.receipt.evidence.latestFrameSequence} ·{" "}
-                  {captureProof.receipt.frameSequenceAdvanced
-                    ? "advanced"
-                    : "not proven advancing"}
-                </dd>
-              </div>
-              <div>
-                <dt>Content / geometry</dt>
-                <dd>
-                  {captureProof.receipt.evidence.contentWidth}×
-                  {captureProof.receipt.evidence.contentHeight} ·{" "}
-                  {captureProof.receipt.contentChanged
-                    ? `${captureProof.receipt.evidence.contentHashChanges} content changes`
-                    : "content change not required for this receipt"}
-                </dd>
-              </div>
-              <div>
-                <dt>Overlay exclusion</dt>
-                <dd>
-                  {captureProof.receipt.evidence.overlayCaptureExcluded
-                    ? "Excluded from capture"
-                    : "Not proven"}
-                </dd>
-              </div>
-              <div>
-                <dt>Pixel source / scope</dt>
-                <dd>
-                  {captureProof.receipt.evidence.pixelSource} ·{" "}
-                  {captureProof.receipt.evidence.pixelScope}
-                </dd>
-              </div>
-              <div>
-                <dt>Display provenance</dt>
-                <dd>
-                  {captureProof.receipt.evidence
-                    .externalDisplayOverlayPixelsExcluded &&
-                  captureProof.receipt.evidence
-                    .desktopLuminanceExcludedFromPixelEvidence
-                    ? "Unrelated display-overlay pixels and desktop luminance excluded"
-                    : "Exact pixel provenance not proven"}
-                </dd>
-              </div>
-              <div>
-                <dt>Safety state</dt>
-                <dd>{captureProof.receipt.safetyState}</dd>
+                <dt>Backend</dt>
+                <dd>Windows Graphics Capture</dd>
               </div>
             </dl>
-          )}
-          {captureProof?.receipt && (
-            <p className="source-disclosure capture-pixel-note">
-              {captureProof.receipt.evidence
-                .externalDisplayOverlaysMayChangePerceivedBrightness
-                ? "External display overlays may change perceived brightness, but exact selected-window WGC pixels exclude unrelated display-overlay pixels. Desktop or whole-screen screenshot luminance is never capture or color proof."
-                : "Native perceived-brightness caveat is missing; this receipt cannot support a display-color claim."}
-            </p>
-          )}
-        </section>
-      </div>
+            <div className="capture-verification-actions">
+              <button
+                className="primary-action"
+                disabled={!reviewLaunchAvailable || captureBusy}
+                onClick={onConnectReviewGame}
+              >
+                {captureBusy
+                  ? "Connecting…"
+                  : captureProof?.receipt?.verified
+                    ? "Reconnect test game"
+                    : "Start & connect test game"}
+              </button>
+              <button
+                className="secondary-action"
+                disabled={!captureAvailable}
+                onClick={onCapture}
+              >
+                {captureProof
+                  ? "Reselect synthetic target"
+                  : captureAvailable
+                    ? "Select synthetic target"
+                    : "Native debug target unavailable"}
+              </button>
+              <button
+                className="primary-action"
+                disabled={!captureAvailable || !captureProof}
+                aria-describedby="verify-capture-reason"
+                onClick={onVerifyCapture}
+              >
+                Verify live capture
+              </button>
+            </div>
+            <small id="verify-capture-reason" className="control-reason">
+              {!captureAvailable
+                ? "Requires the native debug build and task-owned synthetic target. Ordinary commercial-game capture remains fail-closed."
+                : !captureProof
+                  ? "Select the exact task-owned synthetic target first."
+                  : "Calls the canonical native selected-target verifier and requires exact PID, HWND, executable, an advancing frame sequence, and overlay exclusion."}
+            </small>
+            {captureProof?.receipt && (
+              <dl
+                className="capture-receipt"
+                aria-label="Synthetic WGC receipt"
+              >
+                <div>
+                  <dt>Exact target</dt>
+                  <dd>
+                    {captureProof.receipt.exactTargetMatch
+                      ? "Matched PID · HWND · executable"
+                      : "Mismatch"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Frame sequence</dt>
+                  <dd>
+                    {captureProof.receipt.evidence.latestFrameSequence} ·{" "}
+                    {captureProof.receipt.frameSequenceAdvanced
+                      ? "advanced"
+                      : "not proven advancing"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Content / geometry</dt>
+                  <dd>
+                    {captureProof.receipt.evidence.contentWidth}×
+                    {captureProof.receipt.evidence.contentHeight} ·{" "}
+                    {captureProof.receipt.contentChanged
+                      ? `${captureProof.receipt.evidence.contentHashChanges} content changes`
+                      : "content change not required for this receipt"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Overlay exclusion</dt>
+                  <dd>
+                    {captureProof.receipt.evidence.overlayCaptureExcluded
+                      ? "Excluded from capture"
+                      : "Not proven"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Pixel source / scope</dt>
+                  <dd>
+                    {captureProof.receipt.evidence.pixelSource} ·{" "}
+                    {captureProof.receipt.evidence.pixelScope}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Display provenance</dt>
+                  <dd>
+                    {captureProof.receipt.evidence
+                      .externalDisplayOverlayPixelsExcluded &&
+                    captureProof.receipt.evidence
+                      .desktopLuminanceExcludedFromPixelEvidence
+                      ? "Unrelated display-overlay pixels and desktop luminance excluded"
+                      : "Exact pixel provenance not proven"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Safety state</dt>
+                  <dd>{captureProof.receipt.safetyState}</dd>
+                </div>
+              </dl>
+            )}
+            {captureProof?.receipt && (
+              <p className="source-disclosure capture-pixel-note">
+                {captureProof.receipt.evidence
+                  .externalDisplayOverlaysMayChangePerceivedBrightness
+                  ? "External display overlays may change perceived brightness, but exact selected-window WGC pixels exclude unrelated display-overlay pixels. Desktop or whole-screen screenshot luminance is never capture or color proof."
+                  : "Native perceived-brightness caveat is missing; this receipt cannot support a display-color claim."}
+              </p>
+            )}
+          </section>
+        </div>
+      </details>
       <CharacterDatabase
         key={`${gameProfileId}:${contentPackRevision}`}
         nativeAvailable={nativeAvailable}
@@ -3437,9 +3442,9 @@ function VoicePage({
   return (
     <div className="page-stack voice-workspace">
       <header className="page-heading">
-        <span className="eyebrow">Your conversation pipeline</span>
-        <h1>Voice & models</h1>
-        <p>Choose how your character listens, thinks and speaks.</p>
+        <span className="eyebrow">Configure your connection</span>
+        <h1>Neural loadout</h1>
+        <p>Select a component. Make it yours.</p>
       </header>
       <WorkspaceSections
         label="Voice workspace"
@@ -4030,6 +4035,10 @@ function SettingsPage({
               .join(" ")
               .toLowerCase()
               .includes(normalizedGuideQuery),
+          ).sort(
+            (left, right) =>
+              Number(right.searchTerms.includes(normalizedGuideQuery)) -
+              Number(left.searchTerms.includes(normalizedGuideQuery)),
           ),
     [normalizedGuideQuery],
   );
@@ -4137,7 +4146,9 @@ function SettingsPage({
                         aria-pressed={activeGuide.id === guide.id}
                         onClick={() => setActiveGuideId(guide.id)}
                       >
-                        <span>{String(index + 1).padStart(2, "0")}</span>
+                        <span aria-hidden="true">
+                          {String(index + 1).padStart(2, "0")}
+                        </span>
                         <div>
                           <b>{guide.title}</b>
                           <small>{guide.summary}</small>
@@ -4213,8 +4224,8 @@ function AudioOutputPicker({
       <div>
         <b>Audio output</b>
         <small>
-          Explicitly persist System default or one stable Windows endpoint. A
-          first run has no implicit selection.
+          Choose where you hear the character. System default follows your
+          Windows sound settings.
         </small>
       </div>
       <label>
@@ -4315,8 +4326,7 @@ function AudioInputPicker({
       <div>
         <b>Audio input</b>
         <small>
-          Explicitly persist System default or one stable Windows microphone
-          endpoint. This selects routing only.
+          Choose your microphone. Recording starts when you use push-to-talk.
         </small>
       </div>
       <label>
@@ -4378,33 +4388,34 @@ function AudioInputPicker({
                   : "Reading native input state…"
               : "Browser preview cannot enumerate or persist Windows audio inputs."}
       </p>
-      <dl
-        className="audio-input-evidence"
-        aria-label="Microphone evidence state"
-      >
-        <div>
-          <dt>Signal level</dt>
-          <dd>Not measured</dd>
-        </div>
-        <div>
-          <dt>Noise floor</dt>
-          <dd>Not measured</dd>
-        </div>
-        <div>
-          <dt>Captured frames</dt>
-          <dd>Not measured</dd>
-        </div>
-        <div>
-          <dt>Permission</dt>
-          <dd>Not measured</dd>
-        </div>
-      </dl>
-      <small className="audio-input-proof-note">
-        Endpoint selection does not prove microphone allocation, physical PTT,
-        audio frames, speech recognition, or a final transcript. Session PTT
-        becomes turn input only after a broker-authoritative receipt is returned
-        and explicitly consumed once by the native turn.
-      </small>
+      <details className="technical-disclosure">
+        <summary>Microphone measurement details</summary>
+        <dl
+          className="audio-input-evidence"
+          aria-label="Microphone evidence state"
+        >
+          <div>
+            <dt>Signal level</dt>
+            <dd>Not measured</dd>
+          </div>
+          <div>
+            <dt>Noise floor</dt>
+            <dd>Not measured</dd>
+          </div>
+          <div>
+            <dt>Captured frames</dt>
+            <dd>Not measured</dd>
+          </div>
+          <div>
+            <dt>Permission</dt>
+            <dd>Not measured</dd>
+          </div>
+        </dl>
+        <small className="audio-input-proof-note">
+          Choosing a microphone does not start recording or measure signal
+          levels. Capture results appear with your conversation.
+        </small>
+      </details>
     </div>
   );
 }

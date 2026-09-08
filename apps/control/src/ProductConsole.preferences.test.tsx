@@ -254,7 +254,7 @@ describe("ProductConsole native session preferences", () => {
     render(<ProductConsole />);
 
     const subtitles = await screen.findByRole("checkbox", {
-      name: /Show delivered subtitles/i,
+      name: /Subtitles/i,
     });
     await waitFor(() => expect(subtitles).toBeEnabled());
     expect(subtitles).not.toBeChecked();
@@ -264,17 +264,17 @@ describe("ProductConsole native session preferences", () => {
       screen.getByRole("button", { name: "Typed message" }),
     ).toHaveAttribute("aria-pressed", "true");
 
-    await user.click(screen.getByRole("button", { name: "Settings & help" }));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
     await waitFor(() =>
       expect(bridge.readPreferences).toHaveBeenCalledWith({ kind: "global" }),
     );
-    await user.click(screen.getByRole("button", { name: "Session" }));
+    await user.click(screen.getByRole("button", { name: "Channel" }));
 
     expect(
       screen.getByRole("button", { name: "Typed message" }),
     ).toHaveAttribute("aria-pressed", "true");
     expect(
-      screen.getByRole("checkbox", { name: /Show delivered subtitles/i }),
+      screen.getByRole("checkbox", { name: /Subtitles/i }),
     ).not.toBeChecked();
     expect(bridge.readPreferences).toHaveBeenCalledWith(characterScope);
   });
@@ -289,7 +289,7 @@ describe("ProductConsole native session preferences", () => {
     render(<ProductConsole />);
 
     const subtitles = await screen.findByRole("checkbox", {
-      name: /Show delivered subtitles/i,
+      name: /Subtitles/i,
     });
     await waitFor(() => expect(subtitles).toBeEnabled());
     expect(subtitles).toBeChecked();
@@ -326,7 +326,7 @@ describe("ProductConsole native session preferences", () => {
     render(<ProductConsole />);
 
     const subtitles = await screen.findByRole("checkbox", {
-      name: /Show delivered subtitles/i,
+      name: /Subtitles/i,
     });
     await waitFor(() => expect(subtitles).toBeEnabled());
     await user.click(subtitles);
@@ -348,7 +348,7 @@ describe("ProductConsole native session preferences", () => {
     render(<ProductConsole />);
 
     const subtitles = await screen.findByRole("checkbox", {
-      name: /Show delivered subtitles/i,
+      name: /Subtitles/i,
     });
     expect(subtitles).toBeDisabled();
     expect(screen.getByText("Installed app required")).toBeVisible();
@@ -373,12 +373,12 @@ describe("ProductConsole native session preferences", () => {
 
     await screen.findByText("For Eclipse Harbor · Mara Venn");
     await user.click(screen.getByRole("button", { name: "Typed message" }));
-    await user.click(screen.getByRole("button", { name: /Send typed turn/i }));
+    await user.click(screen.getByRole("button", { name: /Send message/i }));
     await waitFor(() => expect(callbacks).toHaveLength(1));
 
     await user.click(screen.getByRole("button", { name: "Cancel generation" }));
     await waitFor(() => expect(bridge.cancelSimulation).toHaveBeenCalledOnce());
-    await user.click(screen.getByRole("button", { name: /Send typed turn/i }));
+    await user.click(screen.getByRole("button", { name: /Send message/i }));
     await waitFor(() => expect(callbacks).toHaveLength(2));
 
     act(() => {

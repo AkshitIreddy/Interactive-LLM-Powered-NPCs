@@ -1,0 +1,847 @@
+/* Original game-menu treatment. Functional controls remain ordinary DOM. */
+:root {
+  --p-void: #100b10;
+  --p-gunmetal: #191017;
+  --p-raised: #28151e;
+  --p-cyan: #65e1e2;
+  --p-amber: #e7c68f;
+  --p-coral: #ff626a;
+  --p-paper: #f1dfe0;
+  --p-muted: #b799a4;
+  --p-line: #54303d;
+  --review-accent: #65e1e2;
+  --font: "Segoe UI Variable", "Segoe UI", sans-serif;
+  --data: "Bahnschrift", "Segoe UI", sans-serif;
+  --bg: var(--p-void);
+  --bg-raised: var(--p-gunmetal);
+  --panel: var(--p-gunmetal);
+  --text: var(--p-paper);
+  --text-soft: #d5b9c4;
+  --muted: var(--p-muted);
+  --line: var(--p-line);
+  --teal: var(--p-cyan);
+}
+.cyberpunk-shell {
+  display: block;
+  height: 100vh;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 50% -25%, #48202c 0, transparent 65%), #100b10;
+  font-size: 14px;
+}
+.cyberpunk-shell .product-rail {
+  height: 82px;
+  padding: 0 32px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 42px;
+  border: 0;
+  border-bottom: 1px solid #9b414f;
+  background: linear-gradient(180deg, #31141e, #1c1018);
+  position: relative;
+  z-index: 5;
+}
+.cyberpunk-shell .brand-lockup {
+  display: flex;
+  width: auto;
+  flex: 0 0 auto;
+  padding: 0;
+  gap: 12px;
+}
+.cyberpunk-shell .brand-mark {
+  background: #4b222b;
+  border-color: #ff626a;
+  color: #ff9297;
+  width: 38px;
+  height: 41px;
+  font-size: 13px;
+}
+.cyberpunk-shell .brand-lockup b {
+  font: 600 20px/1.1 var(--data);
+  letter-spacing: 0.08em;
+  color: #ff858b;
+}
+.cyberpunk-shell .brand-lockup small {
+  font: 10px/1.4 var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #c593a1;
+}
+.cyberpunk-shell .product-rail nav {
+  display: flex;
+  align-self: stretch;
+  gap: 10px;
+  flex: 1;
+}
+.cyberpunk-shell .nav-item {
+  width: auto;
+  padding: 0 20px;
+  display: flex;
+  gap: 9px;
+  min-height: 50px;
+  justify-content: center;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  border-radius: 0;
+  color: #eab3be;
+  background: transparent;
+}
+.cyberpunk-shell .nav-item b {
+  font: 500 15px/1 var(--data);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.cyberpunk-shell .nav-item.selected {
+  background: linear-gradient(0deg, #54dce515, transparent 85%);
+  color: #74e5e6;
+  border-bottom-color: #65e1e2;
+}
+.cyberpunk-shell .nav-item.selected::before {
+  display: none;
+}
+.cyberpunk-shell .nav-item:hover {
+  color: #f7d9df;
+  background-color: #ffffff05;
+}
+.cyberpunk-shell .rail-safety {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  display: grid;
+  grid-template-columns: 8px auto;
+  column-gap: 10px;
+  flex: 0 0 auto;
+}
+.cyberpunk-shell .rail-safety b {
+  font: 500 12px var(--data);
+  color: #dba5af;
+}
+.cyberpunk-shell .rail-safety small {
+  grid-column: 2;
+  color: #9e7a87;
+  font-size: 10px;
+}
+.cyberpunk-shell .product-main {
+  height: calc(100vh - 82px);
+  overflow: auto;
+  padding: 0 40px 40px;
+  scrollbar-color: #b44757 #150e14;
+}
+.cyberpunk-shell .product-topbar {
+  height: 54px;
+  min-height: 54px;
+  padding: 10px 0;
+  margin: 0 0 18px;
+  border-bottom: 1px solid #5e303d;
+  background: transparent;
+}
+.cyberpunk-shell .product-topbar .eyebrow {
+  color: #ba929e;
+  font: 10px var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.cyberpunk-shell .runtime-chip {
+  padding: 3px 9px;
+  border: 0;
+  background: #25151e;
+  color: #d5adba;
+  font: 11px var(--mono);
+  border-radius: 0;
+}
+.cyberpunk-shell .quiet-button {
+  color: #e1a7b6;
+  border-radius: 0;
+}
+.cyberpunk-shell .page-heading {
+  margin: 0 0 20px;
+  padding: 0 0 14px;
+  border-bottom: 1px solid #6c3342;
+  position: relative;
+}
+.cyberpunk-shell .page-heading::after {
+  content: "";
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  width: 68px;
+  height: 3px;
+  background: #ff626a;
+}
+.cyberpunk-shell .page-heading h1 {
+  color: #ff777f;
+  font: 500 34px/1.2 var(--data);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin: 5px 0;
+}
+.cyberpunk-shell .page-heading p {
+  font-size: 14px;
+  color: #bda2ad;
+  max-width: 72ch;
+  margin-top: 6px;
+}
+.cyberpunk-shell .eyebrow {
+  color: #bc8695;
+  font: 10px/1.5 var(--mono);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+.cyberpunk-shell .instrument-panel {
+  background: linear-gradient(135deg, #24141d80, #160f1680);
+  border: 1px solid #623140;
+  border-radius: 0;
+  box-shadow: none;
+}
+.cyberpunk-shell .panel-title {
+  border-color: #542b39;
+}
+.cyberpunk-shell .panel-title h2 {
+  font: 500 17px var(--data);
+  color: #edacb9;
+}
+.cyberpunk-shell .primary-action {
+  border-radius: 0;
+  background: #62dadd;
+  color: #102126;
+  border: 1px solid #89f6f0;
+  font: 600 14px var(--data);
+  box-shadow: none;
+}
+.cyberpunk-shell .primary-action:hover:not(:disabled) {
+  background: #9aeff0;
+}
+.cyberpunk-shell .secondary-action {
+  border-radius: 0;
+  background: #351b26;
+  border: 1px solid #b14d61;
+  color: #ffb3c2;
+  box-shadow: none;
+}
+.cyberpunk-shell .text-action {
+  color: #71d8de;
+  font-size: 13px;
+}
+.cyberpunk-shell :is(input, select, textarea) {
+  border-radius: 0;
+  border-color: #773b4d;
+  background: #130d14;
+  color: #f1dfe0;
+}
+.cyberpunk-shell :is(input, select, textarea):hover {
+  border-color: #c35e72;
+}
+.cyberpunk-shell :is(button, select, input, textarea, summary):focus-visible {
+  outline: 2px solid #70e7e8;
+  outline-offset: 3px;
+}
+.cyberpunk-shell button:disabled {
+  color: #967783;
+  background: #21151d;
+  border-color: #57303f;
+}
+.cyberpunk-shell .badge {
+  border: 1px solid #71384b;
+  background: #351923;
+  color: #e0a0b0;
+  border-radius: 0;
+  font: 10px var(--mono);
+}
+.cyberpunk-shell .badge.good {
+  background: #183133;
+  border-color: #326568;
+  color: #76e1de;
+}
+.cyberpunk-shell .badge.wait {
+  background: #392824;
+  color: #e7c68f;
+  border-color: #715246;
+}
+.cyberpunk-shell .workspace-section-nav {
+  display: flex;
+  gap: 0;
+  border: 0;
+  border-bottom: 1px solid #58303e;
+  padding: 0;
+  margin-bottom: 20px;
+  background: none;
+}
+.cyberpunk-shell .workspace-section-nav button {
+  flex: 0 1 auto;
+  min-width: 130px;
+  padding: 10px 24px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: #c794a5;
+}
+.cyberpunk-shell .workspace-section-nav button b {
+  font: 500 14px var(--data);
+}
+.cyberpunk-shell .workspace-section-nav button small {
+  font-size: 11px;
+  color: #a87e90;
+}
+.cyberpunk-shell .workspace-section-nav button[aria-current] {
+  background: #50dce70b;
+  color: #79e6e6;
+  border-bottom-color: #65e1e2;
+}
+.cyberpunk-shell .workspace-section-nav button[aria-current] small {
+  color: #a4c6c9;
+}
+.cyberpunk-shell .workspace-section-content {
+  padding: 0;
+}
+.cyberpunk-shell .evidence-disclosure {
+  border-radius: 0;
+}
+.cyberpunk-shell .evidence-disclosure > summary {
+  color: #c6a3b1;
+  font-size: 12px;
+}
+.cyberpunk-shell .signal-rail {
+  background: #23131b;
+  border: 1px solid #68313e;
+  border-radius: 0;
+  margin-bottom: 22px;
+}
+.cyberpunk-shell .signal-node {
+  background: transparent;
+  border-color: #58303b;
+}
+.cyberpunk-shell .signal-index {
+  background: #361e29;
+  border-color: #713847;
+  color: #e990a7;
+}
+.cyberpunk-shell .signal-node b {
+  font: 500 14px var(--data);
+}
+.cyberpunk-shell .signal-node small {
+  color: #b294a1;
+}
+.cyberpunk-shell .page-grid.session-grid {
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 24px;
+}
+.cyberpunk-shell .primary-instrument {
+  padding: 0 28px 28px;
+}
+.cyberpunk-shell .primary-instrument > .panel-heading {
+  margin: 0 -28px 24px;
+  padding: 30px 28px;
+  min-height: 160px;
+  background:
+    linear-gradient(90deg, #1d111bf5, #1d111b70),
+    url("/art/city-afterhours.png") center/cover;
+  border-bottom: 1px solid #75364a;
+}
+.cyberpunk-shell .panel-heading h1 {
+  font: 500 36px/1.1 var(--data);
+  letter-spacing: 0.02em;
+  color: #f7dce4;
+}
+.cyberpunk-shell .identity-seal {
+  background: #20141cc9;
+  border: 1px solid #f17289;
+  color: #ff9aad;
+  border-radius: 0;
+  width: 64px;
+  height: 74px;
+  clip-path: polygon(0 0, 80% 0, 100% 18%, 100% 100%, 20% 100%, 0 82%);
+}
+.cyberpunk-shell .segmented-control {
+  background: #1c111a;
+  border-color: #643346;
+  border-radius: 0;
+  padding: 0;
+}
+.cyberpunk-shell .segmented-control button {
+  border-radius: 0;
+  color: #bd8d9f;
+}
+.cyberpunk-shell .segmented-control button.active {
+  background: #183338;
+  color: #7bedec;
+  box-shadow: inset 0 -2px #65e1e2;
+}
+.cyberpunk-shell .message-field textarea {
+  min-height: 128px;
+  padding: 16px;
+  font-size: 16px;
+  line-height: 1.6;
+}
+.cyberpunk-shell .delivery-proof {
+  background: #140f17;
+  border: 1px solid #553044;
+  border-radius: 0;
+}
+.cyberpunk-shell .delivery-proof b {
+  color: #d6bdc7;
+  font-weight: 500;
+}
+.cyberpunk-shell .delivery-proof p {
+  color: #f0dce3;
+  font-size: 16px;
+  line-height: 1.75;
+}
+.cyberpunk-shell .facts > div {
+  border-color: #462536;
+}
+.cyberpunk-shell .facts dt {
+  color: #ba849a;
+}
+.cyberpunk-shell .facts dd {
+  color: #e2c0ce;
+}
+.cyberpunk-shell .visual-mode-note {
+  background: #1c2029;
+  border-color: #334a58;
+}
+.cyberpunk-shell .notice {
+  background: #24212b;
+  border: 1px solid #597179;
+  color: #d2e3e5;
+  border-radius: 0;
+}
+.cyberpunk-shell .practice-lab {
+  padding: 14px 18px;
+  border: 1px solid #58303f;
+  background: #1b111a;
+}
+.cyberpunk-shell .practice-lab > summary {
+  cursor: pointer;
+  font: 500 15px var(--data);
+  color: #d3a2b3;
+}
+.cyberpunk-shell .practice-lab > summary span {
+  margin-left: 14px;
+  font: 12px var(--font);
+  color: #a88997;
+}
+.cyberpunk-shell .practice-lab[open] > summary {
+  margin-bottom: 18px;
+}
+.cyberpunk-shell .world-layout {
+  margin: 0;
+}
+.cyberpunk-shell .page-world > .page-heading {
+  background:
+    linear-gradient(90deg, #170e17e8, #170e17a8),
+    url("/art/city-afterhours.png") center/cover;
+}
+.cyberpunk-shell .source-disclosure {
+  color: #af8b9d;
+}
+.cyberpunk-shell .stop-action {
+  background: #4f1f30;
+  border-color: #fd677b;
+  color: #ffb6c4;
+  border-radius: 0;
+}
+.cyberpunk-shell .settings-output-panel {
+  max-width: 980px;
+}
+.cyberpunk-shell .body-copy,
+.cyberpunk-shell .empty-copy {
+  color: #c3a8b5;
+}
+.cyberpunk-shell .status-dot {
+  background: #6ddfdc;
+  box-shadow: none;
+  animation: none;
+}
+.cyberpunk-shell .page-stack {
+  gap: 22px;
+}
+.cyberpunk-shell .voice-workspace > .page-heading {
+  margin-bottom: 0;
+}
+.cyberpunk-shell .voice-workspace > .page-heading p {
+  margin: 0;
+}
+.cyberpunk-shell .voice-workspace > .page-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+  padding-bottom: 12px;
+}
+.cyberpunk-shell .voice-workspace > .page-heading .eyebrow {
+  display: none;
+}
+.cyberpunk-shell .voice-workspace > .page-heading h1 {
+  font-size: 29px;
+  margin: 0;
+}
+.cyberpunk-shell .voice-workspace {
+  gap: 12px;
+}
+.cyberpunk-shell .voice-workspace .workspace-section-nav {
+  margin-bottom: 14px;
+}
+.cyberpunk-shell .voice-workspace .workspace-section-nav button {
+  padding-top: 6px;
+  padding-bottom: 8px;
+}
+.cyberpunk-shell .voice-workspace .workspace-section-nav button small {
+  display: none;
+}
+.cyberpunk-shell .selected-stt-control {
+  padding: 16px 0;
+  gap: 12px;
+}
+.cyberpunk-shell .selected-stt-physical-note,
+.cyberpunk-shell .stt-service-label {
+  margin: 6px 0;
+  font-size: 12px;
+  color: #c3a5b6;
+}
+.cyberpunk-shell .stt-service-label {
+  color: #9dc6ca;
+}
+.cyberpunk-shell .preference-scope-tabs {
+  background: #170e16;
+  border: 1px solid #633244;
+  border-radius: 0;
+  padding: 0;
+}
+.cyberpunk-shell .preference-scope-tabs button {
+  border: 0;
+  border-radius: 0;
+  color: #cba0b2;
+}
+.cyberpunk-shell .preference-scope-tabs button.selected {
+  background: #17353a;
+  color: #76e9e8;
+  box-shadow: inset 0 -2px #65e1e2;
+}
+.cyberpunk-shell .empty-state {
+  background: #19141d;
+  border: 1px solid #4c3043;
+  border-radius: 0;
+  color: #c6a3b6;
+}
+.cyberpunk-shell .source-disclosure {
+  border-left: 2px solid #774252;
+  background: #26151f;
+  padding: 10px 12px;
+  font-size: 12px;
+}
+.cyberpunk-shell .preference-field-grid {
+  grid-template-columns: 1fr;
+  max-width: 980px;
+  gap: 0;
+}
+.cyberpunk-shell .preference-control {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr);
+  align-items: center;
+  gap: 8px 24px;
+  padding: 13px 0;
+  border-bottom: 1px solid #452537;
+  background: transparent;
+  border-radius: 0;
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+}
+.cyberpunk-shell .preference-control > small {
+  grid-column: 1;
+}
+.cyberpunk-shell .preference-control > select {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  text-align: center;
+  color: #78dcdf;
+  border-color: #844355;
+  font: 500 14px var(--data);
+  background-color: #120d14;
+}
+.cyberpunk-shell .preference-preset-grid button {
+  border-radius: 0;
+  background: #20131d;
+  border: 1px solid #663347;
+  color: #d9a6bb;
+}
+.cyberpunk-shell .preference-preset-grid button.selected {
+  border-color: #68e3e3;
+  background: #173139;
+  color: #a1eff0;
+}
+.cyberpunk-shell .preference-control input[type="range"] {
+  accent-color: #65e1e2;
+}
+.cyberpunk-shell .provider-actions {
+  gap: 10px;
+}
+.cyberpunk-shell .account-status {
+  background: #201721;
+  border-color: #653346;
+  border-radius: 0;
+}
+.cyberpunk-shell .account-selector {
+  max-width: 640px;
+}
+.cyberpunk-shell .game-target-compact {
+  padding: 18px 22px;
+}
+.cyberpunk-shell .game-target-compact .panel-title {
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+}
+.cyberpunk-shell .game-target-compact__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  margin-bottom: 12px;
+}
+.cyberpunk-shell .game-target-compact__actions label {
+  width: auto;
+  flex: 0 1 auto;
+  border: 0;
+  background: none;
+  padding: 8px 0;
+}
+.cyberpunk-shell .game-target-compact .empty-state {
+  padding: 12px;
+  min-height: 0;
+}
+.cyberpunk-shell .game-target-compact .connection-evidence {
+  margin-top: 12px;
+  padding-top: 12px;
+}
+.cyberpunk-shell .game-target-compact > .control-reason {
+  margin: 8px 0 0;
+}
+.cyberpunk-shell .selected-stt-control__heading {
+  border-color: #573141;
+}
+.cyberpunk-shell .guide-detail {
+  background: #261924;
+  border-color: #754158;
+  border-radius: 0;
+}
+.cyberpunk-shell .guide-item {
+  border-radius: 0;
+  border-color: #663347;
+}
+.cyberpunk-shell .guide-item.selected {
+  background: #193239;
+  border-color: #497780;
+}
+.cyberpunk-shell .page-world .page-heading {
+  padding: 18px 22px;
+  background:
+    linear-gradient(90deg, #170e17f5, #170e1770),
+    url("/art/city-afterhours.png") center/cover;
+}
+.cyberpunk-shell .setup-dialog {
+  background: #1a1019;
+  border: 1px solid #b54c63;
+  border-radius: 0;
+  box-shadow: 0 24px 100px #000a;
+}
+.cyberpunk-shell .setup-header {
+  background: #2c1521;
+  border-bottom: 1px solid #773447;
+}
+.cyberpunk-shell .setup-header b,
+.cyberpunk-shell .setup-content h1 {
+  color: #f48198;
+}
+.cyberpunk-shell .setup-dialog .eyebrow {
+  color: #c68aa1;
+}
+.cyberpunk-shell .setup-steps {
+  background: #190e17;
+  border-color: #633046;
+}
+.cyberpunk-shell .setup-steps .active {
+  color: #7ce3e3;
+  background: #163136;
+}
+.cyberpunk-shell .setup-dialog :is(input, select, textarea) {
+  border-radius: 0;
+  background: #100d13;
+  border-color: #7e3c54;
+}
+.cyberpunk-shell .setup-footer {
+  border-color: #6c3349;
+  background: #22121d;
+}
+.cyberpunk-shell .setup-check,
+.cyberpunk-shell .setup-selection.selected {
+  background: #27171e;
+  border-color: #70404a;
+  border-radius: 0;
+}
+.cyberpunk-shell .setup-progress li.current {
+  color: #65e1e2;
+  border-color: #65e1e2;
+}
+.cyberpunk-shell .setup-progress li.current span {
+  background: #163136;
+  border-color: #65e1e2;
+}
+.cyberpunk-shell .setup-progress li.current::after {
+  background: #65e1e2;
+}
+.cyberpunk-shell
+  :is(
+    .nav-item,
+    .secondary-action,
+    .workspace-section-nav button,
+    .text-action
+  ) {
+  transition:
+    color 140ms ease,
+    background-color 140ms ease,
+    border-color 140ms ease;
+}
+@media (max-width: 600px) {
+  .cyberpunk-shell .preference-control {
+    grid-template-columns: 1fr;
+  }
+  .cyberpunk-shell .preference-control > select {
+    grid-column: 1;
+    grid-row: auto;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cyberpunk-shell * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+@media (min-width: 1650px) {
+  .cyberpunk-shell .product-main {
+    padding-left: max(40px, calc((100vw - 1560px) / 2));
+    padding-right: max(40px, calc((100vw - 1560px) / 2));
+  }
+}
+@media (max-width: 1100px) {
+  .cyberpunk-shell .product-rail {
+    gap: 20px;
+    padding: 0 20px;
+  }
+  .cyberpunk-shell .nav-item {
+    padding: 0 14px;
+  }
+  .cyberpunk-shell .rail-safety {
+    display: none;
+  }
+  .cyberpunk-shell .product-main {
+    padding: 0 24px 28px;
+  }
+  .cyberpunk-shell .page-grid.session-grid {
+    grid-template-columns: minmax(0, 1fr) 270px;
+    gap: 16px;
+  }
+}
+@media (max-width: 780px) {
+  .cyberpunk-shell .product-rail {
+    height: 116px;
+    flex-wrap: wrap;
+    align-content: center;
+    gap: 8px;
+    padding: 10px 18px 0;
+  }
+  .cyberpunk-shell .brand-lockup {
+    height: 40px;
+  }
+  .cyberpunk-shell .brand-mark {
+    width: 28px;
+    height: 30px;
+  }
+  .cyberpunk-shell .brand-lockup b {
+    font-size: 16px;
+  }
+  .cyberpunk-shell .brand-lockup small {
+    display: none;
+  }
+  .cyberpunk-shell .product-rail nav {
+    width: 100%;
+    flex: 1 1 100%;
+    height: 52px;
+    gap: 0;
+  }
+  .cyberpunk-shell .nav-item {
+    flex: 1;
+    padding: 0 8px;
+    gap: 5px;
+  }
+  .cyberpunk-shell .nav-item b {
+    font-size: 12px;
+    letter-spacing: 0.02em;
+  }
+  .cyberpunk-shell .product-main {
+    height: calc(100vh - 116px);
+    padding: 0 18px 30px;
+  }
+  .cyberpunk-shell .page-grid.session-grid {
+    grid-template-columns: 1fr;
+  }
+  .cyberpunk-shell .page-heading h1 {
+    font-size: 27px;
+  }
+  .cyberpunk-shell .workspace-section-nav {
+    flex-wrap: wrap;
+  }
+  .cyberpunk-shell .workspace-section-nav button {
+    flex: 1 1 45%;
+    padding: 10px;
+    min-width: 0;
+  }
+  .cyberpunk-shell .primary-instrument {
+    padding: 0 18px 20px;
+  }
+  .cyberpunk-shell .primary-instrument > .panel-heading {
+    margin: 0 -18px 20px;
+    padding: 24px 18px;
+  }
+  .cyberpunk-shell .practice-lab > summary span {
+    display: block;
+    margin: 6px 0 0;
+  }
+}
+.cyberpunk-shell .character-record__hero {
+  border-color: #70404a;
+  border-radius: 0;
+  background: linear-gradient(115deg, #301923, #161016);
+  box-shadow: inset 3px 0 #65e1e2;
+}
+.cyberpunk-shell .character-content-editor {
+  border-color: #59353e;
+  border-radius: 0;
+  background: linear-gradient(115deg, #27171e, #151015);
+}
+.cyberpunk-shell .character-content-editor > summary,
+.cyberpunk-shell .technical-disclosure > summary,
+.cyberpunk-shell .character-profile-disclosure > summary {
+  color: #f1dfe0;
+}
+.cyberpunk-shell .character-content-editor[open] > summary,
+.cyberpunk-shell .character-summary-grid > div {
+  border-color: #59353e;
+}
+@media (forced-colors: active) {
+  .cyberpunk-shell,
+  .cyberpunk-shell .product-rail,
+  .cyberpunk-shell .instrument-panel {
+    background: Canvas;
+    color: CanvasText;
+  }
+  .cyberpunk-shell .nav-item.selected {
+    color: Highlight;
+    border-color: Highlight;
+  }
+  .cyberpunk-shell .primary-instrument > .panel-heading {
+    background: Canvas;
+  }
+}

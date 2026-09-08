@@ -85,28 +85,40 @@ import {
 
 const BROWSER_CHARACTER: NativeCharacterInspection = {
   schemaVersion: 1,
-  gameProfileId: "eclipse-harbor",
-  gameDisplayName: "Eclipse Harbor",
-  selectedCharacterId: "mara-venn",
+  gameProfileId: "cyberpunk-2077",
+  gameDisplayName: "Cyberpunk 2077",
+  selectedCharacterId: "misty-olzewski",
   character: {
-    id: "mara-venn",
-    displayName: "Mara Venn",
-    aliases: ["Mara"],
+    id: "misty-olzewski",
+    displayName: "Misty Olszewski",
+    aliases: ["Misty"],
     biography:
-      "Synthetic browser-preview character. Native character authority is not loaded here.",
-    personality: "Measured and direct.",
-    dialogueStyle: "Browser preview only.",
+      "The proprietor of an esoteric shop near Viktor's clinic and a close member of Jackie's circle. She interprets experience through spiritual symbols while remaining attentive to grief and human needs.",
+    personality:
+      "Gentle, perceptive, patient, and resilient. She offers meaning without demanding belief and can sit with uncertainty rather than forcing reassurance.",
+    dialogueStyle:
+      "Soft, deliberate, image-rich, and emotionally attentive. Symbolic readings are framed as invitations, never objective predictions.",
     styleExamples: [],
     openingLines: [],
     backgroundNpc: false,
-    promptRole: "Synthetic lighthouse keeper",
-    promptObjectives: [],
-    promptConstraints: ["Never present browser data as native authority."],
+    promptRole:
+      "Speak as Misty with relationship and story facts bounded by trusted progress.",
+    promptObjectives: [
+      "Listen before interpreting.",
+      "Offer symbolic reflection as optional perspective.",
+      "Acknowledge grief without exploiting it.",
+    ],
+    promptConstraints: [
+      "Do not claim supernatural certainty.",
+      "Do not predict locked story outcomes.",
+      "Do not imitate recorded dialogue or performer.",
+    ],
     knowledgeRefs: [],
     voice: {
-      description: "Preview voice description",
+      description:
+        "Original gentle mid voice with spacious pacing and grounded warmth.",
       locale: "en-US",
-      styleTags: [],
+      styleTags: ["gentle", "reflective", "grounded"],
       providerVoiceId: null,
       adapterId: null,
       catalogVersion: null,
@@ -114,9 +126,9 @@ const BROWSER_CHARACTER: NativeCharacterInspection = {
       userOverrideAllowed: false,
     },
     identity: {
-      strategy: "explicit_preview_fixture",
-      evidence: ["Browser preview fixture"],
-      fallback: "No native identity decision",
+      strategy: "explicit_selection",
+      evidence: ["Bundled Cyberpunk profile preview"],
+      fallback: "explicit_selection",
       automaticFaceRecognitionClaimed: false,
     },
   },
@@ -125,9 +137,9 @@ const BROWSER_CHARACTER: NativeCharacterInspection = {
   deliveredMemory: [],
   memoryScope: {
     userId: "browser-preview",
-    profileId: "eclipse-harbor",
-    gameId: "eclipse-harbor",
-    characterId: "mara-venn",
+    profileId: "cyberpunk-2077",
+    gameId: "cyberpunk-2077",
+    characterId: "misty-olzewski",
     sessionId: null,
     saveId: null,
     crossGameWideningAllowed: false,
@@ -142,11 +154,12 @@ type AsyncState<T> =
 const errorText = (error: unknown, fallback: string) =>
   error instanceof Error ? error.message : fallback;
 
+const CYBERPUNK_PROFILE_ID = "cyberpunk-2077";
+
 export function GameTargetWorkspace({
   nativeAvailable,
   gameProfiles,
   gameProfileId,
-  onGameProfileChange,
   onSelectionChange,
 }: {
   nativeAvailable: boolean;
@@ -155,6 +168,10 @@ export function GameTargetWorkspace({
   onGameProfileChange: (gameProfileId: string) => void;
   onSelectionChange: (selection: NativeGameTargetSelection | null) => void;
 }) {
+  const cyberpunkProfile = gameProfiles.find(
+    (profile) => profile.id === CYBERPUNK_PROFILE_ID,
+  );
+  const activeGameProfileId = cyberpunkProfile?.id ?? gameProfileId;
   const [candidates, setCandidates] = useState<
     AsyncState<NativeGameTargetCandidate[]>
   >(nativeAvailable ? { kind: "loading" } : { kind: "empty" });
@@ -184,6 +201,7 @@ export function GameTargetWorkspace({
       .then((value) => {
         if (!active) return;
         setSelected(value);
+        setConfirmed(value?.userConfirmedOfflineSinglePlayer ?? false);
         onSelectionChange(value);
         setCandidates({ kind: "empty" });
         setNotice(
@@ -230,11 +248,11 @@ export function GameTargetWorkspace({
     setBusy(true);
     setCandidates({ kind: "loading" });
     try {
-      const value = await discoverGameTargets(gameProfileId);
+      const value = await discoverGameTargets(activeGameProfileId);
       if (!value?.length) {
         setCandidates({ kind: "empty" });
         setNotice(
-          `No matching window found. Start ${gameProfiles.find((profile) => profile.id === gameProfileId)?.displayName ?? "the selected game"}, then try again.`,
+          `Cyberpunk 2077 is not running yet. Start the game, reach the main game window, then scan again.`,
         );
       } else {
         setCandidates({ kind: "ready", value });
@@ -254,7 +272,7 @@ export function GameTargetWorkspace({
     setBusy(true);
     try {
       const value = await selectGameTarget(
-        gameProfileId,
+        activeGameProfileId,
         candidate.nativeWindow,
         confirmed,
       );
@@ -323,9 +341,7 @@ export function GameTargetWorkspace({
     }
   };
 
-  const selectedProfile = gameProfiles.find(
-    (profile) => profile.id === gameProfileId,
-  );
+  const cyberpunkProfileReady = !nativeAvailable || Boolean(cyberpunkProfile);
 
   return (
     <section
@@ -334,90 +350,55 @@ export function GameTargetWorkspace({
     >
       <div className="panel-title workspace-heading">
         <div>
-          <span className="eyebrow">Step 1 · Choose and connect</span>
-          <h2 id="target-workspace-title">Your game</h2>
+          <span className="eyebrow">Game link</span>
+          <h2 id="target-workspace-title">Cyberpunk 2077</h2>
         </div>
-        <span className={selected ? "badge wait" : "badge"}>
-          {selected ? "Connected this session" : "Not connected"}
+        <span className={selected ? "badge good" : "badge"}>
+          {selected ? "Connected" : "Not connected"}
         </span>
       </div>
-      <div className="workspace-step workspace-step--profile">
-        <label className="workspace-primary-field">
-          <span>
-            {nativeAvailable
-              ? "Bundled game profile"
-              : "Synthetic review profile"}
-          </span>
-          <select
-            value={gameProfileId}
-            disabled={busy || gameProfiles.length === 0}
-            onChange={(event) => onGameProfileChange(event.target.value)}
-          >
-            {gameProfiles.length === 0 ? (
-              <option value={gameProfileId}>{gameProfileId}</option>
-            ) : (
-              gameProfiles.map((profile) => (
-                <option key={profile.id} value={profile.id}>
-                  {profile.displayName}
-                </option>
-              ))
-            )}
-          </select>
-        </label>
-        <dl
-          className="facts profile-quick-facts"
-          aria-label="Selected game profile"
-        >
-          <div>
-            <dt>Game</dt>
-            <dd>
-              <strong>{selectedProfile?.displayName ?? gameProfileId}</strong>
-            </dd>
-          </div>
-          <div>
-            <dt>Profile</dt>
-            <dd>
-              {selectedProfile
-                ? `${selectedProfile.catalogState === "bundled" ? "Bundled" : "Missing from bundle"} · ${selectedProfile.safety === "offlineOnly" ? "Offline only" : "Single-player only"}`
-                : nativeAvailable
-                  ? "Details unavailable"
-                  : "Browser preview"}
-            </dd>
-          </div>
-          {selectedProfile?.defaultFallback && (
-            <div>
-              <dt>Fallback</dt>
-              <dd>{selectedProfile.defaultFallback}</dd>
-            </div>
-          )}
-        </dl>
-      </div>
-
-      <div className="workspace-step workspace-step--connect">
-        <div className="workspace-step__heading">
-          <div>
-            <span className="eyebrow">Step 2 · Find the running window</span>
-            <h3>Connect this session</h3>
-          </div>
+      <div className="game-target-compact">
+        <p>
+          {selected
+            ? "The game window is connected for this session."
+            : "Start Cyberpunk 2077, then connect its window."}
+        </p>
+        <div className="game-target-compact__actions">
           <button
-            className="secondary-action"
-            disabled={!nativeAvailable || busy}
+            className="primary-action"
+            disabled={!nativeAvailable || !cyberpunkProfileReady || busy}
             onClick={discover}
           >
-            {busy ? "Working…" : "Discover running windows"}
+            {busy ? "Scanning…" : "Scan for Cyberpunk 2077"}
           </button>
+          <label className="authorization-control compact">
+            <input
+              type="checkbox"
+              checked={confirmed}
+              disabled={!nativeAvailable || busy}
+              onChange={(event) => setConfirmed(event.target.checked)}
+            />
+            <span>
+              <b>Single-player session</b>
+            </span>
+          </label>
         </div>
 
         {!nativeAvailable && (
           <div className="empty-state compact">
-            <b>Open the installed app to find a running game</b>
-            <p>The browser preview cannot inspect Windows game processes.</p>
+            <b>Open the Windows app to scan for the game.</b>
+          </div>
+        )}
+
+        {nativeAvailable && !cyberpunkProfile && (
+          <div className="empty-state error compact">
+            <b>The Cyberpunk profile did not load.</b>
           </div>
         )}
 
         {candidates.kind === "loading" && (
           <div className="empty-state compact" aria-live="polite">
-            <b>Checking running game windows…</b>
+            <b>Looking for Cyberpunk2077.exe…</b>
           </div>
         )}
         {candidates.kind === "error" && (
@@ -431,11 +412,7 @@ export function GameTargetWorkspace({
         )}
         {candidates.kind === "empty" && nativeAvailable && !selected && (
           <div className="empty-state compact">
-            <b>No running game selected</b>
-            <p>
-              Start {selectedProfile?.displayName ?? "the selected game"}, then
-              choose Discover running windows.
-            </p>
+            <b>No Cyberpunk game window connected.</b>
           </div>
         )}
         {candidates.kind === "ready" && (
@@ -456,51 +433,75 @@ export function GameTargetWorkspace({
                   disabled={busy || !confirmed}
                   onClick={() => void choose(candidate)}
                 >
-                  Bind this process
+                  Connect this window
                 </button>
               </article>
             ))}
           </div>
         )}
-
-        <label className="authorization-control">
-          <input
-            type="checkbox"
-            checked={confirmed}
-            disabled={!nativeAvailable || busy}
-            onChange={(event) => setConfirmed(event.target.checked)}
-          />
-          <span>
-            <b>I am using offline single-player</b>
-            <small>
-              Required to connect a process. Visual capture still uses a
-              separate safety check.
-            </small>
-          </span>
-        </label>
       </div>
 
       {selected && (
         <article className="selected-target-card selected-target-card--primary">
           <header>
             <div>
-              <span className="eyebrow">Current session</span>
+              <span className="eyebrow">Connected game</span>
               <b>{selected.target.title}</b>
               <small>{selected.target.executableName}</small>
             </div>
-            <span className="badge wait">Game window selected</span>
+            <span className="badge good">Window connected</span>
           </header>
-          <p className="control-reason">
-            Visual capture is not available for this target yet. Conversation
-            can continue with audio and subtitles.
-          </p>
           <div className="target-toolbar">
             <button className="quiet-button" disabled={busy} onClick={clear}>
-              Clear binding
+              Disconnect game
             </button>
           </div>
-          <details className="technical-disclosure">
-            <summary>Connection and safety details</summary>
+        </article>
+      )}
+
+      <details className="technical-disclosure actor-picker-disclosure">
+        <summary>Connection tools</summary>
+        <p>
+          Select the NPC you are facing after the game window is connected.
+          Their character profile below controls voice and memory.
+        </p>
+        <div className="target-toolbar manual-actor-picker-controls">
+          <button
+            className="secondary-action"
+            disabled={
+              !nativeAvailable ||
+              !selected ||
+              busy ||
+              actorPicker.state === "waiting"
+            }
+            onClick={startActorPicker}
+          >
+            Select NPC on screen
+          </button>
+          <button
+            className="quiet-button"
+            disabled={busy || actorPicker.state !== "waiting"}
+            onClick={cancelActorPicker}
+          >
+            Cancel selection
+          </button>
+          <span
+            className={
+              actorPicker.state === "selected" ? "badge good" : "badge wait"
+            }
+          >
+            {actorPicker.state === "waiting"
+              ? "Waiting for click"
+              : actorPicker.state === "selected"
+                ? "NPC selected"
+                : actorPicker.state === "cancelled"
+                  ? "Selection cancelled"
+                  : "Unavailable"}
+          </span>
+        </div>
+        <p className="source-disclosure">{actorPicker.detail}</p>
+        {selected && (
+          <div className="connection-evidence">
             <dl className="facts">
               <div>
                 <dt>Process</dt>
@@ -528,61 +529,8 @@ export function GameTargetWorkspace({
               protection evidence for this commercial target. The task-owned
               synthetic fixture uses a separate review-only verifier.
             </small>
-          </details>
-        </article>
-      )}
-
-      <details className="technical-disclosure actor-picker-disclosure">
-        <summary>In-game character targeting</summary>
-        <p>
-          Use the native picker after connecting a game window. This targets a
-          visible actor; it does not change the authored character selected for
-          dialogue.
-        </p>
-        <div className="target-toolbar manual-actor-picker-controls">
-          <button
-            className="secondary-action"
-            disabled={
-              !nativeAvailable ||
-              !selected ||
-              busy ||
-              actorPicker.state === "waiting"
-            }
-            onClick={startActorPicker}
-          >
-            Select character in game
-          </button>
-          <button
-            className="quiet-button"
-            disabled={busy || actorPicker.state !== "waiting"}
-            onClick={cancelActorPicker}
-          >
-            Cancel character selection
-          </button>
-          <span
-            className={
-              actorPicker.state === "selected" ? "badge good" : "badge wait"
-            }
-          >
-            {actorPicker.state === "waiting"
-              ? "Waiting for native click"
-              : actorPicker.state === "selected"
-                ? "Character selected"
-                : actorPicker.state === "cancelled"
-                  ? "Selection cancelled"
-                  : "Selection unavailable"}
-          </span>
-        </div>
-        <p className="source-disclosure">{actorPicker.detail}</p>
-      </details>
-
-      <details className="technical-disclosure">
-        <summary>How game connections are verified</summary>
-        <p className="source-disclosure">
-          {nativeAvailable
-            ? "The native app enumerates Windows processes and windows for the selected bundled profile. A binding lasts only for this app session and is revalidated before use."
-            : "Process discovery and current-session binding require the native Windows shell."}
-        </p>
+          </div>
+        )}
       </details>
       <p className="inline-status" role="status">
         {notice}
@@ -603,6 +551,8 @@ export function CharacterDatabase({
   const [catalog, setCatalog] = useState<NativeCharacterCatalogSnapshot | null>(
     null,
   );
+  const [mouthPackRegistry, setMouthPackRegistry] =
+    useState<CharacterMouthPackState | null>(null);
   const [state, setState] = useState<AsyncState<NativeCharacterInspection>>(
     nativeAvailable
       ? { kind: "loading" }
@@ -650,6 +600,20 @@ export function CharacterDatabase({
   useEffect(() => {
     void inspect();
   }, [inspect]);
+  useEffect(() => {
+    if (!nativeAvailable) return;
+    let active = true;
+    void readCharacterMouthPackState()
+      .then((nextRegistry) => {
+        if (active) setMouthPackRegistry(nextRegistry);
+      })
+      .catch(() => {
+        if (active) setMouthPackRegistry(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [nativeAvailable]);
   const value = state.kind === "ready" ? state.value : null;
   const choose = async (characterId: string) => {
     setBusy(true);
@@ -677,24 +641,24 @@ export function CharacterDatabase({
     >
       <header className="panel-title character-database__title workspace-heading">
         <div>
-          <span className="eyebrow">Step 3 · Choose who answers</span>
-          <h2 id="character-db-title">Characters in this game</h2>
+          <span className="eyebrow">Night City roster</span>
+          <h2 id="character-db-title">Choose who answers</h2>
         </div>
         <span className={nativeAvailable ? "badge good" : "badge wait"}>
-          {nativeAvailable ? "Game-scoped roster" : "Browser fixture"}
+          {nativeAvailable ? "Cyberpunk profiles" : "Preview"}
         </span>
       </header>
       <p className="source-disclosure">
         {nativeAvailable
-          ? "Choose a character from the selected game. Opening a profile does not change who answers; use the selection button to save that choice."
-          : "One synthetic preview record keeps this layout inspectable. It cannot be edited or selected natively."}
+          ? "Open a profile to inspect it, then choose Use this character to make it active. Voice and mouth motion are shown separately because they have different setup requirements."
+          : "The preview shows the layout. Character choices are saved by the Windows app."}
       </p>
       {catalog && (
         <div className="character-roster-block">
           <div className="workspace-step__heading">
             <div>
               <span className="eyebrow">{catalog.gameDisplayName}</span>
-              <h3>Available characters</h3>
+              <h3>People you can configure</h3>
             </div>
             <span className="badge">{catalog.characters.length}</span>
           </div>
@@ -708,31 +672,55 @@ export function CharacterDatabase({
                 <p>Choose another bundled game profile.</p>
               </div>
             ) : (
-              catalog.characters.map((entry) => (
-                <button
-                  key={entry.id}
-                  className={value?.character.id === entry.id ? "selected" : ""}
-                  aria-pressed={value?.character.id === entry.id}
-                  disabled={busy}
-                  onClick={() => void inspect(entry.id)}
-                >
-                  <span>{entry.displayName.slice(0, 2).toUpperCase()}</span>
-                  <span>
-                    <b>{entry.displayName}</b>
-                    <small>
-                      {entry.voiceDescription ||
-                        (entry.backgroundNpc
-                          ? "Background character"
-                          : "Voice not described")}
-                    </small>
-                  </span>
-                  <i>
-                    {catalog.selectedCharacterId === entry.id
-                      ? "Selected for turns"
-                      : "Open"}
-                  </i>
-                </button>
-              ))
+              catalog.characters.map((entry) => {
+                const enabledMouthPack = mouthPackRegistry?.enabled.some(
+                  (packEntry) =>
+                    packEntry.gameProfileId === gameProfileId &&
+                    packEntry.characterId === entry.id,
+                );
+                const installedMouthPack = mouthPackRegistry?.installed.some(
+                  (packEntry) =>
+                    packEntry.gameProfileId === gameProfileId &&
+                    packEntry.characterId === entry.id,
+                );
+                return (
+                  <button
+                    key={entry.id}
+                    className={
+                      value?.character.id === entry.id ? "selected" : ""
+                    }
+                    aria-pressed={value?.character.id === entry.id}
+                    disabled={busy}
+                    onClick={() => void inspect(entry.id)}
+                  >
+                    <span>{entry.displayName.slice(0, 2).toUpperCase()}</span>
+                    <span>
+                      <b>{entry.displayName}</b>
+                      <small>
+                        {entry.backgroundNpc
+                          ? "Encounter profile for unlisted NPCs"
+                          : entry.voiceDescription
+                            ? "Voice direction included"
+                            : "Choose a voice"}
+                      </small>
+                      <small className="character-mouth-pack-state">
+                        {enabledMouthPack
+                          ? "Full mouth pack active"
+                          : installedMouthPack
+                            ? "Full mouth pack installed"
+                            : "Voice only · no mouth pack"}
+                      </small>
+                    </span>
+                    <i>
+                      {catalog.selectedCharacterId === entry.id
+                        ? "Active"
+                        : entry.backgroundNpc
+                          ? "Street NPC mode"
+                          : "View"}
+                    </i>
+                  </button>
+                );
+              })
             )}
           </aside>
         </div>
@@ -772,35 +760,85 @@ export function CharacterDatabase({
               onClick={() => void choose(value.character.id)}
             >
               {value.selectedCharacterId === value.character.id
-                ? "Selected for turns"
-                : "Use for ordinary turns"}
+                ? "Active character"
+                : "Use this character"}
             </button>
           </div>
-          <dl className="facts spacious character-native-facts character-summary-grid">
+          <dl
+            className="facts spacious character-native-facts character-summary-grid"
+            aria-label={`${value.character.displayName} setup overview`}
+          >
             <div>
-              <dt>Voice</dt>
+              <dt>Dialogue profile</dt>
               <dd>
-                {value.character.voice.description || "No voice description"}
+                {value.character.biography || value.character.promptRole
+                  ? "Ready"
+                  : "Needs character details"}
               </dd>
             </div>
             <div>
-              <dt>Language</dt>
-              <dd>{value.character.voice.locale || "Not specified"}</dd>
+              <dt>Voice</dt>
+              <dd>Chosen in Voice setup · {value.character.voice.locale}</dd>
             </div>
             <div>
-              <dt>Identity fallback</dt>
-              <dd>{value.character.identity.fallback.replaceAll("_", " ")}</dd>
+              <dt>Mouth motion</dt>
+              <dd>
+                {mouthPackRegistry?.enabled.some(
+                  (entry) =>
+                    entry.gameProfileId === value.gameProfileId &&
+                    entry.characterId === value.character.id,
+                )
+                  ? "Full pack active · visual tracking still required"
+                  : mouthPackRegistry?.installed.some(
+                        (entry) =>
+                          entry.gameProfileId === value.gameProfileId &&
+                          entry.characterId === value.character.id,
+                      )
+                    ? "Full pack installed · enable below"
+                    : mouthPackRegistry || !nativeAvailable
+                      ? "Voice only · mouth pack needed"
+                      : "Checking available motion"}
+              </dd>
             </div>
             <div>
-              <dt>Delivered turns</dt>
+              <dt>Memory</dt>
               <dd>
                 {value.deliveredMemory.length} saved turn
                 {value.deliveredMemory.length === 1 ? "" : "s"}
               </dd>
             </div>
           </dl>
+          {value.character.backgroundNpc && (
+            <section
+              className="street-npc-mode"
+              aria-labelledby="street-npc-mode-title"
+            >
+              <div>
+                <span className="eyebrow">For everyone else in Night City</span>
+                <h4 id="street-npc-mode-title">Stable street NPC mode</h4>
+              </div>
+              <p>
+                An unlisted NPC gets one encounter identity, a consistent
+                profile voice, and separate memory. The app keeps that identity
+                while you stay with the same person; it does not guess who they
+                are from their appearance.
+              </p>
+              <dl className="facts">
+                <div>
+                  <dt>Conversation</dt>
+                  <dd>Available through voice and subtitles</dd>
+                </div>
+                <div>
+                  <dt>Mouth motion</dt>
+                  <dd>
+                    Voice and subtitles only; basic source motion is in testing
+                  </dd>
+                </div>
+              </dl>
+            </section>
+          )}
           <details className="character-profile-disclosure">
-            <summary>Character profile</summary>
+            <summary>Story and speaking style</summary>
             <dl className="facts spacious">
               <div>
                 <dt>Biography</dt>
@@ -833,110 +871,111 @@ export function CharacterDatabase({
             gameProfileId={value.gameProfileId}
             characterId={value.character.id}
           />
-          <details className="technical-disclosure">
-            <summary>Identity, voice, and memory scope</summary>
-            <dl className="facts spacious">
-              <div>
-                <dt>Identity method</dt>
-                <dd>
-                  {value.character.identity.strategy.replaceAll("_", " ")}
-                </dd>
-              </div>
-              <div>
-                <dt>Automatic face recognition</dt>
-                <dd>
-                  {value.character.identity.automaticFaceRecognitionClaimed
-                    ? "Claimed by profile"
-                    : "Not claimed"}
-                </dd>
-              </div>
-              <div>
-                <dt>Voice binding</dt>
-                <dd>
-                  {value.character.voice.providerVoiceId ??
-                    "Resolved by the selected provider loadout"}
-                </dd>
-              </div>
-              <div>
-                <dt>Memory scope</dt>
-                <dd>
-                  {value.memoryScope.gameId} / {value.memoryScope.characterId} ·
-                  cross-game widening{" "}
-                  {value.memoryScope.crossGameWideningAllowed
-                    ? "allowed"
-                    : "blocked"}
-                </dd>
-              </div>
-            </dl>
+          <details className="technical-disclosure character-data-disclosure">
+            <summary>Advanced character data</summary>
+            <details>
+              <summary>Identity, voice, and memory scope</summary>
+              <dl className="facts spacious">
+                <div>
+                  <dt>Identity method</dt>
+                  <dd>
+                    {value.character.identity.strategy.replaceAll("_", " ")}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Automatic face recognition</dt>
+                  <dd>
+                    {value.character.identity.automaticFaceRecognitionClaimed
+                      ? "Available in this profile"
+                      : "Manual selection"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Voice binding</dt>
+                  <dd>
+                    {value.character.voice.providerVoiceId ??
+                      "Resolved by the selected voice setup"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Memory scope</dt>
+                  <dd>
+                    {value.memoryScope.gameId} / {value.memoryScope.characterId}
+                  </dd>
+                </div>
+              </dl>
+            </details>
+            <details>
+              <summary>
+                Authored knowledge · {value.authoredKnowledge.length}
+              </summary>
+              {value.authoredKnowledge.length === 0 ? (
+                <p>No authored records for this character.</p>
+              ) : (
+                <ul>
+                  {value.authoredKnowledge.map((record) => (
+                    <li key={record.id}>
+                      <b>
+                        {record.authority} · {record.spoilerTier}
+                      </b>
+                      <span>{record.text}</span>
+                      <small>provenance {record.provenanceId}</small>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </details>
+            <details>
+              <summary>Provenance · {value.provenance.length}</summary>
+              {value.provenance.length === 0 ? (
+                <p>No provenance rows.</p>
+              ) : (
+                <ul>
+                  {value.provenance.map((record) => (
+                    <li key={record.id}>
+                      <b>{record.title}</b>
+                      <span>
+                        {record.kind} ·{" "}
+                        {record.reviewStatus ?? "review state absent"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </details>
+            <details>
+              <summary>
+                Delivered memory · {value.deliveredMemory.length}
+              </summary>
+              {value.deliveredMemory.length === 0 ? (
+                <p>No delivered turns in the native memory scope.</p>
+              ) : (
+                <ol>
+                  {value.deliveredMemory.map((turn) => (
+                    <li key={turn.turnId}>
+                      <b>{turn.speaker}</b>
+                      <span>{turn.deliveredText}</span>
+                      <small>
+                        Source {turn.provenanceSourceKind} ·{" "}
+                        {turn.provenanceSourceId ??
+                          turn.provenanceSourceUri ??
+                          "source identifier unavailable"}
+                      </small>
+                      <small>
+                        Stored record {turn.turnId} · receipt{" "}
+                        {turn.deliveryReceiptId ?? "unavailable"}
+                      </small>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </details>
+            <CharacterMemoryLifecycle
+              nativeAvailable={nativeAvailable}
+              gameProfileId={value.gameProfileId}
+              characterId={value.character.id}
+            />
           </details>
-          <details>
-            <summary>
-              Authored knowledge · {value.authoredKnowledge.length}
-            </summary>
-            {value.authoredKnowledge.length === 0 ? (
-              <p>No authored records for this character.</p>
-            ) : (
-              <ul>
-                {value.authoredKnowledge.map((record) => (
-                  <li key={record.id}>
-                    <b>
-                      {record.authority} · {record.spoilerTier}
-                    </b>
-                    <span>{record.text}</span>
-                    <small>provenance {record.provenanceId}</small>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </details>
-          <details>
-            <summary>Provenance · {value.provenance.length}</summary>
-            {value.provenance.length === 0 ? (
-              <p>No provenance rows.</p>
-            ) : (
-              <ul>
-                {value.provenance.map((record) => (
-                  <li key={record.id}>
-                    <b>{record.title}</b>
-                    <span>
-                      {record.kind} ·{" "}
-                      {record.reviewStatus ?? "review state absent"}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </details>
-          <details>
-            <summary>Delivered memory · {value.deliveredMemory.length}</summary>
-            {value.deliveredMemory.length === 0 ? (
-              <p>No delivered turns in the native memory scope.</p>
-            ) : (
-              <ol>
-                {value.deliveredMemory.map((turn) => (
-                  <li key={turn.turnId}>
-                    <b>{turn.speaker}</b>
-                    <span>{turn.deliveredText}</span>
-                    <small>
-                      Source {turn.provenanceSourceKind} ·{" "}
-                      {turn.provenanceSourceId ??
-                        turn.provenanceSourceUri ??
-                        "source identifier unavailable"}
-                    </small>
-                    <small>
-                      Stored record {turn.turnId} · receipt{" "}
-                      {turn.deliveryReceiptId ?? "unavailable"}
-                    </small>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </details>
-          <CharacterMemoryLifecycle
-            nativeAvailable={nativeAvailable}
-            gameProfileId={value.gameProfileId}
-            characterId={value.character.id}
-          />
         </div>
       )}
       <p className="inline-status" role="status">
@@ -1318,19 +1357,33 @@ export function CharacterMouthPackWorkspace({
   return (
     <details className="character-mouth-pack technical-disclosure">
       <summary>
-        <span>Character mouth pack</span>
+        <span>Mouth motion</span>
         <span className={scopedEnabled ? "badge good" : "badge wait"}>
           {scopedEnabled
-            ? "Enabled"
+            ? "Full pack active"
             : scopedInstalled.length
-              ? `${scopedInstalled.length} installed`
-              : "Optional"}
+              ? "Full pack installed"
+              : registry || !nativeAvailable
+                ? "No full mouth pack"
+                : "Checking"}
         </span>
       </summary>
       <p className="source-disclosure">
-        Import a prepared mouth pack for this character. You can enable it when
-        the character is tracked in the game.
+        Voice and subtitles work independently. Basic source motion is in
+        testing and is not available for ordinary turns. A reviewed pack for
+        this exact character adds richer oral detail and still requires the
+        matching NPC on screen.
       </p>
+      {!scopedEnabled && scopedInstalled.length === 0 && registry && (
+        <div className="empty-state compact character-mouth-pack__empty">
+          <b>No full mouth pack for this character yet</b>
+          <p>
+            Ordinary turns stay available through voice and subtitles. Basic
+            source motion remains in visual testing. Import a reviewed pack for
+            mouth animation.
+          </p>
+        </div>
+      )}
       <div className="character-mouth-pack__files">
         <label>
           <span>Atlas manifest</span>
@@ -1368,7 +1421,7 @@ export function CharacterMouthPackWorkspace({
         }
         onClick={() => void review()}
       >
-        {busy === "review" ? "Reviewing exact files…" : "Review mouth pack"}
+        {busy === "review" ? "Checking files…" : "Check selected files"}
       </button>
       {preview && (
         <section
@@ -1376,7 +1429,7 @@ export function CharacterMouthPackWorkspace({
           aria-label="Reviewed mouth pack"
         >
           <div>
-            <span className="eyebrow">Binding checks passed</span>
+            <span className="eyebrow">Character match confirmed</span>
             <h4>
               {preview.gameProfileId} / {preview.characterId}
             </h4>
@@ -1419,17 +1472,17 @@ export function CharacterMouthPackWorkspace({
               onClick={() => void importReviewed()}
             >
               {installed
-                ? "Reviewed revision imported"
+                ? "Pack imported"
                 : busy === "import"
                   ? "Importing…"
-                  : "Import reviewed pack"}
+                  : "Import this pack"}
             </button>
             <button
               className="secondary-action"
               disabled={busy !== null || installed === null}
               onClick={() => void enable()}
             >
-              {busy === "enable" ? "Enabling…" : "Enable for selected actor"}
+              {busy === "enable" ? "Enabling…" : "Use for this character"}
             </button>
           </div>
         </section>

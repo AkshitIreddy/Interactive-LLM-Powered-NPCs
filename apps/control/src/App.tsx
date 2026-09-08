@@ -1,5 +1,6 @@
 import "./product.css";
 import "./review.css";
+import "./cyberpunk.css";
 import { ProductConsole } from "./ProductConsole";
 import { ThemeSpecimen } from "./ThemeSpecimen";
 

@@ -10,7 +10,7 @@ describe("NPC 2.0 product console", () => {
     resetBrowserLoadoutsForTests();
   });
 
-  it("renders the compact session deck and five owned destinations", async () => {
+  it("renders four game-menu destinations with troubleshooting out of primary navigation", async () => {
     render(<App />);
     expect(
       screen.getByRole("heading", { name: "Mara Venn" }),
@@ -18,15 +18,12 @@ describe("NPC 2.0 product console", () => {
     expect(screen.getByLabelText("Session signal rail")).toHaveTextContent(
       "Eclipse Harbor",
     );
-    for (const label of [
-      "Session",
-      "Games & characters",
-      "Voice & models",
-      "Diagnostics",
-      "Settings & help",
-    ]) {
+    for (const label of ["Channel", "Night City", "Loadout", "Settings"]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
+    expect(
+      screen.queryByRole("button", { name: "Diagnostics" }),
+    ).not.toBeInTheDocument();
     expect(
       await screen.findByText("Browser preview — native actions unavailable"),
     ).toBeInTheDocument();
@@ -36,21 +33,19 @@ describe("NPC 2.0 product console", () => {
     window.history.replaceState(null, "", "/?page=characters");
     render(<App />);
     expect(
-      screen.getByRole("heading", { name: "Games & characters" }),
+      screen.getByRole("heading", { name: "Night City" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(
-        /Open the Windows app to find running games and manage their characters/i,
-      ),
+      screen.getByText(/Your Cyberpunk characters, voices and memories/i),
     ).toBeInTheDocument();
   });
 
   it("navigates without a reload and updates the owned route", async () => {
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Voice & models" }));
+    await user.click(screen.getByRole("button", { name: "Loadout" }));
     expect(
-      screen.getByRole("heading", { name: "Voice & models" }),
+      screen.getByRole("heading", { name: "Neural loadout" }),
     ).toBeInTheDocument();
     expect(window.location.search).toBe("?page=voice");
   });
@@ -111,17 +106,17 @@ describe("NPC 2.0 product console", () => {
     render(<App />);
     expect(
       screen.getByRole("button", {
-        name: /Capture a PTT receipt first/i,
+        name: /Record a message first/i,
       }),
     ).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: /Arm live PTT capture/i }),
+      screen.getByRole("button", { name: /Enable push-to-talk/i }),
     ).toBeDisabled();
     expect(
       screen.getByText(/Browser preview cannot allocate microphone/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("No delivered turn in this session"),
+      screen.getByText("Your conversation starts here"),
     ).toBeInTheDocument();
   });
 
@@ -141,19 +136,19 @@ describe("NPC 2.0 product console", () => {
     {
       query: "retention",
       action: "Review privacy controls",
-      destination: "Voice & models",
+      destination: "Neural loadout",
       role: "heading" as const,
     },
     {
       query: "loadout",
-      action: "Open Voice & models",
-      destination: "Voice & models",
+      action: "Open loadout",
+      destination: "Neural loadout",
       role: "heading" as const,
     },
     {
       query: "process",
-      action: "Open World",
-      destination: "Games & characters",
+      action: "Open Night City",
+      destination: "Night City",
       role: "heading" as const,
     },
     {

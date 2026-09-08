@@ -70,7 +70,7 @@ describe("CharacterMouthPackWorkspace", () => {
         characterId="misty-olzewski"
       />,
     );
-    await user.click(screen.getByText("Character mouth pack"));
+    await user.click(screen.getByText("Mouth motion"));
     await user.upload(
       screen.getByLabelText("Choose mouth atlas JSON"),
       new File(['{"schemaVersion":2}'], "atlas.json", {
@@ -83,7 +83,9 @@ describe("CharacterMouthPackWorkspace", () => {
         type: "application/octet-stream",
       }),
     );
-    await user.click(screen.getByRole("button", { name: "Review mouth pack" }));
+    await user.click(
+      screen.getByRole("button", { name: "Check selected files" }),
+    );
 
     await waitFor(() => expect(mouthPacks.inspect).toHaveBeenCalledOnce());
     expect(mouthPacks.inspect).toHaveBeenCalledWith({
@@ -95,9 +97,7 @@ describe("CharacterMouthPackWorkspace", () => {
     expect(mouthPacks.importPack).not.toHaveBeenCalled();
     expect(mouthPacks.enable).not.toHaveBeenCalled();
 
-    await user.click(
-      screen.getByRole("button", { name: "Import reviewed pack" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Import this pack" }));
     expect(mouthPacks.importPack).toHaveBeenCalledWith(
       expect.objectContaining({ gameProfileId: "cyberpunk-2077" }),
       digest,
@@ -105,7 +105,7 @@ describe("CharacterMouthPackWorkspace", () => {
     expect(mouthPacks.enable).not.toHaveBeenCalled();
 
     await user.click(
-      screen.getByRole("button", { name: "Enable for selected actor" }),
+      screen.getByRole("button", { name: "Use for this character" }),
     );
     expect(mouthPacks.enable).toHaveBeenCalledWith("cyberpunk-2077", digest);
   });
@@ -147,8 +147,10 @@ describe("CharacterMouthPackWorkspace", () => {
         characterId="misty-olzewski"
       />,
     );
-    await user.click(screen.getByText("Character mouth pack"));
-    expect((await screen.findAllByText("Enabled")).length).toBeGreaterThan(0);
+    await user.click(screen.getByText("Mouth motion"));
+    expect(
+      (await screen.findAllByText("Full pack active")).length,
+    ).toBeGreaterThan(0);
     await user.click(
       screen.getByRole("button", { name: "Disable mouth pack" }),
     );
@@ -165,10 +167,8 @@ describe("CharacterMouthPackWorkspace", () => {
         characterId="misty-olzewski"
       />,
     );
-    await user.click(screen.getByText("Character mouth pack"));
-    expect(
-      screen.getByText(/prepared mouth pack for this character/i),
-    ).toBeVisible();
+    await user.click(screen.getByText("Mouth motion"));
+    expect(screen.getByText(/not available for ordinary turns/i)).toBeVisible();
     expect(screen.getByLabelText("Choose mouth atlas JSON")).toBeDisabled();
     expect(screen.getByText(/Browser preview is read-only/i)).toBeVisible();
   });

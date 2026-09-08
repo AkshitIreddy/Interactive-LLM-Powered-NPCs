@@ -241,8 +241,8 @@ export function ProductPreferencesWorkspace({
           </span>
         </div>
         <p className="source-disclosure">
-          Start globally, then override only the selected game or character.
-          Saving defaults never installs a model or changes provider routes.
+          Set your defaults here. Give a game or character its own settings
+          whenever you want.
         </p>
 
         <div className="preference-scope-tabs" aria-label="Preference scope">
@@ -273,10 +273,9 @@ export function ProductPreferencesWorkspace({
 
         {!nativeAvailable && (
           <div className="empty-state">
-            <b>No browser preference fixtures</b>
+            <b>Your preferences live in the desktop app</b>
             <p>
-              Open the installed app to read effective inheritance, save intent,
-              or reset a scope. Browser preview does not invent preset state.
+              Open it to adjust conversation style, performance and controls.
             </p>
           </div>
         )}
@@ -342,8 +341,8 @@ export function ProductPreferencesWorkspace({
             <div className="preference-overrides">
               <h3>How conversations behave</h3>
               <p>
-                “Inherit” follows the broader scope. Each field shows the value
-                that will win after you save.
+                Keep the default or choose your own value. Changes apply when
+                you save.
               </p>
               <div className="preference-field-grid">
                 <PreferenceSelect
@@ -437,8 +436,8 @@ export function ProductPreferencesWorkspace({
                       )
                     }
                   >
-                    <option value="inherit">Inherit</option>
-                    <option value="override">Override</option>
+                    <option value="inherit">Use default</option>
+                    <option value="override">Custom</option>
                   </select>
                   <input
                     aria-label="Creativity value"
@@ -454,8 +453,8 @@ export function ProductPreferencesWorkspace({
                     }
                   />
                   <small>
-                    Effective {effective.creativity.value}/100 ·{" "}
-                    {inheritedLabel(effective.creativity)}
+                    Current: {effective.creativity.value}/100 ·{" "}
+                    {scopeLabel(effective.creativity.sourceScope)}
                   </small>
                 </label>
                 <BooleanPreference
@@ -472,8 +471,7 @@ export function ProductPreferencesWorkspace({
                 />
               </div>
               <p className="preference-control-note">
-                An overlay request is saved here. Presentation still waits for a
-                trusted native game target and capture-exclusion evidence.
+                The overlay appears after a game window is connected and ready.
               </p>
               <details className="technical-disclosure optional-capability-disclosure">
                 <summary>Optional memory, vision, and presence</summary>
@@ -499,11 +497,11 @@ export function ProductPreferencesWorkspace({
                     />
                   ))}
                 </div>
+                <p className="preference-control-note">
+                  Webcam presence is not available yet; this stores your
+                  preference.
+                </p>
               </details>
-              <p className="preference-control-note">
-                Webcam presence is consent intent only. No camera producer,
-                capture permission, or route is activated by this setting.
-              </p>
             </div>
 
             <details className="technical-disclosure preference-technical-disclosure">
@@ -815,16 +813,13 @@ function SubtitlePreferencesPanel({
         </span>
       </div>
       <p className="source-disclosure">
-        Choose a validated look, then adjust its safe area, scale, backplate,
-        and opacity. These values are pinned into the next native turn.
+        Choose a style, then tune the size, position and background.
       </p>
 
       {!nativeAvailable && (
         <div className="empty-state compact">
-          <b>No browser subtitle fixtures</b>
-          <p>
-            Open the installed app to inspect validated native style assets.
-          </p>
+          <b>Customize subtitles in the desktop app</b>
+          <p>Your selected style applies to the next conversation.</p>
         </div>
       )}
       {nativeAvailable && busy === "load" && !snapshot && (
@@ -1146,7 +1141,7 @@ function EffectiveConfigurationInspector({
       </p>
       {!nativeAvailable && (
         <div className="empty-state compact">
-          <b>No browser configuration projection</b>
+          <b>Open the desktop app to see your active settings</b>
         </div>
       )}
       {busy && !snapshot && (
@@ -1252,7 +1247,7 @@ function PreferenceSelect<T extends string>({
         value={value}
         onChange={(event) => onChange(event.target.value)}
       >
-        {allowInherit && <option value="">Inherit</option>}
+        {allowInherit && <option value="">Use default</option>}
         {options.map(([option, optionLabel]) => (
           <option key={option} value={option}>
             {optionLabel}
@@ -1260,8 +1255,10 @@ function PreferenceSelect<T extends string>({
         ))}
       </select>
       <small>
-        Effective {String(inherited.value).replace(/([A-Z])/g, " $1")} ·{" "}
-        {inheritedLabel(inherited)}
+        Current:{" "}
+        {options.find(([option]) => option === inherited.value)?.[1] ??
+          readableIdentifier(inherited.value)}{" "}
+        · {scopeLabel(inherited.sourceScope)}
       </small>
     </label>
   );
@@ -1292,12 +1289,13 @@ function BooleanPreference({
           )
         }
       >
-        <option value="inherit">Inherit</option>
+        <option value="inherit">Use default</option>
         <option value="on">On</option>
         <option value="off">Off</option>
       </select>
       <small>
-        Effective {inherited.value ? "on" : "off"} · {inheritedLabel(inherited)}
+        Current: {inherited.value ? "On" : "Off"} ·{" "}
+        {scopeLabel(inherited.sourceScope)}
       </small>
     </label>
   );

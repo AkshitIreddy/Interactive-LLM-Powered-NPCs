@@ -38,6 +38,7 @@ const bridge = vi.hoisted(() => ({
   benchmarkStart: vi.fn(),
   benchmarkCancel: vi.fn(),
   benchmarkReport: vi.fn(),
+  mouthPackState: vi.fn(),
 }));
 
 vi.mock("./tauriBridge", async (importOriginal) => ({
@@ -77,6 +78,11 @@ vi.mock("./tauriBridge", async (importOriginal) => ({
   startThisPcBenchmark: bridge.benchmarkStart,
   cancelThisPcBenchmark: bridge.benchmarkCancel,
   readThisPcBenchmarkReport: bridge.benchmarkReport,
+}));
+
+vi.mock("./characterMouthPacks", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./characterMouthPacks")>()),
+  readCharacterMouthPackState: bridge.mouthPackState,
 }));
 
 import {
@@ -610,6 +616,12 @@ describe("native product workspaces", () => {
       detail: "Lifecycle updated; memory was not migrated.",
     });
     bridge.benchmarkStatus.mockResolvedValue(idleBenchmark);
+    bridge.mouthPackState.mockResolvedValue({
+      schemaVersion: 1,
+      installed: [],
+      enabled: [],
+      detail: "No character mouth packs are installed.",
+    });
   });
 
   it("keeps browser preview immutable and hardware state explicitly unavailable", () => {
@@ -626,10 +638,18 @@ describe("native product workspaces", () => {
         <LocalResourcePlanner models={[]} />
       </>,
     );
-    expect(screen.getByText("Synthetic review profile")).toBeInTheDocument();
-    expect(screen.queryByText("Bundled game profile")).not.toBeInTheDocument();
     expect(
-      screen.getByText(/cannot be edited or selected natively/i),
+      screen.getByRole("heading", { name: "Cyberpunk 2077" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Misty Olszewski" }),
+    ).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/Eclipse Harbor|Mara Venn/);
+    expect(
+      screen.queryByRole("combobox", { name: /game/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/Character choices are saved by the Windows app/i),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /editable copy|save local/i }),
@@ -658,6 +678,12 @@ describe("native product workspaces", () => {
       "skyrim-special-edition",
       undefined,
     );
+    expect(
+      (await screen.findAllByText("Voice only · no mouth pack")).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByText("Voice direction included")).toBeVisible();
+    expect(screen.getByText("Voice only · mouth pack needed")).toBeVisible();
+    await user.click(screen.getByText("Advanced character data"));
     await user.click(
       screen.getByText("Delivered memory · 1", { selector: "summary" }),
     );
@@ -668,7 +694,7 @@ describe("native product workspaces", () => {
       /stored-turn-hash-9f2c/,
     );
     await user.click(
-      screen.getByRole("button", { name: "Use for ordinary turns" }),
+      screen.getByRole("button", { name: "Use this character" }),
     );
     expect(bridge.selectCharacter).toHaveBeenCalledWith(
       "skyrim-special-edition",
@@ -707,8 +733,10 @@ describe("native product workspaces", () => {
       />,
     );
 
+    await screen.findByText("Delivered memory · 0", { selector: "summary" });
+    await user.click(screen.getByText("Advanced character data"));
     await user.click(
-      await screen.findByText("Delivered memory · 0", { selector: "summary" }),
+      screen.getByText("Delivered memory · 0", { selector: "summary" }),
     );
     expect(
       screen.getByText("No delivered turns in the native memory scope."),
@@ -735,6 +763,10 @@ describe("native product workspaces", () => {
       await screen.findByRole("heading", {
         name: "Back up or delete memory",
       }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByText("Advanced character data"));
+    expect(
+      screen.getByRole("heading", { name: "Back up or delete memory" }),
     ).toBeVisible();
     expect(bridge.memoryStatus).toHaveBeenCalledWith(
       "skyrim-special-edition",
@@ -851,9 +883,9 @@ describe("native product workspaces", () => {
     const candidate = {
       processId: 44,
       nativeWindow: 55,
-      executableName: "SkyrimSE.exe",
+      executableName: "Cyberpunk2077.exe",
       executablePathSha256: "a".repeat(64),
-      title: "Skyrim",
+      title: "Cyberpunk 2077",
       foreground: true,
       clientWidth: 1920,
       clientHeight: 1080,
@@ -861,7 +893,7 @@ describe("native product workspaces", () => {
     bridge.discover.mockResolvedValue([candidate]);
     bridge.selectTarget.mockResolvedValue({
       schemaVersion: 1,
-      gameProfileId: "skyrim-special-edition",
+      gameProfileId: "cyberpunk-2077",
       target: candidate,
       processInstanceBound: true,
       userConfirmedOfflineSinglePlayer: true,
@@ -874,8 +906,16 @@ describe("native product workspaces", () => {
         nativeAvailable
         gameProfiles={[
           {
+            id: "cyberpunk-2077",
+            displayName: "Cyberpunk 2077",
+            wave: "1",
+            safety: "singlePlayerOnly",
+            catalogState: "bundled",
+            defaultFallback: "audioOnly",
+          },
+          {
             id: "skyrim-special-edition",
-            displayName: "Skyrim",
+            displayName: "Skyrim Special Edition",
             wave: "1",
             safety: "singlePlayerOnly",
             catalogState: "bundled",
@@ -891,21 +931,24 @@ describe("native product workspaces", () => {
       /No game process is selected in this native session/i,
     );
     await user.click(
-      screen.getByRole("button", { name: "Discover running windows" }),
+      screen.getByRole("button", { name: "Scan for Cyberpunk 2077" }),
     );
     await user.click(
-      screen.getByRole("checkbox", { name: /offline single-player/i }),
+      screen.getByRole("checkbox", { name: /single-player session/i }),
     );
-    await user.click(screen.getByRole("button", { name: "Bind this process" }));
-    expect(bridge.discover).toHaveBeenCalledWith("skyrim-special-edition");
+    await user.click(
+      screen.getByRole("button", { name: "Connect this window" }),
+    );
+    expect(bridge.discover).toHaveBeenCalledWith("cyberpunk-2077");
     expect(bridge.selectTarget).toHaveBeenCalledWith(
-      "skyrim-special-edition",
+      "cyberpunk-2077",
       55,
       true,
     );
     expect(
       (await screen.findAllByText("Visual capture stays blocked.")).length,
     ).toBeGreaterThan(0);
+    await user.click(screen.getByText("Connection tools"));
     expect(
       screen.getByRole("button", { name: "Verify ordinary game capture" }),
     ).toBeDisabled();
@@ -913,7 +956,7 @@ describe("native product workspaces", () => {
       screen.getByText(/no trusted offline and protection evidence/i),
     ).toBeInTheDocument();
     await user.click(
-      screen.getByRole("button", { name: "Select character in game" }),
+      screen.getByRole("button", { name: "Select NPC on screen" }),
     );
     expect(bridge.actorStart).toHaveBeenCalledWith();
     expect(
@@ -921,7 +964,56 @@ describe("native product workspaces", () => {
         /No current admitted native visual candidate set/i,
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText("Selection unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Unavailable")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Skyrim Special Edition"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("restores the single-player confirmation from an existing native target", async () => {
+    const candidate = {
+      processId: 44,
+      nativeWindow: 55,
+      executableName: "Cyberpunk2077.exe",
+      executablePathSha256: "a".repeat(64),
+      title: "Cyberpunk 2077",
+      foreground: true,
+      clientWidth: 1920,
+      clientHeight: 1080,
+    };
+    bridge.readTarget.mockResolvedValue({
+      schemaVersion: 1,
+      gameProfileId: "cyberpunk-2077",
+      target: candidate,
+      processInstanceBound: true,
+      userConfirmedOfflineSinglePlayer: true,
+      captureAuthorized: true,
+      safetyState: "allowed",
+      safetyDetail: "Connected native game target.",
+    });
+
+    render(
+      <GameTargetWorkspace
+        nativeAvailable
+        gameProfiles={[
+          {
+            id: "cyberpunk-2077",
+            displayName: "Cyberpunk 2077",
+            wave: "1",
+            safety: "singlePlayerOnly",
+            catalogState: "bundled",
+            defaultFallback: "audioOnly",
+          },
+        ]}
+        gameProfileId="cyberpunk-2077"
+        onGameProfileChange={vi.fn()}
+        onSelectionChange={vi.fn()}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("checkbox", { name: /single-player session/i }),
+    ).toBeChecked();
   });
 
   it("requires explicit confirmation for native encounter correction and merge receipts", async () => {

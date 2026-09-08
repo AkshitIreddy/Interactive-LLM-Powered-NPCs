@@ -9,7 +9,7 @@ describe("P0 honesty boundaries", () => {
   it("keeps delivery empty until a runtime completion event", () => {
     render(<App />);
     expect(
-      screen.getByText("No delivered turn in this session"),
+      screen.getByText("Your conversation starts here"),
     ).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent("ready to answer");
     expect(document.body).not.toHaveTextContent(
