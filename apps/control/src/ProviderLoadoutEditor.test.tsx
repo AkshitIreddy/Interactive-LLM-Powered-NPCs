@@ -323,8 +323,15 @@ describe("provider and model loadouts", () => {
     expect(screen.getByText(/still require your action/i)).toBeInTheDocument();
   });
 
-  it("keeps unqualified lip-sync research paths unavailable", () => {
-    render(<ProviderLoadoutEditor initialRole="lipSync" />);
+  it("keeps the optional model off and hands mouth motion to the game setup", async () => {
+    const user = userEvent.setup();
+    const onManageMouthMotion = vi.fn();
+    render(
+      <ProviderLoadoutEditor
+        initialRole="lipSync"
+        onManageMouthMotion={onManageMouthMotion}
+      />,
+    );
 
     expect(
       screen
@@ -338,6 +345,13 @@ describe("provider and model loadouts", () => {
       "disabled",
     );
     expect(document.body).not.toHaveTextContent("Download pack");
+    expect(document.body).toHaveTextContent(
+      "Game mouth motion is set up in Night City. A separate lip-sync model is optional and unavailable in this build.",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Set up mouth motion" }),
+    );
+    expect(onManageMouthMotion).toHaveBeenCalledOnce();
   });
 
   it("keeps Magpie unavailable and hides unrelated discovery controls", () => {

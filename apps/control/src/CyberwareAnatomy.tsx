@@ -51,6 +51,8 @@ export function CyberwareAnatomy({
         const provider = providerFor(role, route.providerId);
         const model = modelFor(role, route);
         const available = isAvailable(role, provider.id);
+        const mouthMotionUsesGameSetup =
+          role === "lipSync" && provider.id === "disabled";
         return (
           <Button
             key={role}
@@ -73,10 +75,18 @@ export function CyberwareAnatomy({
               <span>
                 <strong>{anatomyLabels[role]}</strong>
                 <small>
-                  {provider.name} · {model.name}
+                  {mouthMotionUsesGameSetup
+                    ? "Night City setup · optional model Off"
+                    : `${provider.name} · ${model.name}`}
                 </small>
               </span>
-              <em>{available ? provider.execution : "Setup needed"}</em>
+              <em>
+                {mouthMotionUsesGameSetup
+                  ? "Game setup"
+                  : available
+                    ? provider.execution
+                    : "Setup needed"}
+              </em>
             </span>
           </Button>
         );

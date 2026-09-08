@@ -1070,6 +1070,53 @@
   color: #cf929c;
 }
 
+.loadout-console .mouth-motion-handoff {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  margin: 2px 16px 14px;
+  padding: 12px;
+  border: 1px solid var(--loadout-line-cool);
+  background:
+    linear-gradient(105deg, rgba(82, 226, 223, 0.075), transparent 70%),
+    rgba(4, 12, 13, 0.5);
+  clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 0 100%);
+}
+
+.loadout-console .mouth-motion-handoff__glyph {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--loadout-line-cool);
+  color: var(--loadout-cyan);
+}
+
+.loadout-console .mouth-motion-handoff strong {
+  color: #d5caca;
+  font: 680 11px var(--data, sans-serif);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.loadout-console .mouth-motion-handoff p {
+  margin-top: 4px;
+  color: #a0878e;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.loadout-console .mouth-motion-handoff .action-button {
+  grid-column: 2;
+  width: fit-content;
+  min-height: 34px;
+  margin-top: 2px;
+  border-color: var(--loadout-line-cool);
+  color: var(--loadout-cyan);
+  font-size: 9px;
+}
+
 .loadout-console .loadout-role__disclosure,
 .loadout-console .stock-voice-discovery,
 .loadout-console .private-evaluation-acknowledgement {

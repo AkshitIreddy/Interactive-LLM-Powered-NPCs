@@ -57,6 +57,7 @@ export interface ProviderLoadoutEditorProps {
   initialRole?: ProviderRole;
   mode?: "full" | "onboarding";
   onManageProvider?: (providerId: string) => void;
+  onManageMouthMotion?: () => void;
   onNativeLoadoutsChange?: (loadouts: ProviderLoadout[]) => void;
 }
 
@@ -146,6 +147,7 @@ export function ProviderLoadoutEditor({
   initialRole = "llm",
   mode = "full",
   onManageProvider,
+  onManageMouthMotion,
   onNativeLoadoutsChange,
 }: ProviderLoadoutEditorProps = {}) {
   const [loadouts, setLoadouts] =
@@ -1201,6 +1203,33 @@ export function ProviderLoadoutEditor({
                           </label>
                         )}
                     </div>
+                    {role === "lipSync" && (
+                      <section
+                        className="mouth-motion-handoff"
+                        aria-label="Game mouth motion setup"
+                      >
+                        <span className="mouth-motion-handoff__glyph">
+                          <Icon name="presence" size={18} />
+                        </span>
+                        <div>
+                          <strong>Game mouth motion</strong>
+                          <p>
+                            Game mouth motion is set up in Night City. A
+                            separate lip-sync model is optional and unavailable
+                            in this build.
+                          </p>
+                        </div>
+                        {onManageMouthMotion && (
+                          <ActionButton
+                            variant="outline"
+                            icon="chevron"
+                            onPress={onManageMouthMotion}
+                          >
+                            Set up mouth motion
+                          </ActionButton>
+                        )}
+                      </section>
+                    )}
                     {!routeAvailable && (
                       <p className="loadout-role__note is-error" role="status">
                         <Icon name="warning" size={14} />
