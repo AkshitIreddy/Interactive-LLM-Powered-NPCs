@@ -486,6 +486,9 @@ def main() -> None:
     parser.add_argument("--sarah-audio", type=Path, default=DEFAULT_SARAH_AUDIO)
     parser.add_argument("--mara-audio", type=Path, default=DEFAULT_INPUT / "sarah-mara-42frames.wav")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--replay-dir", nargs=2, action="append", default=[],
+                        metavar=("CHARACTER", "DIRECTORY"),
+                        help="override a case replay directory without modifying historical defaults")
     parser.add_argument("--ffmpeg", type=Path, default=Path(r"C:\ffmpeg\bin\ffmpeg.exe"))
     parser.add_argument("--ffprobe", type=Path, default=Path(r"C:\ffmpeg\bin\ffprobe.exe"))
     parser.add_argument("--supplement-existing", action="store_true",
@@ -502,13 +505,20 @@ def main() -> None:
     require(args.ffmpeg.is_file() and args.ffprobe.is_file(), "ffmpeg/ffprobe executable missing")
     sarah = wav_receipt(args.sarah_audio.resolve(), 3.0)
     mara = wav_receipt(args.mara_audio.resolve(), 1.4)
-    cases = [load_case(spec, input_root, args.mara_source.resolve()) for spec in CASES]
+    overrides = dict(args.replay_dir)
+    require(len(overrides) == len(args.replay_dir), "duplicate replay override")
+    require(set(overrides) <= {spec["slug"] for spec in CASES}, "unknown replay character")
+    cases = [load_case({**spec, "replay": overrides.get(spec["slug"], spec["replay"])},
+                      input_root, args.mara_source.resolve()) for spec in CASES]
     for case in cases:
         expected_audio = sarah if case["audio"] == "sarah" else mara
         require(case["report"]["audioSha256"] == expected_audio["sha256"],
                 f"{case['name']} report/audio binding mismatch")
 
     output.mkdir(parents=True, exist_ok=args.supplement_existing)
+    snapshot_name = ("supplement-assembler-source.py" if args.supplement_existing
+                     else "assembler-source.py")
+    (output / snapshot_name).write_bytes(Path(__file__).read_bytes())
     for case in cases:
         mouth_board = output / f"{case['slug']}-mouth-contact-board.png"
         make_mouth_contact_board(case, mouth_board)
@@ -523,7 +533,10 @@ def main() -> None:
                 output / f"{case['slug']}-mouth-contact-board.png"
             )
             item["inspectionExposureStops"] = 2 if case["slug"] == "claire" else 0
-        receipt["assemblerSha256"] = sha256(Path(__file__))
+        # Supplemental boards do not regenerate the encoded video. Preserve
+        # its original assembler identity and bind this separate operation.
+        receipt["supplementAssemblerSha256"] = sha256(Path(__file__))
+        receipt["supplementAssemblerSourcePath"] = snapshot_name
         receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
         print(json.dumps({"supplemented": str(output), "verification": str(receipt_path)}))
         return
@@ -594,6 +607,7 @@ def main() -> None:
         "cases": case_receipts,
         "mediaProbe": media,
         "assemblerSha256": sha256(Path(__file__)),
+        "assemblerSourcePath": snapshot_name,
     }
     receipt_path = output / "verification.json"
     receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
