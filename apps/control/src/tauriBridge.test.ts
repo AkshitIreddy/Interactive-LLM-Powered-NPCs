@@ -30,6 +30,7 @@ import {
   listLocalMemoryBackups,
   readSelectedGameTarget,
   readSelectedLocalLoadoutPlanner,
+  prepareSupportedVisualLoadout,
   readThisPcBenchmarkReport,
   readThisPcBenchmarkStatus,
   readTrustedLocalPackCatalog,
@@ -1016,6 +1017,7 @@ describe("Tauri command bridge", () => {
     await saveLocalResourceSettings(resourceSettings);
     await readLocalResourceTelemetry();
     await readSelectedLocalLoadoutPlanner();
+    await prepareSupportedVisualLoadout();
     await readTrustedLocalPackCatalog();
     await admitSelectedLocalLoadout(loadoutSelection);
     await readExperimentalVisualPackStatus();
@@ -1198,6 +1200,10 @@ describe("Tauri command bridge", () => {
       ["save_local_resource_settings", { settings: resourceSettings }],
       ["local_resource_telemetry", {}],
       ["selected_local_loadout_planner", {}],
+      [
+        "prepare_supported_visual_loadout",
+        { request: { explicitUserConfirmation: true } },
+      ],
       ["trusted_local_pack_catalog", {}],
       ["admit_selected_local_loadout", { selection: loadoutSelection }],
       ["experimental_visual_pack_status", {}],

@@ -128,6 +128,7 @@
   overflow: auto;
   padding: 0 40px 40px;
   scrollbar-color: #b44757 #150e14;
+  scroll-padding-top: 72px;
 }
 .cyberpunk-shell .product-topbar {
   height: 54px;
@@ -135,7 +136,7 @@
   padding: 10px 0;
   margin: 0 0 18px;
   border-bottom: 1px solid #5e303d;
-  background: transparent;
+  background: #1b1018;
 }
 .cyberpunk-shell .product-topbar .eyebrow {
   color: #ba929e;

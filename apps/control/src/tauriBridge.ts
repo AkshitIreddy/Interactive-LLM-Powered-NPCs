@@ -2946,6 +2946,14 @@ export const saveLocalResourceSettings = (
 export const readLocalResourceTelemetry = () =>
   nativeInvoke<NativeResourceTelemetryResult>("local_resource_telemetry");
 
+export const prepareSupportedVisualLoadout = () =>
+  nativeInvoke<NativeSelectedLoadoutPlannerResult>(
+    "prepare_supported_visual_loadout",
+    {
+      request: { explicitUserConfirmation: true },
+    },
+  );
+
 export const readSelectedLocalLoadoutPlanner = () =>
   nativeInvoke<NativeSelectedLoadoutPlannerResult>(
     "selected_local_loadout_planner",

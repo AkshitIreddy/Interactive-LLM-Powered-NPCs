@@ -340,6 +340,7 @@ function materialProductPreferenceKey(
 export function ProductConsole() {
   const query = useMemo(() => new URLSearchParams(window.location.search), []);
   const [page, setPage] = useState<ProductPage>(initialPage);
+  const [voiceInitialSection, setVoiceInitialSection] = useState("loadout");
   const [bootstrap, setBootstrap] = useState<NativeBootstrapHealth>(
     LOADING_NATIVE_BOOTSTRAP,
   );
@@ -1794,6 +1795,10 @@ export function ProductConsole() {
         {page === "world" && (
           <WorldPage
             onNavigate={navigate}
+            onSetupMouthTracking={() => {
+              setVoiceInitialSection("local");
+              navigate("voice");
+            }}
             onPreferencesSnapshot={acceptPreferenceWorkspaceSnapshot}
             onConnectReviewGame={connectReviewGame}
             reviewLaunchAvailable={reviewTargetAvailable.available}
@@ -1823,6 +1828,7 @@ export function ProductConsole() {
         )}
         {page === "voice" && !setupOpen && (
           <VoicePage
+            initialSection={voiceInitialSection}
             onManageMouthMotion={openMouthMotion}
             onNativeLoadoutsChange={acceptConfiguredLoadouts}
             accounts={snapshot?.providers ?? []}
@@ -2951,9 +2957,10 @@ function SessionPage({
           <div className="visual-mode-note">
             <Icon name="presence" size={20} />
             <span>
-              <b>Audio & subtitles first</b>
+              <b>Mouth motion</b>
               <small>
-                Add a character mouth pack for the reviewed lip-sync mode.
+                Select an NPC in Games for basic motion. Prepared packs add
+                detail.
               </small>
             </span>
           </div>
@@ -3114,6 +3121,7 @@ function SessionPage({
 
 function WorldPage({
   onNavigate,
+  onSetupMouthTracking,
   onPreferencesSnapshot,
   onConnectReviewGame,
   reviewLaunchAvailable,
@@ -3133,6 +3141,7 @@ function WorldPage({
   identityEnrollmentError,
 }: {
   onNavigate: (page: ProductPage) => void;
+  onSetupMouthTracking: () => void;
   onPreferencesSnapshot: (snapshot: NativeProductPreferenceSnapshot) => void;
   onConnectReviewGame: () => void;
   reviewLaunchAvailable: boolean;
@@ -3164,6 +3173,7 @@ function WorldPage({
         </p>
       </header>
       <GameTargetWorkspace
+        onSetupMouthTracking={onSetupMouthTracking}
         nativeAvailable={nativeAvailable}
         onPreferencesSnapshot={onPreferencesSnapshot}
         gameProfiles={gameProfiles}
@@ -3386,6 +3396,7 @@ function WorldPage({
 }
 
 function VoicePage({
+  initialSection = "loadout",
   onManageMouthMotion,
   onNativeLoadoutsChange,
   accounts,
@@ -3418,6 +3429,7 @@ function VoicePage({
   onProviderAction,
   onSave,
 }: {
+  initialSection?: string;
   onManageMouthMotion: () => void;
   onNativeLoadoutsChange: (loadouts: ProviderLoadout[]) => void;
   accounts: NativeProviderCredentialSummary[];
@@ -3450,7 +3462,7 @@ function VoicePage({
   onProviderAction: (providerId: string, action: AccountAction) => void;
   onSave: () => void;
 }) {
-  const [section, setSection] = useState("loadout");
+  const [section, setSection] = useState(initialSection);
   const [accountId, setAccountId] = useState("nvidia-nim");
   return (
     <div className="page-stack voice-workspace">

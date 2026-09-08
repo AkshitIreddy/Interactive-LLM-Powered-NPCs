@@ -49,6 +49,7 @@ import {
   listLocalMemoryBackups,
   readSelectedGameTarget,
   readSelectedLocalLoadoutPlanner,
+  prepareSupportedVisualLoadout,
   readTrustedLocalPackCatalog,
   readTrustedOptionalPackLifecycle,
   readThisPcBenchmarkReport,
@@ -160,12 +161,14 @@ const errorText = (error: unknown, fallback: string) =>
 const CYBERPUNK_PROFILE_ID = "cyberpunk-2077";
 
 export function GameTargetWorkspace({
+  onSetupMouthTracking,
   nativeAvailable,
   gameProfiles,
   gameProfileId,
   onSelectionChange,
   onPreferencesSnapshot,
 }: {
+  onSetupMouthTracking?: () => void;
   nativeAvailable: boolean;
   gameProfiles: NativeGameProfileSummary[];
   gameProfileId: string;
@@ -235,22 +238,35 @@ export function GameTargetWorkspace({
   }, [nativeAvailable, onSelectionChange]);
 
   useEffect(() => {
-    if (!nativeAvailable || actorPicker.state !== "waiting") return;
+    if (
+      !nativeAvailable ||
+      !["waiting", "selected"].includes(actorPicker.state)
+    )
+      return;
     let active = true;
-    const timer = window.setInterval(() => {
-      void readManualActorPickerStatus()
-        .then((value) => {
-          if (active && value) setActorPicker(value);
-        })
-        .catch(() => {
-          if (active)
-            setActorPicker({
-              schemaVersion: 1,
-              state: "unavailable",
-              detail: "Native actor selection status became unavailable.",
-            });
-        });
-    }, 250);
+    let pending = false;
+    const timer = window.setInterval(
+      () => {
+        if (pending) return;
+        pending = true;
+        void readManualActorPickerStatus()
+          .then((value) => {
+            if (active && value) setActorPicker(value);
+          })
+          .catch(() => {
+            if (active)
+              setActorPicker({
+                schemaVersion: 1,
+                state: "unavailable",
+                detail: "Native actor selection status became unavailable.",
+              });
+          })
+          .finally(() => {
+            pending = false;
+          });
+      },
+      actorPicker.state === "waiting" ? 250 : 1000,
+    );
     return () => {
       active = false;
       window.clearInterval(timer);
@@ -561,6 +577,11 @@ export function GameTargetWorkspace({
               </span>
             </div>
             <p className="source-disclosure">{actorPicker.detail}</p>
+            {onSetupMouthTracking && (
+              <button className="text-action" onClick={onSetupMouthTracking}>
+                Set up mouth tracking →
+              </button>
+            )}
           </section>
         </div>
       )}
@@ -766,10 +787,10 @@ export function CharacterDatabase({
                       </small>
                       <small className="character-mouth-pack-state">
                         {enabledMouthPack
-                          ? "Full mouth pack active"
+                          ? "Full mouth pack enabled"
                           : installedMouthPack
                             ? "Full mouth pack installed"
-                            : "Voice only · no mouth pack"}
+                            : "Basic motion · no full pack"}
                       </small>
                     </span>
                     <i>
@@ -849,7 +870,7 @@ export function CharacterDatabase({
                     entry.gameProfileId === value.gameProfileId &&
                     entry.characterId === value.character.id,
                 )
-                  ? "Full pack active · visual tracking still required"
+                  ? "Full pack enabled · visual tracking still required"
                   : mouthPackRegistry?.installed.some(
                         (entry) =>
                           entry.gameProfileId === value.gameProfileId &&
@@ -857,7 +878,7 @@ export function CharacterDatabase({
                       )
                     ? "Full pack installed · enable below"
                     : mouthPackRegistry || !nativeAvailable
-                      ? "Voice only · mouth pack needed"
+                      ? "Basic motion · select NPC on screen"
                       : "Checking available motion"}
               </dd>
             </div>
@@ -1375,7 +1396,7 @@ export function CharacterMouthPackWorkspace({
     try {
       await enableCharacterMouthPack(gameProfileId, digest);
       setNotice(
-        "Mouth pack enabled for this selected character. The visual runtime will admit it only with the matching native actor and enrollment binding.",
+        "Pack applied to your selected NPC. This is your assignment, not automatic face recognition. Select and apply again when tracking expires.",
       );
       await refresh();
     } catch (error) {
@@ -1421,7 +1442,7 @@ export function CharacterMouthPackWorkspace({
         <span>Mouth motion</span>
         <span className={scopedEnabled ? "badge good" : "badge wait"}>
           {scopedEnabled
-            ? "Full pack active"
+            ? "Full pack enabled"
             : scopedInstalled.length
               ? "Full pack installed"
               : registry || !nativeAvailable
@@ -1430,18 +1451,18 @@ export function CharacterMouthPackWorkspace({
         </span>
       </summary>
       <p className="source-disclosure">
-        Voice and subtitles work independently. Basic source motion is in
-        testing and is not available for ordinary turns. A reviewed pack for
-        this exact character adds richer oral detail and still requires the
-        matching NPC on screen.
+        Select an NPC on screen for basic motion using its current mouth
+        appearance. A prepared pack adds richer mouth detail for that character.
+        Both need the game overlay and local face tracking; voice and subtitles
+        work independently.
       </p>
       {!scopedEnabled && scopedInstalled.length === 0 && registry && (
         <div className="empty-state compact character-mouth-pack__empty">
           <b>No full mouth pack for this character yet</b>
           <p>
-            Ordinary turns stay available through voice and subtitles. Basic
-            source motion remains in visual testing. Import a reviewed pack for
-            mouth animation.
+            Basic motion needs no character pack. It moves the visible mouth
+            subtly; it cannot add teeth or other detail hidden in the game
+            frame.
           </p>
         </div>
       )}
@@ -1490,7 +1511,7 @@ export function CharacterMouthPackWorkspace({
           aria-label="Reviewed mouth pack"
         >
           <div>
-            <span className="eyebrow">Character match confirmed</span>
+            <span className="eyebrow">Pack belongs to this profile</span>
             <h4>
               {preview.gameProfileId} / {preview.characterId}
             </h4>
@@ -1543,7 +1564,7 @@ export function CharacterMouthPackWorkspace({
               disabled={busy !== null || installed === null}
               onClick={() => void enable()}
             >
-              {busy === "enable" ? "Enabling…" : "Use for this character"}
+              {busy === "enable" ? "Applying…" : "Apply to selected NPC"}
             </button>
           </div>
         </section>
@@ -1554,9 +1575,10 @@ export function CharacterMouthPackWorkspace({
           aria-label="Installed mouth-pack revisions"
         >
           <div>
-            <b>Installed revisions</b>
+            <b>Installed packs</b>
             <small>
-              Kept locally until a future explicit removal workflow.
+              Select the matching NPC on screen, then apply its pack here. The
+              selection lasts up to 15 seconds; reselect if it expires.
             </small>
           </div>
           {scopedInstalled.map((entry) => {
@@ -1572,10 +1594,10 @@ export function CharacterMouthPackWorkspace({
                 </span>
                 <button
                   className="secondary-action"
-                  disabled={busy !== null || active}
+                  disabled={!nativeAvailable || busy !== null}
                   onClick={() => void enable(entry.contentSha256)}
                 >
-                  {active ? "Enabled" : "Enable with current actor"}
+                  {active ? "Reapply to selected NPC" : "Apply to selected NPC"}
                 </button>
               </article>
             );
@@ -2830,6 +2852,7 @@ export function LocalResourcePlanner({
   );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [setupError, setSetupError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [gameReserve, setGameReserve] = useState("");
   const [ramReserve, setRamReserve] = useState("");
@@ -3066,6 +3089,25 @@ export function LocalResourcePlanner({
       setBusy(null);
     }
   };
+  const prepareMouthTracking = async () => {
+    setBusy("prepare-visual");
+    setSetupError(null);
+    try {
+      const next = await prepareSupportedVisualLoadout();
+      if (!next?.selected)
+        throw new Error(
+          "Mouth tracking setup did not return a selected model.",
+        );
+      setLoadoutPlanner(next);
+      await refresh();
+    } catch (cause) {
+      setSetupError(
+        errorText(cause, "Mouth tracking setup could not be prepared."),
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
   const admitLoadout = async () => {
     if (!loadoutPlanner?.selected) return;
     setBusy("admit");
@@ -3113,11 +3155,40 @@ export function LocalResourcePlanner({
       className="local-resource-workspace"
       aria-labelledby="local-packs-title"
     >
+      <section
+        className="instrument-panel mouth-tracking-setup"
+        aria-label="Mouth tracking model setup"
+      >
+        <span className="eyebrow">Local face tracking</span>
+        <h2>Set up mouth tracking</h2>
+        <p>
+          Choose the supported tracking model, install it, then test and
+          activate it. With Cyberpunk connected, check the loadout below and
+          return to Games to select an NPC.
+        </p>
+        <div className="target-toolbar">
+          <button
+            className="primary-action"
+            disabled={!nativeAvailable || busy !== null}
+            onClick={() => void prepareMouthTracking()}
+          >
+            {busy === "prepare-visual" ? "Preparing…" : "Choose tracking model"}
+          </button>
+          <a className="text-action" href="#trusted-pack-catalog-title">
+            Model downloads ↓
+          </a>
+        </div>
+        <small>
+          Your existing local model selection is preserved. This step does not
+          download or start a model.
+        </small>
+        {setupError && <p role="alert">{setupError}</p>}
+      </section>
       <div className="resource-planner instrument-panel">
         <div className="panel-title">
           <div>
-            <span className="eyebrow">Native soft-governor policy</span>
-            <h2>Whole-loadout fit</h2>
+            <span className="eyebrow">PC resources</span>
+            <h2>Memory & performance</h2>
           </div>
           <span
             className={telemetry?.admissionReady ? "badge good" : "badge wait"}
@@ -3125,13 +3196,13 @@ export function LocalResourcePlanner({
             {state === "loading"
               ? "Loading"
               : telemetry?.admissionReady
-                ? "Telemetry complete"
-                : "Fail-closed"}
+                ? "Measured"
+                : "Not ready"}
           </span>
         </div>
         <p className="source-disclosure">
           {nativeAvailable
-            ? "Settings persist in native app data. Telemetry observations remain timestamped and unavailable values are never converted to zero."
+            ? "Reserve memory for your game and choose how local models stay loaded. These settings are saved on this PC."
             : "Browser preview has no hardware telemetry or persistence. No planning inputs are presented as measured device fit."}
         </p>
         {state === "loading" && (
@@ -3380,7 +3451,7 @@ export function LocalResourcePlanner({
                       loadoutPlanner.ready ? "badge good" : "badge wait"
                     }
                   >
-                    {loadoutPlanner.ready ? "Planner ready" : "Fail-closed"}
+                    {loadoutPlanner.ready ? "Planner ready" : "Not ready"}
                   </span>
                 </div>
                 <p className="source-disclosure">{loadoutPlanner.detail}</p>
@@ -3421,11 +3492,10 @@ export function LocalResourcePlanner({
                   </>
                 ) : (
                   <div className="empty-state compact">
-                    <b>No native local loadout is selected</b>
+                    <b>Choose a tracking model first</b>
                     <p>
-                      The WebView cannot invent pack IDs or revisions. A signed
-                      release catalog and an exact native selection must exist
-                      first.
+                      Use Choose tracking model above to prepare the supported
+                      local setup.
                     </p>
                   </div>
                 )}
@@ -3638,16 +3708,16 @@ export function LocalResourcePlanner({
       >
         <div className="panel-title">
           <div>
-            <span className="eyebrow">Signed native release catalog</span>
-            <h2 id="trusted-pack-catalog-title">Local runtime inventory</h2>
+            <span className="eyebrow">Available models</span>
+            <h2 id="trusted-pack-catalog-title">Model downloads</h2>
           </div>
           <span className={trustedCatalog?.ready ? "badge good" : "badge wait"}>
             {trustedCatalog?.ready
               ? trustedCatalog.productionTrust
-                ? `${trustedCatalog.packs.length} production-trusted packs`
-                : `${trustedCatalog.packs.length} review-bootstrap packs`
+                ? `${trustedCatalog.packs.length} models`
+                : `${trustedCatalog.packs.length} review models`
               : nativeAvailable
-                ? "Fail-closed"
+                ? "Not ready"
                 : "Native required"}
           </span>
         </div>

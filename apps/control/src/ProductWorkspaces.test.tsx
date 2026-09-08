@@ -29,6 +29,7 @@ const bridge = vi.hoisted(() => ({
   saveSettings: vi.fn(),
   mutatePack: vi.fn(),
   loadoutPlanner: vi.fn(),
+  prepareVisual: vi.fn(),
   admitLoadout: vi.fn(),
   trustedCatalog: vi.fn(),
   optionalLifecycle: vi.fn(),
@@ -40,6 +41,7 @@ const bridge = vi.hoisted(() => ({
   benchmarkCancel: vi.fn(),
   benchmarkReport: vi.fn(),
   mouthPackState: vi.fn(),
+  mouthPackEnable: vi.fn(),
 }));
 
 vi.mock("./tauriBridge", async (importOriginal) => ({
@@ -70,6 +72,7 @@ vi.mock("./tauriBridge", async (importOriginal) => ({
   saveLocalResourceSettings: bridge.saveSettings,
   mutateExperimentalVisualPack: bridge.mutatePack,
   readSelectedLocalLoadoutPlanner: bridge.loadoutPlanner,
+  prepareSupportedVisualLoadout: bridge.prepareVisual,
   admitSelectedLocalLoadout: bridge.admitLoadout,
   readTrustedLocalPackCatalog: bridge.trustedCatalog,
   readTrustedOptionalPackLifecycle: bridge.optionalLifecycle,
@@ -85,10 +88,12 @@ vi.mock("./tauriBridge", async (importOriginal) => ({
 vi.mock("./characterMouthPacks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./characterMouthPacks")>()),
   readCharacterMouthPackState: bridge.mouthPackState,
+  enableCharacterMouthPack: bridge.mouthPackEnable,
 }));
 
 import {
   CharacterDatabase,
+  CharacterMouthPackWorkspace,
   EncounterLifecycleControls,
   GameTargetWorkspace,
   LocalResourcePlanner,
@@ -626,6 +631,64 @@ describe("native product workspaces", () => {
     });
   });
 
+  it("can reapply the exact enabled pack after selecting an NPC again", async () => {
+    const digest = "a".repeat(64);
+    const entry = {
+      gameProfileId: "cyberpunk-2077",
+      characterId: "misty-olszewski",
+      contentSha256: digest,
+      enrollmentBindingSha256: "b".repeat(64),
+      identityRevision: 1,
+      textureFileName: "mouth.bin",
+    };
+    bridge.mouthPackState.mockResolvedValue({
+      schemaVersion: 1,
+      installed: [entry],
+      enabled: [entry],
+      detail: "Enabled revision",
+    });
+    bridge.mouthPackEnable.mockResolvedValue(entry);
+    render(
+      <CharacterMouthPackWorkspace
+        nativeAvailable
+        gameProfileId="cyberpunk-2077"
+        characterId="misty-olszewski"
+      />,
+    );
+    await userEvent.click(screen.getByText("Mouth motion"));
+    const apply = await screen.findByRole("button", {
+      name: "Reapply to selected NPC",
+    });
+    expect(apply).toBeEnabled();
+    await userEvent.click(apply);
+    expect(bridge.mouthPackEnable).toHaveBeenCalledWith(
+      "cyberpunk-2077",
+      digest,
+    );
+    expect(
+      await screen.findByText(
+        /This is your assignment, not automatic face recognition/,
+      ),
+    ).toBeVisible();
+  });
+
+  it("prepares the tracking model through native setup without inventing catalog IDs", async () => {
+    bridge.prepareVisual.mockRejectedValueOnce(
+      new Error("Your existing loadout is preserved."),
+    );
+    render(<LocalResourcePlanner nativeAvailable models={[]} />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Choose tracking model" }),
+    );
+    expect(bridge.prepareVisual).toHaveBeenCalledWith();
+    expect(
+      (await screen.findAllByText("Your existing loadout is preserved."))
+        .length,
+    ).toBeGreaterThan(0);
+    expect(bridge.mutateOptional).not.toHaveBeenCalled();
+    expect(bridge.activateOptional).not.toHaveBeenCalled();
+  });
+
   it("keeps browser preview immutable and hardware state explicitly unavailable", () => {
     render(
       <>
@@ -681,10 +744,12 @@ describe("native product workspaces", () => {
       undefined,
     );
     expect(
-      (await screen.findAllByText("Voice only · no mouth pack")).length,
+      (await screen.findAllByText("Basic motion · no full pack")).length,
     ).toBeGreaterThan(0);
     expect(screen.getByText("Voice direction included")).toBeVisible();
-    expect(screen.getByText("Voice only · mouth pack needed")).toBeVisible();
+    expect(
+      screen.getByText("Basic motion · select NPC on screen"),
+    ).toBeVisible();
     await user.click(screen.getByText("Advanced character data"));
     await user.click(
       screen.getByText("Delivered memory · 1", { selector: "summary" }),
@@ -983,7 +1048,7 @@ describe("native product workspaces", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("restores the single-player confirmation from an existing native target", async () => {
+  it("restores the native target and clears an expired NPC selection", async () => {
     const candidate = {
       processId: 44,
       nativeWindow: 55,
@@ -1027,6 +1092,28 @@ describe("native product workspaces", () => {
     expect(
       await screen.findByRole("checkbox", { name: /single-player session/i }),
     ).toBeChecked();
+    bridge.actorStart.mockResolvedValueOnce({
+      schemaVersion: 1,
+      state: "selected",
+      detail: "Basic motion selected.",
+    });
+    bridge.actorStatus.mockResolvedValueOnce({
+      schemaVersion: 1,
+      state: "unavailable",
+      detail: "Selection expired. Select the NPC again.",
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Select NPC on screen" }),
+    );
+    expect(await screen.findByText("NPC selected")).toBeVisible();
+    expect(
+      await screen.findByText(
+        "Selection expired. Select the NPC again.",
+        {},
+        { timeout: 3000 },
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText("NPC selected")).not.toBeInTheDocument();
   });
 
   it("requires explicit confirmation for native encounter correction and merge receipts", async () => {

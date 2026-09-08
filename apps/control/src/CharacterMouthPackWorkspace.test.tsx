@@ -105,7 +105,7 @@ describe("CharacterMouthPackWorkspace", () => {
     expect(mouthPacks.enable).not.toHaveBeenCalled();
 
     await user.click(
-      screen.getByRole("button", { name: "Use for this character" }),
+      screen.getByRole("button", { name: "Apply to selected NPC" }),
     );
     expect(mouthPacks.enable).toHaveBeenCalledWith("cyberpunk-2077", digest);
   });
@@ -149,7 +149,7 @@ describe("CharacterMouthPackWorkspace", () => {
     );
     await user.click(screen.getByText("Mouth motion"));
     expect(
-      (await screen.findAllByText("Full pack active")).length,
+      (await screen.findAllByText("Full pack enabled")).length,
     ).toBeGreaterThan(0);
     await user.click(
       screen.getByRole("button", { name: "Disable mouth pack" }),
@@ -158,7 +158,7 @@ describe("CharacterMouthPackWorkspace", () => {
     expect(await screen.findByText(/remains installed/i)).toBeVisible();
   });
 
-  it("states the enrollment boundary and stays read-only in browser preview", async () => {
+  it("explains source motion and stays read-only in browser preview", async () => {
     const user = userEvent.setup();
     render(
       <CharacterMouthPackWorkspace
@@ -168,7 +168,9 @@ describe("CharacterMouthPackWorkspace", () => {
       />,
     );
     await user.click(screen.getByText("Mouth motion"));
-    expect(screen.getByText(/not available for ordinary turns/i)).toBeVisible();
+    expect(
+      screen.getByText(/Both need the game overlay and local face tracking/i),
+    ).toBeVisible();
     expect(screen.getByLabelText("Choose mouth atlas JSON")).toBeDisabled();
     expect(screen.getByText(/Browser preview is read-only/i)).toBeVisible();
   });
