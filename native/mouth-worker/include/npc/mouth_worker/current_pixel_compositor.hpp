@@ -19,6 +19,10 @@ struct CurrentPixelCompositorPolicy {
   bool refine_source_edges{};
   double minimum_mouth_width_pixels{24.0};
   double minimum_edge_contrast{2.0};
+  // Keep 1.0 for reviewed oral references. A source-only caller can soften
+  // contact so an unobserved exact seal does not flatten distinctive lipstick
+  // or pull the current corners into a synthetic line.
+  double contact_articulation_strength{1.0};
   // Tests and a playback-clocked coordinator can supply the continuous v10
   // aperture trajectory directly.  Ordinary callers derive a conservative
   // shape from MouthCoefficients.

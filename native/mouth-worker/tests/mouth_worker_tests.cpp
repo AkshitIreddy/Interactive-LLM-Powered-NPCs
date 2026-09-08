@@ -1486,6 +1486,104 @@ void test_schema_four_worker_streaming_and_reset() {
            "cancelled schema four atlas and work cannot resurrect");
 }
 
+void test_unpacked_actor_uses_bounded_current_pixel_fallback() {
+    auto item = make_item(301U, 5'000'000'000);
+    auto& mouth = item.tracking.mouth_landmarks;
+    mouth.schema_version = 2U;
+    mouth.contour_points = 18U;
+    const auto point = [](const double x, const double amplitude) {
+        const double t = (x - .5) / .058;
+        return NormalizedLandmark{x, .646 + amplitude * (1.0 - t*t), .96};
+    };
+    for (std::size_t i = 0; i < 5U; ++i) {
+        const double x = .5 + (static_cast<double>(i) - 2.0) * .019;
+        mouth.contour[i] = point(x, -.025);
+        mouth.contour[9U-i] = point(x, .027);
+    }
+    mouth.contour[10U] = point(.442, 0);
+    mouth.contour[14U] = point(.558, 0);
+    for (std::size_t i = 0; i < 3U; ++i) {
+        const double x = .5 + (static_cast<double>(i) - 1.0) * .03;
+        mouth.contour[11U+i] = point(x, -.006);
+        mouth.contour[17U-i] = point(x, .006);
+    }
+    mouth.left_corner = mouth.contour[10U];
+    mouth.right_corner = mouth.contour[14U];
+    mouth.upper_lip_center = mouth.contour[12U];
+    mouth.lower_lip_center = mouth.contour[16U];
+    item.drive.viseme = Viseme::open_vowel;
+    item.drive.viseme_strength = 1.0;
+
+    const auto coefficients = current_pixel_coefficients_for_viseme(
+        item.drive.viseme, item.drive.viseme_strength);
+    const auto legacy = compose_current_frame_residual(
+        item.source, item.track, item.tracking, coefficients,
+        item.source.identity.captured_at_ns + 3'000'000);
+
+    ReferenceMouthWorker worker(item.track.cancellation_generation);
+    expect(worker.submit(item), "unpacked actor work enters the ordinary queue");
+    const auto result = worker.process_latest(
+        item.source.identity, item.source.identity.captured_at_ns + 3'000'000);
+    CurrentPixelCompositorEvidence evidence{};
+    CurrentPixelCompositorPolicy source_only_policy{};
+    source_only_policy.contact_articulation_strength = 0.45;
+    const auto expected = result.has_residual()
+        ? compose_current_pixel_residual(
+            item.source, item.track, item.tracking, nullptr,
+            result.residual.coefficients,
+            item.source.identity.captured_at_ns + 3'000'000,
+            source_only_policy, &evidence)
+        : ResidualPatch{};
+    expect(result.has_residual() && !expected.premultiplied_bgra.empty(),
+           "an unpacked tracked actor receives a bounded source-only residual");
+    expect(result.has_residual() &&
+               digest(result.residual.premultiplied_bgra) ==
+                   digest(expected.premultiplied_bgra),
+           "the unpacked-actor route uses the current-pixel compositor");
+    expect(result.has_residual() && !legacy.premultiplied_bgra.empty() &&
+               digest(result.residual.premultiplied_bgra) !=
+                   digest(legacy.premultiplied_bgra),
+           "the unpacked-actor route no longer uses the procedural cavity compositor");
+    expect(!evidence.oral_reference_used &&
+               evidence.target_gap_pixels <=
+                   std::max(1.8, evidence.source_gap_pixels * 2.25) + 1.0e-6,
+           "source-only fallback cannot invent unseen oral detail or an unbounded opening");
+
+    auto contact_item = item;
+    contact_item.drive.viseme = Viseme::bilabial;
+    ReferenceMouthWorker contact_worker(contact_item.track.cancellation_generation);
+    expect(contact_worker.submit(contact_item),
+           "unpacked actor contact cue enters the ordinary queue");
+    const auto contact = contact_worker.process_latest(
+        contact_item.source.identity,
+        contact_item.source.identity.captured_at_ns + 3'000'000);
+    CurrentPixelCompositorEvidence soft_contact_evidence{};
+    const auto expected_soft_contact = contact.has_residual()
+        ? compose_current_pixel_residual(
+            contact_item.source, contact_item.track, contact_item.tracking,
+            nullptr, contact.residual.coefficients,
+            contact_item.source.identity.captured_at_ns + 3'000'000,
+            source_only_policy, &soft_contact_evidence)
+        : ResidualPatch{};
+    const auto full_contact = contact.has_residual()
+        ? compose_current_pixel_residual(
+            contact_item.source, contact_item.track, contact_item.tracking,
+            nullptr, contact.residual.coefficients,
+            contact_item.source.identity.captured_at_ns + 3'000'000)
+        : ResidualPatch{};
+    expect(contact.has_residual() && !expected_soft_contact.premultiplied_bgra.empty() &&
+               digest(contact.residual.premultiplied_bgra) ==
+                   digest(expected_soft_contact.premultiplied_bgra) &&
+               !full_contact.premultiplied_bgra.empty() &&
+               digest(contact.residual.premultiplied_bgra) !=
+                   digest(full_contact.premultiplied_bgra),
+           "source-only contact keeps the exact cue but avoids a full unobserved pixel seal");
+    expect(soft_contact_evidence.target_gap_pixels > 0.0 &&
+               soft_contact_evidence.target_gap_pixels <
+                   soft_contact_evidence.source_gap_pixels,
+           "source-only contact visibly narrows while retaining current vermilion shape");
+}
+
 } // namespace
 
 int main() {
@@ -1513,6 +1611,7 @@ int main() {
     test_hard_safety_limits_cannot_be_relaxed();
     test_public_compositor_rejects_malformed_direct_calls();
     test_schema_four_worker_streaming_and_reset();
+    test_unpacked_actor_uses_bounded_current_pixel_fallback();
 
     if (failures != 0) {
         std::cerr << failures << " mouth-worker test assertion(s) failed\n";

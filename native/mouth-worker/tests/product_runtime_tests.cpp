@@ -283,6 +283,7 @@ void test_typed_openseeface_mapping_and_rate_policy() {
 void test_qualified_detector_confidence_floor() {
     MouthProductRuntime qualified_runtime;
     auto qualified = make_request(90U, 90U, 8'000'000'000);
+    set_valid_schema_four_geometry(qualified);
     qualified.landmarks.detector_confidence = 0.719482;
     const auto qualified_frame = qualified.source.identity;
     const auto queued = qualified_runtime.submit(std::move(qualified), qualified_frame,
@@ -807,6 +808,7 @@ void test_product_queue_receipts_and_exact_current_frame() {
 
     MouthProductRuntime successful;
     auto request = make_request(3U, 12U, 4'000'000'000);
+    set_valid_schema_four_geometry(request);
     const auto frame = request.source.identity;
     const auto submit = successful.submit(std::move(request), frame, 4'005'000'000);
     expect(submit.receipt.disposition == PresentationDisposition::queued,
@@ -818,9 +820,13 @@ void test_product_queue_receipts_and_exact_current_frame() {
                rendered.residual->audio_clock.segment_id == 3U &&
                rendered.residual->audio_clock.sample_count == 800U,
            "residual receipt preserves exact actor, source-frame, and audio interval identity");
-    expect(rendered.residual->normalized_bounds.width <= 0.45 &&
-               rendered.residual->normalized_bounds.height <= 0.35,
-           "product residual remains inside hard presentation ceilings");
+    expect(rendered.residual->normalized_bounds.x >= 0.0 &&
+               rendered.residual->normalized_bounds.y >= 0.0 &&
+               rendered.residual->normalized_bounds.right() <= 1.0 &&
+               rendered.residual->normalized_bounds.bottom() <= 1.0 &&
+               rendered.residual->normalized_bounds.width <= 0.90 &&
+               rendered.residual->normalized_bounds.height <= 0.90,
+           "source-only residual remains normalized and bounded to selected-face support");
 }
 
 void test_routine_rate_limit_preserves_current_pixel_history() {

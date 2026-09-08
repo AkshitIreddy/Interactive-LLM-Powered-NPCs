@@ -142,7 +142,7 @@ int main(int argc, char** argv) {
         if (argc != 7) {
             throw std::runtime_error(
                 "usage: replay_current_pixel_mouth <source-ppm-directory> <audio.wav> "
-                "<schema4-atlas> <cues.tsv> <landmarks.tsv> <fresh-output>");
+                "<schema4-atlas|--source-only> <cues.tsv> <landmarks.tsv> <fresh-output>");
         }
         const std::filesystem::path source_root(argv[1]);
         const std::filesystem::path audio_path(argv[2]);
@@ -150,6 +150,7 @@ int main(int argc, char** argv) {
         const std::filesystem::path cue_path(argv[4]);
         const std::filesystem::path landmark_path(argv[5]);
         const std::filesystem::path output(argv[6]);
+        const bool source_only = std::string_view(argv[3]) == "--source-only";
         if (std::filesystem::exists(output)) {
             throw std::runtime_error("output must be a fresh directory");
         }
@@ -184,13 +185,15 @@ int main(int argc, char** argv) {
         constexpr std::uint64_t generation = 1U;
         const TrackBinding track{generation, 0x43555252454E54ULL,
                                  0x504958454C34ULL, 1U};
-        auto atlas = read_review_atlas(atlas_root, generation, track);
-        if (atlas.schema_version != 4U) {
-            throw std::runtime_error("current-pixel replay requires a schema-4 atlas");
-        }
         ReferenceMouthWorker worker(generation);
-        if (!worker.install_atlas(std::move(atlas))) {
-            throw std::runtime_error("schema-4 atlas failed native admission");
+        if (!source_only) {
+            auto atlas = read_review_atlas(atlas_root, generation, track);
+            if (atlas.schema_version != 4U) {
+                throw std::runtime_error("current-pixel replay requires a schema-4 atlas");
+            }
+            if (!worker.install_atlas(std::move(atlas))) {
+                throw std::runtime_error("schema-4 atlas failed native admission");
+            }
         }
 
         OpenSeeFaceAdapterPolicy adapter_policy{};
@@ -379,7 +382,12 @@ int main(int argc, char** argv) {
         report << std::fixed << std::setprecision(3)
                << "{\n  \"schema\":\"interactive-npcs-current-pixel-replay/v1\",\n"
                << "  \"status\":\"" << (integrity_passed ? "passed" : "failed") << "\",\n"
-               << "  \"scope\":\"offline component fixture through native full-66 adapter, schema-4 ReferenceMouthWorker, current-pixel compositor and CPU composition; not live capture, installed app, provider inference, audible playback, or game-load proof\",\n"
+               << "  \"scope\":\"offline component fixture through native full-66 adapter, ReferenceMouthWorker, current-pixel compositor and CPU composition; not live capture, installed app, provider inference, audible playback, or game-load proof\",\n"
+               << "  \"mouthAppearance\":\""
+               << (source_only
+                       ? "source-only current pixels; no character pack or invented oral texture"
+                       : "identity-bound schema-4 oral-reference pack")
+               << "\",\n"
                << "  \"identitySource\":\"manual reviewer-bound fixture; no face-recognition claim\",\n"
                << "  \"geometrySource\":\"exact current-frame full-66 packet with adapter smoothing alpha 1; no carried prior-frame geometry\",\n"
                << "  \"timeline\":\"native 15 Hz samples at source indices 0,2,4... from the exact 30 Hz source; no alternating 30 Hz residual/source artifact\",\n"

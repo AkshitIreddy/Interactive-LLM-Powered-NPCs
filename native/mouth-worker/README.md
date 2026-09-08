@@ -31,6 +31,11 @@ product route yet.
   locks the upper-lip source surface, performs a curved lower-jaw-biased mouth
   warp, and emits a feathered premultiplied BGRA8 residual. Source pixels are
   immutable and bypass means no residual.
+- A connected no-pack fallback for actors with a valid ordered mouth contour.
+  It deforms only the current frame's pixels, supplies no oral reference, and
+  caps opening to the source's already visible aperture. This preserves a
+  conservative response when no matching character atlas is installed without
+  inventing teeth, tongue, cavity, or another actor's appearance.
 - A deterministic atlas compositor primitive that validates premultiplied
   enrollment patches, interpolates two states, rotates them to the current
   semantic mouth-corner axis, binds the result to the exact source frame and
@@ -71,6 +76,13 @@ The atlas primitive does not yet load the project-owned `.npz` proof, map a TTS
 provider's viseme IDs to atlas states, adapt skin color/lighting, or prove live
 captured-game warping. It remains unavailable in the app until a versioned,
 validated artifact loader and those visual/product gates exist.
+
+The no-pack fallback is deliberately restrained. A closed source mouth cannot
+produce unseen wide-open oral detail, so large vowels remain less expressive
+than a reviewed same-character schema-four atlas. Exact contact cues use a
+softened source-only deformation so distinctive lipstick is not flattened into
+an invented seal. It has two-actor moving Cyberpunk replay evidence, not
+automatic actor-recognition, all-NPC, or live-game quality qualification.
 
 ## Build and run
 

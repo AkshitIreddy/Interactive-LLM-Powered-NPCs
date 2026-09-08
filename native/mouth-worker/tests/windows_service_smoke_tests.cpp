@@ -274,26 +274,31 @@ public:
         packet.qpc_frequency = work.qpc_frequency;
         packet.face_bounds = work.seed_face_bounds;
         for (auto& point : packet.landmarks) point = {0.50, 0.45, 0.96};
-        packet.landmarks[48U] = {0.43, 0.60, 0.97};
-        packet.landmarks[49U] = {0.46, 0.58, 0.97};
-        packet.landmarks[50U] = {0.48, 0.57, 0.97};
-        packet.landmarks[51U] = {0.50, 0.565, 0.97};
-        packet.landmarks[52U] = {0.52, 0.57, 0.97};
-        packet.landmarks[53U] = {0.54, 0.58, 0.97};
-        packet.landmarks[54U] = {0.57, 0.60, 0.97};
-        packet.landmarks[55U] = {0.54, 0.64, 0.97};
-        packet.landmarks[56U] = {0.52, 0.655, 0.97};
-        packet.landmarks[57U] = {0.50, 0.66, 0.97};
-        packet.landmarks[58U] = {0.48, 0.655, 0.97};
-        packet.landmarks[59U] = {0.46, 0.64, 0.97};
-        packet.landmarks[58U] = {0.57, 0.60, 0.96};
-        packet.landmarks[59U] = {0.54, 0.585, 0.96};
-        packet.landmarks[60U] = {0.50, 0.578, 0.96};
-        packet.landmarks[61U] = {0.46, 0.585, 0.96};
-        packet.landmarks[62U] = {0.43, 0.60, 0.96};
-        packet.landmarks[63U] = {0.46, 0.63, 0.96};
-        packet.landmarks[64U] = {0.50, 0.642, 0.96};
-        packet.landmarks[65U] = {0.54, 0.63, 0.96};
+        const auto set = [&](const std::size_t index, const double x, const double y) {
+            packet.landmarks[index] = {x / 320.0, y / 180.0, 0.97};
+        };
+        // Qualified 66-point topology: 48..57 is the outer arc and 58..65
+        // the inner arc whose endpoints (58/62) are the semantic corners.
+        // Keep this service fixture valid for the current-pixel compositor;
+        // duplicate dlib-style assignments here previously crossed the arc.
+        set(48U, 128.0, 84.0);
+        set(49U, 144.0, 80.0);
+        set(50U, 160.0, 78.0);
+        set(51U, 176.0, 80.0);
+        set(52U, 192.0, 84.0);
+        set(53U, 192.0, 96.0);
+        set(54U, 176.0, 100.0);
+        set(55U, 160.0, 102.0);
+        set(56U, 144.0, 100.0);
+        set(57U, 128.0, 96.0);
+        set(58U, 120.0, 90.0);
+        set(59U, 136.0, 88.0);
+        set(60U, 160.0, 86.0);
+        set(61U, 184.0, 88.0);
+        set(62U, 200.0, 90.0);
+        set(63U, 184.0, 92.0);
+        set(64U, 160.0, 94.0);
+        set(65U, 136.0, 92.0);
         packet.detector_confidence = 0.96;
         packet.landmark_confidence = 0.95;
         packet.visibility_ratio = 0.94;
@@ -791,7 +796,10 @@ int wmain(const int argc, wchar_t** argv) {
     native_render.source.source_frame_qpc = qpc_now();
     native_render.track = {1U, 141U, 142U, 143U};
     native_render.frame = {151U, 152U, 153U, native_captured};
-    native_render.seed_face_bounds = {0.30, 0.16, 0.40, 0.68};
+    // The current-pixel support extends beyond the raw lip contour and must be
+    // contained by the independently tracked face. This seed corresponds to
+    // the synthetic provider's 80 px mouth rather than clipping its feather.
+    native_render.seed_face_bounds = {0.05, 0.05, 0.90, 0.90};
     native_render.appearance = {1U, 141U, 1U, 201U, 202U, 203U, 204U,
                                 0.94, 0.91, 0.01, true, true, false};
     native_render.resources = {1U, VisualPressure::nominal, 15U, true};
@@ -799,6 +807,10 @@ int wmain(const int argc, wchar_t** argv) {
     native_render.drive.clock.stream_generation = 1U;
     native_render.drive.clock.segment_id = 190U;
     native_render.drive.clock.playback_at_ns = native_captured;
+    // Exact contact is intentionally immediate at a segment boundary, so the
+    // one-frame service smoke observes real source-pixel motion instead of the
+    // ordinary spring's neutral reset sample.
+    native_render.drive.viseme = Viseme::bilabial;
     native_render.deadline_ns = native_captured + 500'000'000;
     const auto native_rendered = request(native_pipe.get(), envelope(
         native_session, CommandKind::render_with_admitted_landmarks, native_sequence++, 1U,

@@ -127,6 +127,7 @@ private:
     OpenSeeFaceSignalAdapter adapter_;
     ReferenceMouthWorker worker_;
     std::optional<PendingReceipt> pending_;
+    std::optional<std::uint64_t> installed_atlas_actor_;
     std::optional<std::uint64_t> current_pixel_actor_;
 };
 

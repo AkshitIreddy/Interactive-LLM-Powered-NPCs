@@ -437,15 +437,22 @@ ProcessResult ReferenceMouthWorker::process_latest(const FrameIdentity& current_
                                              item.drive.clock.channels);
         break;
     }
-    const bool current_pixel_route = atlas_.has_value() && atlas_->schema_version == 4U &&
+    const bool matching_atlas = atlas_.has_value() &&
         atlas_->cancellation_generation == item.track.cancellation_generation &&
         atlas_->actor_id == item.track.actor_id;
-    if (current_pixel_route && item.drive.kind == DriveKind::timed_viseme) {
+    const bool current_pixel_route = matching_atlas && atlas_->schema_version == 4U;
+    const auto& mouth = item.tracking.mouth_landmarks;
+    const bool has_ordered_contour = mouth.schema_version >= 2U &&
+        mouth.contour_points == mouth.contour.size();
+    const bool source_only_current_pixel_route = !matching_atlas && has_ordered_contour;
+    const bool current_pixel_motion_route = current_pixel_route ||
+        source_only_current_pixel_route;
+    if (current_pixel_motion_route && item.drive.kind == DriveKind::timed_viseme) {
         coefficients = current_pixel_coefficients_for_viseme(item.drive.viseme,
                                                              item.drive.viseme_strength);
     }
     const auto target_coefficients = coefficients;
-    if (current_pixel_route) {
+    if (current_pixel_motion_route) {
         if (!trajectory_track_ || *trajectory_track_ != item.track) {
             streaming_trajectory_.reset(active_generation_);
             trajectory_track_ = item.track;
@@ -482,9 +489,7 @@ ProcessResult ReferenceMouthWorker::process_latest(const FrameIdentity& current_
             residual = compose_current_pixel_residual(item.source, item.track, item.tracking,
                 &appearance, render_coefficients, now_ns, policy);
         }
-    } else if (atlas_.has_value() &&
-        atlas_->cancellation_generation == item.track.cancellation_generation &&
-        atlas_->actor_id == item.track.actor_id) {
+    } else if (matching_atlas) {
         const bool pure_silence = exact_silence_coefficients(target_coefficients);
         if (pure_silence ||
             (atlas_->schema_version != 3U && exact_contact_closure(coefficients))) {
@@ -522,8 +527,27 @@ ProcessResult ReferenceMouthWorker::process_latest(const FrameIdentity& current_
             }
         }
     } else {
-        residual = compose_current_frame_residual(item.source, item.track, item.tracking,
-                                                  coefficients, now_ns);
+        // An actor without an enrolled oral reference still has useful motion
+        // authority in the newest tracked frame. Use the schema-four
+        // source-pixel deformation with no oral patch: its opening is capped
+        // by the already visible source aperture and it cannot invent a dark
+        // cavity, teeth, tongue, or identity texture. A later identity-bound
+        // pack may add observed oral pixels without changing this fail-open
+        // frame/track/cancellation contract.
+        if (source_only_current_pixel_route) {
+            CurrentPixelCompositorPolicy source_only_policy{};
+            // Without an observed contact surface, a full seal can compress a
+            // dark or asymmetric vermilion profile into an artificial line.
+            // Retain most of the exact current shape while still making the
+            // contact cue visibly distinct. Reviewed packs keep full strength.
+            source_only_policy.contact_articulation_strength = 0.45;
+            residual = compose_current_pixel_residual(
+                item.source, item.track, item.tracking, nullptr, coefficients,
+                now_ns, source_only_policy);
+        } else {
+            residual = compose_current_frame_residual(
+                item.source, item.track, item.tracking, coefficients, now_ns);
+        }
     }
     if (residual.premultiplied_bgra.empty()) {
         return bypass(Disposition::bypass_unsafe_bounds);

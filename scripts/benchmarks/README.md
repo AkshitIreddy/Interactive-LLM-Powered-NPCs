@@ -222,6 +222,56 @@ worker select-and-compose, with zero GPU VRAM; six native CTest suites passed.
 Native generated-reference parity, desktop/live-game presentation, and installer
 qualification remain open. See the [v6 proof report](../../docs/research/headless-realistic-lipsync-proof-2026-09-04-v6.md).
 
+## Source-only fallback review
+
+The same native replay can omit the schema-four atlas and exercise the
+connected no-pack route. `--source-only` supplies no character appearance data:
+the worker deforms only pixels in each exact current game frame and caps any
+opening to visible source content.
+
+```powershell
+E:\temp\InteractiveNPCs\native-builds\photometric-schema3-20260905\Release\npc_mouth_worker_current_pixel_replay.exe `
+  E:\temp\InteractiveNPCs\sources\cyberpunk-idle-frames `
+  E:\temp\InteractiveNPCs\inputs\speech.wav `
+  --source-only `
+  E:\temp\InteractiveNPCs\inputs\speech-cues.tsv `
+  E:\temp\InteractiveNPCs\inputs\landmarks.tsv `
+  E:\temp\InteractiveNPCs\reviews\source-only-NEW
+```
+
+`assemble-source-only-fallback-review.py` makes a lossless enlarged board from
+source frames, a passed no-pack replay, and optionally a reviewed pack replay.
+It verifies the no-pack marker, hashes every selected input and retains the
+original exposure. Use a fresh output directory.
+
+```powershell
+py -3 .\scripts\benchmarks\assemble-source-only-fallback-review.py `
+  --source E:\temp\InteractiveNPCs\sources\cyberpunk-idle-frames `
+  --source-only E:\temp\InteractiveNPCs\reviews\source-only-NEW `
+  --reviewed E:\temp\InteractiveNPCs\reviews\reviewed-pack `
+  --output E:\temp\InteractiveNPCs\reviews\source-only-board-NEW
+```
+
+`assemble-source-only-fallback-video.py` encodes a three-column, face-scale
+temporal comparison of the same moving source, basic source motion and a
+reviewed full pack. It binds both replays to the same source-frame ledger, muxes
+the prerecorded cue audio without playing it, and writes input/video hashes and
+`ffprobe` stream metadata beside the MP4.
+
+```powershell
+py -3 .\scripts\benchmarks\assemble-source-only-fallback-video.py `
+  --actor character-id `
+  --source E:\temp\InteractiveNPCs\sources\cyberpunk-idle-frames `
+  --source-only E:\temp\InteractiveNPCs\reviews\source-only-NEW `
+  --reviewed E:\temp\InteractiveNPCs\reviews\reviewed-pack `
+  --audio E:\temp\InteractiveNPCs\inputs\speech.wav `
+  --output E:\temp\InteractiveNPCs\reviews\temporal-NEW
+```
+
+This is a visual fallback inspection, not proof of face recognition, live
+capture, natural speech, or universal NPC quality. See the
+[Cyberpunk packless fallback record](../../docs/research/cyberpunk-packless-mouth-fallback-2026-09-08.md).
+
 ## Deterministic self-tests
 
 ```powershell

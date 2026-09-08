@@ -616,7 +616,10 @@ ResidualPatch compose_current_pixel_residual(
       !std::isfinite(policy.minimum_mouth_width_pixels) ||
       policy.minimum_mouth_width_pixels < 4.0 ||
       !std::isfinite(policy.minimum_edge_contrast) ||
-      policy.minimum_edge_contrast < 0.0)
+      policy.minimum_edge_contrast < 0.0 ||
+      !std::isfinite(policy.contact_articulation_strength) ||
+      policy.contact_articulation_strength < 0.0 ||
+      policy.contact_articulation_strength > 1.0)
     return empty;
   const MouthCoefficients coefficients = clamped(raw_coefficients);
   CurrentPixelMouthShape shape =
@@ -644,7 +647,7 @@ ResidualPatch compose_current_pixel_residual(
       shape.contact || (shape.aperture < .02 && !silence(coefficients) &&
                         shape.articulation_strength > .01);
   if (shape.contact)
-    shape.articulation_strength = 1.0;
+    shape.articulation_strength = policy.contact_articulation_strength;
 
   // Use the same rotated support rectangle as the accepted Python proof.
   // The smooth field is identically zero at this boundary, which prevents a
@@ -712,9 +715,8 @@ ResidualPatch compose_current_pixel_residual(
   const double cap =
       oral ? curves.width * .22 : std::max(1.8, centre_gap * 2.25);
   evidence.target_gap_pixels =
-      shape.contact ? 0.0
-                    : centre_gap + shape.articulation_strength *
-                                       (std::min(desired, cap) - centre_gap);
+      centre_gap + shape.articulation_strength *
+                       (std::min(desired, cap) - centre_gap);
   evidence.contact_occludes_cavity = shape.contact;
   auto mapped_at = [&](const std::uint32_t px, const std::uint32_t py,
                        const std::size_t index) {

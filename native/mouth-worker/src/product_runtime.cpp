@@ -23,8 +23,11 @@ MouthProductRuntime::MouthProductRuntime(const std::uint64_t initial_generation,
 ProductSubmissionResult MouthProductRuntime::submit(ProductFrameRequest request,
                                                     const FrameIdentity& current_frame,
                                                     const Nanoseconds now_ns) {
-    adapter_.set_current_frame_geometry(current_pixel_actor_.has_value() &&
-                                       *current_pixel_actor_ == request.landmarks.track.actor_id);
+    const auto actor = request.landmarks.track.actor_id;
+    const bool actor_has_no_pack = !installed_atlas_actor_.has_value() ||
+                                   *installed_atlas_actor_ != actor;
+    adapter_.set_current_frame_geometry(actor_has_no_pack ||
+        (current_pixel_actor_.has_value() && *current_pixel_actor_ == actor));
     const auto signal = adapter_.adapt(request.landmarks, request.appearance,
                                        request.resources, current_frame, now_ns);
     if (!valid_request_identity(request.identity) || !signal.accepted()) {
@@ -123,6 +126,7 @@ std::optional<PresentationReceiptV1> MouthProductRuntime::cancel_to(
         return std::nullopt;
     }
     current_pixel_actor_.reset();
+    installed_atlas_actor_.reset();
     adapter_.set_current_frame_geometry(false);
     if (!pending_) {
         return std::nullopt;
@@ -135,15 +139,18 @@ std::optional<PresentationReceiptV1> MouthProductRuntime::cancel_to(
 }
 
 bool MouthProductRuntime::install_atlas(CharacterMouthAtlas atlas) {
+    const auto actor_id = atlas.actor_id;
     const auto actor = atlas.schema_version == 4U
         ? std::optional<std::uint64_t>{atlas.actor_id} : std::nullopt;
     if (!worker_.install_atlas(std::move(atlas))) return false;
+    installed_atlas_actor_ = actor_id;
     current_pixel_actor_ = actor;
     return true;
 }
 
 void MouthProductRuntime::clear_atlas() noexcept {
     worker_.clear_atlas();
+    installed_atlas_actor_.reset();
     current_pixel_actor_.reset();
     adapter_.set_current_frame_geometry(false);
 }
