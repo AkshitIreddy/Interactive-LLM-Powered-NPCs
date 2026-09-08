@@ -530,15 +530,26 @@ whole-loadout admission pass.
 
 Review root: $destination
 
-1. Start interactive-npcs-control.exe first.
-2. In Guided setup, continue to Meet Mara at Eclipse Harbor and choose
-   Start & connect test game. The native review launcher supplies the fixture's
-   exact review metadata and muted-start arguments before it verifies capture.
-3. Continue to Choose your voice & models. Open Connect accounts, choose each
-   hosted provider used by the loadout, and choose Connect account to enter its
-   key in the secure Windows prompt. Provider keys are not imported automatically.
-4. Choose the model and stock voice you intend to review, then follow the setup
-   checks. Provider charges and limits may apply.
+1. Start interactive-npcs-control.exe. This is a clean local-review build: no
+   model, provider, target, or character mouth pack is pre-activated.
+2. Open Games, choose Cyberpunk 2077, confirm single-player use, scan for game
+   windows, and connect the exact window you intend to review.
+3. Open Local models and choose Choose tracking model. In Model downloads,
+   explicitly allow the local change, accept the displayed license when required,
+   and choose Install exact optional pack for the staged YuNet catalog entry.
+4. Select that exact local model in the prepared loadout and choose Test &
+   activate. This checks that the provider can load and unload; it does not rate
+   mouth-motion quality. Then, with the Cyberpunk window connected, choose Check
+   and admit selected loadout. A blocked check is not a ready installation.
+5. Return to Games and choose Select NPC on screen. After the sealed native
+   selection succeeds, open the matching character's mouth-pack workspace,
+   import its staged reviewed receipt from review-character-mouth-packs, and
+   choose Apply to selected NPC. The selection lease lasts at most 15 seconds;
+   reselect the NPC before applying if it expires.
+6. Open Connect accounts, choose each hosted provider used by the voice and
+   conversation loadout, and choose Connect account to enter its key in the
+   secure Windows prompt. Provider keys are not imported automatically. Choose
+   the model and stock voice you intend to review; charges and limits may apply.
 
 This package contains no provider credential values and never imports them.
 Owner-local review setup, when performed separately, stays in Windows Credential
