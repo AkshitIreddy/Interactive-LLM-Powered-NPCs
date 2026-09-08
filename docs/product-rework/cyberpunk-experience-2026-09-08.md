@@ -6,7 +6,7 @@ setup, and scalable handling of characters without prepared mouth packs.
 
 ## Design and navigation
 
-Four primary destinations: Channel (talk), Night City (game and character),
+Four primary destinations: Channel (talk), Games (game and character),
 Loadout (models, voices and accounts), Settings (preferences and help).
 Diagnostics moves under help/troubleshooting rather than occupying a primary tab.
 The test game remains accessible as a separate practice environment.
@@ -57,7 +57,7 @@ Generated originals are in `apps/control/public/art`; provenance recorded alongs
 - Neural loadout uses six selectable anatomical modules. Provider, model and
   voice remain ordinary keyboard-accessible controls, with custom voice IDs and
   route parameters behind disclosures. Existing native persistence is retained.
-- Night City lists Cyberpunk characters, their dialogue/voice configuration and
+- Games lists Cyberpunk characters, their dialogue/voice configuration and
   separate installed/active mouth-pack states. The practice game is collapsed.
 - Settings uses compact label/value rows. Help still reaches troubleshooting;
   diagnostics URLs remain compatible without a primary navigation destination.
@@ -73,7 +73,7 @@ Generated originals are in `apps/control/public/art`; provenance recorded alongs
 
 Headless frontend acceptance: 163 tests passed before the final Cyberpunk-first
 startup refinement; production build passed. Rendered browser surfaces cover
-Channel, Night City, Loadout, Settings and Setup, including 720px layouts. The
+Channel, Games, Loadout, Settings and Setup, including 720px layouts. The
 injected native World layout fixture additionally covers three viewport sizes
 and active/installed/no-pack character states. These fixtures prove layout and
 interaction contracts, not a live game connection. Evidence is under
@@ -84,3 +84,18 @@ comparisons. It preserves current-frame appearance and changes only mouth
 support pixels. Its motion is intentionally modest; closed source lips cannot
 provide unseen teeth/tongue appearance. The native activation integration and
 final package acceptance are recorded separately when complete.
+
+The owner requested the generic **Games** navigation name on 8 September so
+the current Cyberpunk focus does not imply a permanently single-game product.
+The same follow-up prohibited the flashing native smoke test. Window-creating
+tests must stay outside the default test suite; terminal invisibility is not
+evidence that their child windows are invisible. Further acceptance uses only
+audited windowless tests and headless browser rendering.
+
+The final frontend run used one worker and a 30-second per-test limit under
+concurrent native compilation. It passed all assertions; an earlier parallel run
+had one 10-second setup-test timeout. Evidence:
+`E:\temp\InteractiveNPCs\cyberpunk-ui-final-tests-r5.log`.
+Game overlay preferences use native per-game revision checks; the ordinary game
+capture action checks the returned game/window scope and rereads native state
+before updating the UI. Basic NPC selection is visible beside that preference.
