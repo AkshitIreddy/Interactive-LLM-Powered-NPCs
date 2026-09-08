@@ -92,7 +92,7 @@ def validate_installer_legal_materials(root: Path, ledger: dict) -> None:
         raise ReconciliationError(f"installed SBOM required set differs from artifact scope (missing={sorted(required_purls - sbom_required)}, stale={sorted(sbom_required - required_purls)})")
     for entry in ledger.get("static_files", []):
         installed = entry.get("install_path", entry["path"])
-        if installed == "icon-resource-in-executable":
+        if installed in {"icon-resource-in-executable", "frontend-resource-in-executable"}:
             continue
         material = root / installed
         if not material.is_file() or sha256(material) != entry["sha256"]:

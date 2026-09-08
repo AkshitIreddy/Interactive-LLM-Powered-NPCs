@@ -132,7 +132,8 @@ foreach ($static in @($ledger.static_files)) {
     } else {
         [string]$static.path
     }
-    if ($installed -eq 'icon-resource-in-executable' -or $installed.StartsWith('product-audit/')) { continue }
+    if ($installed -in @('icon-resource-in-executable', 'frontend-resource-in-executable') -or
+        $installed.StartsWith('product-audit/')) { continue }
     Add-NpcExpectedInstalledFile -RelativePath $installed `
         -Sha256 ([string]$static.sha256) -ComponentId ([string]$static.component_id)
 }

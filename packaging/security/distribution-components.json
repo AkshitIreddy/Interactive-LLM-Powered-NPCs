@@ -72,7 +72,7 @@
       "notice_reference": "legal/LICENSE.txt"
     },
     "project:static-resources": {
-      "name": "Project-owned profiles, catalog, icon, model metadata, and subtitle metadata",
+      "name": "Project-owned profiles, catalog, interface art, icon, model metadata, and subtitle metadata",
       "spdx": "MIT",
       "distribution_class": "project-static-resources-with-item-provenance",
       "redistributed": true,
@@ -288,6 +288,9 @@
   "static_files": [
     {"path": "LICENSE", "install_path": "product-audit/legal/LICENSE.txt", "sha256": "8703e8c956a5accb5322bf6160ae4b5612683d680d8803a2288ff0a95f834ce8", "component_id": "project:legal-resources"},
     {"path": "catalog/v1/catalog.json", "install_path": "catalog/v1/catalog.json", "sha256": "877b1e8750aeb534c1fa2619e56273f75db8af78fd56bb3cba0b54eede7fa039", "component_id": "project:static-resources"},
+    {"path": "apps/control/public/art/city-afterhours.png", "install_path": "frontend-resource-in-executable", "sha256": "e1dfe974b7594fc707c7105896d71b4239571f055ec77b969fb705bf6ed9a5ff", "component_id": "project:static-resources"},
+    {"path": "apps/control/public/art/neural-anatomy.png", "install_path": "frontend-resource-in-executable", "sha256": "5fa56622d05dcf2a2e7a461abfb08255e1e69590e88840c1ebc563e7c78b907f", "component_id": "project:static-resources"},
+    {"path": "apps/control/public/art/PROVENANCE.md", "install_path": "frontend-resource-in-executable", "sha256": "8122e62766f1341fb886c385829bf71ffd15d833b39e13ee1d138c82a9000c9a", "component_id": "project:static-resources"},
     {"path": "apps/control/src-tauri/icons/icon.ico", "install_path": "icon-resource-in-executable", "sha256": "fa29a7c87754d8a624c6ef0d68711277bc17e65ae75186119b7d0eb2c26093cb", "component_id": "project:static-resources"},
     {"path": "assets/subtitles/fonts.v1.json", "install_path": "product-audit/assets/subtitles/fonts.v1.json", "sha256": "ea6f4d6363f680e66745cf7115a32d270feb4d8f679a9f97b7207034371b7136", "component_id": "project:static-resources"},
     {"path": "assets/subtitles/licenses.v1.json", "install_path": "product-audit/assets/subtitles/licenses.v1.json", "sha256": "eba39e198c8a74db4ef0c1e8385f43a68001125494d91c484049fed06c63c0ba", "component_id": "project:static-resources"},

@@ -505,7 +505,14 @@ class DistributionReconciliationTests(unittest.TestCase):
         body = legal / "packages/components/0001-example/LICENSE"
         body.parent.mkdir(parents=True)
         body.write_text("exact license body", encoding="utf-8")
-        ledger = {"schema_version": 1, "components": {}, "static_files": []}
+        ledger = {
+            "schema_version": 1,
+            "components": {},
+            "static_files": [
+                {"path": "source/icon.ico", "install_path": "icon-resource-in-executable"},
+                {"path": "source/art.png", "install_path": "frontend-resource-in-executable"},
+            ],
+        }
         (legal / "distribution-components.json").write_text(json.dumps(ledger), encoding="utf-8")
         scope = {"schema_version": 1, "artifact_id": "fixture", "components": {"pkg:cargo/example@1.0.0": "required"}}
         (legal / "windows-artifact-scope.json").write_text(json.dumps(scope), encoding="utf-8")
