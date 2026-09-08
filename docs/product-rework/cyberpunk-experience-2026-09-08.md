@@ -71,8 +71,8 @@ Generated originals are in `apps/control/public/art`; provenance recorded alongs
   key values. Provisioning verifies configuration and credential presence, not
   a new paid provider request.
 
-Headless frontend acceptance: 163 tests passed before the final Cyberpunk-first
-startup refinement; production build passed. Rendered browser surfaces cover
+Headless frontend acceptance: 170 tests passed across 22 files after the Games
+navigation and native setup controls; production build passed. Rendered browser surfaces cover
 Channel, Games, Loadout, Settings and Setup, including 720px layouts. The
 injected native World layout fixture additionally covers three viewport sizes
 and active/installed/no-pack character states. These fixtures prove layout and
@@ -99,3 +99,27 @@ had one 10-second setup-test timeout. Evidence:
 Game overlay preferences use native per-game revision checks; the ordinary game
 capture action checks the returned game/window scope and rereads native state
 before updating the UI. Basic NPC selection is visible beside that preference.
+
+## Native setup follow-up
+
+The clean-profile audit found that the previous Local models workflow needed a
+persisted selection that it could not create. A dedicated native preparation
+action now resolves the supported tracking model from its verified catalog;
+it does not accept browser-supplied model IDs and preserves existing selections.
+Games links directly to this setup. Install, activate and admission remain
+separate actions with native results.
+
+A manual face click provides short-lived spatial selection, not biometric
+identity. The UI polls native status after selection and clears expired state.
+Prepared-pack application is an explicit user assignment to that selection;
+an enabled revision can be reapplied after reselection. Enabled pack labels do
+not claim current tracking or presentation. Current basic motion preserves
+visible source appearance and needs no per-character pack.
+
+Final frontend evidence: all 172 tests passed across 22 files in
+`E:\temp\InteractiveNPCs\cyberpunk-ui-final-tests-r7.log` (149.73 seconds).
+Coverage includes selection expiry, exact-pack reapplication, native-only model
+preparation, provider state and navigation. Final typecheck and production build
+passed. Native-fixture routing Games -> Local models passed at 1440x1000,
+1440x720 and 720x1000 with no browser errors. The fixture does not provide real
+resource telemetry or prove model activation.
