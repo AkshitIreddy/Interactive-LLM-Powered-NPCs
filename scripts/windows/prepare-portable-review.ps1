@@ -514,7 +514,15 @@ whole-loadout admission pass.
     $characterPackReviewNote = if ($stagedCharacterMouthPacks.Count -eq 0) {
         'No separately reviewed character mouth packs are staged in this review.'
     } else {
-        "Reviewed character mouth packs are staged under review-character-mouth-packs. They remain disabled until imported and enabled through the character workspace. Packaging their reviewed receipts does not qualify or activate them."
+        $characterPackBoundaries = @($reviewedCharacterMouthPacks | ForEach-Object {
+            "- $($_.game_profile_id)/$($_.character_id): schema $($_.schema_version); " +
+                "$($_.classification); $($_.qualification); natural-quality qualified " +
+                "$($_.natural_quality_qualified); ordinary targets enabled $($_.ordinary_targets_enabled)."
+        }) -join [Environment]::NewLine
+        "Reviewed character mouth packs are staged under review-character-mouth-packs. " +
+            "They remain disabled until imported and enabled through the character workspace. " +
+            "Packaging their reviewed receipts does not qualify or activate them." +
+            [Environment]::NewLine + $characterPackBoundaries
     }
 
     $readme = @"
@@ -535,6 +543,8 @@ Review root: $destination
 The sibling review-mouth-atlas is bound by its reviewed-artifact receipt to
 $($reviewedMouthAtlas.game_profile_id)/$($reviewedMouthAtlas.character_id). Its review classification is
 $($reviewedMouthAtlas.classification); natural-quality qualification is $($reviewedMouthAtlas.natural_quality_qualified).
+Its schema is $($reviewedMouthAtlas.schema_version). Its qualification boundary is:
+$($reviewedMouthAtlas.qualification)
 Ordinary game targets cannot select that atlas. Directly starting
 local-app-data\test-game\interactive-npcs-synthetic-target.exe is an optional
 standalone fixture check; it does not perform the review launch contract or
