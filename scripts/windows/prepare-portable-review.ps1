@@ -540,6 +540,11 @@ Review root: $destination
 4. Choose the model and stock voice you intend to review, then follow the setup
    checks. Provider charges and limits may apply.
 
+This package contains no provider credential values and never imports them.
+Owner-local review setup, when performed separately, stays in Windows Credential
+Manager under interactive-npcs/v2/review and in the isolated review app state; it
+is not part of this directory or REVIEW-MANIFEST.json.
+
 The sibling review-mouth-atlas is bound by its reviewed-artifact receipt to
 $($reviewedMouthAtlas.game_profile_id)/$($reviewedMouthAtlas.character_id). Its review classification is
 $($reviewedMouthAtlas.classification); natural-quality qualification is $($reviewedMouthAtlas.natural_quality_qualified).
