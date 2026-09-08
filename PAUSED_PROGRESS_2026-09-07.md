@@ -1,5 +1,8 @@
 # Paused progress — 7 September 2026
 
+**Latest delivery:** [Local review v18, 8 September](REVIEW_READY_2026-09-08.md)
+records the completed package, packaged integration test and final videos.
+
 **Historical checkpoint: resumed by the owner on 8 September.** The final
 native rerenders are complete and all 156 frames match the preceding outputs.
 The new enlarged mouth sequences have been inspected. Current verification
