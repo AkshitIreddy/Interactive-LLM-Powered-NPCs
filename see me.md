@@ -1,5 +1,18 @@
 # See me — mandatory product rework handoff
 
+## Display safety — renewed explicit instruction, 8 September 2026
+
+The user again reported an epilepsy concern after the native media-broker smoke
+suite created a flashing blue/red window. Do not run that smoke suite or any
+window-creating test. Hidden terminal execution does NOT make a spawned test
+window hidden. Do not run aggregate native CTest against an unaudited or stale
+build cache. Use build-only checks and individually audited windowless unit
+tests. Window-creating native tests must require explicit opt-in and stay out of
+the normal suite. No visible capture/game/GUI/audio testing is authorized.
+
+The Games tab must be called **Games**, not Night City: the product is intended
+to support multiple games, while Cyberpunk 2077 remains the current focus.
+
 ## Current directive — re-evaluate and rebuild the product experience
 
 This section is the current source of truth and supersedes the incremental UI
