@@ -530,20 +530,24 @@ whole-loadout admission pass.
 
 Review root: $destination
 
-1. Start interactive-npcs-control.exe. This is a clean local-review build: no
-   model, provider, target, or character mouth pack is pre-activated.
+1. Start interactive-npcs-control.exe. The bundle contains no pre-activated
+   model, provider, target, or character mouth-pack state. Existing settings in
+   the isolated owner review profile persist separately from this directory.
 2. Open Games, choose Cyberpunk 2077, confirm single-player use, scan for game
    windows, and connect the exact window you intend to review.
-3. Open Local models and choose Choose tracking model. In Model downloads,
-   explicitly allow the local change, accept the displayed license when required,
-   and choose Install exact optional pack for the staged YuNet catalog entry.
+3. From Games choose Set up mouth tracking; the app opens Loadout > Local models.
+   Choose Choose tracking model. In Model downloads, explicitly allow the local
+   change, accept the displayed license when required, and choose Install exact
+   optional pack for the staged YuNet catalog entry.
 4. Select that exact local model in the prepared loadout and choose Test &
    activate. This checks that the provider can load and unload; it does not rate
    mouth-motion quality. Then, with the Cyberpunk window connected, choose Check
    and admit selected loadout. A blocked check is not a ready installation.
 5. Before starting the short NPC-selection lease, open the matching character's
-   mouth-pack workspace and import its staged reviewed receipt from
-   review-character-mouth-packs. Keep that character selected, return to Games,
+   mouth-pack workspace. Choose atlas.json and atlas-bgra8-premultiplied.bin from
+   that character's directory under review-character-mouth-packs, review them,
+   and import the pack. The receipt beside those files remains review evidence;
+   it is not an import input. Keep that character selected, return to Games,
    choose Select NPC on screen, and then choose Apply to selected NPC. The sealed
    selection lease lasts at most 15 seconds; reselect the NPC before applying if
    it expires.
@@ -576,8 +580,8 @@ $characterPackReviewNote
 
 Build outcome: passed (fresh installer-free debug build). The packaging verifier
 runs on the staged directory and again after its atomic move to the review root.
-The generated REVIEW-MANIFEST.json binds every file, the full dirty-source
-identity, the stable test game, the private atlas, and
+The generated REVIEW-MANIFEST.json binds every file, the full source identity
+(clean in this build), the stable test game, the private atlas, and
 review-evidence\engineering-review.md.
 
 Still open: a permitted desktop/game-capture walkthrough, physical audio output,
