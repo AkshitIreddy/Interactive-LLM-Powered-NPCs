@@ -7244,6 +7244,8 @@ mod tests {
             resource_root: PathBuf::from("C:/missing/resources"),
             app_data: PathBuf::from("C:/missing/data"),
             development_fixture_allowed: true,
+            application_namespace:
+                interactive_npcs_credential_vault::PRODUCTION_APPLICATION_NAMESPACE.into(),
         })
         .expect("parent job");
         let supervisor = MediaBrokerSupervisor::new(

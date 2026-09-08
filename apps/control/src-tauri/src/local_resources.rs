@@ -3214,6 +3214,8 @@ mod tests {
                 resource_root: resource_root.to_path_buf(),
                 app_data: state_root.join("runtime-host-data"),
                 development_fixture_allowed: true,
+                application_namespace:
+                    interactive_npcs_credential_vault::PRODUCTION_APPLICATION_NAMESPACE.into(),
             },
         )
         .expect("kill-on-close parent job");

@@ -232,6 +232,7 @@ async fn fixed_fixture_host_supports_authenticated_control_lifecycle() {
     let config_root = tempfile::tempdir().expect("temporary config root");
     let app_data = config_root.path().join("runtime-host-data");
     let supervisor = RuntimeSupervisor::try_new(RuntimeLaunchConfig {
+        application_namespace: "io.github.akshitireddy.interactive-npcs".into(),
         executable,
         resource_root: repository_root(),
         app_data: app_data.clone(),
@@ -491,6 +492,7 @@ async fn private_evaluation_namespace_is_bound_across_the_authenticated_sidecar(
     assert!(executable.is_file(), "build the runtime sidecar first");
     let app_data = tempfile::tempdir().expect("temporary app data");
     let supervisor = RuntimeSupervisor::try_new(RuntimeLaunchConfig {
+        application_namespace: "io.github.akshitireddy.interactive-npcs".into(),
         executable,
         resource_root: repository_root(),
         app_data: app_data.path().to_path_buf(),
@@ -648,6 +650,7 @@ async fn qualified_debug_host_streams_stock_voice_to_wasapi() {
     );
     let app_data = tempfile::tempdir().expect("temporary app data");
     let supervisor = RuntimeSupervisor::try_new(RuntimeLaunchConfig {
+        application_namespace: "io.github.akshitireddy.interactive-npcs".into(),
         executable,
         resource_root: repository_root(),
         app_data: app_data.path().to_path_buf(),

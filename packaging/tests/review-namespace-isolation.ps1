@@ -13,6 +13,13 @@ $packageScriptPath = Join-Path $repoRoot 'scripts/package.ps1'
 $devScriptPath = Join-Path $repoRoot 'scripts/dev.ps1'
 $tauriLibPath = Join-Path $repoRoot 'apps/control/src-tauri/src/lib.rs'
 $providerLoadoutsPath = Join-Path $repoRoot 'apps/control/src-tauri/src/provider_loadouts.rs'
+$credentialVaultPath = Join-Path $repoRoot 'crates/credential-vault/src/lib.rs'
+$credentialCatalogPath = Join-Path $repoRoot 'apps/control/src-tauri/src/catalog.rs'
+$commandsPath = Join-Path $repoRoot 'apps/control/src-tauri/src/commands.rs'
+$runtimeSupervisorPath = Join-Path $repoRoot 'apps/control/src-tauri/src/sidecar_supervisor.rs'
+$runtimeCliPath = Join-Path $repoRoot 'apps/runtime-host/src/cli.rs'
+$reviewCredentialImportPath = Join-Path $repoRoot 'scripts/windows/import-review-provider-credentials.ps1'
+$reviewProviderInspectPath = Join-Path $repoRoot 'scripts/windows/inspect-private-review-provider-setup.ps1'
 $testGameScriptPath = Join-Path $repoRoot 'scripts/windows/prepare-review-test-game.ps1'
 $reviewPathsScriptPath = Join-Path $repoRoot 'scripts/windows/review-paths.ps1'
 $priorCleanupScriptPath = Join-Path $repoRoot 'scripts/windows/remove-prior-hands-on-install.ps1'
@@ -59,6 +66,13 @@ $packageSource = Get-Content -LiteralPath $packageScriptPath -Raw
 $devSource = Get-Content -LiteralPath $devScriptPath -Raw
 $tauriLibSource = Get-Content -LiteralPath $tauriLibPath -Raw
 $providerLoadoutsSource = Get-Content -LiteralPath $providerLoadoutsPath -Raw
+$credentialVaultSource = Get-Content -LiteralPath $credentialVaultPath -Raw
+$credentialCatalogSource = Get-Content -LiteralPath $credentialCatalogPath -Raw
+$commandsSource = Get-Content -LiteralPath $commandsPath -Raw
+$runtimeSupervisorSource = Get-Content -LiteralPath $runtimeSupervisorPath -Raw
+$runtimeCliSource = Get-Content -LiteralPath $runtimeCliPath -Raw
+$reviewCredentialImportSource = Get-Content -LiteralPath $reviewCredentialImportPath -Raw
+$reviewProviderInspectSource = Get-Content -LiteralPath $reviewProviderInspectPath -Raw
 $tokens = $null
 $parseErrors = $null
 [Management.Automation.Language.Parser]::ParseFile($packageScriptPath, [ref]$tokens, [ref]$parseErrors) | Out-Null
@@ -129,6 +143,45 @@ foreach ($forbiddenText in @(
     if ($tauriLibSource.IndexOf($forbiddenText, [System.StringComparison]::Ordinal) -ge 0 -or
         $providerLoadoutsSource.IndexOf($forbiddenText, [System.StringComparison]::Ordinal) -ge 0) {
         throw "Debug build profile still participates in private-evaluation authority: $forbiddenText"
+    }
+}
+
+foreach ($requiredText in @(
+    'PRODUCTION_CREDENTIAL_NAMESPACE: &str = "interactive-npcs/v2"',
+    'REVIEW_CREDENTIAL_NAMESPACE: &str = "interactive-npcs/v2/review"',
+    'DEBUG_CREDENTIAL_NAMESPACE: &str = "interactive-npcs/v2/debug"',
+    'credential_namespace_for_application'
+)) {
+    if ($credentialVaultSource.IndexOf($requiredText, [System.StringComparison]::Ordinal) -lt 0) {
+        throw "Credential vault namespace mapping omits: $requiredText"
+    }
+}
+foreach ($requiredText in @(
+    'SystemCredentialPresence::new_for_application(&application_namespace)',
+    '.arg("--application-namespace")',
+    'HostState::initialize_for_application('
+)) {
+    if ($tauriLibSource.IndexOf($requiredText, [System.StringComparison]::Ordinal) -lt 0 -and
+        $credentialCatalogSource.IndexOf($requiredText, [System.StringComparison]::Ordinal) -lt 0 -and
+        $commandsSource.IndexOf($requiredText, [System.StringComparison]::Ordinal) -lt 0 -and
+        $runtimeSupervisorSource.IndexOf($requiredText, [System.StringComparison]::Ordinal) -lt 0 -and
+        $runtimeCliSource.IndexOf($requiredText, [System.StringComparison]::Ordinal) -lt 0 -and
+        $providerLoadoutsSource.IndexOf($requiredText, [System.StringComparison]::Ordinal) -lt 0) {
+        throw "Shell/runtime credential namespace handoff omits: $requiredText"
+    }
+}
+if ($reviewCredentialImportSource.IndexOf("'interactive-npcs/v2/review'", [System.StringComparison]::Ordinal) -lt 0 -or
+    $reviewCredentialImportSource.IndexOf('production_namespace_written = $false', [System.StringComparison]::Ordinal) -lt 0) {
+    throw 'Review credential importer does not bind writes to the isolated review namespace.'
+}
+foreach ($requiredText in @(
+    "credentialNamespace = 'interactive-npcs/v2/review'",
+    'production_namespace_consulted = $false',
+    'credential_values_exposed = $false',
+    'provider_network_requests_made = $false'
+)) {
+    if ($reviewProviderInspectSource.IndexOf($requiredText, [System.StringComparison]::Ordinal) -lt 0) {
+        throw "Redacted review provider inspector omits: $requiredText"
     }
 }
 

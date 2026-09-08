@@ -331,6 +331,8 @@ mod tests {
             resource_root: directory.path().to_path_buf(),
             app_data: directory.path().join("runtime-data"),
             development_fixture_allowed: false,
+            application_namespace:
+                interactive_npcs_credential_vault::PRODUCTION_APPLICATION_NAMESPACE.into(),
         })
         .expect("runtime supervisor");
         let broker = MediaBrokerSupervisor::new(

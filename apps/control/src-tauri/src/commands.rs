@@ -246,10 +246,11 @@ impl AppState {
                 .map_err(|error| error.to_string())?;
         let onboarding_store = OnboardingStore::new(config_directory.clone());
         let (snapshot, persistence) = onboarding_store.load();
-        let credentials: Arc<dyn CredentialPresence> = match SystemCredentialPresence::new() {
-            Ok(presence) => Arc::new(presence),
-            Err(_) => Arc::new(UnavailableCredentialPresence),
-        };
+        let credentials: Arc<dyn CredentialPresence> =
+            match SystemCredentialPresence::new_for_application(&application_namespace) {
+                Ok(presence) => Arc::new(presence),
+                Err(_) => Arc::new(UnavailableCredentialPresence),
+            };
         let credential_prompt: Arc<dyn CredentialPrompt> = Arc::new(SystemCredentialPrompt::new(
             cfg!(dev) && cfg!(debug_assertions),
         ));
@@ -260,6 +261,7 @@ impl AppState {
             resource_root.clone(),
             config_directory.join("runtime-host-data"),
             cfg!(dev) && cfg!(debug_assertions),
+            application_namespace.clone(),
         )
         .map_err(|error| error.to_string())?;
         let runtime_supervisor =

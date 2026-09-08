@@ -5,11 +5,13 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use interactive_npcs_credential_vault::CredentialVault;
 #[cfg(not(windows))]
 use interactive_npcs_credential_vault::MemoryCredentialVault;
 #[cfg(windows)]
 use interactive_npcs_credential_vault::WindowsCredentialVault;
+use interactive_npcs_credential_vault::{
+    credential_namespace_for_application, CredentialVault, PRODUCTION_APPLICATION_NAMESPACE,
+};
 use model_manager::{
     CatalogSignatureVerifier as ModelCatalogSignatureVerifier, Ed25519CatalogVerifier,
 };
@@ -96,6 +98,7 @@ impl HostConfig {
 #[derive(Clone)]
 pub struct HostState {
     pub config: HostConfig,
+    pub application_namespace: String,
     pub profiles: ProfileCorpus,
     pub catalog: CatalogDocument,
     pub catalog_trust: CatalogTrustState,
@@ -108,8 +111,17 @@ pub struct HostState {
 
 impl HostState {
     pub async fn initialize(config: HostConfig) -> Result<Self, BootstrapError> {
-        let vault = platform_vault()?;
-        Self::initialize_with_resolved_vault(config, vault).await
+        Self::initialize_for_application(config, PRODUCTION_APPLICATION_NAMESPACE).await
+    }
+
+    pub async fn initialize_for_application(
+        config: HostConfig,
+        application_namespace: &str,
+    ) -> Result<Self, BootstrapError> {
+        let credential_namespace = credential_namespace_for_application(application_namespace)
+            .ok_or(BootstrapError::ApplicationNamespace)?;
+        let vault = platform_vault(credential_namespace)?;
+        Self::initialize_with_resolved_vault(config, application_namespace.to_owned(), vault).await
     }
 
     /// Hermetic integration-test seam. It is absent from normal runtime builds
@@ -121,11 +133,17 @@ impl HostState {
         config: HostConfig,
         vault: Arc<dyn CredentialVault>,
     ) -> Result<Self, BootstrapError> {
-        Self::initialize_with_resolved_vault(config, vault).await
+        Self::initialize_with_resolved_vault(
+            config,
+            PRODUCTION_APPLICATION_NAMESPACE.to_owned(),
+            vault,
+        )
+        .await
     }
 
     async fn initialize_with_resolved_vault(
         config: HostConfig,
+        application_namespace: String,
         vault: Arc<dyn CredentialVault>,
     ) -> Result<Self, BootstrapError> {
         ensure_private_app_data(&config.app_data)?;
@@ -137,6 +155,7 @@ impl HostState {
         let tts_voice_discovery = Arc::new(TtsVoiceDiscoveryService::hosted(Arc::clone(&vault)));
         Ok(Self {
             config,
+            application_namespace,
             profiles,
             catalog,
             catalog_trust,
@@ -897,20 +916,22 @@ mod private_app_data_windows {
 }
 
 #[cfg(windows)]
-fn platform_vault() -> Result<Arc<dyn CredentialVault>, BootstrapError> {
-    WindowsCredentialVault::new("interactive-npcs/v2")
+fn platform_vault(credential_namespace: &str) -> Result<Arc<dyn CredentialVault>, BootstrapError> {
+    WindowsCredentialVault::new(credential_namespace)
         .map(|vault| Arc::new(vault) as Arc<dyn CredentialVault>)
         .map_err(|_| BootstrapError::CredentialVault)
 }
 
 #[cfg(not(windows))]
-fn platform_vault() -> Result<Arc<dyn CredentialVault>, BootstrapError> {
+fn platform_vault(_credential_namespace: &str) -> Result<Arc<dyn CredentialVault>, BootstrapError> {
     // Portable CI never persists or resolves live provider credentials.
     Ok(Arc::new(MemoryCredentialVault::default()))
 }
 
 #[derive(Debug, Error)]
 pub enum BootstrapError {
+    #[error("application namespace is not recognized")]
+    ApplicationNamespace,
     #[error("application data directory is unavailable or unsafe")]
     AppData,
     #[error("game profile corpus could not be loaded: {0}")]

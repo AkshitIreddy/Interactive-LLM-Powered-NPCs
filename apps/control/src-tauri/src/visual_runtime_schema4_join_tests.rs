@@ -370,6 +370,8 @@ async fn real_schema_four_worker_join_is_headless_and_fail_closed() {
         resource_root: repository,
         app_data: evidence_root.join("runtime-host-data"),
         development_fixture_allowed: true,
+        application_namespace: interactive_npcs_credential_vault::PRODUCTION_APPLICATION_NAMESPACE
+            .into(),
     })
     .expect("kill-on-close parent job");
     let broker = MediaBrokerSupervisor::new(

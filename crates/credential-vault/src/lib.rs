@@ -16,6 +16,28 @@ pub use windows::WindowsCredentialVault;
 pub const MAX_SECRET_BYTES: usize = 2_560;
 pub const MAX_TARGET_CHARS: usize = 256;
 
+pub const PRODUCTION_APPLICATION_NAMESPACE: &str = "io.github.akshitireddy.interactive-npcs";
+pub const REVIEW_APPLICATION_NAMESPACE: &str = "io.github.akshitireddy.interactive-npcs.review";
+pub const DEBUG_APPLICATION_NAMESPACE: &str = "io.github.akshitireddy.interactive-npcs.debug";
+
+pub const PRODUCTION_CREDENTIAL_NAMESPACE: &str = "interactive-npcs/v2";
+pub const REVIEW_CREDENTIAL_NAMESPACE: &str = "interactive-npcs/v2/review";
+pub const DEBUG_CREDENTIAL_NAMESPACE: &str = "interactive-npcs/v2/debug";
+
+/// Maps the native application identifier to its exact Windows Credential
+/// Manager namespace. Keeping this allowlist in the vault crate gives the
+/// control shell and runtime sidecar one shared authority and prevents a
+/// private review import from becoming visible to the production app.
+#[must_use]
+pub fn credential_namespace_for_application(application_namespace: &str) -> Option<&'static str> {
+    match application_namespace {
+        PRODUCTION_APPLICATION_NAMESPACE => Some(PRODUCTION_CREDENTIAL_NAMESPACE),
+        REVIEW_APPLICATION_NAMESPACE => Some(REVIEW_CREDENTIAL_NAMESPACE),
+        DEBUG_APPLICATION_NAMESPACE => Some(DEBUG_CREDENTIAL_NAMESPACE),
+        _ => None,
+    }
+}
+
 #[derive(PartialEq, Eq)]
 pub struct SecretValue(Vec<u8>);
 
@@ -184,5 +206,22 @@ mod tests {
             SecretValue::new(vec![1; MAX_SECRET_BYTES + 1]),
             Err(VaultError::SecretTooLarge(MAX_SECRET_BYTES + 1))
         );
+    }
+
+    #[test]
+    fn application_distributions_use_isolated_credential_namespaces() {
+        assert_eq!(
+            credential_namespace_for_application(PRODUCTION_APPLICATION_NAMESPACE),
+            Some("interactive-npcs/v2")
+        );
+        assert_eq!(
+            credential_namespace_for_application(REVIEW_APPLICATION_NAMESPACE),
+            Some("interactive-npcs/v2/review")
+        );
+        assert_eq!(
+            credential_namespace_for_application(DEBUG_APPLICATION_NAMESPACE),
+            Some("interactive-npcs/v2/debug")
+        );
+        assert_eq!(credential_namespace_for_application("forged.app"), None);
     }
 }

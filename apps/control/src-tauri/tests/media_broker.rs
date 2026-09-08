@@ -29,6 +29,7 @@ async fn fixed_broker_authenticates_reports_health_and_shuts_down() {
     );
     let app_data = tempfile::tempdir().expect("app data");
     let parent_job = RuntimeSupervisor::try_new(RuntimeLaunchConfig {
+        application_namespace: "io.github.akshitireddy.interactive-npcs".into(),
         executable: PathBuf::from("C:/missing/npc-runtime.exe"),
         resource_root: repository_root(),
         app_data: app_data.path().to_path_buf(),

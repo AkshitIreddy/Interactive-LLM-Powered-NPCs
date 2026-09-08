@@ -25,6 +25,13 @@ pub struct Cli {
     /// Writable per-user application data root. Tests and portable runs should inject this.
     #[arg(long, global = true)]
     pub app_data: Option<PathBuf>,
+    /// Exact native application identifier used to isolate persisted provider credentials.
+    #[arg(
+        long,
+        global = true,
+        default_value = interactive_npcs_credential_vault::PRODUCTION_APPLICATION_NAMESPACE
+    )]
+    pub application_namespace: String,
     #[command(subcommand)]
     pub command: Command,
 }
@@ -82,10 +89,13 @@ pub enum Command {
 pub async fn run(cli: Cli) -> Result<(), CliError> {
     let repo_root = resolve_repo_root(cli.repo_root)?;
     let app_data = resolve_app_data(cli.app_data);
-    let state = HostState::initialize(HostConfig {
-        repo_root,
-        app_data,
-    })
+    let state = HostState::initialize_for_application(
+        HostConfig {
+            repo_root,
+            app_data,
+        },
+        &cli.application_namespace,
+    )
     .await?;
     match cli.command {
         Command::Doctor => write_json(&state.doctor().await)?,

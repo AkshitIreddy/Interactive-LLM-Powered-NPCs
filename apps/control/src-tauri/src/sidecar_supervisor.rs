@@ -34,6 +34,7 @@ pub struct RuntimeLaunchConfig {
     pub resource_root: PathBuf,
     pub app_data: PathBuf,
     pub development_fixture_allowed: bool,
+    pub application_namespace: String,
 }
 
 impl RuntimeLaunchConfig {
@@ -41,7 +42,15 @@ impl RuntimeLaunchConfig {
         resource_root: PathBuf,
         app_data: PathBuf,
         development_fixture_allowed: bool,
+        application_namespace: String,
     ) -> Result<Self, SupervisorError> {
+        if interactive_npcs_credential_vault::credential_namespace_for_application(
+            &application_namespace,
+        )
+        .is_none()
+        {
+            return Err(SupervisorError::InvalidBundle);
+        }
         let executable = std::env::current_exe()
             .map_err(|_| SupervisorError::InvalidBundle)?
             .parent()
@@ -52,6 +61,7 @@ impl RuntimeLaunchConfig {
             resource_root,
             app_data,
             development_fixture_allowed,
+            application_namespace,
         })
     }
 }
@@ -366,6 +376,8 @@ impl RuntimeSupervisor {
             .arg(&resource_root)
             .arg("--app-data")
             .arg(&app_data)
+            .arg("--application-namespace")
+            .arg(&self.config.application_namespace)
             .arg("serve")
             .arg("--nonce")
             .arg(nonce.to_string())
@@ -760,6 +772,8 @@ mod tests {
             resource_root: PathBuf::from("C:/missing/resources"),
             app_data: PathBuf::from("C:/missing/data"),
             development_fixture_allowed: false,
+            application_namespace:
+                interactive_npcs_credential_vault::PRODUCTION_APPLICATION_NAMESPACE.into(),
         };
         let health = RuntimeSupervisor::try_new(config)
             .expect("job object")
@@ -775,6 +789,8 @@ mod tests {
             resource_root: PathBuf::from("C:/missing/resources"),
             app_data: PathBuf::from("C:/missing/data"),
             development_fixture_allowed: true,
+            application_namespace:
+                interactive_npcs_credential_vault::PRODUCTION_APPLICATION_NAMESPACE.into(),
         };
         let health = RuntimeSupervisor::try_new(config)
             .expect("job object")

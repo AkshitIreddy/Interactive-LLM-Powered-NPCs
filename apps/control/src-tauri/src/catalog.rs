@@ -2,7 +2,10 @@ use crate::domain::{
     CatalogState, CredentialReferenceStatus, GameProfileSummary, ModelInstallation, ModelSummary,
     ProfileSafety, ProviderCredentialSummary,
 };
-use interactive_npcs_credential_vault::{CredentialVault, SecretValue, VaultError};
+use interactive_npcs_credential_vault::{
+    credential_namespace_for_application, CredentialVault, SecretValue, VaultError,
+    PRODUCTION_CREDENTIAL_NAMESPACE,
+};
 use npc_provider_catalog::{
     CatalogDocument, ExecutionLocation, Lifecycle, Modality, RouteAvailability,
 };
@@ -10,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 /// Shared with `apps/runtime-host/src/bootstrap.rs`. Both processes must resolve
 /// the identical Windows Credential Manager target namespace.
-pub(crate) const CREDENTIAL_NAMESPACE: &str = "interactive-npcs/v2";
+pub(crate) const CREDENTIAL_NAMESPACE: &str = PRODUCTION_CREDENTIAL_NAMESPACE;
 
 const BUNDLED_PROVIDER_CATALOG: &[u8] = include_bytes!("../../../../catalog/v1/catalog.json");
 
@@ -24,6 +27,9 @@ pub trait CredentialPresence: Send + Sync + std::fmt::Debug {
     fn save(&self, reference: &str, secret: &SecretValue) -> Result<(), CredentialMutationError>;
     fn delete(&self, reference: &str) -> Result<(), CredentialMutationError>;
     fn availability_detail(&self) -> &'static str;
+    fn credential_namespace(&self) -> &str {
+        CREDENTIAL_NAMESPACE
+    }
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -38,15 +44,25 @@ pub enum CredentialMutationError {
 #[derive(Debug)]
 pub struct SystemCredentialPresence {
     vault: interactive_npcs_credential_vault::WindowsCredentialVault,
+    credential_namespace: &'static str,
 }
 
 #[cfg(windows)]
 impl SystemCredentialPresence {
     pub fn new() -> Result<Self, VaultError> {
+        Self::new_for_application(
+            interactive_npcs_credential_vault::PRODUCTION_APPLICATION_NAMESPACE,
+        )
+    }
+
+    pub fn new_for_application(application_namespace: &str) -> Result<Self, VaultError> {
+        let credential_namespace = credential_namespace_for_application(application_namespace)
+            .ok_or(VaultError::InvalidTarget)?;
         Ok(Self {
             vault: interactive_npcs_credential_vault::WindowsCredentialVault::new(
-                CREDENTIAL_NAMESPACE,
+                credential_namespace,
             )?,
+            credential_namespace,
         })
     }
 }
@@ -82,16 +98,32 @@ impl CredentialPresence for SystemCredentialPresence {
     fn availability_detail(&self) -> &'static str {
         "Credential references are checked in Windows Credential Manager; values never enter the WebView."
     }
+
+    fn credential_namespace(&self) -> &str {
+        self.credential_namespace
+    }
 }
 
 #[cfg(not(windows))]
-#[derive(Debug, Default)]
-pub struct SystemCredentialPresence;
+#[derive(Debug)]
+pub struct SystemCredentialPresence {
+    credential_namespace: &'static str,
+}
 
 #[cfg(not(windows))]
 impl SystemCredentialPresence {
     pub fn new() -> Result<Self, VaultError> {
-        Ok(Self)
+        Self::new_for_application(
+            interactive_npcs_credential_vault::PRODUCTION_APPLICATION_NAMESPACE,
+        )
+    }
+
+    pub fn new_for_application(application_namespace: &str) -> Result<Self, VaultError> {
+        credential_namespace_for_application(application_namespace)
+            .ok_or(VaultError::InvalidTarget)
+            .map(|credential_namespace| Self {
+                credential_namespace,
+            })
     }
 }
 
@@ -111,6 +143,10 @@ impl CredentialPresence for SystemCredentialPresence {
 
     fn availability_detail(&self) -> &'static str {
         "Credential status is unavailable outside the supported Windows runtime."
+    }
+
+    fn credential_namespace(&self) -> &str {
+        self.credential_namespace
     }
 }
 
@@ -140,7 +176,10 @@ pub fn provider_summaries(presence: &dyn CredentialPresence) -> Vec<ProviderCred
                     ProviderCredentialSummary {
                         provider_id: provider.id,
                         display_name: provider.display_name,
-                        credential_reference: Some(format!("{CREDENTIAL_NAMESPACE}/{reference}")),
+                        credential_reference: Some(format!(
+                            "{}/{reference}",
+                            presence.credential_namespace()
+                        )),
                         status,
                         detail: detail.into(),
                     }
@@ -581,6 +620,47 @@ mod tests {
     }
 
     #[test]
+    fn review_provider_contract_names_only_the_review_vault() {
+        #[derive(Debug)]
+        struct ReviewPresence;
+        impl CredentialPresence for ReviewPresence {
+            fn status(&self, _reference: &str) -> CredentialReferenceStatus {
+                CredentialReferenceStatus::Missing
+            }
+            fn save(
+                &self,
+                _reference: &str,
+                _secret: &SecretValue,
+            ) -> Result<(), CredentialMutationError> {
+                Ok(())
+            }
+            fn delete(&self, _reference: &str) -> Result<(), CredentialMutationError> {
+                Ok(())
+            }
+            fn availability_detail(&self) -> &'static str {
+                "available"
+            }
+            fn credential_namespace(&self) -> &str {
+                interactive_npcs_credential_vault::REVIEW_CREDENTIAL_NAMESPACE
+            }
+        }
+
+        let summaries = provider_summaries(&ReviewPresence);
+        let groq = summaries
+            .iter()
+            .find(|provider| provider.provider_id == "groq")
+            .expect("Groq provider");
+        assert_eq!(
+            groq.credential_reference.as_deref(),
+            Some("interactive-npcs/v2/review/providers/groq")
+        );
+        assert!(summaries.iter().all(|provider| provider
+            .credential_reference
+            .as_deref()
+            .is_none_or(|reference| !reference.starts_with("interactive-npcs/v2/providers/"))));
+    }
+
+    #[test]
     fn product_provider_and_model_summaries_are_exact_canonical_catalog_adapters() {
         let canonical = bundled_provider_catalog();
         let provider_ids = provider_summaries(&FixedPresence)
@@ -681,5 +761,30 @@ mod tests {
         assert!(!response.contains(CANARY));
         shell.delete(&reference).expect("cleanup fixture target");
         assert_eq!(shell.status(&reference), CredentialReferenceStatus::Missing);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn review_shell_credential_is_invisible_to_production_namespace() {
+        const CANARY: &str = "review-only-canary-secret";
+        let reference = format!("tests/review-namespace-{}", uuid::Uuid::new_v4());
+        let review = SystemCredentialPresence::new_for_application(
+            interactive_npcs_credential_vault::REVIEW_APPLICATION_NAMESPACE,
+        )
+        .expect("review vault");
+        let production = SystemCredentialPresence::new().expect("production vault");
+        let secret = SecretValue::new(CANARY.as_bytes().to_vec()).expect("secret");
+        review.save(&reference, &secret).expect("review save");
+        drop(secret);
+
+        assert_eq!(
+            review.status(&reference),
+            CredentialReferenceStatus::Present
+        );
+        assert_eq!(
+            production.status(&reference),
+            CredentialReferenceStatus::Missing
+        );
+        review.delete(&reference).expect("cleanup review fixture");
     }
 }

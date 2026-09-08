@@ -5902,6 +5902,8 @@ mod tests {
             resource_root: repository,
             app_data: scratch.path().join("runtime-host-data"),
             development_fixture_allowed: true,
+            application_namespace:
+                interactive_npcs_credential_vault::PRODUCTION_APPLICATION_NAMESPACE.into(),
         })
         .expect("native parent job");
         let broker = MediaBrokerSupervisor::new(
@@ -5974,6 +5976,8 @@ mod tests {
             resource_root: repository.clone(),
             app_data: scratch.path().join("runtime-host-data"),
             development_fixture_allowed: true,
+            application_namespace:
+                interactive_npcs_credential_vault::PRODUCTION_APPLICATION_NAMESPACE.into(),
         })
         .expect("kill-on-close parent job");
         let broker = MediaBrokerSupervisor::new(

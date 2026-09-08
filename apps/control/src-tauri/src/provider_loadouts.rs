@@ -1749,6 +1749,171 @@ mod tests {
         assert!(pinned.route(ProviderRole::Lipsync).is_none());
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn private_review_script_adds_valid_cyberpunk_presets_without_replacing_global_state() {
+        let temp = tempfile::tempdir().expect("temporary parent");
+        let directory = temp.path().join(REVIEW_APPLICATION_NAMESPACE);
+        std::fs::create_dir(&directory).expect("review directory");
+        let store = ProviderLoadoutStore::new_for_distribution(
+            &directory,
+            REVIEW_APPLICATION_NAMESPACE.into(),
+        );
+        store.save(&starter_document()).expect("starter document");
+        let script = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../scripts/windows/configure-private-review-loadouts.ps1");
+        let output = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+            ])
+            .arg("-File")
+            .arg(script)
+            .arg("-ConfigDirectory")
+            .arg(&directory)
+            .output()
+            .expect("run private review configurator");
+        assert!(
+            output.status.success(),
+            "configurator failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let receipt: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("redacted configurator receipt");
+        assert_eq!(receipt["credential_values_recorded"], false);
+        assert_eq!(receipt["production_state_changed"], false);
+
+        let snapshot = store.load();
+        assert_eq!(snapshot.document.activation.global, id("api-first-starter"));
+        assert_eq!(snapshot.document.loadouts.len(), 4);
+        let resolved = snapshot
+            .document
+            .resolve(
+                &LoadoutContextV1::game("cyberpunk-2077"),
+                &ValidationContextV1::online(),
+            )
+            .expect("active Cyberpunk preset");
+        assert_eq!(resolved.leaf_loadout_id, id("cyberpunk-private-fast-groq"));
+        assert_eq!(
+            resolved.roles[&ProviderRole::Llm].primary.provider_id,
+            "groq"
+        );
+        assert_eq!(
+            resolved.roles[&ProviderRole::Stt].primary.provider_id,
+            "assemblyai"
+        );
+        assert_eq!(
+            resolved.roles[&ProviderRole::Tts].primary.provider_id,
+            "cartesia"
+        );
+        assert_eq!(
+            resolved.roles[&ProviderRole::Embeddings]
+                .primary
+                .provider_id,
+            "fts-only"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn private_review_script_seeds_a_native_valid_document_without_launching_the_app() {
+        let temp = tempfile::tempdir().expect("temporary parent");
+        let directory = temp.path().join(REVIEW_APPLICATION_NAMESPACE);
+        let store = ProviderLoadoutStore::new_for_distribution(
+            &directory,
+            REVIEW_APPLICATION_NAMESPACE.into(),
+        );
+        let script = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../scripts/windows/configure-private-review-loadouts.ps1");
+        let output = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+            ])
+            .arg("-File")
+            .arg(script)
+            .arg("-ConfigDirectory")
+            .arg(&directory)
+            .output()
+            .expect("run headless private review configurator");
+        assert!(
+            output.status.success(),
+            "configurator failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let receipt: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("redacted configurator receipt");
+        assert_eq!(receipt["seeded_review_config"], true);
+        assert_eq!(receipt["credential_values_recorded"], false);
+        assert_eq!(receipt["production_state_changed"], false);
+
+        let snapshot = store.load();
+        assert_eq!(
+            snapshot.persistence_health,
+            ProviderLoadoutPersistenceHealth::Healthy
+        );
+        assert_eq!(snapshot.document.activation.global, id("api-first-starter"));
+        assert_eq!(snapshot.document.loadouts.len(), 4);
+        let resolved = snapshot
+            .document
+            .resolve(
+                &LoadoutContextV1::game("cyberpunk-2077"),
+                &ValidationContextV1::online(),
+            )
+            .expect("active Cyberpunk preset");
+        assert_eq!(resolved.leaf_loadout_id, id("cyberpunk-private-fast-groq"));
+        assert_eq!(
+            resolved.roles[&ProviderRole::Llm].primary.provider_id,
+            "groq"
+        );
+        assert_eq!(
+            resolved.roles[&ProviderRole::Stt].primary.provider_id,
+            "assemblyai"
+        );
+        assert_eq!(
+            resolved.roles[&ProviderRole::Tts].primary.provider_id,
+            "cartesia"
+        );
+
+        let inspect_script = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../scripts/windows/inspect-private-review-provider-setup.ps1");
+        let inspect_output = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+            ])
+            .arg("-File")
+            .arg(inspect_script)
+            .arg("-ConfigDirectory")
+            .arg(&directory)
+            .output()
+            .expect("inspect private review setup headlessly");
+        assert!(
+            inspect_output.status.success(),
+            "inspector failed: {}",
+            String::from_utf8_lossy(&inspect_output.stderr)
+        );
+        let evidence: serde_json::Value =
+            serde_json::from_slice(&inspect_output.stdout).expect("redacted inspector evidence");
+        assert_eq!(
+            evidence["classification"],
+            "recorded_native_config_and_vault_presence"
+        );
+        assert_eq!(evidence["production_namespace_consulted"], false);
+        assert_eq!(evidence["credential_values_exposed"], false);
+        assert_eq!(evidence["provider_network_requests_made"], false);
+        assert_eq!(
+            evidence["game"]["active_loadout_id"],
+            "cyberpunk-private-fast-groq"
+        );
+    }
+
     #[test]
     fn corrupt_primary_recovers_last_good_then_can_be_replaced_atomically() {
         let temp = tempfile::tempdir().expect("temporary directory");

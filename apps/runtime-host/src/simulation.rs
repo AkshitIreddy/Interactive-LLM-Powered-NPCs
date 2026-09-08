@@ -705,6 +705,13 @@ impl HostState {
         cancellation: CancellationToken,
     ) -> Result<SimulationResult, SimulationError> {
         request.validate()?;
+        if request
+            .application_namespace
+            .as_deref()
+            .is_some_and(|namespace| namespace != self.application_namespace)
+        {
+            return Err(SimulationError::InvalidRequest);
+        }
         if request.protected_online_detected() {
             return Err(SimulationError::ProtectedOnlineBlocked);
         }

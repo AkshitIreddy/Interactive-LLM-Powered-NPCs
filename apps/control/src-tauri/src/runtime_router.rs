@@ -1669,6 +1669,8 @@ mod tests {
                 resource_root: root.to_path_buf(),
                 app_data: root.join("runtime-data"),
                 development_fixture_allowed: false,
+                application_namespace:
+                    interactive_npcs_credential_vault::PRODUCTION_APPLICATION_NAMESPACE.into(),
             },
         )
         .expect("test runtime supervisor");

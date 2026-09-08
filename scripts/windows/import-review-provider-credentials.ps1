@@ -39,7 +39,7 @@ public static class NpcReviewCredentialWriter
 
     public static void Write(string target, byte[] secret)
     {
-        if (String.IsNullOrWhiteSpace(target) || secret == null || secret.Length < 8 || secret.Length > 8192)
+        if (String.IsNullOrWhiteSpace(target) || secret == null || secret.Length < 8 || secret.Length > 2560)
             throw new ArgumentException("Credential target or value is invalid.");
         IntPtr targetPointer = IntPtr.Zero;
         IntPtr userPointer = IntPtr.Zero;
@@ -76,13 +76,27 @@ public static class NpcReviewCredentialWriter
 }
 '@
 
+$credentialNamespace = 'interactive-npcs/v2/review'
 $aliases = [ordered]@{
-    'nvidia-nim' = @('nvidia', 'nim')
+    'openai' = @('openai', 'open ai')
+    'anthropic' = @('anthropic', 'claude')
+    'gemini' = @('google gemini', 'gemini')
+    'groq' = @('groq')
+    'mistral' = @('mistral')
+    'openrouter' = @('openrouter', 'open router')
     'cohere' = @('cohere')
-    'elevenlabs' = @('elevenlabs', 'eleven labs', 'elevenlab')
+    'nvidia-nim' = @('nvidia nim', 'nvidia-nim', 'nvidia')
+    'deepgram' = @('deepgram')
     'assemblyai' = @('assemblyai', 'assembly ai')
+    'elevenlabs' = @('elevenlabs', 'eleven labs', 'elevenlab')
+    'cartesia' = @('cartesia')
+    'inworld' = @('inworld')
+}
+$unsupportedAliases = [ordered]@{
+    'cloudflare-workers-ai' = @('cloudflare', 'cloudfare')
 }
 $found = @{}
+$unsupportedFound = @{}
 $current = $null
 foreach ($raw in [System.IO.File]::ReadAllLines($credentialPath, [System.Text.Encoding]::UTF8)) {
     $line = $raw.Trim()
@@ -99,40 +113,87 @@ foreach ($raw in [System.IO.File]::ReadAllLines($credentialPath, [System.Text.En
         $current = $provider
         if ($line -match '[:=]\s*([^\s].*)$') {
             $value = $Matches[1].Trim().Trim('"').Trim("'")
-            if ($value.Length -ge 8 -and -not $found.ContainsKey($provider)) { $found[$provider] = $value }
+            if ($value.Length -ge 8) {
+                if (-not $found.ContainsKey($provider)) {
+                    $found[$provider] = New-Object System.Collections.Generic.List[string]
+                }
+                $found[$provider].Add($value)
+            }
             $current = $null
         }
         continue
     }
-    if ($null -ne $current -and $line.Length -ge 8 -and -not $found.ContainsKey($current)) {
-        $found[$current] = $line.Trim('"').Trim("'")
+    $unsupportedProvider = $null
+    foreach ($candidate in $unsupportedAliases.Keys) {
+        foreach ($alias in $unsupportedAliases[$candidate]) {
+            if ($lowered.Contains($alias)) { $unsupportedProvider = $candidate; break }
+        }
+        if ($null -ne $unsupportedProvider) { break }
+    }
+    if ($null -ne $unsupportedProvider) {
+        $unsupportedFound[$unsupportedProvider] = $true
+        $current = $null
+        continue
+    }
+    if ($null -ne $current) {
+        $value = if ($line -match '^(?:api\s*key|key(?:\s*\d+)?|token|secret)?\s*[:=]\s*([^\s].*)$') {
+            $Matches[1]
+        } else {
+            $line
+        }
+        $value = $value.Trim().Trim('"').Trim("'")
+        if ($value.Length -ge 8) {
+            if (-not $found.ContainsKey($current)) {
+                $found[$current] = New-Object System.Collections.Generic.List[string]
+            }
+            $found[$current].Add($value)
+        }
         $current = $null
     }
 }
-
 $results = @()
 foreach ($provider in $aliases.Keys) {
     if (-not $found.ContainsKey($provider)) {
         $results += [ordered]@{ provider = $provider; status = 'not_found' }
         continue
     }
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$found[$provider])
+    $values = @($found[$provider])
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$values[0])
     try {
-        [NpcReviewCredentialWriter]::Write("interactive-npcs/v2/providers/$provider", $bytes)
-        $results += [ordered]@{ provider = $provider; status = 'saved_to_windows_credential_manager' }
+        [NpcReviewCredentialWriter]::Write("$credentialNamespace/providers/$provider", $bytes)
+        $results += [ordered]@{
+            provider = $provider
+            status = 'saved_to_review_windows_credential_manager'
+            values_detected = $values.Count
+            active_value_saved = 1
+            additional_values_retained_in_source_file = [Math]::Max(0, $values.Count - 1)
+        }
     }
     finally {
         [Array]::Clear($bytes, 0, $bytes.Length)
         $found[$provider] = $null
     }
 }
+foreach ($provider in $unsupportedAliases.Keys) {
+    if ($unsupportedFound.ContainsKey($provider)) {
+        $results += [ordered]@{
+            provider = $provider
+            status = 'adapter_unavailable_not_imported'
+            values_detected = $null
+            active_value_saved = 0
+            additional_values_retained_in_source_file = $null
+        }
+    }
+}
 
 [ordered]@{
     schema_version = 1
-    status = if (@($results | Where-Object { $_.status -ne 'saved_to_windows_credential_manager' }).Count -eq 0) { 'passed' } else { 'incomplete' }
-    namespace = 'interactive-npcs/v2'
+    status = if (@($results | Where-Object { $_.status -eq 'saved_to_review_windows_credential_manager' }).Count -gt 0) { 'passed' } else { 'incomplete' }
+    application_namespace = 'io.github.akshitireddy.interactive-npcs.review'
+    credential_namespace = $credentialNamespace
+    production_namespace_written = $false
     contains_credential_values = $false
     providers = @($results)
 } | ConvertTo-Json -Depth 4
 
-if (@($results | Where-Object { $_.status -ne 'saved_to_windows_credential_manager' }).Count -ne 0) { exit 1 }
+if (@($results | Where-Object { $_.status -eq 'saved_to_review_windows_credential_manager' }).Count -eq 0) { exit 1 }
