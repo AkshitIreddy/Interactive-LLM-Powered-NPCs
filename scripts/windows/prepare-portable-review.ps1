@@ -413,6 +413,7 @@ try {
     }
     $repositoryMappings = @(
         @{ Source = 'profiles/games'; Destination = 'profiles/games' },
+        @{ Source = 'profiles/content-packs/local-review'; Destination = 'profiles/content-packs/local-review' },
         @{ Source = 'catalog/v1'; Destination = 'catalog/v1' }
     )
     if ($null -eq $privateModelCatalog) {
@@ -628,6 +629,25 @@ by the builder.
     Copy-Item -LiteralPath $sourceEvidencePath `
         -Destination (Join-Path $reviewEvidence 'source-evidence.json') -Force
 
+    $cyberpunkRuntimeProfileRelative = 'profiles/games/cyberpunk-2077/profile.json'
+    $cyberpunkAuthoredPackRelative =
+        'profiles/content-packs/local-review/cyberpunk-2077-authored-context-v1.pack.json'
+    $cyberpunkRuntimeProfilePath = Join-Path $stage $cyberpunkRuntimeProfileRelative
+    $cyberpunkAuthoredPackPath = Join-Path $stage $cyberpunkAuthoredPackRelative
+    $cyberpunkRuntimeProfile = Get-Content -LiteralPath $cyberpunkRuntimeProfilePath -Raw | ConvertFrom-Json
+    $cyberpunkAuthoredPack = Get-Content -LiteralPath $cyberpunkAuthoredPackPath -Raw | ConvertFrom-Json
+    $runtimeCharacterIds = @($cyberpunkRuntimeProfile.characters | ForEach-Object { [string]$_.id })
+    $packCharacterIds = @($cyberpunkAuthoredPack.profile.characters | ForEach-Object { [string]$_.id })
+    $backgroundCharacterIds = @($runtimeCharacterIds | Where-Object { $_ -ceq 'night-city-resident' })
+    if ([string]$cyberpunkRuntimeProfile.id -cne 'cyberpunk-2077' -or
+        [string]$cyberpunkAuthoredPack.game_profile_id -cne 'cyberpunk-2077' -or
+        [string]$cyberpunkAuthoredPack.version -cne '1.2.0' -or
+        $runtimeCharacterIds.Count -ne 37 -or $packCharacterIds.Count -ne 37 -or
+        ($runtimeCharacterIds -join "`n") -cne ($packCharacterIds -join "`n") -or
+        $backgroundCharacterIds.Count -ne 1) {
+        throw 'Packaged Cyberpunk runtime profile and authored corpus are not the reviewed 1.2.0 36+1 roster.'
+    }
+
     $files = @(Get-ChildItem -LiteralPath $stage -File -Force -Recurse | Sort-Object FullName |
         ForEach-Object {
             [ordered]@{
@@ -774,6 +794,24 @@ by the builder.
                     })
             }
         })
+        content_corpus = [ordered]@{
+            game_profile_id = 'cyberpunk-2077'
+            version = [string]$cyberpunkAuthoredPack.version
+            named_character_count = 36
+            background_character_count = 1
+            total_character_count = $runtimeCharacterIds.Count
+            background_character_ids = @($backgroundCharacterIds)
+            exact_character_id_order_match = $true
+            runtime_load_mode = 'bundled-profile-resource'
+            runtime_profile = [ordered]@{
+                relative_path = $cyberpunkRuntimeProfileRelative
+                sha256 = Get-LowerSha256 -Path $cyberpunkRuntimeProfilePath
+            }
+            authored_pack = [ordered]@{
+                relative_path = $cyberpunkAuthoredPackRelative
+                sha256 = Get-LowerSha256 -Path $cyberpunkAuthoredPackPath
+            }
+        }
         engineering_review = [ordered]@{
             relative_path = 'review-evidence/engineering-review.md'
             source_path = $engineeringReviewSource

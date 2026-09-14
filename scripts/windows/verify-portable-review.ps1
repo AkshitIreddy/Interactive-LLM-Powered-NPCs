@@ -499,6 +499,44 @@ foreach ($pack in $characterMouthPackEntries) {
     }
 }
 
+if (-not ($manifest.PSObject.Properties.Name -contains 'content_corpus')) {
+    throw 'Portable review content-corpus binding is missing.'
+}
+$contentCorpus = $manifest.content_corpus
+$runtimeProfileRelative = [string]$contentCorpus.runtime_profile.relative_path
+$authoredPackRelative = [string]$contentCorpus.authored_pack.relative_path
+if ([string]$contentCorpus.game_profile_id -cne 'cyberpunk-2077' -or
+    [string]$contentCorpus.version -cne '1.2.0' -or
+    [int]$contentCorpus.named_character_count -ne 36 -or
+    [int]$contentCorpus.background_character_count -ne 1 -or
+    [int]$contentCorpus.total_character_count -ne 37 -or
+    [bool]$contentCorpus.exact_character_id_order_match -ne $true -or
+    [string]$contentCorpus.runtime_load_mode -cne 'bundled-profile-resource' -or
+    $runtimeProfileRelative -cne 'profiles/games/cyberpunk-2077/profile.json' -or
+    $authoredPackRelative -cne
+        'profiles/content-packs/local-review/cyberpunk-2077-authored-context-v1.pack.json' -or
+    (@($contentCorpus.background_character_ids) -join "`n") -cne 'night-city-resident') {
+    throw 'Portable review content-corpus summary is invalid.'
+}
+$runtimeProfilePath = Join-Path $root $runtimeProfileRelative
+$authoredPackPath = Join-Path $root $authoredPackRelative
+if ((Get-LowerSha256 -Path $runtimeProfilePath) -cne [string]$contentCorpus.runtime_profile.sha256 -or
+    (Get-LowerSha256 -Path $authoredPackPath) -cne [string]$contentCorpus.authored_pack.sha256) {
+    throw 'Portable review content-corpus hash binding is invalid.'
+}
+$runtimeProfile = Get-Content -LiteralPath $runtimeProfilePath -Raw | ConvertFrom-Json
+$authoredPack = Get-Content -LiteralPath $authoredPackPath -Raw | ConvertFrom-Json
+$runtimeCharacterIds = @($runtimeProfile.characters | ForEach-Object { [string]$_.id })
+$packCharacterIds = @($authoredPack.profile.characters | ForEach-Object { [string]$_.id })
+if ([string]$runtimeProfile.id -cne 'cyberpunk-2077' -or
+    [string]$authoredPack.game_profile_id -cne 'cyberpunk-2077' -or
+    [string]$authoredPack.version -cne '1.2.0' -or
+    $runtimeCharacterIds.Count -ne 37 -or $packCharacterIds.Count -ne 37 -or
+    ($runtimeCharacterIds -join "`n") -cne ($packCharacterIds -join "`n") -or
+    @($runtimeCharacterIds | Where-Object { $_ -ceq 'night-city-resident' }).Count -ne 1) {
+    throw 'Portable review runtime profile does not match its reviewed 1.2.0 36+1 corpus.'
+}
+
 $engineeringReviewPath = Join-Path $root 'review-evidence/engineering-review.md'
 if ([string]$manifest.engineering_review.relative_path -ne 'review-evidence/engineering-review.md' -or
     [bool]$manifest.engineering_review.local_links_rewritten_to_absolute_source_paths -ne $true -or
@@ -542,6 +580,9 @@ if ($engineeringReviewText -match '\]\((?![<#]|(?i:https?|mailto|file):)[^)]+\)'
         [string]$manifest.mouth_atlas.receipt.sha256
     } else { $null }
     reviewed_character_mouth_pack_count = $characterMouthPackEntries.Count
+    content_corpus_version = [string]$contentCorpus.version
+    named_character_count = [int]$contentCorpus.named_character_count
+    background_character_count = [int]$contentCorpus.background_character_count
     model_catalog_scope = if ($manifest.PSObject.Properties.Name -contains 'model_catalog') {
         [string]$manifest.model_catalog.scope
     } else {

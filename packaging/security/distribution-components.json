@@ -329,6 +329,7 @@
     {"path": "packaging/model-packs/review-evidence-index-v1.json", "sha256": "a2d9a652133e7e7d54e61380c597e3dd32b6e0df2c91d566b762901e2a042d95", "component_id": "project:static-resources"},
     {"path": "packaging/model-packs/review-evidence/moonshine-non-qualifying-review-summary-v1.json", "sha256": "1d9368f3c91d36430d787ba84474c380ca2904eb534029c1018d0ccd3cd7a96e", "component_id": "project:static-resources"},
     {"path": "packaging/runtime-components/onnxruntime-1.22.1-cpu.json", "install_path": "product-audit/packaging/runtime-components/onnxruntime-1.22.1-cpu.json", "sha256": "99352e1b8d8953515e0ff857980c000797967ed50d5a0316793a9388298fc79d", "component_id": "project:static-resources"},
+    {"path": "profiles/content-packs/local-review/cyberpunk-2077-authored-context-v1.pack.json", "sha256": "7b16dcef9e794593262e12475d281b34dc866a5584f0f2305f7ee13e1ebe4c38", "component_id": "project:static-resources"},
     {"path": "profiles/games/baldurs-gate-3/profile.json", "sha256": "ef3094a7ddd6c0e527f42cabc4ee44ad3c4d47d40b1fa44072233a01173153d5", "component_id": "project:static-resources"},
     {"path": "profiles/games/cyberpunk-2077/profile.json", "sha256": "a72c61d64f540a59ff418f52d37fa34c02c8ebce69b1b7daaeb365ffdd8c6339", "component_id": "project:static-resources"},
     {"path": "profiles/games/divinity-original-sin-2/profile.json", "sha256": "5c88e007dc4d4277727de4497f7797ce3dbde22bb11db6bc92863ab4bfad03cf", "component_id": "project:static-resources"},
