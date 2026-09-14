@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$DestinationRoot = 'E:\temp\InteractiveNPCs\review-v18',
+    [string]$DestinationRoot = 'E:\temp\InteractiveNPCs\review-v21',
     [string]$ArtifactRoot = 'E:\temp\InteractiveNPCs',
     [string]$StableTestGameDirectory = 'E:\temp\InteractiveNPCs\review-game-v17-stable\local-app-data\test-game',
     [string]$MouthAtlasDirectory = 'E:\temp\InteractiveNPCs\review-mouth-atlas-v80-native-compatible',
@@ -48,15 +48,8 @@ $stableTestGame = [System.IO.Path]::GetFullPath($StableTestGameDirectory).TrimEn
 $engineeringReviewSource = Join-Path $repoRoot 'docs/product-rework/local-review-2026-09-05.md'
 $privateModelCatalog = $null
 $privateCatalogReceipt = $null
+$privateCatalogReceiptHash = $null
 $privateCatalogRuntimeFiles = @()
-$privateCatalogExpectedFiles = @(
-    'evidence/catalog-verification-receipt.json',
-    'evidence/yunet-import-context.json',
-    'model-catalog-root-v1.json',
-    'model-catalog-v1.json',
-    'openseeface-yunet640-lm1-mouth-signal.json',
-    'qual/c35d184bc8f69b833c1da3fdf38a731b977b2612b565bc58cae1989f75990896.json'
-)
 
 function Get-LowerSha256 {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -189,12 +182,17 @@ foreach ($characterReceiptPath in $ReviewedCharacterMouthPackReceiptPaths) {
 
 if (-not [string]::IsNullOrWhiteSpace($PrivateReviewModelCatalogDirectory)) {
     $privateModelCatalog = [System.IO.Path]::GetFullPath($PrivateReviewModelCatalogDirectory).TrimEnd('\')
-    Assert-NormalClosedWorldDirectory -Path $privateModelCatalog `
-        -ExpectedFiles $privateCatalogExpectedFiles -Label 'Private signed review model catalog'
     $receiptPath = Join-Path $privateModelCatalog 'evidence/catalog-verification-receipt.json'
-    if ((Get-LowerSha256 -Path $receiptPath) -cne
-            '9b10b97b76e9dbda1f3903d2fe7884a7c3bff3bc5d58bc14d45100ff1c8b2bb7') {
-        throw 'Private review catalog receipt is not the independently verified YuNet v17 receipt.'
+    $importContextPath = Join-Path $privateModelCatalog 'evidence/yunet-import-context.json'
+    $liveVerification = & (Join-Path $PSScriptRoot 'verify-private-review-model-catalog.ps1') `
+        -Directory $privateModelCatalog -ReceiptPath $receiptPath `
+        -ImportContextPath $importContextPath | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or $liveVerification.status -ne 'passed') {
+        throw 'Private review model catalog failed live cryptographic verification.'
+    }
+    $privateCatalogReceiptHash = Get-LowerSha256 -Path $receiptPath
+    if ($privateCatalogReceiptHash -cne [string]$liveVerification.receiptSha256) {
+        throw 'Private review model catalog receipt changed after live verification.'
     }
     $privateCatalogReceipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
     if ($privateCatalogReceipt.schema -ne 'interactive-npcs-private-catalog-verification/v1' -or
@@ -221,14 +219,34 @@ if (-not [string]::IsNullOrWhiteSpace($PrivateReviewModelCatalogDirectory)) {
     if ($privateCatalogRuntimeFiles.Count -ne 4) {
         throw 'Private review catalog receipt must bind exactly four runtime metadata files.'
     }
+    $runtimeRelativePaths = @($privateCatalogRuntimeFiles | ForEach-Object { [string]$_.path })
+    $expectedFixedRuntimePaths = @(
+        'model-catalog-root-v1.json',
+        'model-catalog-v1.json',
+        'openseeface-yunet640-lm1-mouth-signal.json'
+    )
+    foreach ($required in $expectedFixedRuntimePaths) {
+        if ($required -notin $runtimeRelativePaths) {
+            throw "Private review catalog receipt is missing runtime metadata: $required"
+        }
+    }
+    $qualifiedPaths = @($runtimeRelativePaths | Where-Object {
+            $_ -cmatch '^qual/[0-9a-f]{64}\.json$'
+        })
+    if ($qualifiedPaths.Count -ne 1 -or
+        @($runtimeRelativePaths | Select-Object -Unique).Count -ne 4) {
+        throw 'Private review catalog receipt must bind one digest-addressed qualified envelope.'
+    }
+    $privateCatalogExpectedFiles = @($runtimeRelativePaths) + @(
+        'evidence/catalog-verification-receipt.json',
+        'evidence/yunet-import-context.json'
+    )
+    Assert-NormalClosedWorldDirectory -Path $privateModelCatalog `
+        -ExpectedFiles $privateCatalogExpectedFiles -Label 'Private signed review model catalog'
     foreach ($entry in $privateCatalogRuntimeFiles) {
         $relative = [string]$entry.path
-        if ($relative -notin @(
-                'model-catalog-root-v1.json',
-                'model-catalog-v1.json',
-                'openseeface-yunet640-lm1-mouth-signal.json',
-                'qual/c35d184bc8f69b833c1da3fdf38a731b977b2612b565bc58cae1989f75990896.json'
-            ) -or [string]$entry.sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+        if ($relative -notin $runtimeRelativePaths -or
+            [string]$entry.sha256 -cnotmatch '^[0-9a-f]{64}$' -or
             (Get-LowerSha256 -Path (Join-Path $privateModelCatalog $relative)) -cne [string]$entry.sha256) {
             throw "Private review catalog runtime file disagrees with its verified receipt: $relative"
         }
@@ -294,7 +312,7 @@ $preflight = [ordered]@{
     private_review_model_catalog_receipt_sha256 = if ($null -eq $privateCatalogReceipt) {
         $null
     } else {
-        '9b10b97b76e9dbda1f3903d2fe7884a7c3bff3bc5d58bc14d45100ff1c8b2bb7'
+        $privateCatalogReceiptHash
     }
     installer_used = $false
     desktop_launch_performed = $false
@@ -530,11 +548,15 @@ whole-loadout admission pass.
 
 Review root: $destination
 
-1. Start interactive-npcs-control.exe. The bundle contains no pre-activated
-   model, provider, target, or character mouth-pack state. Existing settings in
-   the isolated owner review profile persist separately from this directory.
-2. Open Games, choose Cyberpunk 2077, confirm single-player use, scan for game
-   windows, and connect the exact window you intend to review.
+1. Start interactive-npcs-control.exe. Open Games and use **Launch & connect**
+   on the Included practice game card. The app verifies and opens Eclipse Harbor
+   from `local-app-data\test-game\interactive-npcs-synthetic-target.exe`, then
+   connects the exact window. You do not need to find or start that file first.
+2. The bundle contains no pre-activated model, provider, target, or character
+   mouth-pack state. Existing settings in the isolated owner review profile
+   persist separately from this directory. To review Cyberpunk 2077 instead,
+   choose it in Games, confirm single-player use, scan for game windows, and
+   connect the exact window you intend to review.
 3. From Games choose Set up mouth tracking; the app opens Loadout > Local models.
    Choose Choose tracking model. In Model downloads, explicitly allow the local
    change, accept the displayed license when required, and choose Install exact

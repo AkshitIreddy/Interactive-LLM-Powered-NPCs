@@ -188,21 +188,39 @@ if ($manifest.PSObject.Properties.Name -contains 'model_catalog') {
             throw 'Portable review private model-catalog boundary is invalid.'
         }
         $catalogRoot = Join-Path $root 'packaging/model-packs'
-        $expectedCatalogFiles = @(
-            'model-catalog-root-v1.json',
-            'model-catalog-v1.json',
-            'openseeface-yunet640-lm1-mouth-signal.json',
-            'qual/c35d184bc8f69b833c1da3fdf38a731b977b2612b565bc58cae1989f75990896.json'
-        ) | Sort-Object
+        $recordedCatalogFiles = @($manifest.model_catalog.runtime_files)
+        if ($recordedCatalogFiles.Count -ne 4) {
+            throw 'Portable review private model-catalog manifest must bind four runtime files.'
+        }
+        $expectedCatalogFiles = @($recordedCatalogFiles | ForEach-Object {
+                $relative = [string]$_.path
+                if (-not $relative.StartsWith('packaging/model-packs/',
+                        [System.StringComparison]::Ordinal)) {
+                    throw "Portable review private model-catalog path escaped its runtime root: $relative"
+                }
+                $relative.Substring('packaging/model-packs/'.Length)
+            } | Sort-Object)
+        foreach ($required in @(
+                'model-catalog-root-v1.json',
+                'model-catalog-v1.json',
+                'openseeface-yunet640-lm1-mouth-signal.json'
+            )) {
+            if ($required -notin $expectedCatalogFiles) {
+                throw "Portable review private model-catalog is missing runtime metadata: $required"
+            }
+        }
+        $qualifiedCatalogFiles = @($expectedCatalogFiles | Where-Object {
+                $_ -cmatch '^qual/[0-9a-f]{64}\.json$'
+            })
+        if ($qualifiedCatalogFiles.Count -ne 1 -or
+            @($expectedCatalogFiles | Select-Object -Unique).Count -ne 4) {
+            throw 'Portable review private model-catalog must bind one digest-addressed envelope.'
+        }
         $actualCatalogFiles = @(Get-ChildItem -LiteralPath $catalogRoot -File -Force -Recurse |
                 ForEach-Object { $_.FullName.Substring($catalogRoot.Length + 1).Replace('\', '/') } |
                 Sort-Object)
         if (($expectedCatalogFiles -join "`n") -cne ($actualCatalogFiles -join "`n")) {
             throw 'Portable review private model-catalog loader root is not the four-file closed world.'
-        }
-        $recordedCatalogFiles = @($manifest.model_catalog.runtime_files)
-        if ($recordedCatalogFiles.Count -ne 4) {
-            throw 'Portable review private model-catalog manifest must bind four runtime files.'
         }
         foreach ($entry in $recordedCatalogFiles) {
             $path = Join-Path $root ([string]$entry.path)
@@ -214,8 +232,6 @@ if ($manifest.PSObject.Properties.Name -contains 'model_catalog') {
         $receiptPath = Join-Path $root ([string]$manifest.model_catalog.verification_receipt.relative_path)
         if ([string]$manifest.model_catalog.verification_receipt.relative_path -ne
                 'review-evidence/private-model-catalog-verification.json' -or
-            (Get-LowerSha256 -Path $receiptPath) -cne
-                '9b10b97b76e9dbda1f3903d2fe7884a7c3bff3bc5d58bc14d45100ff1c8b2bb7' -or
             (Get-LowerSha256 -Path $receiptPath) -cne
                 [string]$manifest.model_catalog.verification_receipt.sha256) {
             throw 'Portable review private model-catalog verification receipt is invalid.'
@@ -253,12 +269,21 @@ if ($manifest.PSObject.Properties.Name -contains 'model_catalog') {
                 [string]$manifest.model_catalog.import_context.sha256) {
             throw 'Portable review private model-catalog import context is invalid.'
         }
+        $liveVerification = & (Join-Path $repoRoot `
+                'scripts/windows/verify-private-review-model-catalog.ps1') `
+            -Directory $catalogRoot -ReceiptPath $receiptPath `
+            -ImportContextPath $importContextPath | ConvertFrom-Json
+        if ($LASTEXITCODE -ne 0 -or $liveVerification.status -ne 'passed' -or
+            [string]$liveVerification.receiptSha256 -cne
+                [string]$manifest.model_catalog.verification_receipt.sha256) {
+            throw 'Portable review private model-catalog failed live cryptographic verification.'
+        }
         $catalogTrustRoot = Get-Content -LiteralPath (Join-Path $catalogRoot 'model-catalog-root-v1.json') -Raw |
             ConvertFrom-Json
         $catalog = Get-Content -LiteralPath (Join-Path $catalogRoot 'model-catalog-v1.json') -Raw |
             ConvertFrom-Json
         $qualifiedEnvelope = Get-Content -LiteralPath (Join-Path $catalogRoot `
-                'qual/c35d184bc8f69b833c1da3fdf38a731b977b2612b565bc58cae1989f75990896.json') -Raw |
+                $qualifiedCatalogFiles[0]) -Raw |
             ConvertFrom-Json
         if ($catalogTrustRoot.schema -ne 'npc.model-catalog-root/v1' -or
             $catalogTrustRoot.trustScope -ne 'automated_local_review_bootstrap' -or

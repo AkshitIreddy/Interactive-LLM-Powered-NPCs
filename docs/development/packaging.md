@@ -20,13 +20,13 @@ running an installer or launching the desktop application:
 ```powershell
 $env:NPC_LARGE_ARTIFACT_ROOT = 'E:\temp\InteractiveNPCs'
 ./scripts/windows/prepare-portable-review.ps1 `
-  -DestinationRoot 'E:\temp\InteractiveNPCs\review-v18' `
+  -DestinationRoot 'E:\temp\InteractiveNPCs\review-v21' `
   -StableTestGameDirectory `
     'E:\temp\InteractiveNPCs\review-game-v17-stable\local-app-data\test-game' `
   -ReviewedMouthAtlasReceiptPath `
     'E:\temp\InteractiveNPCs\review-mouth-atlas-v80-native-compatible\reviewed-artifact-receipt.v1.json' `
   -PrivateReviewModelCatalogDirectory `
-    'E:\temp\InteractiveNPCs\private-review-catalog-yunet-20260907-r3'
+    'E:\temp\InteractiveNPCs\private-review-catalog-yunet-20260914-r5'
 ```
 
 Run the non-mutating preflight while source or vertical-slice work is still in
@@ -34,15 +34,35 @@ progress:
 
 ```powershell
 ./scripts/windows/prepare-portable-review.ps1 `
-  -DestinationRoot 'E:\temp\InteractiveNPCs\review-v18' `
+  -DestinationRoot 'E:\temp\InteractiveNPCs\review-v21' `
   -StableTestGameDirectory `
     'E:\temp\InteractiveNPCs\review-game-v17-stable\local-app-data\test-game' `
   -ReviewedMouthAtlasReceiptPath `
     'E:\temp\InteractiveNPCs\review-mouth-atlas-v80-native-compatible\reviewed-artifact-receipt.v1.json' `
   -PrivateReviewModelCatalogDirectory `
-    'E:\temp\InteractiveNPCs\private-review-catalog-yunet-20260907-r3' `
+    'E:\temp\InteractiveNPCs\private-review-catalog-yunet-20260914-r5' `
   -PreflightOnly
 ```
+
+Private review catalog metadata is deliberately short lived. Refresh an expired
+local-review bootstrap only while its exact signed device measurement remains
+current:
+
+```powershell
+./scripts/windows/refresh-private-review-model-catalog.ps1 `
+  -SourceDirectory `
+    'E:\temp\InteractiveNPCs\private-review-catalog-yunet-20260907-r3' `
+  -DestinationDirectory `
+    'E:\temp\InteractiveNPCs\private-review-catalog-yunet-20260914-r5'
+```
+
+The refresh verifies the previous two-of-two signatures and current measurement
+envelope through the model-manager public API, creates a new short-lived
+two-of-two bootstrap with fresh ephemeral keys, and persists no private signing
+material. It cannot extend the underlying measurement envelope, enable
+production trust, or enable promotion/publication. Verify any supplied overlay
+independently with `verify-private-review-model-catalog.ps1`; packaging performs
+the same live cryptographic verification and rejects expired metadata.
 
 The builder compiles a fresh Debug review-namespace shell with Tauri's
 `--no-bundle` path, audits the four GUI-subsystem sidecars, stages the exact
@@ -108,7 +128,7 @@ source identity, private-catalog boundary, and synthetic-game provenance with:
 
 ```powershell
 ./scripts/windows/verify-portable-review.ps1 `
-  -Directory 'E:\temp\InteractiveNPCs\review-v18'
+  -Directory 'E:\temp\InteractiveNPCs\review-v21'
 ```
 
 This is unsigned, installer-free, local-review evidence. It is not installed
