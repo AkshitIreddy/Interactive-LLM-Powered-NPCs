@@ -463,6 +463,45 @@ fn authority_scope() -> AuthorityScope {
 }
 
 #[test]
+fn expanded_cyberpunk_character_context_reaches_the_runtime_prompt() {
+    let database = database();
+    let mut scope = authority_scope();
+    scope.character_id = Some("song-so-mi".to_owned());
+    let context = build_prompt_context(
+        &database,
+        PromptBuildRequestV1 {
+            schema_version: CHARACTER_DB_SCHEMA_VERSION.to_owned(),
+            scope,
+            query: "What makes this choice yours?".to_owned(),
+            enabled_spoiler_tiers: vec!["dogtown".to_owned(), "relic-and-endings".to_owned()],
+            memory_context: MemoryContextBundle::default(),
+            memory_spoiler_policy: SpoilerPolicy {
+                allow_game: true,
+                allow_save: true,
+                allow_character_private: true,
+                allow_user_private: true,
+            },
+            max_style_examples: 4,
+        },
+    )
+    .expect("expanded Songbird context should build");
+    let all_text = context
+        .sections
+        .iter()
+        .flat_map(|section| section.records.iter().map(|record| record.text.as_str()))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(all_text.contains("Song So Mi, known as Songbird"));
+    assert!(all_text.contains("FIA operations, Myers, Reed, Alex"));
+    assert!(all_text.contains("every door is owned by someone else"));
+    assert!(context
+        .retrieval_provenance
+        .selected_profile_knowledge_ids
+        .contains(&"corpus-song-so-mi-context".to_owned()));
+}
+
+#[test]
 fn retrieved_memory_is_typed_exactly_once_and_shares_the_global_memory_cap() {
     let mut profile = support::cyberpunk_profile();
     profile.content.retrieval.max_memory_records = 3;
