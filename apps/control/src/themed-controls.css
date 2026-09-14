@@ -1,0 +1,252 @@
+/*
+ * Shared chrome for native controls.
+ *
+ * Chromium/WebView2's customizable-select implementation keeps the native
+ * control, keyboard model and form behaviour while exposing its top-layer
+ * picker for styling. Older engines retain the native picker and receive the
+ * trigger/option colours below as a progressive fallback.
+ */
+
+:root {
+  --control-chrome: #160d13;
+  --control-chrome-raised: #24121b;
+  --control-chrome-hover: #351824;
+  --control-border: rgba(255, 98, 106, 0.42);
+  --control-border-hot: rgba(255, 98, 106, 0.82);
+  --control-text: #f1dfe0;
+  --control-muted: #b799a4;
+  --control-accent: #65e1e2;
+  --control-accent-soft: rgba(101, 225, 226, 0.14);
+  --control-focus: rgba(101, 225, 226, 0.7);
+  --scroll-track: #120a10;
+  --scroll-thumb: #71303e;
+  --scroll-thumb-hover: #c24e5d;
+}
+
+/* Firefox and standards-compatible Chromium fallback. */
+html,
+body,
+* {
+  scrollbar-color: var(--scroll-thumb) var(--scroll-track);
+  scrollbar-width: thin;
+}
+
+/* WebView2/Chromium gives us the more game-like rail and hover treatment. */
+@supports selector(::-webkit-scrollbar) {
+  html,
+  body,
+  * {
+    /* Existing page selectors set the standards fallback more specifically. */
+    scrollbar-color: auto !important;
+  }
+
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background:
+      linear-gradient(
+        90deg,
+        transparent 0 3px,
+        rgba(255, 98, 106, 0.13) 3px 4px,
+        transparent 4px
+      ),
+      var(--scroll-track);
+    border-inline: 1px solid rgba(255, 98, 106, 0.08);
+  }
+
+  *::-webkit-scrollbar-thumb {
+    min-height: 42px;
+    border: 3px solid var(--scroll-track);
+    border-radius: 0;
+    background:
+      linear-gradient(180deg, var(--scroll-thumb-hover) 0 3px, transparent 3px),
+      var(--scroll-thumb);
+    box-shadow: inset 1px 0 rgba(255, 185, 190, 0.15);
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background:
+      linear-gradient(180deg, var(--control-accent) 0 3px, transparent 3px),
+      var(--scroll-thumb-hover);
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: var(--scroll-track);
+  }
+}
+
+select {
+  max-width: 100%;
+  border-color: var(--control-border);
+  background-color: var(--control-chrome);
+  color: var(--control-text);
+  font: inherit;
+  color-scheme: dark;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+select:hover:not(:disabled) {
+  border-color: var(--control-border-hot);
+  background-color: var(--control-chrome-raised);
+}
+
+select:focus-visible {
+  border-color: var(--control-accent);
+  outline: 1px solid var(--control-focus);
+  outline-offset: 2px;
+  box-shadow:
+    0 0 0 3px rgba(101, 225, 226, 0.08),
+    inset 3px 0 var(--control-accent);
+}
+
+select:disabled {
+  cursor: not-allowed;
+  filter: saturate(0.45);
+  opacity: 0.55;
+}
+
+select option {
+  background: var(--control-chrome);
+  color: var(--control-text);
+}
+
+select option:disabled {
+  color: color-mix(in srgb, var(--control-muted) 62%, transparent);
+}
+
+@supports (appearance: base-select) {
+  select,
+  select::picker(select) {
+    appearance: base-select;
+  }
+
+  select {
+    min-height: 36px;
+    padding: 7px 11px;
+    gap: 12px;
+  }
+
+  select::picker-icon {
+    color: var(--control-accent);
+    transition: rotate 140ms ease;
+  }
+
+  select:open::picker-icon {
+    rotate: 180deg;
+  }
+
+  select::picker(select) {
+    max-height: min(23rem, calc(100dvh - 32px));
+    margin-block: 6px;
+    overflow-y: auto;
+    border: 1px solid var(--control-border-hot);
+    border-radius: 0;
+    background:
+      linear-gradient(135deg, rgba(101, 225, 226, 0.05), transparent 38%),
+      linear-gradient(180deg, #2c111b, var(--control-chrome) 34%);
+    box-shadow:
+      0 18px 50px rgba(0, 0, 0, 0.58),
+      inset 3px 0 #ff626a,
+      inset 0 1px rgba(255, 185, 190, 0.12);
+  }
+
+  select option {
+    display: flex;
+    min-height: 38px;
+    align-items: center;
+    gap: 9px;
+    padding: 8px 12px 8px 14px;
+    border: 0;
+    border-bottom: 1px solid rgba(255, 98, 106, 0.11);
+    background: transparent;
+    color: var(--control-text);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  select option:last-of-type {
+    border-bottom: 0;
+  }
+
+  select option:is(:hover, :focus) {
+    background:
+      linear-gradient(90deg, var(--control-accent-soft), transparent 78%),
+      var(--control-chrome-hover);
+    color: #fff7f5;
+    outline: 0;
+  }
+
+  select option:checked {
+    background:
+      linear-gradient(90deg, rgba(101, 225, 226, 0.2), transparent 84%), #24151c;
+    color: var(--control-accent);
+    font-weight: 650;
+  }
+
+  select option:disabled {
+    background: rgba(0, 0, 0, 0.16);
+    color: color-mix(in srgb, var(--control-muted) 55%, transparent);
+    cursor: not-allowed;
+  }
+
+  select option::checkmark {
+    order: 1;
+    margin-inline-start: auto;
+    color: var(--control-accent);
+    font-weight: 800;
+  }
+}
+
+/* The loadout has its own hotter red/cyan instrument palette. */
+.loadout-console select {
+  --control-chrome: var(--loadout-panel, #0c090d);
+  --control-chrome-raised: var(--loadout-panel-raised, #130b10);
+  --control-chrome-hover: var(--loadout-burgundy, #2a0d15);
+  --control-border: var(--loadout-line, rgba(239, 110, 126, 0.19));
+  --control-border-hot: var(--loadout-line-hot, rgba(255, 70, 93, 0.54));
+  --control-text: var(--loadout-bone, #e2d7cf);
+  --control-muted: var(--loadout-muted, #a68e96);
+  --control-accent: var(--loadout-cyan, #52e2df);
+  --control-accent-soft: var(--loadout-cyan-soft, rgba(82, 226, 223, 0.1));
+}
+
+:root[data-theme="light"] {
+  --scroll-track: #e5d8da;
+  --scroll-thumb: #9c5763;
+  --scroll-thumb-hover: #743946;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  select,
+  select::picker-icon {
+    transition-duration: 0.001ms;
+  }
+}
+
+@media (forced-colors: active) {
+  html,
+  body,
+  * {
+    scrollbar-color: auto;
+  }
+
+  select,
+  select::picker(select) {
+    border: 1px solid ButtonText;
+    background: Canvas;
+    color: CanvasText;
+    box-shadow: none;
+    forced-color-adjust: auto;
+  }
+
+  select:focus-visible {
+    outline: 2px solid Highlight;
+  }
+}
