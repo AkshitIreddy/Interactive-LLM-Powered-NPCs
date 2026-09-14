@@ -31,6 +31,8 @@ const bridge = vi.hoisted(() => ({
   savePreferences: vi.fn(),
   captureSelect: vi.fn(),
   captureVerify: vi.fn(),
+  reviewStatus: vi.fn(),
+  reviewPrepare: vi.fn(),
 }));
 
 const selectedStt = vi.hoisted(() => ({
@@ -71,6 +73,12 @@ vi.mock("./tauriBridge", async (importOriginal) => ({
     available: true,
     commandName: "debug_select",
   }),
+  syntheticReviewTargetAvailability: () => ({
+    available: true,
+    commandName: "prepare_synthetic_review_target",
+  }),
+  readSyntheticReviewTargetStatus: bridge.reviewStatus,
+  prepareSyntheticReviewTarget: bridge.reviewPrepare,
   runSyntheticReplayCapture: bridge.captureSelect,
   verifySelectedGameCapture: bridge.captureVerify,
 }));
@@ -163,7 +171,10 @@ const authenticatedBootstrap = {
         defaultFallback: "audioOnly" as const,
       },
     ],
-    capabilities: { debugSyntheticReplayCapture: true },
+    capabilities: {
+      debugSyntheticReplayCapture: true,
+      debugSyntheticReviewTargetLaunch: true,
+    },
   },
 };
 
@@ -524,6 +535,29 @@ describe("native evidence in the product console", () => {
       targetExecutableBasename: "interactive-npcs-synthetic-target.exe",
       diagnostics: { framesReceived: 4 },
       captureEvidence: { latestFrameSequence: 4 },
+    });
+    bridge.reviewStatus.mockReset().mockResolvedValue({
+      schemaVersion: 1,
+      state: "readyToLaunch",
+      displayName: "Eclipse Harbor",
+      executableName: "interactive-npcs-synthetic-target.exe",
+      executablePath:
+        "E:\\review\\local-app-data\\test-game\\interactive-npcs-synthetic-target.exe",
+      expectedRelativePath:
+        "local-app-data\\test-game\\interactive-npcs-synthetic-target.exe",
+      targetProcessId: null,
+      targetWindowHandle: null,
+      detail: "The included practice game is installed and ready.",
+    });
+    bridge.reviewPrepare.mockReset().mockResolvedValue({
+      schemaVersion: 1,
+      launched: true,
+      executablePath:
+        "E:\\review\\local-app-data\\test-game\\interactive-npcs-synthetic-target.exe",
+      targetProcessId: 7331,
+      targetWindowHandle: 880055,
+      targetExecutableBasename: "interactive-npcs-synthetic-target.exe",
+      fixtureMotionMode: "camera-idle-loop",
     });
     bridge.captureVerify.mockReset().mockResolvedValue({
       schemaVersion: 1,
@@ -1172,7 +1206,7 @@ describe("native evidence in the product console", () => {
     render(<App />);
     await screen.findByText("Runtime and media broker authenticated");
     await user.click(screen.getByRole("button", { name: "Games" }));
-    await user.click(screen.getByText("Practice environment"));
+    await user.click(screen.getByText("Practice environment details"));
     expect(
       screen.getByRole("button", { name: "Verify live capture" }),
     ).toBeDisabled();
@@ -1214,6 +1248,33 @@ describe("native evidence in the product console", () => {
     expect(screen.getByLabelText("Synthetic WGC receipt")).toHaveTextContent(
       "verified_synthetic_fixture",
     );
+  });
+
+  it("offers the included game directly and keeps a native launch failure retryable", async () => {
+    const user = userEvent.setup();
+    bridge.reviewPrepare.mockRejectedValueOnce(
+      new Error(
+        "The included practice game did not publish a capturable window.",
+      ),
+    );
+    render(<App />);
+    await screen.findByText("Runtime and media broker authenticated");
+    await user.click(screen.getByRole("button", { name: "Games" }));
+
+    expect(await screen.findByText("Ready to launch")).toBeInTheDocument();
+    const launch = screen.getByRole("button", { name: "Launch & connect" });
+    expect(launch).toBeEnabled();
+    await user.click(launch);
+
+    expect(bridge.reviewPrepare).toHaveBeenCalledOnce();
+    expect(
+      await screen.findAllByText(
+        "The included practice game did not publish a capturable window.",
+      ),
+    ).not.toHaveLength(0);
+    expect(
+      screen.getByRole("button", { name: "Launch & connect" }),
+    ).toBeEnabled();
   });
 
   it("keeps private identity enrollment disabled until native pack admission", async () => {

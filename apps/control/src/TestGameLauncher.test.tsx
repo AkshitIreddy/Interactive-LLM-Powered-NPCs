@@ -27,6 +27,8 @@ const ready = {
     "E:\\review\\local-app-data\\test-game\\interactive-npcs-synthetic-target.exe",
   expectedRelativePath:
     "local-app-data\\test-game\\interactive-npcs-synthetic-target.exe",
+  targetProcessId: null,
+  targetWindowHandle: null,
   detail: "Installed and ready.",
 };
 
@@ -79,6 +81,47 @@ describe("TestGameLauncher", () => {
     expect(
       screen.getByRole("button", { name: "Launch & connect" }),
     ).toBeDisabled();
+  });
+
+  it("trusts the current native window state instead of a stale parent proof", async () => {
+    const onLaunchAndConnect = vi.fn();
+    bridge.status.mockResolvedValue({
+      ...ready,
+      state: "connected",
+      targetProcessId: 7331,
+      targetWindowHandle: 880055,
+      detail: "The included practice-game window is connected.",
+    });
+    const { unmount } = render(
+      <TestGameLauncher
+        availability={available}
+        connected={false}
+        busy={false}
+        onLaunchAndConnect={onLaunchAndConnect}
+      />,
+    );
+
+    expect(await screen.findByText("Connected")).toBeInTheDocument();
+    expect(screen.getByText(/PID 7331/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Game connected" }),
+    ).toBeDisabled();
+    expect(onLaunchAndConnect).not.toHaveBeenCalled();
+    unmount();
+
+    bridge.status.mockResolvedValue(ready);
+    render(
+      <TestGameLauncher
+        availability={available}
+        connected
+        busy={false}
+        onLaunchAndConnect={onLaunchAndConnect}
+      />,
+    );
+    expect(await screen.findByText("Ready to launch")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Launch & connect" }),
+    ).toBeEnabled();
   });
 
   it("explains that browser preview cannot launch the native practice game", () => {

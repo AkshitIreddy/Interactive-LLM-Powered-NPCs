@@ -820,6 +820,8 @@ describe("Tauri bridge normalization", () => {
         "C:\\review\\local-app-data\\test-game\\interactive-npcs-synthetic-target.exe",
       expectedRelativePath:
         "local-app-data\\test-game\\interactive-npcs-synthetic-target.exe",
+      targetProcessId: null,
+      targetWindowHandle: null,
       detail: "The included practice game is installed and ready.",
     };
     tauriMocks.invoke.mockResolvedValueOnce(status);

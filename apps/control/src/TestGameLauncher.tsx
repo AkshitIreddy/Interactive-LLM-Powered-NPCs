@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   readSyntheticReviewTargetStatus,
   type SyntheticReplayCaptureAvailability,
@@ -11,6 +11,7 @@ export interface TestGameLauncherProps {
   connected: boolean;
   busy: boolean;
   onLaunchAndConnect: () => void | Promise<void>;
+  onConnectionLost?: () => void;
 }
 
 type StatusState =
@@ -31,6 +32,7 @@ export function TestGameLauncher({
   connected,
   busy,
   onLaunchAndConnect,
+  onConnectionLost,
 }: TestGameLauncherProps) {
   const [revision, setRevision] = useState(0);
   const [status, setStatus] = useState<StatusState>(() =>
@@ -43,6 +45,12 @@ export function TestGameLauncher({
   );
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const nativeWasConnected = useRef(false);
+  const connectionLostHandler = useRef(onConnectionLost);
+
+  useEffect(() => {
+    connectionLostHandler.current = onConnectionLost;
+  }, [onConnectionLost]);
 
   useEffect(() => {
     if (!availability.available) {
@@ -53,29 +61,41 @@ export function TestGameLauncher({
       return;
     }
     let current = true;
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
     setStatus({ kind: "loading" });
-    void readSyntheticReviewTargetStatus(availability)
-      .then((target) => {
-        if (!current) return;
-        if (target) setStatus({ kind: "loaded", target });
-        else
+    const readStatus = () => {
+      void readSyntheticReviewTargetStatus(availability)
+        .then((target) => {
+          if (!current) return;
+          if (target) {
+            const nowConnected = target.state === "connected";
+            if (nativeWasConnected.current && !nowConnected)
+              connectionLostHandler.current?.();
+            nativeWasConnected.current = nowConnected;
+            setStatus({ kind: "loaded", target });
+            if (nowConnected) refreshTimer = setTimeout(readStatus, 2_000);
+          } else {
+            setStatus({
+              kind: "failed",
+              detail: "The native app did not return a practice-game status.",
+            });
+          }
+        })
+        .catch((error: unknown) => {
+          if (!current) return;
           setStatus({
             kind: "failed",
-            detail: "The native app did not return a practice-game status.",
+            detail:
+              error instanceof Error
+                ? error.message
+                : "The practice-game status could not be read.",
           });
-      })
-      .catch((error: unknown) => {
-        if (!current) return;
-        setStatus({
-          kind: "failed",
-          detail:
-            error instanceof Error
-              ? error.message
-              : "The practice-game status could not be read.",
         });
-      });
+    };
+    readStatus();
     return () => {
       current = false;
+      if (refreshTimer) clearTimeout(refreshTimer);
     };
   }, [
     availability.available,
@@ -85,8 +105,9 @@ export function TestGameLauncher({
 
   const target = status.kind === "loaded" ? status.target : null;
   const ready = target?.state === "readyToLaunch";
-  const disabled = busy || actionBusy || !ready || connected;
-  const stateLabel = connected
+  const nativeConnected = target?.state === "connected";
+  const disabled = busy || actionBusy || !ready || nativeConnected;
+  const stateLabel = nativeConnected
     ? "Connected"
     : status.kind === "loading"
       ? "Checking included game"
@@ -103,6 +124,7 @@ export function TestGameLauncher({
     setActionError(null);
     try {
       await onLaunchAndConnect();
+      setRevision((value) => value + 1);
     } catch (error) {
       setActionError(
         error instanceof Error
@@ -125,7 +147,7 @@ export function TestGameLauncher({
         <div className="test-game-heading-row">
           <h2 id="test-game-title">Eclipse Harbor</h2>
           <span
-            className={`test-game-state ${connected || ready ? "is-ready" : ""}`}
+            className={`test-game-state ${nativeConnected || ready ? "is-ready" : ""}`}
             role="status"
           >
             {stateLabel}
@@ -149,9 +171,11 @@ export function TestGameLauncher({
         {status.kind === "nativeUnavailable" && (
           <p className="test-game-message">{status.detail}</p>
         )}
-        {target && target.state !== "readyToLaunch" && (
-          <p className="test-game-message is-error">{target.detail}</p>
-        )}
+        {target &&
+          target.state !== "readyToLaunch" &&
+          target.state !== "connected" && (
+            <p className="test-game-message is-error">{target.detail}</p>
+          )}
         {actionError && (
           <p className="test-game-message is-error">{actionError}</p>
         )}
@@ -163,7 +187,7 @@ export function TestGameLauncher({
           disabled={disabled}
           onClick={() => void launch()}
         >
-          {connected
+          {nativeConnected
             ? "Game connected"
             : busy || actionBusy
               ? "Launching…"
@@ -179,11 +203,13 @@ export function TestGameLauncher({
           </button>
         )}
         <small>
-          {connected
-            ? "The exact game window is selected for this session."
-            : ready
-              ? "One click opens the game and connects its window."
-              : "Launch becomes available after the included files pass their integrity check."}
+          {nativeConnected
+            ? `The exact window is connected${target?.targetProcessId ? ` · PID ${target.targetProcessId}` : ""}.`
+            : connected && ready
+              ? "Checking the native connection after launch."
+              : ready
+                ? "One click opens the game and connects its window."
+                : "Launch becomes available after the included files pass their integrity check."}
         </small>
       </div>
     </section>

@@ -1868,11 +1868,13 @@ export interface PreparedSyntheticReviewTarget {
 
 export interface SyntheticReviewTargetStatus {
   schemaVersion: 1;
-  state: "readyToLaunch" | "missing" | "invalid";
+  state: "readyToLaunch" | "connected" | "missing" | "invalid";
   displayName: string;
   executableName: string;
   executablePath: string | null;
   expectedRelativePath: string;
+  targetProcessId: number | null;
+  targetWindowHandle: number | null;
   detail: string;
 }
 

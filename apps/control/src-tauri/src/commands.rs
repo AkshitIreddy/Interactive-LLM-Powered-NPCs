@@ -3012,6 +3012,8 @@ pub struct SyntheticReviewTargetStatus {
     pub executable_name: &'static str,
     pub executable_path: Option<String>,
     pub expected_relative_path: &'static str,
+    pub target_process_id: Option<u32>,
+    pub target_window_handle: Option<u64>,
     pub detail: String,
 }
 
@@ -3025,15 +3027,44 @@ pub fn synthetic_review_target_status(
     const EXPECTED_RELATIVE_PATH: &str =
         "local-app-data\\test-game\\interactive-npcs-synthetic-target.exe";
     match state.synthetic_review_target.executable_path() {
-        Ok(executable_path) => SyntheticReviewTargetStatus {
-            schema_version: 1,
-            state: "readyToLaunch",
-            display_name: "Eclipse Harbor",
-            executable_name: crate::synthetic_review_target::SYNTHETIC_TARGET_BASENAME,
-            executable_path: Some(executable_path.to_string_lossy().into_owned()),
-            expected_relative_path: EXPECTED_RELATIVE_PATH,
-            detail: "The included practice game is installed and ready. It opens automatically when you choose Launch & connect.".into(),
-        },
+        Ok(executable_path) => {
+            let selected = state
+                .game_targets
+                .revalidated_snapshot(&state.resources)
+                .ok()
+                .flatten()
+                .filter(|selection| {
+                    selection.game_profile_id == "eclipse-harbor"
+                        && selection.target.executable_name.eq_ignore_ascii_case(
+                            crate::synthetic_review_target::SYNTHETIC_TARGET_BASENAME,
+                        )
+                });
+            let (state_name, process_id, window_handle, detail) = match selected {
+                Some(selection) => (
+                    "connected",
+                    Some(selection.target.process_id),
+                    Some(selection.target.native_window),
+                    "The included practice-game window is connected for this session.".into(),
+                ),
+                None => (
+                    "readyToLaunch",
+                    None,
+                    None,
+                    "The included practice game is installed and ready. It opens automatically when you choose Launch & connect.".into(),
+                ),
+            };
+            SyntheticReviewTargetStatus {
+                schema_version: 1,
+                state: state_name,
+                display_name: "Eclipse Harbor",
+                executable_name: crate::synthetic_review_target::SYNTHETIC_TARGET_BASENAME,
+                executable_path: Some(executable_path.to_string_lossy().into_owned()),
+                expected_relative_path: EXPECTED_RELATIVE_PATH,
+                target_process_id: process_id,
+                target_window_handle: window_handle,
+                detail,
+            }
+        }
         Err(crate::synthetic_review_target::SyntheticReviewTargetError::Unavailable) => {
             SyntheticReviewTargetStatus {
                 schema_version: 1,
@@ -3042,6 +3073,8 @@ pub fn synthetic_review_target_status(
                 executable_name: crate::synthetic_review_target::SYNTHETIC_TARGET_BASENAME,
                 executable_path: None,
                 expected_relative_path: EXPECTED_RELATIVE_PATH,
+                target_process_id: None,
+                target_window_handle: None,
                 detail: "The included practice game is missing from this app folder.".into(),
             }
         }
@@ -3052,6 +3085,8 @@ pub fn synthetic_review_target_status(
             executable_name: crate::synthetic_review_target::SYNTHETIC_TARGET_BASENAME,
             executable_path: None,
             expected_relative_path: EXPECTED_RELATIVE_PATH,
+            target_process_id: None,
+            target_window_handle: None,
             detail: "The included practice game failed its integrity check. Restore this review package before launching it.".into(),
         },
     }
