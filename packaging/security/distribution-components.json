@@ -330,7 +330,7 @@
     {"path": "packaging/model-packs/review-evidence/moonshine-non-qualifying-review-summary-v1.json", "sha256": "1d9368f3c91d36430d787ba84474c380ca2904eb534029c1018d0ccd3cd7a96e", "component_id": "project:static-resources"},
     {"path": "packaging/runtime-components/onnxruntime-1.22.1-cpu.json", "install_path": "product-audit/packaging/runtime-components/onnxruntime-1.22.1-cpu.json", "sha256": "99352e1b8d8953515e0ff857980c000797967ed50d5a0316793a9388298fc79d", "component_id": "project:static-resources"},
     {"path": "profiles/games/baldurs-gate-3/profile.json", "sha256": "ef3094a7ddd6c0e527f42cabc4ee44ad3c4d47d40b1fa44072233a01173153d5", "component_id": "project:static-resources"},
-    {"path": "profiles/games/cyberpunk-2077/profile.json", "sha256": "5b92296e1a41c22f76430db8a984e2b6cc391523783b544b5299102b73c8706e", "component_id": "project:static-resources"},
+    {"path": "profiles/games/cyberpunk-2077/profile.json", "sha256": "a72c61d64f540a59ff418f52d37fa34c02c8ebce69b1b7daaeb365ffdd8c6339", "component_id": "project:static-resources"},
     {"path": "profiles/games/divinity-original-sin-2/profile.json", "sha256": "5c88e007dc4d4277727de4497f7797ce3dbde22bb11db6bc92863ab4bfad03cf", "component_id": "project:static-resources"},
     {"path": "profiles/games/dragon-age-inquisition/profile.json", "sha256": "d4bc504b5b74577d409387ae0468beb471dbc8e53d74ff18add5b6ab7d67ca53", "component_id": "project:static-resources"},
     {"path": "profiles/games/eclipse-harbor/profile.json", "sha256": "f655398afc5a701d057d534b575cf6f4d22e3bff410161232b0a460d1cbd6b31", "component_id": "project:static-resources"},
