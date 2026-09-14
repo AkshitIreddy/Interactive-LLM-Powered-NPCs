@@ -37,6 +37,7 @@ import {
   readCharacterDatabaseCatalog,
   readCharacterMemoryStatus,
   readProductPreferences,
+  readSyntheticReviewTargetStatus,
   readSubtitlePreferences,
   readSelectedAudioOutput,
   readSelectedAudioInput,
@@ -806,6 +807,42 @@ describe("Tauri bridge normalization", () => {
     expect(tauriMocks.invoke.mock.calls).toEqual([
       ["prepare_synthetic_review_target"],
     ]);
+  });
+
+  it("reads the included test-game path without launching it", async () => {
+    enableTauri();
+    const status = {
+      schemaVersion: 1 as const,
+      state: "readyToLaunch" as const,
+      displayName: "Eclipse Harbor",
+      executableName: "interactive-npcs-synthetic-target.exe",
+      executablePath:
+        "C:\\review\\local-app-data\\test-game\\interactive-npcs-synthetic-target.exe",
+      expectedRelativePath:
+        "local-app-data\\test-game\\interactive-npcs-synthetic-target.exe",
+      detail: "The included practice game is installed and ready.",
+    };
+    tauriMocks.invoke.mockResolvedValueOnce(status);
+
+    await expect(
+      readSyntheticReviewTargetStatus({
+        available: true,
+        commandName: "prepare_synthetic_review_target",
+      }),
+    ).resolves.toEqual(status);
+    expect(tauriMocks.invoke.mock.calls).toEqual([
+      ["synthetic_review_target_status"],
+    ]);
+  });
+
+  it("does not probe the test game outside the native review capability", async () => {
+    await expect(
+      readSyntheticReviewTargetStatus({
+        available: false,
+        reason: "browserPreview",
+      }),
+    ).resolves.toBeNull();
+    expect(tauriMocks.invoke).not.toHaveBeenCalled();
   });
 
   it("preserves a native synthetic verification error", async () => {

@@ -153,6 +153,8 @@ pub fn run() {
             commands::save_product_preferences,
             commands::reset_product_preferences,
             #[cfg(debug_assertions)]
+            commands::synthetic_review_target_status,
+            #[cfg(debug_assertions)]
             commands::prepare_synthetic_review_target,
             #[cfg(debug_assertions)]
             commands::debug_select_synthetic_replay_capture_target,

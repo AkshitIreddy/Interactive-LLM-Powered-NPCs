@@ -1866,6 +1866,16 @@ export interface PreparedSyntheticReviewTarget {
   fixtureMotionMode: string;
 }
 
+export interface SyntheticReviewTargetStatus {
+  schemaVersion: 1;
+  state: "readyToLaunch" | "missing" | "invalid";
+  displayName: string;
+  executableName: string;
+  executablePath: string | null;
+  expectedRelativePath: string;
+  detail: string;
+}
+
 export function syntheticReviewTargetAvailability(
   debugCapabilityEnabled = false,
 ): SyntheticReplayCaptureAvailability {
@@ -1890,6 +1900,18 @@ export async function prepareSyntheticReviewTarget(
   }
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<PreparedSyntheticReviewTarget>(availability.commandName);
+}
+
+/**
+ * Locates and integrity-checks the included practice game without launching it
+ * or changing the selected game window.
+ */
+export async function readSyntheticReviewTargetStatus(
+  availability = syntheticReviewTargetAvailability(),
+): Promise<SyntheticReviewTargetStatus | null> {
+  if (!availability.available) return null;
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<SyntheticReviewTargetStatus>("synthetic_review_target_status");
 }
 
 /**

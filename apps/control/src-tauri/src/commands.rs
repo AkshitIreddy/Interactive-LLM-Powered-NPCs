@@ -3002,6 +3002,61 @@ pub struct PreparedSyntheticReviewTarget {
     pub fixture_motion_mode: String,
 }
 
+#[cfg(debug_assertions)]
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyntheticReviewTargetStatus {
+    pub schema_version: u32,
+    pub state: &'static str,
+    pub display_name: &'static str,
+    pub executable_name: &'static str,
+    pub executable_path: Option<String>,
+    pub expected_relative_path: &'static str,
+    pub detail: String,
+}
+
+/// Reports whether the included practice game is present and integrity checked.
+/// This command never starts a process or changes the selected game target.
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn synthetic_review_target_status(
+    state: State<'_, AppState>,
+) -> SyntheticReviewTargetStatus {
+    const EXPECTED_RELATIVE_PATH: &str =
+        "local-app-data\\test-game\\interactive-npcs-synthetic-target.exe";
+    match state.synthetic_review_target.executable_path() {
+        Ok(executable_path) => SyntheticReviewTargetStatus {
+            schema_version: 1,
+            state: "readyToLaunch",
+            display_name: "Eclipse Harbor",
+            executable_name: crate::synthetic_review_target::SYNTHETIC_TARGET_BASENAME,
+            executable_path: Some(executable_path.to_string_lossy().into_owned()),
+            expected_relative_path: EXPECTED_RELATIVE_PATH,
+            detail: "The included practice game is installed and ready. It opens automatically when you choose Launch & connect.".into(),
+        },
+        Err(crate::synthetic_review_target::SyntheticReviewTargetError::Unavailable) => {
+            SyntheticReviewTargetStatus {
+                schema_version: 1,
+                state: "missing",
+                display_name: "Eclipse Harbor",
+                executable_name: crate::synthetic_review_target::SYNTHETIC_TARGET_BASENAME,
+                executable_path: None,
+                expected_relative_path: EXPECTED_RELATIVE_PATH,
+                detail: "The included practice game is missing from this app folder.".into(),
+            }
+        }
+        Err(_) => SyntheticReviewTargetStatus {
+            schema_version: 1,
+            state: "invalid",
+            display_name: "Eclipse Harbor",
+            executable_name: crate::synthetic_review_target::SYNTHETIC_TARGET_BASENAME,
+            executable_path: None,
+            expected_relative_path: EXPECTED_RELATIVE_PATH,
+            detail: "The included practice game failed its integrity check. Restore this review package before launching it.".into(),
+        },
+    }
+}
+
 /// Resolves and starts only the manifest-attested, co-located local-review
 /// target, then binds the exact process/window through the native broker.
 #[cfg(debug_assertions)]
