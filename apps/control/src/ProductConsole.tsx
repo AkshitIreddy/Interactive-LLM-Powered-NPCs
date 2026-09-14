@@ -39,6 +39,7 @@ import {
   syntheticReviewTargetAvailability,
   prepareSyntheticReviewTarget,
   verifySelectedGameCapture,
+  type SyntheticReplayCaptureAvailability,
   type NativeBootstrapHealth,
   type NativeAudioInputSelection,
   type NativeAudioInputSnapshot,
@@ -1599,7 +1600,7 @@ export function ProductConsole() {
   };
 
   const verifySyntheticCapture = () => verifySyntheticCaptureFor(captureProof);
-  const connectReviewGame = async () => {
+  const connectReviewGame = async (reportError = false) => {
     markConfigurationChanged();
     setCaptureBusy(true);
     setNotice(null);
@@ -1619,8 +1620,9 @@ export function ProductConsole() {
       setNotice(
         error instanceof Error
           ? error.message
-          : "Could not start the test game. Open Games & characters and try again.",
+          : "Could not start the test game. Open Games and try again.",
       );
+      if (reportError) throw error;
     } finally {
       setCaptureBusy(false);
     }
@@ -1801,8 +1803,9 @@ export function ProductConsole() {
               navigate("voice");
             }}
             onPreferencesSnapshot={acceptPreferenceWorkspaceSnapshot}
-            onConnectReviewGame={connectReviewGame}
-            reviewLaunchAvailable={reviewTargetAvailable.available}
+            onConnectReviewGame={() => connectReviewGame(true)}
+            reviewTargetAvailable={reviewTargetAvailable}
+            onReviewConnectionLost={() => setCaptureProof(null)}
             captureBusy={captureBusy}
             captureProof={captureProof}
             captureAvailable={captureDebugAvailable.available}
@@ -3125,6 +3128,8 @@ function WorldPage({
   onSetupMouthTracking,
   onPreferencesSnapshot,
   onConnectReviewGame,
+  reviewTargetAvailable,
+  onReviewConnectionLost,
   captureBusy,
   captureAvailable,
   captureProof,
@@ -3143,8 +3148,9 @@ function WorldPage({
   onNavigate: (page: ProductPage) => void;
   onSetupMouthTracking: () => void;
   onPreferencesSnapshot: (snapshot: NativeProductPreferenceSnapshot) => void;
-  onConnectReviewGame: () => void;
-  reviewLaunchAvailable: boolean;
+  onConnectReviewGame: () => void | Promise<void>;
+  reviewTargetAvailable: SyntheticReplayCaptureAvailability;
+  onReviewConnectionLost: () => void;
   captureBusy: boolean;
   captureAvailable: boolean;
   captureProof: SyntheticCaptureProof | null;
@@ -3173,10 +3179,11 @@ function WorldPage({
         </p>
       </header>
       <TestGameLauncher
-        availability={syntheticReviewTargetAvailability()}
+        availability={reviewTargetAvailable}
         connected={Boolean(captureProof)}
         busy={captureBusy}
         onLaunchAndConnect={onConnectReviewGame}
+        onConnectionLost={onReviewConnectionLost}
       />
       <GameTargetWorkspace
         onSetupMouthTracking={onSetupMouthTracking}
