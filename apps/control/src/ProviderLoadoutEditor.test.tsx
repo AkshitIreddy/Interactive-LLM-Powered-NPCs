@@ -31,6 +31,7 @@ describe("provider and model loadouts", () => {
       />,
     );
 
+    await user.click(screen.getByRole("button", { name: "Manage loadouts" }));
     await user.click(
       screen.getByRole("button", { name: /GAME OVERRIDE Game/ }),
     );
@@ -60,6 +61,7 @@ describe("provider and model loadouts", () => {
     const user = userEvent.setup();
     render(<ProviderLoadoutEditor />);
 
+    await user.click(screen.getByRole("button", { name: "Manage loadouts" }));
     await user.click(
       screen.getByRole("button", { name: /GAME OVERRIDE Game/ }),
     );
@@ -230,9 +232,13 @@ describe("provider and model loadouts", () => {
       screen.getByLabelText("Reply model model"),
       "qwen/qwen3.6-27b",
     );
+    await user.click(screen.getByRole("button", { name: "Advanced routing" }));
     expect(
       screen.getByText(/exact qualified Groq non-reasoning request profile/i),
     ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Close advanced routing" }),
+    );
 
     await user.selectOptions(
       screen.getByLabelText("Reply model provider"),
@@ -264,9 +270,13 @@ describe("provider and model loadouts", () => {
     expect(screen.getByLabelText("Reply model model")).toHaveValue(
       "liquid/lfm-2.5-2.6b:free",
     );
+    await user.click(screen.getByRole("button", { name: "Advanced routing" }));
     expect(
       screen.getByText(/fallback routing is disabled/i),
     ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Close advanced routing" }),
+    );
     expect(
       screen.getByRole("button", { name: "Connect or check OpenRouter" }),
     ).toBeEnabled();
@@ -281,6 +291,7 @@ describe("provider and model loadouts", () => {
       />,
     );
 
+    await user.click(screen.getByRole("button", { name: "Manage loadouts" }));
     await user.click(
       screen.getByRole("button", { name: /GAME OVERRIDE Game/ }),
     );
@@ -297,6 +308,9 @@ describe("provider and model loadouts", () => {
       "Quiet night route copy",
     );
     await user.click(
+      screen.getByRole("button", { name: "Close loadout manager" }),
+    );
+    await user.click(
       screen.getByRole("button", { name: "Activate for next turn" }),
     );
     expect(
@@ -311,6 +325,7 @@ describe("provider and model loadouts", () => {
     const user = userEvent.setup();
     render(<ProviderLoadoutEditor />);
 
+    await user.click(screen.getByRole("button", { name: "Advanced routing" }));
     const fallback = screen.getByLabelText(
       "Reply model manual fallback provider",
     );
@@ -346,7 +361,7 @@ describe("provider and model loadouts", () => {
     );
     expect(document.body).not.toHaveTextContent("Download pack");
     expect(document.body).toHaveTextContent(
-      "Game mouth motion is set up in Games. A separate lip-sync model is optional and unavailable in this build.",
+      "Select the NPC and its mouth pack in Games.",
     );
     await user.click(
       screen.getByRole("button", { name: "Set up mouth motion" }),
@@ -645,7 +660,9 @@ describe("provider and model loadouts", () => {
     const user = userEvent.setup();
     render(<ProviderLoadoutEditor initialRole="tts" />);
 
-    await screen.findByDisplayValue("Inactive route");
+    await screen.findByText("Inactive route", {
+      selector: ".loadout-toolbar__identity strong",
+    });
     await user.click(
       screen.getByRole("button", { name: "Activate for next turn" }),
     );

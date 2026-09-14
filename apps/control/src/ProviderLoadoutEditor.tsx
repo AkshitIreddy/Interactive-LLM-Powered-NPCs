@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button } from "react-aria-components";
+import {
+  Button,
+  ModalOverlay,
+  Modal,
+  Dialog,
+  Heading,
+} from "react-aria-components";
 import { CyberwareAnatomy } from "./CyberwareAnatomy";
 import { ActionButton, StatusPill } from "./components";
 import { Icon } from "./icons";
@@ -157,7 +163,7 @@ export function ProviderLoadoutEditor({
     loadouts[0].scope,
   );
   const [notice, setNotice] = useState(
-    "Route choices are saved as a local preview. No provider request was made.",
+    "Choose a system to configure its provider and model.",
   );
   const [nativeDocument, setNativeDocument] =
     useState<NativeLoadoutDocument | null>(null);
@@ -187,6 +193,8 @@ export function ProviderLoadoutEditor({
   const [privateEvaluationBusy, setPrivateEvaluationBusy] = useState(false);
   const [activeRole, setActiveRole] = useState<ProviderRole>(initialRole);
   const [customVoiceEditing, setCustomVoiceEditing] = useState(false);
+  const [managerOpen, setManagerOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const selected =
     loadouts.find((loadout) => loadout.id === selectedId) ?? loadouts[0];
@@ -725,6 +733,70 @@ export function ProviderLoadoutEditor({
     }, `${ROLE_META[role].short} manual retry preference updated.`);
   };
 
+  const renderRouteDetails = () => {
+    const route = selected.routes[activeRole];
+    const provider = providerFor(activeRole, route.providerId);
+    const model = modelFor(activeRole, route);
+    return (
+      <details className="loadout-role__disclosure" open>
+        <summary>Privacy, cost, and route details</summary>
+        <dl className="loadout-role__facts">
+          <div>
+            <dt>EGRESS</dt>
+            <dd>{provider.egress}</dd>
+          </div>
+          <div>
+            <dt>COST</dt>
+            <dd>{provider.cost}</dd>
+          </div>
+          <div>
+            <dt>PRIVACY</dt>
+            <dd>{provider.privacy}</dd>
+          </div>
+        </dl>
+        {model.note && (
+          <p className="loadout-role__note">
+            <Icon name="help" size={14} />
+            {model.note}
+          </p>
+        )}
+        {provider.note && (
+          <p className="loadout-role__note">
+            <Icon name="help" size={14} />
+            {provider.note}
+          </p>
+        )}
+        {provider.id === "local-visual-worker" && (
+          <p className="loadout-role__note">
+            <Icon name="warning" size={14} />
+            No qualified pack is installed, downloadable, or available for
+            activation in this build.
+          </p>
+        )}
+      </details>
+    );
+  };
+
+  const scopeControls = (
+    <div className="loadout-scope-trace" aria-label="Loadout inheritance order">
+      {(["global", "game", "character"] as LoadoutScope[]).map(
+        (scope, index) => (
+          <Button
+            key={scope}
+            className={`loadout-scope-trace__step ${scopeFilter === scope ? "is-selected" : ""}`}
+            onPress={() => chooseScope(scope)}
+            aria-pressed={scopeFilter === scope}
+          >
+            <span>{scopeCopy[scope].eyebrow}</span>
+            <strong>{scopeCopy[scope].label}</strong>
+            <small>{scopeCopy[scope].description}</small>
+            {index < 2 && <Icon name="chevron" aria-hidden="true" />}
+          </Button>
+        ),
+      )}
+    </div>
+  );
+
   return (
     <section
       className={`loadout-console loadout-console--${mode}`}
@@ -756,200 +828,22 @@ export function ProviderLoadoutEditor({
         </div>
       </header>
 
-      <div
-        className="loadout-scope-trace"
-        aria-label="Loadout inheritance order"
-      >
-        {(["global", "game", "character"] as LoadoutScope[]).map(
-          (scope, index) => (
-            <Button
-              key={scope}
-              className={`loadout-scope-trace__step ${scopeFilter === scope ? "is-selected" : ""}`}
-              onPress={() => chooseScope(scope)}
-              aria-pressed={scopeFilter === scope}
-            >
-              <span>{scopeCopy[scope].eyebrow}</span>
-              <strong>{scopeCopy[scope].label}</strong>
-              <small>{scopeCopy[scope].description}</small>
-              {index < 2 && <Icon name="chevron" aria-hidden="true" />}
-            </Button>
-          ),
-        )}
+      <div className="loadout-toolbar">
+        <div className="loadout-toolbar__identity">
+          <span>LOADOUT</span>
+          <strong>{selected.name}</strong>
+          <small>{targetLabelFor(selected)}</small>
+        </div>
+        <div className="loadout-toolbar__actions">
+          <Button onPress={() => setManagerOpen(true)}>Manage loadouts</Button>
+          <Button onPress={() => setAdvancedOpen(true)}>
+            Advanced routing
+          </Button>
+        </div>
       </div>
-
+      {scopeControls}
       <div className="loadout-console__workspace">
-        <aside
-          className="loadout-library"
-          aria-label={`${scopeCopy[scopeFilter].label} loadouts`}
-        >
-          <div className="loadout-library__head">
-            <div>
-              <span>{scopeCopy[scopeFilter].eyebrow}</span>
-              <strong>{scopeCopy[scopeFilter].label} loadouts</strong>
-            </div>
-            <Button
-              className="loadout-add"
-              onPress={addLoadout}
-              isDisabled={!targetForScope(scopeFilter)}
-              aria-label={`Create ${scopeFilter} loadout`}
-            >
-              +
-            </Button>
-          </div>
-          {!targetForScope(scopeFilter) && (
-            <p className="loadout-library__context-required" role="note">
-              {scopeFilter === "game"
-                ? "Select a game in World to create its override."
-                : "Select a game and character in World to create an override."}
-            </p>
-          )}
-          <div className="loadout-library__list">
-            {currentScopeLoadouts.length === 0 ? (
-              <div className="loadout-library__empty">
-                <Icon name="models" />
-                <strong>No {scopeFilter} override</strong>
-                <p>
-                  {targetForScope(scopeFilter)
-                    ? "The inherited route stays active until you create one."
-                    : scopeFilter === "game"
-                      ? "Select a game in World to create its override."
-                      : "Select a game and character in World to create an override."}
-                </p>
-              </div>
-            ) : (
-              currentScopeLoadouts.map((loadout) => (
-                <Button
-                  key={loadout.id}
-                  className={`loadout-library__item ${selected.id === loadout.id ? "is-selected" : ""}`}
-                  onPress={() => chooseLoadout(loadout)}
-                  aria-pressed={selected.id === loadout.id}
-                >
-                  <span className="loadout-library__signal" />
-                  <span>
-                    <strong>{loadout.name}</strong>
-                    <small>{targetLabelFor(loadout)}</small>
-                  </span>
-                  {loadout.active ? (
-                    <StatusPill tone="ok">Active</StatusPill>
-                  ) : (
-                    <span className="loadout-library__draft">INACTIVE</span>
-                  )}
-                </Button>
-              ))
-            )}
-          </div>
-          <div className="loadout-library__legend">
-            <span>
-              <i /> Active preference
-            </span>
-            <span>Inactive loadouts never route traffic</span>
-          </div>
-        </aside>
-
         <div className="loadout-editor">
-          <div className="loadout-editor__identity">
-            <label>
-              <span>LOADOUT NAME</span>
-              <input
-                aria-label="Loadout name"
-                value={selected.name}
-                maxLength={64}
-                onChange={(event) =>
-                  updateSelected(
-                    (loadout) => ({ ...loadout, name: event.target.value }),
-                    "Name updated locally.",
-                    false,
-                  )
-                }
-                onBlur={() => {
-                  if (!nativeDocument) return;
-                  nativeRename(selected.id, selected.name)
-                    .then((snapshot) =>
-                      acceptNativeSnapshot(
-                        snapshot,
-                        "Loadout renamed in protected native state.",
-                      ),
-                    )
-                    .catch(() => nativeFailure("Loadout rename"));
-                }}
-              />
-            </label>
-            <div className="loadout-editor__target">
-              <span>APPLIES TO</span>
-              <strong>{targetLabelFor(selected)}</strong>
-              <small>
-                {selected.scope === "global"
-                  ? "Base route"
-                  : `Overrides ${selected.scope === "game" ? "global" : "game and global"} choices`}
-              </small>
-            </div>
-            <div className="loadout-editor__actions">
-              <ActionButton
-                variant="outline"
-                icon="models"
-                onPress={cloneLoadout}
-              >
-                Clone
-              </ActionButton>
-              <ActionButton
-                variant="danger"
-                icon="close"
-                onPress={deleteLoadout}
-                isDisabled={loadouts.length === 1 || selected.active}
-              >
-                Delete loadout
-              </ActionButton>
-            </div>
-          </div>
-
-          <details className="loadout-overview-details">
-            <summary>Connections & active route</summary>
-            <div
-              className="loadout-route-summary"
-              aria-label="Selected route summary"
-            >
-              <div>
-                <span>CLOUD EGRESS</span>
-                <strong>
-                  {cloudVendors.size} provider
-                  {cloudVendors.size === 1 ? "" : "s"}
-                </strong>
-                <small>
-                  {cloudVendors.size
-                    ? [...cloudVendors].join(" · ")
-                    : "No selected cloud route"}
-                </small>
-              </div>
-              <div>
-                <span>LOCAL ROLES</span>
-                <strong>{localRoles.length || "None"}</strong>
-                <small>
-                  {localRoles.length
-                    ? localRoles
-                        .map((role) => ROLE_META[role].short)
-                        .join(" · ")
-                    : "Cloud/off selections only"}
-                </small>
-              </div>
-              <div>
-                <span>ACTIVE AT SCOPE</span>
-                <strong>{activeForScope?.name ?? "None"}</strong>
-                <small>
-                  {selected.active
-                    ? "You are editing the active preference"
-                    : "This loadout is not routing"}
-                </small>
-              </div>
-              <div>
-                <span>REVISION</span>
-                <strong>
-                  R{selected.revision.toString().padStart(2, "0")}
-                </strong>
-                <small>Route IDs only · no credential values</small>
-              </div>
-            </div>
-          </details>
-
           <div className="loadout-neural-bay">
             <CyberwareAnatomy
               activeRole={activeRole}
@@ -1202,6 +1096,19 @@ export function ProviderLoadoutEditor({
                             </select>
                           </label>
                         )}
+                      {provider.execution === "Cloud" &&
+                        routeAvailable &&
+                        onManageProvider && (
+                          <ActionButton
+                            variant="outline"
+                            icon="shield"
+                            onPress={() =>
+                              onManageProvider(accountProviderId(provider.id))
+                            }
+                          >
+                            Connect or check {provider.name.split(" · ")[0]}
+                          </ActionButton>
+                        )}
                     </div>
                     {role === "lipSync" && (
                       <section
@@ -1213,11 +1120,7 @@ export function ProviderLoadoutEditor({
                         </span>
                         <div>
                           <strong>Game mouth motion</strong>
-                          <p>
-                            Game mouth motion is set up in Games. A separate
-                            lip-sync model is optional and unavailable in this
-                            build.
-                          </p>
+                          <p>Select the NPC and its mouth pack in Games.</p>
                         </div>
                         {onManageMouthMotion && (
                           <ActionButton
@@ -1242,19 +1145,6 @@ export function ProviderLoadoutEditor({
                               : "This catalog route is not executable in the current runtime."}
                       </p>
                     )}
-                    {provider.execution === "Cloud" &&
-                      routeAvailable &&
-                      onManageProvider && (
-                        <ActionButton
-                          variant="outline"
-                          icon="shield"
-                          onPress={() =>
-                            onManageProvider(accountProviderId(provider.id))
-                          }
-                        >
-                          Connect or check {provider.name.split(" · ")[0]}
-                        </ActionButton>
-                      )}
                     {role === "tts" && provider.id === "nvidia-nim-magpie" && (
                       <details className="stock-voice-discovery" open>
                         <summary>
@@ -1502,42 +1392,6 @@ export function ProviderLoadoutEditor({
                         </details>
                       </section>
                     )}
-                    <details className="loadout-role__disclosure">
-                      <summary>Privacy, cost, and route details</summary>
-                      <dl className="loadout-role__facts">
-                        <div>
-                          <dt>EGRESS</dt>
-                          <dd>{provider.egress}</dd>
-                        </div>
-                        <div>
-                          <dt>COST</dt>
-                          <dd>{provider.cost}</dd>
-                        </div>
-                        <div>
-                          <dt>PRIVACY</dt>
-                          <dd>{provider.privacy}</dd>
-                        </div>
-                      </dl>
-                      {model.note && (
-                        <p className="loadout-role__note">
-                          <Icon name="help" size={14} />
-                          {model.note}
-                        </p>
-                      )}
-                      {provider.note && (
-                        <p className="loadout-role__note">
-                          <Icon name="help" size={14} />
-                          {provider.note}
-                        </p>
-                      )}
-                      {provider.id === "local-visual-worker" && (
-                        <p className="loadout-role__note">
-                          <Icon name="warning" size={14} />
-                          No qualified pack is installed, downloadable, or
-                          available for activation in this build.
-                        </p>
-                      )}
-                    </details>
                   </article>
                 );
               })}
@@ -1568,199 +1422,431 @@ export function ProviderLoadoutEditor({
               </small>
             )}
           </footer>
-
-          <section
-            className="manual-fallbacks"
-            aria-labelledby="manual-fallbacks-title"
+        </div>
+      </div>
+      <ModalOverlay
+        className="workshop-modal-overlay"
+        isOpen={managerOpen}
+        onOpenChange={setManagerOpen}
+        isDismissable
+      >
+        <Modal className="workshop-modal">
+          <Dialog
+            className="workshop-dialog loadout-console"
+            aria-label="Manage loadouts"
           >
-            <details>
-              <summary>Manual retry routes · off until authorized</summary>
-              <header>
-                <div>
-                  <span className="eyebrow">MANUAL RECOVERY ONLY</span>
-                  <h4 id="manual-fallbacks-title">
-                    Pre-authorize choices you may retry yourself.
-                  </h4>
+            <header className="workshop-dialog__header">
+              <Heading slot="title">Manage loadouts</Heading>
+              <Button
+                aria-label="Close loadout manager"
+                onPress={() => setManagerOpen(false)}
+              >
+                Close ×
+              </Button>
+            </header>
+            <div className="workshop-dialog__body">
+              {scopeControls}
+              <aside
+                className="loadout-library"
+                aria-label={`${scopeCopy[scopeFilter].label} loadouts`}
+              >
+                <div className="loadout-library__head">
+                  <div>
+                    <span>{scopeCopy[scopeFilter].eyebrow}</span>
+                    <strong>{scopeCopy[scopeFilter].label} loadouts</strong>
+                  </div>
+                  <Button
+                    className="loadout-add"
+                    onPress={addLoadout}
+                    isDisabled={!targetForScope(scopeFilter)}
+                    aria-label={`Create ${scopeFilter} loadout`}
+                  >
+                    +
+                  </Button>
                 </div>
-                <StatusPill tone="teal">Automatic fallback disabled</StatusPill>
-              </header>
-              <p>
-                Authorization adds a visible retry choice after a failure. It
-                never switches providers on its own, never changes a live turn,
-                and never overrides Offline mode.
-              </p>
-              <div className="manual-fallbacks__grid">
-                {fallbackRoles.map((role) => {
-                  const fallback =
-                    selected.fallbacks[role] ??
-                    defaultFallback(role, selected.routes[role]);
-                  const eligibleProviders = ROUTE_OPTIONS[role].filter(
-                    (provider) =>
-                      provider.id !== selected.routes[role].providerId &&
-                      provider.execution !== "Off" &&
-                      provider.selectable !== false &&
-                      routeIsExecutable(role, provider.id),
-                  );
-                  return (
-                    <div
-                      className={fallback.authorized ? "is-authorized" : ""}
-                      key={role}
-                    >
-                      <label className="fallback-authorize">
-                        <input
-                          type="checkbox"
-                          checked={fallback.authorized}
-                          onChange={(event) =>
-                            toggleFallback(role, event.target.checked)
-                          }
-                        />
-                        <span>
-                          <strong>{ROLE_META[role].short} manual retry</strong>
-                          <small>
-                            {fallback.authorized
-                              ? "Authorized · still requires a click"
-                              : "Not authorized"}
-                          </small>
-                        </span>
-                      </label>
-                      <select
-                        aria-label={`${ROLE_META[role].label} manual fallback provider`}
-                        value={fallback.providerId}
-                        onChange={(event) =>
-                          changeFallback(role, event.target.value)
-                        }
-                        disabled={!fallback.authorized}
-                      >
-                        {eligibleProviders.map((provider) => (
-                          <option value={provider.id} key={provider.id}>
-                            {provider.name} · {provider.models[0].name}
-                          </option>
-                        ))}
-                      </select>
+                {!targetForScope(scopeFilter) && (
+                  <p className="loadout-library__context-required" role="note">
+                    {scopeFilter === "game"
+                      ? "Select a game in World to create its override."
+                      : "Select a game and character in World to create an override."}
+                  </p>
+                )}
+                <div className="loadout-library__list">
+                  {currentScopeLoadouts.length === 0 ? (
+                    <div className="loadout-library__empty">
+                      <Icon name="models" />
+                      <strong>No {scopeFilter} override</strong>
+                      <p>
+                        {targetForScope(scopeFilter)
+                          ? "The inherited route stays active until you create one."
+                          : scopeFilter === "game"
+                            ? "Select a game in World to create its override."
+                            : "Select a game and character in World to create an override."}
+                      </p>
                     </div>
-                  );
-                })}
-              </div>
-            </details>
-          </section>
-
-          <section
-            className="loadout-native-review"
-            aria-labelledby="loadout-native-review-title"
-          >
-            <details>
-              <summary>
-                Validate active inheritance · no provider contact
-              </summary>
-              <header>
-                <div>
-                  <span className="eyebrow">PROTECTED NATIVE STATE</span>
-                  <h4 id="loadout-native-review-title">
-                    Review the active route for this scope.
-                  </h4>
+                  ) : (
+                    currentScopeLoadouts.map((loadout) => (
+                      <Button
+                        key={loadout.id}
+                        className={`loadout-library__item ${selected.id === loadout.id ? "is-selected" : ""}`}
+                        onPress={() => chooseLoadout(loadout)}
+                        aria-pressed={selected.id === loadout.id}
+                      >
+                        <span className="loadout-library__signal" />
+                        <span>
+                          <strong>{loadout.name}</strong>
+                          <small>{targetLabelFor(loadout)}</small>
+                        </span>
+                        {loadout.active ? (
+                          <StatusPill tone="ok">Active</StatusPill>
+                        ) : (
+                          <span className="loadout-library__draft">
+                            INACTIVE
+                          </span>
+                        )}
+                      </Button>
+                    ))
+                  )}
                 </div>
-                <StatusPill tone={nativeDocument ? "ok" : "neutral"}>
-                  {nativeDocument ? "Installed app" : "Browser preview"}
-                </StatusPill>
-              </header>
-              <p>
-                Review resolves the active global → game → character inheritance
-                chain. It does not validate an inactive draft, contact a
-                provider, or check credentials.
-              </p>
-              {activeForScope && activeForScope.id !== selected.id && (
-                <p className="loadout-native-review__context">
-                  This draft is inactive. Review will resolve active loadout “
-                  {activeForScope.name}” for {targetLabelFor(selected)}.
-                </p>
-              )}
-              <div className="loadout-native-review__actions">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={reviewOffline}
-                    onChange={(event) => {
-                      setReviewOffline(event.target.checked);
-                      setReview(null);
-                    }}
-                    disabled={!nativeDocument}
-                  />
+                <div className="loadout-library__legend">
                   <span>
-                    <strong>Review as fully local</strong>
-                    <small>
-                      Hosted routes should fail the native policy check
-                    </small>
+                    <i /> Active preference
                   </span>
+                  <span>Inactive loadouts never route traffic</span>
+                </div>
+              </aside>{" "}
+              <div className="loadout-editor__identity">
+                <label>
+                  <span>LOADOUT NAME</span>
+                  <input
+                    aria-label="Loadout name"
+                    value={selected.name}
+                    maxLength={64}
+                    onChange={(event) =>
+                      updateSelected(
+                        (loadout) => ({ ...loadout, name: event.target.value }),
+                        "Name updated locally.",
+                        false,
+                      )
+                    }
+                    onBlur={() => {
+                      if (!nativeDocument) return;
+                      nativeRename(selected.id, selected.name)
+                        .then((snapshot) =>
+                          acceptNativeSnapshot(
+                            snapshot,
+                            "Loadout renamed in protected native state.",
+                          ),
+                        )
+                        .catch(() => nativeFailure("Loadout rename"));
+                    }}
+                  />
                 </label>
-                <ActionButton
-                  variant="outline"
-                  icon="shield"
-                  onPress={reviewActiveRoute}
-                  isDisabled={!nativeDocument || reviewBusy}
-                >
-                  {reviewBusy ? "Reviewing…" : "Review active route"}
-                </ActionButton>
-                {selected.scope !== "global" && (
+                <div className="loadout-editor__target">
+                  <span>APPLIES TO</span>
+                  <strong>{targetLabelFor(selected)}</strong>
+                  <small>
+                    {selected.scope === "global"
+                      ? "Base route"
+                      : `Overrides ${selected.scope === "game" ? "global" : "game and global"} choices`}
+                  </small>
+                </div>
+                <div className="loadout-editor__actions">
+                  <ActionButton
+                    variant="outline"
+                    icon="models"
+                    onPress={cloneLoadout}
+                  >
+                    Clone
+                  </ActionButton>
                   <ActionButton
                     variant="danger"
                     icon="close"
-                    onPress={deactivateScope}
-                    isDisabled={!nativeDocument || !activeForScope}
+                    onPress={deleteLoadout}
+                    isDisabled={loadouts.length === 1 || selected.active}
                   >
-                    Return scope to inherited route
+                    Delete loadout
                   </ActionButton>
-                )}
+                </div>
               </div>
-              {!nativeDocument && (
-                <p className="loadout-native-review__reason">
-                  Review and scope deactivation require the installed app.
-                  Browser preview changes remain local to this browser.
-                </p>
-              )}
-              {selected.scope !== "global" &&
-                !activeForScope &&
-                nativeDocument && (
-                  <p className="loadout-native-review__reason">
-                    This scope already inherits its parent route; there is no
-                    active override to deactivate.
+              <details className="loadout-overview-details">
+                <summary>Connections & active route</summary>
+                <div
+                  className="loadout-route-summary"
+                  aria-label="Selected route summary"
+                >
+                  <div>
+                    <span>CLOUD EGRESS</span>
+                    <strong>
+                      {cloudVendors.size} provider
+                      {cloudVendors.size === 1 ? "" : "s"}
+                    </strong>
+                    <small>
+                      {cloudVendors.size
+                        ? [...cloudVendors].join(" · ")
+                        : "No selected cloud route"}
+                    </small>
+                  </div>
+                  <div>
+                    <span>LOCAL ROLES</span>
+                    <strong>{localRoles.length || "None"}</strong>
+                    <small>
+                      {localRoles.length
+                        ? localRoles
+                            .map((role) => ROLE_META[role].short)
+                            .join(" · ")
+                        : "Cloud/off selections only"}
+                    </small>
+                  </div>
+                  <div>
+                    <span>ACTIVE AT SCOPE</span>
+                    <strong>{activeForScope?.name ?? "None"}</strong>
+                    <small>
+                      {selected.active
+                        ? "You are editing the active preference"
+                        : "This loadout is not routing"}
+                    </small>
+                  </div>
+                  <div>
+                    <span>REVISION</span>
+                    <strong>
+                      R{selected.revision.toString().padStart(2, "0")}
+                    </strong>
+                    <small>Route IDs only · no credential values</small>
+                  </div>
+                </div>
+              </details>
+            </div>
+          </Dialog>
+        </Modal>
+      </ModalOverlay>
+      <ModalOverlay
+        className="workshop-modal-overlay"
+        isOpen={advancedOpen}
+        onOpenChange={setAdvancedOpen}
+        isDismissable
+      >
+        <Modal className="workshop-modal">
+          <Dialog
+            className="workshop-dialog loadout-console"
+            aria-label="Advanced routing"
+          >
+            <header className="workshop-dialog__header">
+              <Heading slot="title">Advanced routing</Heading>
+              <Button
+                aria-label="Close advanced routing"
+                onPress={() => setAdvancedOpen(false)}
+              >
+                Close ×
+              </Button>
+            </header>
+            <div className="workshop-dialog__body">
+              {renderRouteDetails()}
+
+              <section
+                className="manual-fallbacks"
+                aria-labelledby="manual-fallbacks-title"
+              >
+                <details open>
+                  <summary>Manual retry routes · off until authorized</summary>
+                  <header>
+                    <div>
+                      <span className="eyebrow">MANUAL RECOVERY ONLY</span>
+                      <h4 id="manual-fallbacks-title">
+                        Pre-authorize choices you may retry yourself.
+                      </h4>
+                    </div>
+                    <StatusPill tone="teal">
+                      Automatic fallback disabled
+                    </StatusPill>
+                  </header>
+                  <p>
+                    Authorization adds a visible retry choice after a failure.
+                    It never switches providers on its own, never changes a live
+                    turn, and never overrides Offline mode.
                   </p>
-                )}
-              {review && (
-                <dl className="loadout-native-review__receipt">
-                  <div>
-                    <dt>RESOLVED LEAF</dt>
-                    <dd>{review.resolved.leaf_loadout_id}</dd>
+                  <div className="manual-fallbacks__grid">
+                    {fallbackRoles.map((role) => {
+                      const fallback =
+                        selected.fallbacks[role] ??
+                        defaultFallback(role, selected.routes[role]);
+                      const eligibleProviders = ROUTE_OPTIONS[role].filter(
+                        (provider) =>
+                          provider.id !== selected.routes[role].providerId &&
+                          provider.execution !== "Off" &&
+                          provider.selectable !== false &&
+                          routeIsExecutable(role, provider.id),
+                      );
+                      return (
+                        <div
+                          className={fallback.authorized ? "is-authorized" : ""}
+                          key={role}
+                        >
+                          <label className="fallback-authorize">
+                            <input
+                              type="checkbox"
+                              checked={fallback.authorized}
+                              onChange={(event) =>
+                                toggleFallback(role, event.target.checked)
+                              }
+                            />
+                            <span>
+                              <strong>
+                                {ROLE_META[role].short} manual retry
+                              </strong>
+                              <small>
+                                {fallback.authorized
+                                  ? "Authorized · still requires a click"
+                                  : "Not authorized"}
+                              </small>
+                            </span>
+                          </label>
+                          <select
+                            aria-label={`${ROLE_META[role].label} manual fallback provider`}
+                            value={fallback.providerId}
+                            onChange={(event) =>
+                              changeFallback(role, event.target.value)
+                            }
+                            disabled={!fallback.authorized}
+                          >
+                            {eligibleProviders.map((provider) => (
+                              <option value={provider.id} key={provider.id}>
+                                {provider.name} · {provider.models[0].name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      );
+                    })}
                   </div>
-                  <div>
-                    <dt>INHERITANCE</dt>
-                    <dd>{review.resolved.inheritance_chain.join(" → ")}</dd>
+                </details>
+              </section>
+
+              <section
+                className="loadout-native-review"
+                aria-labelledby="loadout-native-review-title"
+              >
+                <details open>
+                  <summary>
+                    Validate active inheritance · no provider contact
+                  </summary>
+                  <header>
+                    <div>
+                      <span className="eyebrow">PROTECTED NATIVE STATE</span>
+                      <h4 id="loadout-native-review-title">
+                        Review the active route for this scope.
+                      </h4>
+                    </div>
+                    <StatusPill tone={nativeDocument ? "ok" : "neutral"}>
+                      {nativeDocument ? "Installed app" : "Browser preview"}
+                    </StatusPill>
+                  </header>
+                  <p>
+                    Review resolves the active global → game → character
+                    inheritance chain. It does not validate an inactive draft,
+                    contact a provider, or check credentials.
+                  </p>
+                  {activeForScope && activeForScope.id !== selected.id && (
+                    <p className="loadout-native-review__context">
+                      This draft is inactive. Review will resolve active loadout
+                      “{activeForScope.name}” for {targetLabelFor(selected)}.
+                    </p>
+                  )}
+                  <div className="loadout-native-review__actions">
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={reviewOffline}
+                        onChange={(event) => {
+                          setReviewOffline(event.target.checked);
+                          setReview(null);
+                        }}
+                        disabled={!nativeDocument}
+                      />
+                      <span>
+                        <strong>Review as fully local</strong>
+                        <small>
+                          Hosted routes should fail the native policy check
+                        </small>
+                      </span>
+                    </label>
+                    <ActionButton
+                      variant="outline"
+                      icon="shield"
+                      onPress={reviewActiveRoute}
+                      isDisabled={!nativeDocument || reviewBusy}
+                    >
+                      {reviewBusy ? "Reviewing…" : "Review active route"}
+                    </ActionButton>
+                    {selected.scope !== "global" && (
+                      <ActionButton
+                        variant="danger"
+                        icon="close"
+                        onPress={deactivateScope}
+                        isDisabled={!nativeDocument || !activeForScope}
+                      >
+                        Return scope to inherited route
+                      </ActionButton>
+                    )}
                   </div>
-                  <div>
-                    <dt>CONFIGURED ROLES</dt>
-                    <dd>{Object.keys(review.resolved.roles).length} / 6</dd>
-                  </div>
-                  <div>
-                    <dt>POLICY</dt>
-                    <dd>{review.offline ? "Fully local" : "Online allowed"}</dd>
-                  </div>
-                  <div>
-                    <dt>PROVIDER CONTACT</dt>
-                    <dd>
-                      {review.networkRequestPerformed ? "Performed" : "None"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>CREDENTIAL CHECK</dt>
-                    <dd>
-                      {review.credentialsChecked ? "Checked" : "Not checked"}
-                    </dd>
-                  </div>
-                </dl>
-              )}
-            </details>
-          </section>
-        </div>
-      </div>
+                  {!nativeDocument && (
+                    <p className="loadout-native-review__reason">
+                      Review and scope deactivation require the installed app.
+                      Browser preview changes remain local to this browser.
+                    </p>
+                  )}
+                  {selected.scope !== "global" &&
+                    !activeForScope &&
+                    nativeDocument && (
+                      <p className="loadout-native-review__reason">
+                        This scope already inherits its parent route; there is
+                        no active override to deactivate.
+                      </p>
+                    )}
+                  {review && (
+                    <dl className="loadout-native-review__receipt">
+                      <div>
+                        <dt>RESOLVED LEAF</dt>
+                        <dd>{review.resolved.leaf_loadout_id}</dd>
+                      </div>
+                      <div>
+                        <dt>INHERITANCE</dt>
+                        <dd>{review.resolved.inheritance_chain.join(" → ")}</dd>
+                      </div>
+                      <div>
+                        <dt>CONFIGURED ROLES</dt>
+                        <dd>{Object.keys(review.resolved.roles).length} / 6</dd>
+                      </div>
+                      <div>
+                        <dt>POLICY</dt>
+                        <dd>
+                          {review.offline ? "Fully local" : "Online allowed"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>PROVIDER CONTACT</dt>
+                        <dd>
+                          {review.networkRequestPerformed
+                            ? "Performed"
+                            : "None"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>CREDENTIAL CHECK</dt>
+                        <dd>
+                          {review.credentialsChecked
+                            ? "Checked"
+                            : "Not checked"}
+                        </dd>
+                      </div>
+                    </dl>
+                  )}
+                </details>
+              </section>
+            </div>
+          </Dialog>
+        </Modal>
+      </ModalOverlay>
     </section>
   );
 }
