@@ -18,9 +18,13 @@ describe("provider credential boundary", () => {
   it("opens the native prompt with provider ID only and exposes no credential input", async () => {
     const user = userEvent.setup();
     render(<ProviderSettings />);
+    await user.click(screen.getByRole("button", { name: "Manage loadouts" }));
     expect(
       screen.getByRole("textbox", { name: "Loadout name" }),
     ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Close loadout manager" }),
+    );
     expect(document.querySelector('input[type="password"]')).toBeNull();
     expect(screen.queryByLabelText("API credential")).not.toBeInTheDocument();
     await user.click(
