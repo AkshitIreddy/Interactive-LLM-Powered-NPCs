@@ -1,4 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import {
+  Button,
+  Dialog,
+  Heading,
+  Modal,
+  ModalOverlay,
+} from "react-aria-components";
 import { GameOverlaySetup } from "./GameOverlaySetup";
 import {
   readCharacterContentOverride,
@@ -91,9 +104,9 @@ const BROWSER_CHARACTER: NativeCharacterInspection = {
   schemaVersion: 1,
   gameProfileId: "cyberpunk-2077",
   gameDisplayName: "Cyberpunk 2077",
-  selectedCharacterId: "misty-olzewski",
+  selectedCharacterId: "misty-olszewski",
   character: {
-    id: "misty-olzewski",
+    id: "misty-olszewski",
     displayName: "Misty Olszewski",
     aliases: ["Misty"],
     biography:
@@ -143,7 +156,7 @@ const BROWSER_CHARACTER: NativeCharacterInspection = {
     userId: "browser-preview",
     profileId: "cyberpunk-2077",
     gameId: "cyberpunk-2077",
-    characterId: "misty-olzewski",
+    characterId: "misty-olszewski",
     sessionId: null,
     saveId: null,
     crossGameWideningAllowed: false,
@@ -157,6 +170,51 @@ type AsyncState<T> =
   | { kind: "error"; detail: string };
 const errorText = (error: unknown, fallback: string) =>
   error instanceof Error ? error.message : fallback;
+
+function CharacterToolDialog({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <ModalOverlay
+      className="cyberpunk-shell workspace-dialog-layer"
+      isOpen
+      isDismissable
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <Modal className="workspace-dialog-modal">
+        <Dialog
+          className="workspace-dialog character-tool-dialog"
+          aria-label={title}
+          data-workspace-dialog="true"
+        >
+          <header className="workspace-dialog__header">
+            <div>
+              <span className="eyebrow">Character workshop</span>
+              <Heading slot="title">{title}</Heading>
+            </div>
+            <Button
+              autoFocus
+              className="workspace-dialog__close"
+              aria-label={`Close ${title}`}
+              onPress={onClose}
+            >
+              Close
+            </Button>
+          </header>
+          <div className="workspace-dialog__body">{children}</div>
+        </Dialog>
+      </Modal>
+    </ModalOverlay>
+  );
+}
 
 const CYBERPUNK_PROFILE_ID = "cyberpunk-2077";
 
@@ -421,39 +479,63 @@ export function GameTargetWorkspace({
           <h2 id="target-workspace-title">Cyberpunk 2077</h2>
         </div>
         <span className={selected ? "badge good" : "badge"}>
-          {selected ? "Connected" : "Not connected"}
+          {selected ? "Connected · single-player" : "Not connected"}
         </span>
       </div>
       <div className="game-target-compact">
-        <p>
+        <p role="status">
           {selected
-            ? "The game window is connected for this session."
-            : "Start Cyberpunk 2077, then connect its window."}
+            ? notice
+            : nativeAvailable
+              ? notice
+              : "Start Cyberpunk 2077, then connect its window."}
         </p>
-        <div className="game-target-compact__actions">
-          <button
-            className="primary-action"
-            disabled={!nativeAvailable || !cyberpunkProfileReady || busy}
-            onClick={discover}
-          >
-            {busy ? "Scanning…" : "Scan for Cyberpunk 2077"}
-          </button>
-          <label className="authorization-control compact">
-            <input
-              type="checkbox"
-              checked={confirmed}
+        {selected ? (
+          <div className="game-target-compact__actions game-target-connected-actions">
+            <button
+              className="secondary-action"
               disabled={!nativeAvailable || busy}
-              onChange={(event) => setConfirmed(event.target.checked)}
-            />
-            <span>
-              <b>Single-player session</b>
-            </span>
-          </label>
-        </div>
-
-        {!nativeAvailable && (
-          <div className="empty-state compact">
-            <b>Open the Windows app to scan for the game.</b>
+              onClick={
+                actorPicker.state === "waiting"
+                  ? cancelActorPicker
+                  : startActorPicker
+              }
+            >
+              {actorPicker.state === "waiting"
+                ? "Cancel NPC selection"
+                : "Select NPC on screen"}
+            </button>
+            <button
+              className="quiet-button"
+              disabled={!nativeAvailable || busy}
+              onClick={() => void verifyCapture()}
+            >
+              Check game capture
+            </button>
+            <button className="quiet-button" disabled={busy} onClick={clear}>
+              Disconnect game
+            </button>
+          </div>
+        ) : (
+          <div className="game-target-compact__actions">
+            <button
+              className="primary-action"
+              disabled={!nativeAvailable || !cyberpunkProfileReady || busy}
+              onClick={discover}
+            >
+              {busy ? "Scanning…" : "Scan for Cyberpunk 2077"}
+            </button>
+            <label className="authorization-control compact">
+              <input
+                type="checkbox"
+                checked={confirmed}
+                disabled={!nativeAvailable || busy}
+                onChange={(event) => setConfirmed(event.target.checked)}
+              />
+              <span>
+                <b>Single-player session</b>
+              </span>
+            </label>
           </div>
         )}
 
@@ -475,11 +557,6 @@ export function GameTargetWorkspace({
             <button className="quiet-button" onClick={() => void discover()}>
               Try again
             </button>
-          </div>
-        )}
-        {candidates.kind === "empty" && nativeAvailable && !selected && (
-          <div className="empty-state compact">
-            <b>No Cyberpunk game window connected.</b>
           </div>
         )}
         {candidates.kind === "ready" && (
@@ -509,24 +586,6 @@ export function GameTargetWorkspace({
       </div>
 
       {selected && (
-        <article className="selected-target-card selected-target-card--primary">
-          <header>
-            <div>
-              <span className="eyebrow">Connected game</span>
-              <b>{selected.target.title}</b>
-              <small>{selected.target.executableName}</small>
-            </div>
-            <span className="badge good">Window connected</span>
-          </header>
-          <div className="target-toolbar">
-            <button className="quiet-button" disabled={busy} onClick={clear}>
-              Disconnect game
-            </button>
-          </div>
-        </article>
-      )}
-
-      {selected && (
         <div className="game-visual-setup">
           <GameOverlaySetup
             nativeAvailable={nativeAvailable}
@@ -541,27 +600,6 @@ export function GameTargetWorkspace({
               controls voice and memory.
             </p>
             <div className="target-toolbar manual-actor-picker-controls">
-              <button
-                className="secondary-action"
-                disabled={
-                  !nativeAvailable ||
-                  !selected ||
-                  busy ||
-                  actorPicker.state === "waiting"
-                }
-                onClick={startActorPicker}
-              >
-                Select NPC on screen
-              </button>
-              {actorPicker.state === "waiting" && (
-                <button
-                  className="quiet-button"
-                  disabled={busy}
-                  onClick={cancelActorPicker}
-                >
-                  Cancel selection
-                </button>
-              )}
               <span
                 className={
                   actorPicker.state === "selected" ? "badge good" : "badge wait"
@@ -585,9 +623,9 @@ export function GameTargetWorkspace({
           </section>
         </div>
       )}
-      <details className="technical-disclosure actor-picker-disclosure">
-        <summary>Connection details</summary>
-        {selected && (
+      {selected && (
+        <details className="technical-disclosure actor-picker-disclosure">
+          <summary>Connection details</summary>
           <div className="connection-evidence">
             <dl className="facts">
               <div>
@@ -604,19 +642,9 @@ export function GameTargetWorkspace({
               </div>
             </dl>
             <p>{selected.safetyDetail}</p>
-            <button
-              className="quiet-button"
-              disabled={!nativeAvailable || busy}
-              onClick={() => void verifyCapture()}
-            >
-              Check game capture
-            </button>
           </div>
-        )}
-      </details>
-      <p className="inline-status" role="status">
-        {notice}
-      </p>
+        </details>
+      )}
     </section>
   );
 }
@@ -641,6 +669,9 @@ export function CharacterDatabase({
       : { kind: "ready", value: BROWSER_CHARACTER },
   );
   const [busy, setBusy] = useState(false);
+  const [characterTool, setCharacterTool] = useState<
+    "story" | "customize" | "mouth" | "memory" | null
+  >(null);
   const onSelectionChangeRef = useRef(onSelectionChange);
   const [notice, setNotice] = useState(
     nativeAvailable
@@ -738,11 +769,10 @@ export function CharacterDatabase({
       {catalog && (
         <div className="character-roster-block">
           <div className="workspace-step__heading">
-            <div>
-              <span className="eyebrow">{catalog.gameDisplayName}</span>
-              <h3>People you can configure</h3>
-            </div>
-            <span className="badge">{catalog.characters.length}</span>
+            <h3>
+              People you can configure
+              <span className="badge">{catalog.characters.length}</span>
+            </h3>
           </div>
           <aside
             className="native-character-list"
@@ -754,55 +784,23 @@ export function CharacterDatabase({
                 <p>Choose another bundled game profile.</p>
               </div>
             ) : (
-              catalog.characters.map((entry) => {
-                const enabledMouthPack = mouthPackRegistry?.enabled.some(
-                  (packEntry) =>
-                    packEntry.gameProfileId === gameProfileId &&
-                    packEntry.characterId === entry.id,
-                );
-                const installedMouthPack = mouthPackRegistry?.installed.some(
-                  (packEntry) =>
-                    packEntry.gameProfileId === gameProfileId &&
-                    packEntry.characterId === entry.id,
-                );
-                return (
-                  <button
-                    key={entry.id}
-                    className={
-                      value?.character.id === entry.id ? "selected" : ""
-                    }
-                    aria-pressed={value?.character.id === entry.id}
-                    disabled={busy}
-                    onClick={() => void inspect(entry.id)}
-                  >
-                    <span>{entry.displayName.slice(0, 2).toUpperCase()}</span>
-                    <span>
-                      <b>{entry.displayName}</b>
-                      <small>
-                        {entry.backgroundNpc
-                          ? "Encounter profile for unlisted NPCs"
-                          : entry.voiceDescription
-                            ? "Voice direction included"
-                            : "Choose a voice"}
-                      </small>
-                      <small className="character-mouth-pack-state">
-                        {enabledMouthPack
-                          ? "Full mouth pack enabled"
-                          : installedMouthPack
-                            ? "Full mouth pack installed"
-                            : "Basic motion · no full pack"}
-                      </small>
-                    </span>
-                    <i>
-                      {catalog.selectedCharacterId === entry.id
-                        ? "Active"
-                        : entry.backgroundNpc
-                          ? "Street NPC mode"
-                          : "View"}
-                    </i>
-                  </button>
-                );
-              })
+              catalog.characters.map((entry) => (
+                <button
+                  key={entry.id}
+                  className={value?.character.id === entry.id ? "selected" : ""}
+                  aria-pressed={value?.character.id === entry.id}
+                  disabled={busy}
+                  onClick={() => void inspect(entry.id)}
+                >
+                  <span aria-hidden="true">
+                    {entry.displayName.slice(0, 2).toUpperCase()}
+                  </span>
+                  <span>
+                    <b>{entry.displayName}</b>
+                  </span>
+                  {catalog.selectedCharacterId === entry.id && <i>Active</i>}
+                </button>
+              ))
             )}
           </aside>
         </div>
@@ -919,145 +917,194 @@ export function CharacterDatabase({
               </dl>
             </section>
           )}
-          <details className="character-profile-disclosure">
-            <summary>Story and speaking style</summary>
-            <dl className="facts spacious">
-              <div>
-                <dt>Biography</dt>
-                <dd>{value.character.biography || "No biography authored"}</dd>
-              </div>
-              <div>
-                <dt>Personality</dt>
-                <dd>
-                  {value.character.personality || "No personality authored"}
-                </dd>
-              </div>
-              <div>
-                <dt>Dialogue style</dt>
-                <dd>
-                  {value.character.dialogueStyle ||
-                    "No dialogue style authored"}
-                </dd>
-              </div>
-            </dl>
-          </details>
-          <CharacterContentOverrideEditor
-            nativeAvailable={nativeAvailable}
-            editable={catalog?.editableAuthoredData ?? nativeAvailable}
-            inspection={value}
-            onChanged={() => inspect(value.character.id)}
-          />
-          <CharacterMouthPackWorkspace
-            key={`${value.gameProfileId}/${value.character.id}`}
-            nativeAvailable={nativeAvailable}
-            gameProfileId={value.gameProfileId}
-            characterId={value.character.id}
-          />
-          <details className="technical-disclosure character-data-disclosure">
-            <summary>Advanced character data</summary>
-            <details>
-              <summary>Identity, voice, and memory scope</summary>
+          <nav
+            className="character-tool-grid"
+            aria-label={`${value.character.displayName} tools`}
+          >
+            <button onClick={() => setCharacterTool("story")}>
+              <b>Story & voice</b>
+              <small>Biography, personality and dialogue style</small>
+            </button>
+            <button onClick={() => setCharacterTool("customize")}>
+              <b>Customize</b>
+              <small>Add your own backstory and prompt direction</small>
+            </button>
+            <button onClick={() => setCharacterTool("mouth")}>
+              <b>Mouth motion</b>
+              <small>Review, install and assign a prepared pack</small>
+            </button>
+            <button onClick={() => setCharacterTool("memory")}>
+              <b>Memory & data</b>
+              <small>History, sources, backup and reset tools</small>
+            </button>
+          </nav>
+          {characterTool === "story" && (
+            <CharacterToolDialog
+              title={`${value.character.displayName} · story and voice`}
+              onClose={() => setCharacterTool(null)}
+            >
               <dl className="facts spacious">
                 <div>
-                  <dt>Identity method</dt>
+                  <dt>Biography</dt>
                   <dd>
-                    {value.character.identity.strategy.replaceAll("_", " ")}
+                    {value.character.biography || "No biography authored"}
                   </dd>
                 </div>
                 <div>
-                  <dt>Automatic face recognition</dt>
+                  <dt>Personality</dt>
                   <dd>
-                    {value.character.identity.automaticFaceRecognitionClaimed
-                      ? "Available in this profile"
-                      : "Manual selection"}
+                    {value.character.personality || "No personality authored"}
                   </dd>
                 </div>
                 <div>
-                  <dt>Voice binding</dt>
+                  <dt>Dialogue style</dt>
                   <dd>
-                    {value.character.voice.providerVoiceId ??
-                      "Resolved by the selected voice setup"}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Memory scope</dt>
-                  <dd>
-                    {value.memoryScope.gameId} / {value.memoryScope.characterId}
+                    {value.character.dialogueStyle ||
+                      "No dialogue style authored"}
                   </dd>
                 </div>
               </dl>
-            </details>
-            <details>
-              <summary>
-                Authored knowledge · {value.authoredKnowledge.length}
-              </summary>
-              {value.authoredKnowledge.length === 0 ? (
-                <p>No authored records for this character.</p>
-              ) : (
-                <ul>
-                  {value.authoredKnowledge.map((record) => (
-                    <li key={record.id}>
-                      <b>
-                        {record.authority} · {record.spoilerTier}
-                      </b>
-                      <span>{record.text}</span>
-                      <small>provenance {record.provenanceId}</small>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </details>
-            <details>
-              <summary>Provenance · {value.provenance.length}</summary>
-              {value.provenance.length === 0 ? (
-                <p>No provenance rows.</p>
-              ) : (
-                <ul>
-                  {value.provenance.map((record) => (
-                    <li key={record.id}>
-                      <b>{record.title}</b>
-                      <span>
-                        {record.kind} ·{" "}
-                        {record.reviewStatus ?? "review state absent"}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </details>
-            <details>
-              <summary>
-                Delivered memory · {value.deliveredMemory.length}
-              </summary>
-              {value.deliveredMemory.length === 0 ? (
-                <p>No delivered turns in the native memory scope.</p>
-              ) : (
-                <ol>
-                  {value.deliveredMemory.map((turn) => (
-                    <li key={turn.turnId}>
-                      <b>{turn.speaker}</b>
-                      <span>{turn.deliveredText}</span>
-                      <small>
-                        Source {turn.provenanceSourceKind} ·{" "}
-                        {turn.provenanceSourceId ??
-                          turn.provenanceSourceUri ??
-                          "source identifier unavailable"}
-                      </small>
-                      <small>
-                        Stored record {turn.turnId} · receipt{" "}
-                        {turn.deliveryReceiptId ?? "unavailable"}
-                      </small>
-                    </li>
-                  ))}
-                </ol>
-              )}
-            </details>
-            <CharacterMemoryLifecycle
-              nativeAvailable={nativeAvailable}
-              gameProfileId={value.gameProfileId}
-              characterId={value.character.id}
-            />
-          </details>
+            </CharacterToolDialog>
+          )}
+          {characterTool === "customize" && (
+            <CharacterToolDialog
+              title={`Customize ${value.character.displayName}`}
+              onClose={() => setCharacterTool(null)}
+            >
+              <CharacterContentOverrideEditor
+                nativeAvailable={nativeAvailable}
+                editable={catalog?.editableAuthoredData ?? nativeAvailable}
+                inspection={value}
+                onChanged={() => inspect(value.character.id)}
+              />
+            </CharacterToolDialog>
+          )}
+          {characterTool === "mouth" && (
+            <CharacterToolDialog
+              title={`${value.character.displayName} · mouth motion`}
+              onClose={() => setCharacterTool(null)}
+            >
+              <CharacterMouthPackWorkspace
+                key={`${value.gameProfileId}/${value.character.id}`}
+                nativeAvailable={nativeAvailable}
+                gameProfileId={value.gameProfileId}
+                characterId={value.character.id}
+              />
+            </CharacterToolDialog>
+          )}
+          {characterTool === "memory" && (
+            <CharacterToolDialog
+              title={`${value.character.displayName} · memory and data`}
+              onClose={() => setCharacterTool(null)}
+            >
+              <div className="technical-disclosure character-data-disclosure">
+                <details>
+                  <summary>Identity, voice, and memory scope</summary>
+                  <dl className="facts spacious">
+                    <div>
+                      <dt>Identity method</dt>
+                      <dd>
+                        {value.character.identity.strategy.replaceAll("_", " ")}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Automatic face recognition</dt>
+                      <dd>
+                        {value.character.identity
+                          .automaticFaceRecognitionClaimed
+                          ? "Available in this profile"
+                          : "Manual selection"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Voice binding</dt>
+                      <dd>
+                        {value.character.voice.providerVoiceId ??
+                          "Resolved by the selected voice setup"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Memory scope</dt>
+                      <dd>
+                        {value.memoryScope.gameId} /{" "}
+                        {value.memoryScope.characterId}
+                      </dd>
+                    </div>
+                  </dl>
+                </details>
+                <details>
+                  <summary>
+                    Authored knowledge · {value.authoredKnowledge.length}
+                  </summary>
+                  {value.authoredKnowledge.length === 0 ? (
+                    <p>No authored records for this character.</p>
+                  ) : (
+                    <ul>
+                      {value.authoredKnowledge.map((record) => (
+                        <li key={record.id}>
+                          <b>
+                            {record.authority} · {record.spoilerTier}
+                          </b>
+                          <span>{record.text}</span>
+                          <small>provenance {record.provenanceId}</small>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </details>
+                <details>
+                  <summary>Provenance · {value.provenance.length}</summary>
+                  {value.provenance.length === 0 ? (
+                    <p>No provenance rows.</p>
+                  ) : (
+                    <ul>
+                      {value.provenance.map((record) => (
+                        <li key={record.id}>
+                          <b>{record.title}</b>
+                          <span>
+                            {record.kind} ·{" "}
+                            {record.reviewStatus ?? "review state absent"}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </details>
+                <details>
+                  <summary>
+                    Delivered memory · {value.deliveredMemory.length}
+                  </summary>
+                  {value.deliveredMemory.length === 0 ? (
+                    <p>No delivered turns in the native memory scope.</p>
+                  ) : (
+                    <ol>
+                      {value.deliveredMemory.map((turn) => (
+                        <li key={turn.turnId}>
+                          <b>{turn.speaker}</b>
+                          <span>{turn.deliveredText}</span>
+                          <small>
+                            Source {turn.provenanceSourceKind} ·{" "}
+                            {turn.provenanceSourceId ??
+                              turn.provenanceSourceUri ??
+                              "source identifier unavailable"}
+                          </small>
+                          <small>
+                            Stored record {turn.turnId} · receipt{" "}
+                            {turn.deliveryReceiptId ?? "unavailable"}
+                          </small>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </details>
+                <CharacterMemoryLifecycle
+                  nativeAvailable={nativeAvailable}
+                  gameProfileId={value.gameProfileId}
+                  characterId={value.character.id}
+                />
+              </div>
+            </CharacterToolDialog>
+          )}
         </div>
       )}
       <p className="inline-status" role="status">
@@ -2829,10 +2876,13 @@ export function ThisPcBenchmark({
 export function LocalResourcePlanner({
   models,
   nativeAvailable = false,
+  sectioned = false,
 }: {
   models: NativeModelSummary[];
   nativeAvailable?: boolean;
+  sectioned?: boolean;
 }) {
+  const [localSection, setLocalSection] = useState("tracking");
   const [settings, setSettings] = useState<NativeLocalResourceSettings | null>(
     null,
   );
@@ -3100,6 +3150,7 @@ export function LocalResourcePlanner({
         );
       setLoadoutPlanner(next);
       await refresh();
+      if (sectioned) setLocalSection("downloads");
     } catch (cause) {
       setSetupError(
         errorText(cause, "Mouth tracking setup could not be prepared."),
@@ -3152,19 +3203,39 @@ export function LocalResourcePlanner({
 
   return (
     <section
-      className="local-resource-workspace"
+      className={`local-resource-workspace ${sectioned ? "local-resource-workspace--sectioned" : ""}`}
       aria-labelledby="local-packs-title"
     >
+      {sectioned && (
+        <nav className="local-resource-nav" aria-label="Local model settings">
+          {[
+            ["tracking", "Mouth tracking"],
+            ["budget", "PC budget"],
+            ["downloads", "Downloads"],
+            ["benchmark", "Benchmark"],
+            ["advanced", "Advanced packs"],
+          ].map(([id, label]) => (
+            <button
+              key={id}
+              aria-current={localSection === id ? "page" : undefined}
+              onClick={() => setLocalSection(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+      )}
       <section
         className="instrument-panel mouth-tracking-setup"
         aria-label="Mouth tracking model setup"
+        hidden={sectioned && localSection !== "tracking"}
       >
         <span className="eyebrow">Local face tracking</span>
         <h2>Set up mouth tracking</h2>
         <p>
           Choose the supported tracking model, install it, then test and
-          activate it. With Cyberpunk connected, check the loadout below and
-          return to Games to select an NPC.
+          activate it. With Cyberpunk connected, check PC budget and return to
+          Games to select an NPC.
         </p>
         <div className="target-toolbar">
           <button
@@ -3174,9 +3245,18 @@ export function LocalResourcePlanner({
           >
             {busy === "prepare-visual" ? "Preparing…" : "Choose tracking model"}
           </button>
-          <a className="text-action" href="#trusted-pack-catalog-title">
-            Model downloads ↓
-          </a>
+          {sectioned ? (
+            <button
+              className="text-action"
+              onClick={() => setLocalSection("downloads")}
+            >
+              Model downloads →
+            </button>
+          ) : (
+            <a className="text-action" href="#trusted-pack-catalog-title">
+              Model downloads ↓
+            </a>
+          )}
         </div>
         <small>
           Your existing local model selection is preserved. This step does not
@@ -3184,7 +3264,10 @@ export function LocalResourcePlanner({
         </small>
         {setupError && <p role="alert">{setupError}</p>}
       </section>
-      <div className="resource-planner instrument-panel">
+      <div
+        className="resource-planner instrument-panel"
+        hidden={sectioned && localSection !== "budget"}
+      >
         <div className="panel-title">
           <div>
             <span className="eyebrow">PC resources</span>
@@ -3705,6 +3788,7 @@ export function LocalResourcePlanner({
       <section
         className="trusted-pack-catalog instrument-panel"
         aria-labelledby="trusted-pack-catalog-title"
+        hidden={sectioned && localSection !== "downloads"}
       >
         <div className="panel-title">
           <div>
@@ -4186,8 +4270,16 @@ export function LocalResourcePlanner({
           evidence are never presented as measured fit.
         </p>
       </section>
-      <ThisPcBenchmark nativeAvailable={nativeAvailable} />
-      <div className="pack-manager instrument-panel">
+      <div
+        className="local-benchmark-pane"
+        hidden={sectioned && localSection !== "benchmark"}
+      >
+        <ThisPcBenchmark nativeAvailable={nativeAvailable} />
+      </div>
+      <div
+        className="pack-manager instrument-panel"
+        hidden={sectioned && localSection !== "advanced"}
+      >
         <div className="panel-title">
           <div>
             <span className="eyebrow">Explicit local-review lifecycle</span>

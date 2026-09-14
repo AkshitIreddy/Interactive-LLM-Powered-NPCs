@@ -17,9 +17,16 @@ describe("P0 honesty boundaries", () => {
     );
   });
 
-  it("labels the synthetic target and does not claim a detected game", () => {
+  it("labels the synthetic target and does not claim a detected game", async () => {
+    const user = userEvent.setup();
     window.history.replaceState(null, "", "/?page=world");
     render(<App />);
+    expect(
+      screen.getByRole("button", { name: "Launch & connect" }),
+    ).toBeDisabled();
+    await user.click(
+      screen.getByRole("button", { name: /Practice environment details/i }),
+    );
     expect(screen.getByText("Debug fixture only")).toBeInTheDocument();
     expect(
       screen.getByText("interactive-npcs-synthetic-target.exe"),
@@ -35,12 +42,14 @@ describe("P0 honesty boundaries", () => {
     window.history.replaceState(null, "", "/?page=voice");
     render(<App />);
     await user.click(screen.getByRole("button", { name: /Local models/i }));
+    await user.click(screen.getByRole("button", { name: "Downloads" }));
     expect(
       screen.getByText("Native signed catalog unavailable in browser preview"),
-    ).toBeInTheDocument();
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Advanced packs" }));
     expect(
       screen.getByText("Native pack lifecycle unavailable in browser preview"),
-    ).toBeInTheDocument();
+    ).toBeVisible();
     expect(document.body).toHaveTextContent(
       /not a complete lip-sync model and is unavailable to normal product sessions/i,
     );
@@ -64,14 +73,25 @@ describe("P0 honesty boundaries", () => {
     const user = userEvent.setup();
     window.history.replaceState(null, "", "/?page=world");
     render(<App />);
+    await user.click(
+      screen.getByRole("button", { name: /Practice environment details/i }),
+    );
     expect(screen.getByText("Single-player only")).toBeInTheDocument();
     expect(document.body).toHaveTextContent(
       /Ordinary commercial-game capture remains fail-closed/i,
     );
-    await user.click(screen.getByText("Character recognition"));
-    expect(document.body).toHaveTextContent(
-      /Automatic recognition is not qualified. Choose the character manually/i,
+    await user.click(
+      screen.getByRole("button", { name: "Close Practice environment" }),
     );
+    await user.click(
+      screen.getByRole("button", { name: /Character recognition/i }),
+    );
+    expect(screen.getByText("Automatic match unavailable")).toBeVisible();
+    expect(
+      screen.getByText(
+        /Choose the character manually; that selection controls its prompt, voice and memory/i,
+      ),
+    ).toBeVisible();
     expect(
       screen.queryByRole("button", { name: /Recognize/i }),
     ).not.toBeInTheDocument();

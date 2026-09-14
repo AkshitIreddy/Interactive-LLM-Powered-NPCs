@@ -90,6 +90,12 @@ export function ProductPreferencesWorkspace({
   onSnapshot?: (snapshot: NativeProductPreferenceSnapshot) => void;
 }) {
   const [scopeKind, setScopeKind] = useState<ScopeKind>("global");
+  const [preferenceSection, setPreferenceSection] = useState<
+    "conversation" | "subtitles" | "routing"
+  >("conversation");
+  const [conversationGroup, setConversationGroup] = useState<
+    "response" | "interaction" | "presence"
+  >("response");
   const [snapshot, setSnapshot] =
     useState<NativeProductPreferenceSnapshot | null>(null);
   const [draft, setDraft] = useState<NativeScopedProductPreferences | null>(
@@ -229,379 +235,81 @@ export function ProductPreferencesWorkspace({
         draft.performancePreset !== undefined));
 
   return (
-    <div className="product-preferences-stack">
-      <section className="instrument-panel product-preferences-workspace">
-        <div className="panel-title workspace-heading">
-          <div>
-            <span className="eyebrow">Apply defaults by scope</span>
-            <h2>Conversation defaults</h2>
+    <div className="product-preferences-stack preference-editor-shell">
+      <nav className="preference-editor-nav" aria-label="Preference category">
+        <button
+          aria-current={
+            preferenceSection === "conversation" ? "page" : undefined
+          }
+          onClick={() => setPreferenceSection("conversation")}
+        >
+          <b>Conversation</b>
+          <small>Behavior, performance and presence</small>
+        </button>
+        <button
+          aria-current={preferenceSection === "subtitles" ? "page" : undefined}
+          onClick={() => setPreferenceSection("subtitles")}
+        >
+          <b>Subtitles</b>
+          <small>Typography, placement and backplate</small>
+        </button>
+        <button
+          aria-current={preferenceSection === "routing" ? "page" : undefined}
+          onClick={() => setPreferenceSection("routing")}
+        >
+          <b>Effective setup</b>
+          <small>Resolved providers and local resources</small>
+        </button>
+      </nav>
+      <div
+        className="preference-editor-pane"
+        hidden={preferenceSection !== "conversation"}
+      >
+        <section className="instrument-panel product-preferences-workspace">
+          <div className="panel-title workspace-heading">
+            <div>
+              <span className="eyebrow">Apply defaults by scope</span>
+              <h2>Conversation defaults</h2>
+            </div>
+            <span className={nativeAvailable ? "badge good" : "badge wait"}>
+              {nativeAvailable ? "Native store" : "Preview only"}
+            </span>
           </div>
-          <span className={nativeAvailable ? "badge good" : "badge wait"}>
-            {nativeAvailable ? "Native store" : "Preview only"}
-          </span>
-        </div>
-        <p className="source-disclosure">
-          Set your defaults here. Give a game or character its own settings
-          whenever you want.
-        </p>
-
-        <div className="preference-scope-tabs" aria-label="Preference scope">
-          {(["global", "game", "character"] as const).map((kind) => (
-            <button
-              key={kind}
-              className={scopeKind === kind ? "selected" : ""}
-              aria-pressed={scopeKind === kind}
-              disabled={busy !== null || (kind === "character" && !characterId)}
-              title={
-                kind === "character" && !characterId
-                  ? "Select an authored character in World first."
-                  : undefined
-              }
-              onClick={() => setScopeKind(kind)}
+          <div className="preference-scope-command">
+            <div
+              className="preference-scope-tabs"
+              aria-label="Preference scope"
             >
-              {kind === "global"
-                ? "Global"
-                : kind === "game"
-                  ? "Selected game"
-                  : "Selected character"}
-            </button>
-          ))}
-        </div>
-        <p className="preference-scope-context" role="status">
-          Editing <strong>{scopeLabel(scope)}</strong>
-        </p>
-
-        {!nativeAvailable && (
-          <div className="empty-state">
-            <b>Your preferences live in the desktop app</b>
-            <p>
-              Open it to adjust conversation style, performance and controls.
+              {(["global", "game", "character"] as const).map((kind) => (
+                <button
+                  key={kind}
+                  className={scopeKind === kind ? "selected" : ""}
+                  aria-pressed={scopeKind === kind}
+                  disabled={
+                    busy !== null || (kind === "character" && !characterId)
+                  }
+                  title={
+                    kind === "character" && !characterId
+                      ? "Select an authored character in World first."
+                      : undefined
+                  }
+                  onClick={() => setScopeKind(kind)}
+                >
+                  {kind === "global"
+                    ? "Global"
+                    : kind === "game"
+                      ? "Selected game"
+                      : "Selected character"}
+                </button>
+              ))}
+            </div>
+            <p className="preference-scope-context" role="status">
+              Editing <strong>{scopeLabel(scope)}</strong>
             </p>
           </div>
-        )}
-        {nativeAvailable && busy === "load" && !snapshot && (
-          <div className="empty-state" aria-live="polite">
-            <b>Loading native preferences…</b>
-          </div>
-        )}
-        {nativeAvailable && !snapshot && !error && busy !== "load" && (
-          <div className="empty-state">
-            <b>No native preference snapshot</b>
-            <button className="quiet-button" onClick={() => void load()}>
-              Retry native load
-            </button>
-          </div>
-        )}
 
-        {snapshot && draft && effective && (
-          <>
-            <div className="preference-preset-grid preference-preset-grid--primary">
-              <PreferenceSelect
-                label="Execution preset"
-                value={draft.executionPreset ?? ""}
-                inherited={effective.executionPreset}
-                allowInherit={scope.kind !== "global"}
-                onChange={(value) =>
-                  setDraft((current) =>
-                    current
-                      ? {
-                          ...current,
-                          executionPreset:
-                            value === ""
-                              ? undefined
-                              : (value as NativeExecutionPreset),
-                        }
-                      : current,
-                  )
-                }
-                options={EXECUTION_PRESETS}
-              />
-              <PreferenceSelect
-                label="Performance preset"
-                value={draft.performancePreset ?? ""}
-                inherited={effective.performancePreset}
-                allowInherit={scope.kind !== "global"}
-                onChange={(value) =>
-                  setDraft((current) =>
-                    current
-                      ? {
-                          ...current,
-                          performancePreset:
-                            value === ""
-                              ? undefined
-                              : (value as NativePerformancePreset),
-                        }
-                      : current,
-                  )
-                }
-                options={PERFORMANCE_PRESETS}
-              />
-            </div>
-
-            <div className="preference-overrides">
-              <h3>How conversations behave</h3>
-              <p>
-                Keep the default or choose your own value. Changes apply when
-                you save.
-              </p>
-              <div className="preference-field-grid">
-                <PreferenceSelect
-                  label="Verbosity"
-                  value={draft.overrides.verbosity ?? ""}
-                  inherited={effective.verbosity}
-                  allowInherit
-                  onChange={(value) =>
-                    setOverride(
-                      "verbosity",
-                      value === "" ? undefined : (value as NativeVerbosity),
-                    )
-                  }
-                  options={[
-                    ["concise", "Concise"],
-                    ["standard", "Standard"],
-                    ["detailed", "Detailed"],
-                  ]}
-                />
-                <PreferenceSelect
-                  label="Response length"
-                  value={draft.overrides.responseLength ?? ""}
-                  inherited={effective.responseLength}
-                  allowInherit
-                  onChange={(value) =>
-                    setOverride(
-                      "responseLength",
-                      value === ""
-                        ? undefined
-                        : (value as NativeResponseLength),
-                    )
-                  }
-                  options={[
-                    ["short", "Short"],
-                    ["medium", "Medium"],
-                    ["long", "Long"],
-                  ]}
-                />
-                <PreferenceSelect
-                  label="Interruption"
-                  value={draft.overrides.interruptionMode ?? ""}
-                  inherited={effective.interruptionMode}
-                  allowInherit
-                  onChange={(value) =>
-                    setOverride(
-                      "interruptionMode",
-                      value === ""
-                        ? undefined
-                        : (value as NativeInterruptionMode),
-                    )
-                  }
-                  options={[
-                    ["immediate", "Immediate"],
-                    ["finishSentence", "Finish sentence"],
-                    ["disabled", "Disabled"],
-                  ]}
-                />
-                <PreferenceSelect
-                  label="Input"
-                  value={draft.overrides.inputMode ?? ""}
-                  inherited={effective.inputMode}
-                  allowInherit
-                  onChange={(value) =>
-                    setOverride(
-                      "inputMode",
-                      value === ""
-                        ? undefined
-                        : (value as NativePreferenceInputMode),
-                    )
-                  }
-                  options={[
-                    ["ptt", "Push to talk"],
-                    ["vad", "Voice activity detection"],
-                  ]}
-                />
-                <label className="preference-control creativity-control">
-                  <span>Creativity</span>
-                  <select
-                    aria-label="Creativity source"
-                    value={
-                      draft.overrides.creativity === undefined
-                        ? "inherit"
-                        : "override"
-                    }
-                    onChange={(event) =>
-                      setOverride(
-                        "creativity",
-                        event.target.value === "inherit"
-                          ? undefined
-                          : effective.creativity.value,
-                      )
-                    }
-                  >
-                    <option value="inherit">Use default</option>
-                    <option value="override">Custom</option>
-                  </select>
-                  <input
-                    aria-label="Creativity value"
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={
-                      draft.overrides.creativity ?? effective.creativity.value
-                    }
-                    disabled={draft.overrides.creativity === undefined}
-                    onChange={(event) =>
-                      setOverride("creativity", Number(event.target.value))
-                    }
-                  />
-                  <small>
-                    Current: {effective.creativity.value}/100 ·{" "}
-                    {scopeLabel(effective.creativity.sourceScope)}
-                  </small>
-                </label>
-                <BooleanPreference
-                  label="Subtitles"
-                  value={draft.overrides.subtitles}
-                  inherited={effective.subtitles}
-                  onChange={(next) => setOverride("subtitles", next)}
-                />
-                <BooleanPreference
-                  label="Overlay request"
-                  value={draft.overrides.overlay}
-                  inherited={effective.overlay}
-                  onChange={(next) => setOverride("overlay", next)}
-                />
-              </div>
-              <p className="preference-control-note">
-                The overlay appears after a game window is connected and ready.
-              </p>
-              <details className="technical-disclosure optional-capability-disclosure">
-                <summary>Optional memory, vision, and presence</summary>
-                <div className="preference-field-grid">
-                  {(
-                    [
-                      ["memory", "Memory", effective.memory],
-                      ["emotion", "Emotion", effective.emotion],
-                      ["vision", "Vision", effective.vision],
-                      [
-                        "webcamPresence",
-                        "Webcam presence intent",
-                        effective.webcamPresence,
-                      ],
-                    ] as const
-                  ).map(([key, label, value]) => (
-                    <BooleanPreference
-                      key={key}
-                      label={label}
-                      value={draft.overrides[key]}
-                      inherited={value}
-                      onChange={(next) => setOverride(key, next)}
-                    />
-                  ))}
-                </div>
-                <p className="preference-control-note">
-                  Webcam presence is not available yet; this stores your
-                  preference.
-                </p>
-              </details>
-            </div>
-
-            <details className="technical-disclosure preference-technical-disclosure">
-              <summary>
-                <span>Privacy and routing details</span>
-                {" · "}
-                <span className="preference-technical-summary">
-                  <span>
-                    {snapshot.routeSnapshot?.sourceLoadoutId ??
-                      "No active route"}
-                  </span>
-                  {" · "}
-                  <span>
-                    {snapshot.resourceSnapshot.admissionReceiptPresent
-                      ? (snapshot.resourceSnapshot.admissionStatus ??
-                        "Admission receipt present")
-                      : "No admission receipt"}
-                  </span>
-                  {" · "}
-                  <span>
-                    <span>Captured game image</span>{" "}
-                    <b>
-                      {effective.egress.capturedGameImage.value === "denied"
-                        ? "Denied"
-                        : "Selected provider route only"}
-                    </b>
-                  </span>
-                </span>
-              </summary>
-
-              <div className="preference-proof-grid">
-                <article>
-                  <span>Route authority snapshot</span>
-                  <b>
-                    Loadout {snapshot.routeSnapshot?.sourceLoadoutId ?? "none"}
-                  </b>
-                  <small>
-                    {snapshot.routeSnapshot
-                      ? `sha256 ${snapshot.routeSnapshot.sha256.slice(0, 12)}… · generation ${snapshot.routeSnapshot.generation ?? "unreported"}`
-                      : "No route receipt was available for this scope."}
-                  </small>
-                </article>
-                <article>
-                  <span>Local resource authority</span>
-                  <b>
-                    Admission:{" "}
-                    {snapshot.resourceSnapshot.admissionReceiptPresent
-                      ? (snapshot.resourceSnapshot.admissionStatus ??
-                        "receipt present")
-                      : "no receipt"}
-                  </b>
-                  <small>
-                    {snapshot.resourceSnapshot.selectionId ??
-                      "No selected local loadout"}
-                  </small>
-                </article>
-                <article>
-                  <span>Mutation safety</span>
-                  <b>Intent only</b>
-                  <small>
-                    Automatic fallback off · route/pack activation false
-                  </small>
-                </article>
-              </div>
-
-              <div className="preference-egress" aria-label="Effective egress">
-                <h3>Data allowed for the selected route</h3>
-                {(
-                  [
-                    ["Transcript", effective.egress.transcript],
-                    ["Microphone audio", effective.egress.microphoneAudio],
-                    ["Game image capture", effective.egress.capturedGameImage],
-                    [
-                      "Local memory context",
-                      effective.egress.localMemoryContext,
-                    ],
-                  ] as const
-                ).map(([label, value]) => (
-                  <div key={label}>
-                    <span>{label}</span>
-                    <b>
-                      {value.value === "denied"
-                        ? "Denied"
-                        : "Selected provider route only"}
-                    </b>
-                    <small>{inheritedLabel(value)}</small>
-                  </div>
-                ))}
-              </div>
-            </details>
-
-            <div className="preference-migration">
-              <b>
-                Schema v{snapshot.schemaVersion} · revision {snapshot.revision}
-              </b>
-              <span>{snapshot.migration.state.replace(/([A-Z])/g, " $1")}</span>
-              <small>{snapshot.migration.detail}</small>
-            </div>
-
-            <div className="preference-actions">
+          {snapshot && draft && effective && (
+            <div className="preference-actions preference-actions--persistent">
               <button
                 className="primary-action small"
                 disabled={!scopeCanSave || busy !== null}
@@ -630,28 +338,473 @@ export function ProductPreferencesWorkspace({
                 Reload saved values
               </button>
             </div>
-          </>
-        )}
+          )}
 
-        {notice && (
-          <p className="inline-status" role="status">
-            {notice}
-          </p>
+          {!nativeAvailable && (
+            <div className="empty-state">
+              <b>Your preferences live in the desktop app</b>
+              <p>
+                Open it to adjust conversation style, performance and controls.
+              </p>
+            </div>
+          )}
+          {nativeAvailable && busy === "load" && !snapshot && (
+            <div className="empty-state" aria-live="polite">
+              <b>Loading native preferences…</b>
+            </div>
+          )}
+          {nativeAvailable && !snapshot && !error && busy !== "load" && (
+            <div className="empty-state">
+              <b>No native preference snapshot</b>
+              <button className="quiet-button" onClick={() => void load()}>
+                Retry native load
+              </button>
+            </div>
+          )}
+
+          {snapshot && draft && effective && (
+            <>
+              <nav
+                className="conversation-group-nav"
+                aria-label="Conversation setting group"
+              >
+                {(
+                  [
+                    ["response", "Response", "Speed, quality and style"],
+                    ["interaction", "Interaction", "Input and display"],
+                    ["presence", "Presence", "Memory, vision and privacy"],
+                  ] as const
+                ).map(([id, label, description]) => (
+                  <button
+                    key={id}
+                    aria-current={conversationGroup === id ? "page" : undefined}
+                    onClick={() => setConversationGroup(id)}
+                  >
+                    <b>{label}</b>
+                    <small>{description}</small>
+                  </button>
+                ))}
+              </nav>
+
+              <div
+                className="preference-preset-grid preference-preset-grid--primary"
+                hidden={conversationGroup !== "response"}
+              >
+                <PreferenceSelect
+                  label="Execution preset"
+                  value={draft.executionPreset ?? ""}
+                  inherited={effective.executionPreset}
+                  allowInherit={scope.kind !== "global"}
+                  onChange={(value) =>
+                    setDraft((current) =>
+                      current
+                        ? {
+                            ...current,
+                            executionPreset:
+                              value === ""
+                                ? undefined
+                                : (value as NativeExecutionPreset),
+                          }
+                        : current,
+                    )
+                  }
+                  options={EXECUTION_PRESETS}
+                />
+                <PreferenceSelect
+                  label="Performance preset"
+                  value={draft.performancePreset ?? ""}
+                  inherited={effective.performancePreset}
+                  allowInherit={scope.kind !== "global"}
+                  onChange={(value) =>
+                    setDraft((current) =>
+                      current
+                        ? {
+                            ...current,
+                            performancePreset:
+                              value === ""
+                                ? undefined
+                                : (value as NativePerformancePreset),
+                          }
+                        : current,
+                    )
+                  }
+                  options={PERFORMANCE_PRESETS}
+                />
+              </div>
+
+              <div
+                className="preference-overrides"
+                data-conversation-group={conversationGroup}
+              >
+                <h3>
+                  {conversationGroup === "response"
+                    ? "Response style"
+                    : conversationGroup === "interaction"
+                      ? "Input and display"
+                      : "Presence and privacy"}
+                </h3>
+                <p>
+                  {conversationGroup === "response"
+                    ? "Choose how quickly and fully a character answers."
+                    : conversationGroup === "interaction"
+                      ? "Choose how conversations start, pause and appear."
+                      : "Choose which optional context the character may use."}
+                </p>
+                <div className="preference-field-grid">
+                  <PreferenceSelect
+                    label="Verbosity"
+                    value={draft.overrides.verbosity ?? ""}
+                    inherited={effective.verbosity}
+                    allowInherit
+                    onChange={(value) =>
+                      setOverride(
+                        "verbosity",
+                        value === "" ? undefined : (value as NativeVerbosity),
+                      )
+                    }
+                    options={[
+                      ["concise", "Concise"],
+                      ["standard", "Standard"],
+                      ["detailed", "Detailed"],
+                    ]}
+                  />
+                  <PreferenceSelect
+                    label="Response length"
+                    value={draft.overrides.responseLength ?? ""}
+                    inherited={effective.responseLength}
+                    allowInherit
+                    onChange={(value) =>
+                      setOverride(
+                        "responseLength",
+                        value === ""
+                          ? undefined
+                          : (value as NativeResponseLength),
+                      )
+                    }
+                    options={[
+                      ["short", "Short"],
+                      ["medium", "Medium"],
+                      ["long", "Long"],
+                    ]}
+                  />
+                  <PreferenceSelect
+                    label="Interruption"
+                    value={draft.overrides.interruptionMode ?? ""}
+                    inherited={effective.interruptionMode}
+                    allowInherit
+                    onChange={(value) =>
+                      setOverride(
+                        "interruptionMode",
+                        value === ""
+                          ? undefined
+                          : (value as NativeInterruptionMode),
+                      )
+                    }
+                    options={[
+                      ["immediate", "Immediate"],
+                      ["finishSentence", "Finish sentence"],
+                      ["disabled", "Disabled"],
+                    ]}
+                  />
+                  <PreferenceSelect
+                    label="Input"
+                    value={draft.overrides.inputMode ?? ""}
+                    inherited={effective.inputMode}
+                    allowInherit
+                    onChange={(value) =>
+                      setOverride(
+                        "inputMode",
+                        value === ""
+                          ? undefined
+                          : (value as NativePreferenceInputMode),
+                      )
+                    }
+                    options={[
+                      ["ptt", "Push to talk"],
+                      ["vad", "Voice activity detection"],
+                    ]}
+                  />
+                  <label className="preference-control creativity-control">
+                    <span>Creativity</span>
+                    <select
+                      aria-label="Creativity source"
+                      value={
+                        draft.overrides.creativity === undefined
+                          ? "inherit"
+                          : "override"
+                      }
+                      onChange={(event) =>
+                        setOverride(
+                          "creativity",
+                          event.target.value === "inherit"
+                            ? undefined
+                            : effective.creativity.value,
+                        )
+                      }
+                    >
+                      <option value="inherit">Use default</option>
+                      <option value="override">Custom</option>
+                    </select>
+                    <input
+                      aria-label="Creativity value"
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={
+                        draft.overrides.creativity ?? effective.creativity.value
+                      }
+                      disabled={draft.overrides.creativity === undefined}
+                      onChange={(event) =>
+                        setOverride("creativity", Number(event.target.value))
+                      }
+                    />
+                    <small>
+                      Current: {effective.creativity.value}/100 ·{" "}
+                      {scopeLabel(effective.creativity.sourceScope)}
+                    </small>
+                  </label>
+                  <BooleanPreference
+                    label="Subtitles"
+                    value={draft.overrides.subtitles}
+                    inherited={effective.subtitles}
+                    onChange={(next) => setOverride("subtitles", next)}
+                  />
+                  <BooleanPreference
+                    label="Overlay request"
+                    value={draft.overrides.overlay}
+                    inherited={effective.overlay}
+                    onChange={(next) => setOverride("overlay", next)}
+                  />
+                </div>
+                {conversationGroup === "interaction" && (
+                  <p className="preference-control-note">
+                    The overlay appears after a game window is connected and
+                    ready.
+                  </p>
+                )}
+                <details
+                  className="technical-disclosure optional-capability-disclosure"
+                  hidden={conversationGroup !== "presence"}
+                  open={conversationGroup === "presence"}
+                >
+                  <summary>Optional memory, vision, and presence</summary>
+                  <div className="preference-field-grid">
+                    {(
+                      [
+                        ["memory", "Memory", effective.memory],
+                        ["emotion", "Emotion", effective.emotion],
+                        ["vision", "Vision", effective.vision],
+                        [
+                          "webcamPresence",
+                          "Webcam presence intent",
+                          effective.webcamPresence,
+                        ],
+                      ] as const
+                    ).map(([key, label, value]) => (
+                      <BooleanPreference
+                        key={key}
+                        label={label}
+                        value={draft.overrides[key]}
+                        inherited={value}
+                        onChange={(next) => setOverride(key, next)}
+                      />
+                    ))}
+                  </div>
+                  <p className="preference-control-note">
+                    Webcam presence is not available yet; this stores your
+                    preference.
+                  </p>
+                </details>
+              </div>
+
+              <details
+                className="technical-disclosure preference-technical-disclosure"
+                hidden={conversationGroup !== "presence"}
+              >
+                <summary>
+                  <span>Privacy and routing details</span>
+                  {" · "}
+                  <span className="preference-technical-summary">
+                    <span>
+                      {snapshot.routeSnapshot?.sourceLoadoutId ??
+                        "No active route"}
+                    </span>
+                    {" · "}
+                    <span>
+                      {snapshot.resourceSnapshot.admissionReceiptPresent
+                        ? (snapshot.resourceSnapshot.admissionStatus ??
+                          "Admission receipt present")
+                        : "No admission receipt"}
+                    </span>
+                    {" · "}
+                    <span>
+                      <span>Captured game image</span>{" "}
+                      <b>
+                        {effective.egress.capturedGameImage.value === "denied"
+                          ? "Denied"
+                          : "Selected provider route only"}
+                      </b>
+                    </span>
+                  </span>
+                </summary>
+
+                <div className="preference-proof-grid">
+                  <article>
+                    <span>Route authority snapshot</span>
+                    <b>
+                      Loadout{" "}
+                      {snapshot.routeSnapshot?.sourceLoadoutId ?? "none"}
+                    </b>
+                    <small>
+                      {snapshot.routeSnapshot
+                        ? `sha256 ${snapshot.routeSnapshot.sha256.slice(0, 12)}… · generation ${snapshot.routeSnapshot.generation ?? "unreported"}`
+                        : "No route receipt was available for this scope."}
+                    </small>
+                  </article>
+                  <article>
+                    <span>Local resource authority</span>
+                    <b>
+                      Admission:{" "}
+                      {snapshot.resourceSnapshot.admissionReceiptPresent
+                        ? (snapshot.resourceSnapshot.admissionStatus ??
+                          "receipt present")
+                        : "no receipt"}
+                    </b>
+                    <small>
+                      {snapshot.resourceSnapshot.selectionId ??
+                        "No selected local loadout"}
+                    </small>
+                  </article>
+                  <article>
+                    <span>Mutation safety</span>
+                    <b>Intent only</b>
+                    <small>
+                      Automatic fallback off · route/pack activation false
+                    </small>
+                  </article>
+                </div>
+
+                <div
+                  className="preference-egress"
+                  aria-label="Effective egress"
+                >
+                  <h3>Data allowed for the selected route</h3>
+                  {(
+                    [
+                      ["Transcript", effective.egress.transcript],
+                      ["Microphone audio", effective.egress.microphoneAudio],
+                      [
+                        "Game image capture",
+                        effective.egress.capturedGameImage,
+                      ],
+                      [
+                        "Local memory context",
+                        effective.egress.localMemoryContext,
+                      ],
+                    ] as const
+                  ).map(([label, value]) => (
+                    <div key={label}>
+                      <span>{label}</span>
+                      <b>
+                        {value.value === "denied"
+                          ? "Denied"
+                          : "Selected provider route only"}
+                      </b>
+                      <small>{inheritedLabel(value)}</small>
+                    </div>
+                  ))}
+                </div>
+              </details>
+
+              <div
+                className="preference-migration"
+                hidden={conversationGroup !== "presence"}
+              >
+                <b>
+                  Schema v{snapshot.schemaVersion} · revision{" "}
+                  {snapshot.revision}
+                </b>
+                <span>
+                  {snapshot.migration.state.replace(/([A-Z])/g, " $1")}
+                </span>
+                <small>{snapshot.migration.detail}</small>
+              </div>
+            </>
+          )}
+
+          {notice && (
+            <p className="inline-status" role="status">
+              {notice}
+            </p>
+          )}
+          {error && (
+            <p className="inline-status error" role="alert">
+              {error}
+            </p>
+          )}
+        </section>
+      </div>
+      <div
+        className="preference-editor-pane"
+        hidden={preferenceSection !== "subtitles"}
+      >
+        <SubtitlePreferencesPanel
+          nativeAvailable={nativeAvailable}
+          scope={scope}
+        />
+      </div>
+      <div
+        className="preference-editor-pane"
+        hidden={preferenceSection !== "routing"}
+      >
+        {snapshot && effective && (
+          <section className="instrument-panel preference-routing-overview">
+            <div className="panel-title workspace-heading">
+              <div>
+                <span className="eyebrow">Route and data boundary</span>
+                <h2>Current authority</h2>
+              </div>
+              <span className="badge">Read only</span>
+            </div>
+            <dl className="preference-routing-summary">
+              <div>
+                <dt>Provider loadout</dt>
+                <dd>
+                  {snapshot.routeSnapshot?.sourceLoadoutId ?? "No active route"}
+                </dd>
+              </div>
+              <div>
+                <dt>Local admission</dt>
+                <dd>
+                  {snapshot.resourceSnapshot.admissionReceiptPresent
+                    ? (snapshot.resourceSnapshot.admissionStatus ??
+                      "Admission receipt present")
+                    : "No admission receipt"}
+                </dd>
+              </div>
+              <div>
+                <dt>Captured game image</dt>
+                <dd>
+                  {effective.egress.capturedGameImage.value === "denied"
+                    ? "Denied"
+                    : "Selected provider route only"}
+                </dd>
+              </div>
+              <div>
+                <dt>Fallback policy</dt>
+                <dd>Automatic fallback off</dd>
+              </div>
+            </dl>
+            <p className="preference-routing-migration">
+              {snapshot.migration.detail}
+            </p>
+          </section>
         )}
-        {error && (
-          <p className="inline-status error" role="alert">
-            {error}
-          </p>
-        )}
-      </section>
-      <SubtitlePreferencesPanel
-        nativeAvailable={nativeAvailable}
-        scope={scope}
-      />
-      <EffectiveConfigurationInspector
-        nativeAvailable={nativeAvailable}
-        scope={scope}
-      />
+        <EffectiveConfigurationInspector
+          nativeAvailable={nativeAvailable}
+          scope={scope}
+        />
+      </div>
     </div>
   );
 }

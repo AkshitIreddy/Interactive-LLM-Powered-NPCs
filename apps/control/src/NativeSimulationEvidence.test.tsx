@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -783,9 +783,7 @@ describe("native evidence in the product console", () => {
       name: "Enable push-to-talk",
     });
     await waitFor(() => expect(arm).toBeEnabled());
-    expect(document.body).toHaveTextContent(
-      /Speech recognition by AssemblyAI/i,
-    );
+    expect(document.body).toHaveTextContent(/assemblyai · u3-rt-pro/i);
     expect(document.body).toHaveTextContent(/u3-rt-pro/i);
     await user.click(screen.getByText("Microphone connection details"));
     expect(document.body).toHaveTextContent(/Automatic fallback false/i);
@@ -1309,6 +1307,9 @@ describe("native evidence in the product console", () => {
     await screen.findByText("Runtime and media broker authenticated");
     await user.click(screen.getByRole("button", { name: "Games" }));
     await user.click(
+      screen.getByRole("button", { name: /Practice environment details/i }),
+    );
+    await user.click(
       screen.getByRole("button", { name: "Select synthetic target" }),
     );
     await user.click(
@@ -1334,14 +1335,19 @@ describe("native evidence in the product console", () => {
     await screen.findByText("Runtime and media broker authenticated");
     await user.click(screen.getByRole("button", { name: "Games" }));
     await user.click(
+      screen.getByRole("button", { name: /Practice environment details/i }),
+    );
+    await user.click(
       screen.getByRole("button", { name: "Select synthetic target" }),
     );
     await user.click(
       screen.getByRole("button", { name: "Verify live capture" }),
     );
     expect(
-      await screen.findByText("native WGC receipt did not advance"),
-    ).toBeInTheDocument();
+      await within(
+        screen.getByRole("dialog", { name: "Practice environment" }),
+      ).findByText("native WGC receipt did not advance"),
+    ).toBeVisible();
     expect(
       screen.queryByText("Synthetic WGC verified"),
     ).not.toBeInTheDocument();

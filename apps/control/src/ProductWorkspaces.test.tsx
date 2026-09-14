@@ -744,13 +744,19 @@ describe("native product workspaces", () => {
       undefined,
     );
     expect(
-      (await screen.findAllByText("Basic motion · no full pack")).length,
-    ).toBeGreaterThan(0);
-    expect(screen.getByText("Voice direction included")).toBeVisible();
+      within(
+        screen.getByRole("complementary", {
+          name: "Skyrim Special Edition characters",
+        }),
+      ).getByRole("button", { name: "Lydia" }),
+    ).toBeVisible();
+    expect(screen.getByText("Chosen in Voice setup · en-US")).toBeVisible();
     expect(
       screen.getByText("Basic motion · select NPC on screen"),
     ).toBeVisible();
-    await user.click(screen.getByText("Advanced character data"));
+    await user.click(
+      await screen.findByRole("button", { name: /Memory & data/i }),
+    );
     await user.click(
       screen.getByText("Delivered memory · 1", { selector: "summary" }),
     );
@@ -759,6 +765,9 @@ describe("native product workspaces", () => {
     );
     expect(screen.getByText(/Stored record/i)).toHaveTextContent(
       /stored-turn-hash-9f2c/,
+    );
+    await user.click(
+      screen.getByRole("button", { name: /Close Lydia · memory and data/i }),
     );
     await user.click(
       screen.getByRole("button", { name: "Use this character" }),
@@ -800,8 +809,10 @@ describe("native product workspaces", () => {
       />,
     );
 
+    await user.click(
+      await screen.findByRole("button", { name: /Memory & data/i }),
+    );
     await screen.findByText("Delivered memory · 0", { selector: "summary" });
-    await user.click(screen.getByText("Advanced character data"));
     await user.click(
       screen.getByText("Delivered memory · 0", { selector: "summary" }),
     );
@@ -826,14 +837,11 @@ describe("native product workspaces", () => {
         gameProfileId="skyrim-special-edition"
       />,
     );
+    await user.click(
+      await screen.findByRole("button", { name: /Memory & data/i }),
+    );
     expect(
-      await screen.findByRole("heading", {
-        name: "Back up or delete memory",
-      }),
-    ).toBeInTheDocument();
-    await user.click(screen.getByText("Advanced character data"));
-    expect(
-      screen.getByRole("heading", { name: "Back up or delete memory" }),
+      await screen.findByRole("heading", { name: "Back up or delete memory" }),
     ).toBeVisible();
     expect(bridge.memoryStatus).toHaveBeenCalledWith(
       "skyrim-special-edition",
@@ -1089,9 +1097,7 @@ describe("native product workspaces", () => {
       />,
     );
 
-    expect(
-      await screen.findByRole("checkbox", { name: /single-player session/i }),
-    ).toBeChecked();
+    expect(await screen.findByText("Connected · single-player")).toBeVisible();
     bridge.actorStart.mockResolvedValueOnce({
       schemaVersion: 1,
       state: "selected",

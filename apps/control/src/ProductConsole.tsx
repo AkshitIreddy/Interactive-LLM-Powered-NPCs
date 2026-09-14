@@ -5,7 +5,17 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
+import {
+  Button,
+  Dialog,
+  Heading,
+  Modal,
+  ModalOverlay,
+} from "react-aria-components";
+import "./workspace-layout.css";
+import "./secondary-loadout.css";
 import type { AppPreferences } from "./types";
 import {
   deleteProviderCredential,
@@ -1716,7 +1726,7 @@ export function ProductConsole() {
           </button>
         </header>
 
-        {notice && !setupOpen && (
+        {notice && !setupOpen && page !== "world" && (
           <div className="notice" role="status">
             <span>{notice}</span>
             <button onClick={() => setNotice(null)} aria-label="Dismiss notice">
@@ -1797,6 +1807,8 @@ export function ProductConsole() {
         )}
         {page === "world" && (
           <WorldPage
+            feedback={notice}
+            onDismissFeedback={() => setNotice(null)}
             onNavigate={navigate}
             onSetupMouthTracking={() => {
               setVoiceInitialSection("local");
@@ -2221,13 +2233,18 @@ function SelectedSttControl({
           </div>
         </dl>
       </details>
-      <p className="selected-stt-physical-note">
-        Enable push-to-talk, then hold F8 within 8 seconds. Speak for up to 10
-        seconds and release.
-      </p>
-      <p className="stt-service-label">
-        Speech recognition by AssemblyAI · microphone starts when you hold F8.
-      </p>
+      {!compact && (
+        <>
+          <p className="selected-stt-physical-note">
+            Enable push-to-talk, then hold F8 within 8 seconds. Speak for up to
+            10 seconds and release.
+          </p>
+          <p className="stt-service-label">
+            Speech recognition by AssemblyAI · microphone starts when you hold
+            F8.
+          </p>
+        </>
+      )}
       <div className="selected-stt-actions">
         <button
           className="secondary-action"
@@ -3123,7 +3140,56 @@ function SessionPage({
   );
 }
 
+function WorkspaceDialog({
+  title,
+  eyebrow,
+  onClose,
+  children,
+}: {
+  title: string;
+  eyebrow: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <ModalOverlay
+      className="cyberpunk-shell workspace-dialog-layer"
+      isOpen
+      isDismissable
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <Modal className="workspace-dialog-modal">
+        <Dialog
+          className="workspace-dialog"
+          aria-label={title}
+          data-workspace-dialog="true"
+        >
+          <header className="workspace-dialog__header">
+            <div>
+              <span className="eyebrow">{eyebrow}</span>
+              <Heading slot="title">{title}</Heading>
+            </div>
+            <Button
+              autoFocus
+              className="workspace-dialog__close"
+              onPress={onClose}
+              aria-label={`Close ${title}`}
+            >
+              Close
+            </Button>
+          </header>
+          <div className="workspace-dialog__body">{children}</div>
+        </Dialog>
+      </Modal>
+    </ModalOverlay>
+  );
+}
+
 function WorldPage({
+  feedback,
+  onDismissFeedback,
   onNavigate,
   onSetupMouthTracking,
   onPreferencesSnapshot,
@@ -3145,6 +3211,8 @@ function WorldPage({
   identityEnrollmentStatus,
   identityEnrollmentError,
 }: {
+  feedback: string | null;
+  onDismissFeedback: () => void;
   onNavigate: (page: ProductPage) => void;
   onSetupMouthTracking: () => void;
   onPreferencesSnapshot: (snapshot: NativeProductPreferenceSnapshot) => void;
@@ -3167,8 +3235,11 @@ function WorldPage({
   identityEnrollmentError: string | null;
 }) {
   const [contentPackRevision, setContentPackRevision] = useState(0);
+  const [worldTool, setWorldTool] = useState<
+    "practice" | "packs" | "recognition" | null
+  >(null);
   return (
-    <div className="page-stack">
+    <div className="page-stack world-workspace">
       <header className="page-heading">
         <span className="eyebrow">Choose who answers</span>
         <h1>Games</h1>
@@ -3178,6 +3249,14 @@ function WorldPage({
             : "Your Cyberpunk characters, voices and memories. Connect a game in the desktop app."}
         </p>
       </header>
+      {feedback && worldTool !== "practice" && (
+        <div className="notice workspace-notice" role="status">
+          <span>{feedback}</span>
+          <button onClick={onDismissFeedback} aria-label="Dismiss notice">
+            ×
+          </button>
+        </div>
+      )}
       <TestGameLauncher
         availability={reviewTargetAvailable}
         connected={Boolean(captureProof)}
@@ -3194,205 +3273,248 @@ function WorldPage({
         onGameProfileChange={onGameProfileChange}
         onSelectionChange={onTargetChange}
       />
-      <details className="practice-lab evidence-disclosure">
-        <summary>
-          Practice environment details{" "}
-          <span>Try a conversation in the included test game</span>
-        </summary>
-        <div className="world-layout">
-          <section className="instrument-panel world-visual">
-            <div className="world-horizon">
-              <div className="moon" />
-              <div className="lighthouse">
-                <i />
-                <span />
-              </div>
-              <div className="harbor-lines" />
-            </div>
-            <div className="world-overlay">
-              <span
-                className={
-                  captureProof?.receipt?.verified ? "badge good" : "badge wait"
-                }
-              >
-                {captureProof?.receipt?.verified
-                  ? "Synthetic WGC verified"
-                  : captureProof
-                    ? "Synthetic target selected"
-                    : "Debug fixture only"}
-              </span>
-              <h2>Eclipse Harbor</h2>
-              <p>An original test world for your first conversation</p>
-            </div>
-          </section>
-          <section className="instrument-panel">
-            <div className="panel-title">
-              <h2>Connect the test game</h2>
-              <span className="badge">Debug only</span>
-            </div>
-            <dl className="facts spacious">
-              <div>
-                <dt>Executable</dt>
-                <dd>interactive-npcs-synthetic-target.exe</dd>
-              </div>
-              <div>
-                <dt>Policy</dt>
-                <dd>Single-player only</dd>
-              </div>
-              <div>
-                <dt>Evidence</dt>
-                <dd>
-                  {captureProof
-                    ? `PID ${captureProof.pid} · HWND ${captureProof.hwnd}`
-                    : "PID · HWND · frame counters"}
-                </dd>
-              </div>
-              <div>
-                <dt>Backend</dt>
-                <dd>Windows Graphics Capture</dd>
-              </div>
-            </dl>
-            <div className="capture-verification-actions">
-              <button
-                className="secondary-action"
-                disabled={!captureAvailable}
-                onClick={onCapture}
-              >
-                {captureProof
-                  ? "Reselect synthetic target"
-                  : captureAvailable
-                    ? "Select synthetic target"
-                    : "Native debug target unavailable"}
-              </button>
-              <button
-                className="primary-action"
-                disabled={!captureAvailable || !captureProof}
-                aria-describedby="verify-capture-reason"
-                onClick={onVerifyCapture}
-              >
-                Verify live capture
-              </button>
-            </div>
-            <small id="verify-capture-reason" className="control-reason">
-              {!captureAvailable
-                ? "Requires the native debug build and task-owned synthetic target. Ordinary commercial-game capture remains fail-closed."
-                : !captureProof
-                  ? "Select the exact task-owned synthetic target first."
-                  : "Calls the canonical native selected-target verifier and requires exact PID, HWND, executable, an advancing frame sequence, and overlay exclusion."}
-            </small>
-            {captureProof?.receipt && (
-              <dl
-                className="capture-receipt"
-                aria-label="Synthetic WGC receipt"
-              >
-                <div>
-                  <dt>Exact target</dt>
-                  <dd>
-                    {captureProof.receipt.exactTargetMatch
-                      ? "Matched PID · HWND · executable"
-                      : "Mismatch"}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Frame sequence</dt>
-                  <dd>
-                    {captureProof.receipt.evidence.latestFrameSequence} ·{" "}
-                    {captureProof.receipt.frameSequenceAdvanced
-                      ? "advanced"
-                      : "not proven advancing"}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Content / geometry</dt>
-                  <dd>
-                    {captureProof.receipt.evidence.contentWidth}×
-                    {captureProof.receipt.evidence.contentHeight} ·{" "}
-                    {captureProof.receipt.contentChanged
-                      ? `${captureProof.receipt.evidence.contentHashChanges} content changes`
-                      : "content change not required for this receipt"}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Overlay exclusion</dt>
-                  <dd>
-                    {captureProof.receipt.evidence.overlayCaptureExcluded
-                      ? "Excluded from capture"
-                      : "Not proven"}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Pixel source / scope</dt>
-                  <dd>
-                    {captureProof.receipt.evidence.pixelSource} ·{" "}
-                    {captureProof.receipt.evidence.pixelScope}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Display provenance</dt>
-                  <dd>
-                    {captureProof.receipt.evidence
-                      .externalDisplayOverlayPixelsExcluded &&
-                    captureProof.receipt.evidence
-                      .desktopLuminanceExcludedFromPixelEvidence
-                      ? "Unrelated display-overlay pixels and desktop luminance excluded"
-                      : "Exact pixel provenance not proven"}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Safety state</dt>
-                  <dd>{captureProof.receipt.safetyState}</dd>
-                </div>
-              </dl>
-            )}
-            {captureProof?.receipt && (
-              <p className="source-disclosure capture-pixel-note">
-                {captureProof.receipt.evidence
-                  .externalDisplayOverlaysMayChangePerceivedBrightness
-                  ? "External display overlays may change perceived brightness, but exact selected-window WGC pixels exclude unrelated display-overlay pixels. Desktop or whole-screen screenshot luminance is never capture or color proof."
-                  : "Native perceived-brightness caveat is missing; this receipt cannot support a display-color claim."}
-              </p>
-            )}
-          </section>
-        </div>
-      </details>
+      <div className="world-tool-dock" aria-label="More game tools">
+        <button onClick={() => setWorldTool("practice")}>
+          <span>Practice environment details</span>
+          <small>Inspect and verify the included test game</small>
+        </button>
+        <button onClick={() => setWorldTool("packs")}>
+          <span>Content packs</span>
+          <small>Import world and character data</small>
+        </button>
+        <button onClick={() => setWorldTool("recognition")}>
+          <span>Character recognition</span>
+          <small>Review current manual-selection status</small>
+        </button>
+      </div>
       <CharacterDatabase
         key={`${gameProfileId}:${contentPackRevision}`}
         nativeAvailable={nativeAvailable}
         gameProfileId={gameProfileId}
         onSelectionChange={onCharacterChange}
       />
-      <ContentPackWorkspace
-        nativeAvailable={nativeAvailable}
-        gameProfileId={gameProfileId}
-        onApplied={() => setContentPackRevision((current) => current + 1)}
-        onOpenProviders={() => onNavigate("voice")}
-      />
-      <details className="instrument-panel evidence-disclosure identity-enrollment-panel">
-        <summary>
-          Character recognition <span className="badge wait">Unavailable</span>
-        </summary>
-        <p className="body-copy">
-          Automatic recognition is not qualified. Choose the character manually;
-          that selection controls its prompt, voice and memory.
-        </p>
-        <dl className="facts">
-          <div>
-            <dt>Selected character</dt>
-            <dd>
-              {selectedCharacter?.character.displayName ??
-                "Choose a character above"}
-            </dd>
+      {worldTool === "practice" && (
+        <WorkspaceDialog
+          title="Practice environment"
+          eyebrow="Included test game"
+          onClose={() => setWorldTool(null)}
+        >
+          {feedback && (
+            <div className="notice workspace-dialog__feedback" role="status">
+              <span>{feedback}</span>
+              <button onClick={onDismissFeedback} aria-label="Dismiss notice">
+                ×
+              </button>
+            </div>
+          )}
+          <div className="world-layout">
+            <section className="instrument-panel world-visual">
+              <div className="world-horizon">
+                <div className="moon" />
+                <div className="lighthouse">
+                  <i />
+                  <span />
+                </div>
+                <div className="harbor-lines" />
+              </div>
+              <div className="world-overlay">
+                <span
+                  className={
+                    captureProof?.receipt?.verified
+                      ? "badge good"
+                      : "badge wait"
+                  }
+                >
+                  {captureProof?.receipt?.verified
+                    ? "Synthetic WGC verified"
+                    : captureProof
+                      ? "Synthetic target selected"
+                      : "Debug fixture only"}
+                </span>
+                <h2>Eclipse Harbor</h2>
+                <p>An original test world for your first conversation</p>
+              </div>
+            </section>
+            <section className="instrument-panel">
+              <div className="panel-title">
+                <h2>Connect the test game</h2>
+                <span className="badge">Debug only</span>
+              </div>
+              <dl className="facts spacious">
+                <div>
+                  <dt>Executable</dt>
+                  <dd>interactive-npcs-synthetic-target.exe</dd>
+                </div>
+                <div>
+                  <dt>Policy</dt>
+                  <dd>Single-player only</dd>
+                </div>
+                <div>
+                  <dt>Evidence</dt>
+                  <dd>
+                    {captureProof
+                      ? `PID ${captureProof.pid} · HWND ${captureProof.hwnd}`
+                      : "PID · HWND · frame counters"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Backend</dt>
+                  <dd>Windows Graphics Capture</dd>
+                </div>
+              </dl>
+              <div className="capture-verification-actions">
+                <button
+                  className="secondary-action"
+                  disabled={!captureAvailable}
+                  onClick={onCapture}
+                >
+                  {captureProof
+                    ? "Reselect synthetic target"
+                    : captureAvailable
+                      ? "Select synthetic target"
+                      : "Native debug target unavailable"}
+                </button>
+                <button
+                  className="primary-action"
+                  disabled={!captureAvailable || !captureProof}
+                  aria-describedby="verify-capture-reason"
+                  onClick={onVerifyCapture}
+                >
+                  Verify live capture
+                </button>
+              </div>
+              <small id="verify-capture-reason" className="control-reason">
+                {!captureAvailable
+                  ? "Requires the native debug build and task-owned synthetic target. Ordinary commercial-game capture remains fail-closed."
+                  : !captureProof
+                    ? "Select the exact task-owned synthetic target first."
+                    : "Calls the canonical native selected-target verifier and requires exact PID, HWND, executable, an advancing frame sequence, and overlay exclusion."}
+              </small>
+              {captureProof?.receipt && (
+                <dl
+                  className="capture-receipt"
+                  aria-label="Synthetic WGC receipt"
+                >
+                  <div>
+                    <dt>Exact target</dt>
+                    <dd>
+                      {captureProof.receipt.exactTargetMatch
+                        ? "Matched PID · HWND · executable"
+                        : "Mismatch"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Frame sequence</dt>
+                    <dd>
+                      {captureProof.receipt.evidence.latestFrameSequence} ·{" "}
+                      {captureProof.receipt.frameSequenceAdvanced
+                        ? "advanced"
+                        : "not proven advancing"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Content / geometry</dt>
+                    <dd>
+                      {captureProof.receipt.evidence.contentWidth}×
+                      {captureProof.receipt.evidence.contentHeight} ·{" "}
+                      {captureProof.receipt.contentChanged
+                        ? `${captureProof.receipt.evidence.contentHashChanges} content changes`
+                        : "content change not required for this receipt"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Overlay exclusion</dt>
+                    <dd>
+                      {captureProof.receipt.evidence.overlayCaptureExcluded
+                        ? "Excluded from capture"
+                        : "Not proven"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Pixel source / scope</dt>
+                    <dd>
+                      {captureProof.receipt.evidence.pixelSource} ·{" "}
+                      {captureProof.receipt.evidence.pixelScope}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Display provenance</dt>
+                    <dd>
+                      {captureProof.receipt.evidence
+                        .externalDisplayOverlayPixelsExcluded &&
+                      captureProof.receipt.evidence
+                        .desktopLuminanceExcludedFromPixelEvidence
+                        ? "Unrelated display-overlay pixels and desktop luminance excluded"
+                        : "Exact pixel provenance not proven"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Safety state</dt>
+                    <dd>{captureProof.receipt.safetyState}</dd>
+                  </div>
+                </dl>
+              )}
+              {captureProof?.receipt && (
+                <p className="source-disclosure capture-pixel-note">
+                  {captureProof.receipt.evidence
+                    .externalDisplayOverlaysMayChangePerceivedBrightness
+                    ? "External display overlays may change perceived brightness, but exact selected-window WGC pixels exclude unrelated display-overlay pixels. Desktop or whole-screen screenshot luminance is never capture or color proof."
+                    : "Native perceived-brightness caveat is missing; this receipt cannot support a display-color claim."}
+                </p>
+              )}
+            </section>
           </div>
-          <div>
-            <dt>Reference status</dt>
-            <dd>
-              {identityEnrollmentError ??
-                identityEnrollmentStatus?.detail ??
-                "No qualified reference pack"}
-            </dd>
-          </div>
-        </dl>
-      </details>
+        </WorkspaceDialog>
+      )}
+      {worldTool === "packs" && (
+        <WorkspaceDialog
+          title="Content packs"
+          eyebrow="World and character library"
+          onClose={() => setWorldTool(null)}
+        >
+          <ContentPackWorkspace
+            nativeAvailable={nativeAvailable}
+            gameProfileId={gameProfileId}
+            onApplied={() => setContentPackRevision((current) => current + 1)}
+            onOpenProviders={() => onNavigate("voice")}
+          />
+        </WorkspaceDialog>
+      )}
+      {worldTool === "recognition" && (
+        <WorkspaceDialog
+          title="Character recognition"
+          eyebrow="Identity controls"
+          onClose={() => setWorldTool(null)}
+        >
+          <section className="instrument-panel identity-enrollment-panel">
+            <div className="panel-title">
+              <h2>Manual character selection</h2>
+              <span className="badge wait">Automatic match unavailable</span>
+            </div>
+            <p className="body-copy">
+              Choose the character manually; that selection controls its prompt,
+              voice and memory.
+            </p>
+            <dl className="facts">
+              <div>
+                <dt>Selected character</dt>
+                <dd>
+                  {selectedCharacter?.character.displayName ??
+                    "Choose a character from the roster"}
+                </dd>
+              </div>
+              <div>
+                <dt>Reference status</dt>
+                <dd>
+                  {identityEnrollmentError ??
+                    identityEnrollmentStatus?.detail ??
+                    "No qualified reference pack"}
+                </dd>
+              </div>
+            </dl>
+          </section>
+        </WorkspaceDialog>
+      )}
     </div>
   );
 }
@@ -3466,6 +3588,7 @@ function VoicePage({
 }) {
   const [section, setSection] = useState(initialSection);
   const [accountId, setAccountId] = useState("nvidia-nim");
+  const [executionOpen, setExecutionOpen] = useState(false);
   return (
     <div className="page-stack voice-workspace">
       <header className="page-heading">
@@ -3523,7 +3646,7 @@ function VoicePage({
             label: "Microphone",
             description: "Input & push-to-talk",
             content: (
-              <section className="instrument-panel settings-output-panel">
+              <section className="instrument-panel settings-output-panel microphone-workbench">
                 <div className="panel-title">
                   <h2>Microphone & push-to-talk</h2>
                   <span className="badge">F8</span>
@@ -3559,45 +3682,65 @@ function VoicePage({
             label: "Local models",
             description: "Inventory & PC budget",
             content: (
-              <>
-                <section className="instrument-panel">
-                  <div className="panel-title">
-                    <h2>Execution preference</h2>
-                    <span className="badge">API first</span>
-                  </div>
-                  <p className="body-copy">
-                    Hosted models leave your GPU available for the game. Each
-                    account has its own charges, limits and data policy.
-                  </p>
+              <div className="local-model-workbench">
+                <div className="local-model-toolbar">
+                  <span>Manage the models that run on this PC.</span>
                   <button
                     className="secondary-action"
-                    disabled={!nativeAvailable}
-                    onClick={onSave}
+                    onClick={() => setExecutionOpen(true)}
                   >
-                    Save cloud execution preference
+                    Execution preference
                   </button>
-                  <details className="evidence-disclosure">
-                    <summary>Connected account status</summary>
-                    <p>
-                      ElevenLabs:{" "}
-                      {providerPresent ? "key present" : "key needed"}.{" "}
-                      {providerDetail}
-                    </p>
-                    <p>
-                      NVIDIA NIM: {nvidiaPresent ? "key present" : "key needed"}
-                      . {nvidiaDetail}
-                    </p>
-                    <p>
-                      NVIDIA trial routes require an eligible private evaluation
-                      and are not unlimited production services.
-                    </p>
-                  </details>
-                </section>
+                </div>
+                {executionOpen && (
+                  <WorkspaceDialog
+                    title="Execution preference"
+                    eyebrow="Local and hosted models"
+                    onClose={() => setExecutionOpen(false)}
+                  >
+                    <section className="instrument-panel">
+                      <div className="panel-title">
+                        <h2>Execution preference</h2>
+                        <span className="badge">API first</span>
+                      </div>
+                      <p className="body-copy">
+                        Hosted models leave your GPU available for the game.
+                        Each account has its own charges, limits and data
+                        policy.
+                      </p>
+                      <button
+                        className="secondary-action"
+                        disabled={!nativeAvailable}
+                        onClick={onSave}
+                      >
+                        Save cloud execution preference
+                      </button>
+                      <details className="evidence-disclosure">
+                        <summary>Connected account status</summary>
+                        <p>
+                          ElevenLabs:{" "}
+                          {providerPresent ? "key present" : "key needed"}.{" "}
+                          {providerDetail}
+                        </p>
+                        <p>
+                          NVIDIA NIM:{" "}
+                          {nvidiaPresent ? "key present" : "key needed"}.{" "}
+                          {nvidiaDetail}
+                        </p>
+                        <p>
+                          NVIDIA trial routes require an eligible private
+                          evaluation and are not unlimited production services.
+                        </p>
+                      </details>
+                    </section>
+                  </WorkspaceDialog>
+                )}
                 <LocalResourcePlanner
                   models={models}
                   nativeAvailable={nativeAvailable}
+                  sectioned
                 />
-              </>
+              </div>
             ),
           },
         ]}

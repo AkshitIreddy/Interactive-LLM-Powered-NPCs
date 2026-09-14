@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProductPreferencesWorkspace } from "./ProductPreferencesWorkspace";
@@ -256,6 +256,7 @@ describe("native product preferences", () => {
   });
 
   it("renders effective inheritance, egress, migration, and authority truth", async () => {
+    const user = userEvent.setup();
     const snapshot = preferenceSnapshot();
     bridge.readProductPreferences.mockResolvedValue(snapshot);
     const onSnapshot = vi.fn();
@@ -272,23 +273,37 @@ describe("native product preferences", () => {
       "cloud",
     );
     expect(screen.getByLabelText("Performance preset")).toHaveValue("balanced");
-    expect(screen.getByText("native-balanced-api")).toBeVisible();
-    expect(screen.getByText("No admission receipt")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /^Subtitles/i }));
     expect(
-      screen.getByText("Captured game image").parentElement,
+      await screen.findByLabelText("Validated renderer parameters"),
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /Effective setup/i }));
+    const routingOverview = screen
+      .getByRole("heading", { name: "Current authority" })
+      .closest("section")!;
+    expect(
+      within(routingOverview).getByText("native-balanced-api"),
+    ).toBeVisible();
+    expect(
+      within(routingOverview).getByText("No admission receipt"),
+    ).toBeVisible();
+    expect(
+      within(routingOverview).getByText("Captured game image").parentElement,
     ).toHaveTextContent("Denied");
     expect(
-      screen.getByText(/initialized from legacy onboarding intent/i),
+      within(routingOverview).getByText(
+        /initialized from legacy onboarding intent/i,
+      ),
     ).toBeVisible();
     expect(document.body).toHaveTextContent(
       "Webcam presence is not available yet; this stores your preference.",
     );
     expect(document.body).toHaveTextContent("Automatic fallback off");
     expect(onSnapshot).toHaveBeenCalledWith(snapshot);
-    expect(
-      await screen.findByText("Validated renderer parameters"),
-    ).toBeVisible();
-    expect(screen.getByText("TTS route")).toBeVisible();
+    const effectiveInspector = screen
+      .getByRole("heading", { name: "What the next turn will use" })
+      .closest("section")!;
+    expect(within(effectiveInspector).getByText("TTS route")).toBeVisible();
     expect(document.body).toHaveTextContent("Mutation authority added: no");
   });
 
@@ -307,6 +322,7 @@ describe("native product preferences", () => {
       />,
     );
 
+    await user.click(screen.getByRole("button", { name: /^Subtitles/i }));
     await screen.findByLabelText("Bundled subtitle style");
     await user.selectOptions(
       screen.getByLabelText("Text scale source"),
@@ -373,7 +389,15 @@ describe("native product preferences", () => {
       "immersive",
     );
     await user.selectOptions(screen.getByLabelText("Verbosity"), "detailed");
+    await user.click(
+      screen.getByRole("button", { name: /^Interaction Input and display/i }),
+    );
     await user.selectOptions(screen.getByLabelText("Subtitles"), "off");
+    await user.click(
+      screen.getByRole("button", {
+        name: /^Presence Memory, vision and privacy/i,
+      }),
+    );
     await user.selectOptions(
       screen.getByLabelText("Webcam presence intent"),
       "on",

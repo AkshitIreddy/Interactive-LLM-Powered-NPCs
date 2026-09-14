@@ -1,0 +1,1194 @@
+/* Workspace composition for ordinary desktop and zoomed layouts. */
+
+.cyberpunk-shell .product-main > .notice,
+.cyberpunk-shell .world-workspace > .workspace-notice {
+  position: fixed;
+  z-index: 70;
+  right: 24px;
+  bottom: 20px;
+  width: min(520px, calc(100vw - 48px));
+  margin: 0;
+  box-shadow: 0 18px 52px rgba(0, 0, 0, 0.55);
+}
+
+.cyberpunk-shell .workspace-dialog__feedback {
+  position: static;
+  flex: 0 0 auto;
+  width: auto;
+  margin: 0 0 14px;
+}
+
+.cyberpunk-shell.workspace-dialog-layer {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: clamp(18px, 4vw, 52px);
+  background: rgba(7, 4, 8, 0.82);
+  backdrop-filter: blur(12px);
+}
+
+.cyberpunk-shell .workspace-dialog {
+  width: 100%;
+  max-height: inherit;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #995064;
+  background:
+    linear-gradient(120deg, rgba(44, 21, 31, 0.98), rgba(13, 13, 20, 0.99)),
+    #130d14;
+  box-shadow:
+    0 30px 100px rgba(0, 0, 0, 0.62),
+    inset 3px 0 #65e1e2;
+}
+
+.cyberpunk-shell .workspace-dialog-modal {
+  width: min(1120px, 100%);
+  max-height: min(820px, calc(100dvh - 48px));
+}
+
+.cyberpunk-shell .workspace-dialog__header {
+  min-height: 74px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 14px 20px;
+  border-bottom: 1px solid #633344;
+  background: linear-gradient(90deg, rgba(52, 23, 34, 0.94), transparent);
+}
+
+.cyberpunk-shell .workspace-dialog__header h2 {
+  margin-top: 4px;
+  color: #f5dbe2;
+  font: 500 22px/1.2 var(--data);
+}
+
+.cyberpunk-shell .workspace-dialog__close {
+  min-width: 82px;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid #a34c61;
+  color: #ffc0cb;
+  background: #321822;
+}
+
+.cyberpunk-shell .workspace-dialog__body {
+  min-height: 0;
+  overflow: auto;
+  padding: 18px;
+  scrollbar-gutter: stable;
+}
+
+.cyberpunk-shell .workspace-dialog__body > .instrument-panel,
+.cyberpunk-shell .workspace-dialog__body > .content-pack-workspace {
+  margin: 0;
+  box-shadow: none;
+}
+
+/* Channel keeps the conversation and composer dominant. Evidence stays in
+   deliberate disclosures and each dense column owns its overflow. */
+@media (min-width: 1050px) and (min-height: 700px) {
+  .cyberpunk-shell.page-session .product-main,
+  .cyberpunk-shell.page-world .product-main,
+  .cyberpunk-shell.page-settings .product-main,
+  .cyberpunk-shell.page-voice .product-main {
+    overflow: hidden;
+    padding-bottom: 18px;
+  }
+
+  .cyberpunk-shell.page-session .signal-rail {
+    min-height: 46px;
+    height: 46px;
+    margin: 0 0 8px;
+  }
+
+  .cyberpunk-shell.page-session .signal-rail::before {
+    top: 19px;
+  }
+
+  .cyberpunk-shell.page-session .signal-node {
+    min-height: 44px;
+    padding: 7px 10px;
+    gap: 8px;
+  }
+
+  .cyberpunk-shell.page-session .signal-node > span:last-child {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px;
+    align-items: center;
+  }
+
+  .cyberpunk-shell.page-session .signal-node b {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.25;
+  }
+
+  .cyberpunk-shell.page-session .signal-node small {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.25;
+  }
+
+  .cyberpunk-shell.page-session .signal-index {
+    width: 25px;
+    height: 25px;
+  }
+
+  .cyberpunk-shell.page-session .session-grid {
+    height: calc(100dvh - 68px - 40px - 14px - 46px - 8px - 18px);
+    min-height: 0;
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(292px, 320px);
+  }
+
+  .cyberpunk-shell.page-session .primary-instrument,
+  .cyberpunk-shell.page-session .session-side {
+    height: 100%;
+    max-height: 100%;
+    min-height: 0;
+    overflow: auto;
+    scrollbar-gutter: stable;
+  }
+
+  .cyberpunk-shell.page-session .primary-instrument {
+    padding: 0 22px 18px;
+  }
+
+  .cyberpunk-shell.page-session .primary-instrument > .panel-heading {
+    min-height: 62px;
+    margin: 0 -22px 11px;
+    padding: 9px 22px;
+    align-items: center;
+    background:
+      linear-gradient(90deg, #1d111bf2, #1d111b8a),
+      url("/art/city-afterhours.png") center 44% / cover;
+  }
+
+  .cyberpunk-shell.page-session
+    .primary-instrument
+    > .panel-heading
+    > div:first-child {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr);
+    align-items: baseline;
+    gap: 6px 14px;
+  }
+
+  .cyberpunk-shell.page-session .primary-instrument > .panel-heading .eyebrow,
+  .cyberpunk-shell.page-session .primary-instrument > .panel-heading h1,
+  .cyberpunk-shell.page-session .primary-instrument > .panel-heading p {
+    margin: 0;
+  }
+
+  .cyberpunk-shell.page-session .primary-instrument > .panel-heading p {
+    min-width: 0;
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .cyberpunk-shell.page-session .panel-heading h1 {
+    font-size: 26px;
+  }
+
+  .cyberpunk-shell.page-session .identity-seal {
+    width: 38px;
+    height: 44px;
+    font-size: 18px;
+  }
+
+  .cyberpunk-shell.page-session .turn-composer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: start;
+    padding: 10px 22px 7px;
+  }
+
+  .cyberpunk-shell.page-session .conversation-source {
+    grid-column: 1;
+    margin-bottom: 0;
+    padding-bottom: 9px;
+  }
+
+  .cyberpunk-shell.page-session .turn-mode {
+    grid-column: 2;
+    margin-bottom: 10px;
+  }
+
+  .cyberpunk-shell.page-session .turn-composer > .message-field,
+  .cyberpunk-shell.page-session .turn-composer > .selected-stt-control {
+    grid-column: 1 / -1;
+  }
+
+  .cyberpunk-shell.page-session .selected-stt-control.is-compact {
+    display: grid;
+    grid-template-columns: minmax(145px, auto) minmax(0, 1fr);
+    gap: 8px 14px;
+    padding: 8px 0 0;
+  }
+
+  .cyberpunk-shell.page-session
+    .selected-stt-control.is-compact
+    > .selected-stt-control__heading,
+  .cyberpunk-shell.page-session
+    .selected-stt-control.is-compact
+    > .stt-connection-details,
+  .cyberpunk-shell.page-session
+    .selected-stt-control.is-compact
+    > .selected-stt-receipt,
+  .cyberpunk-shell.page-session
+    .selected-stt-control.is-compact
+    > .evidence-disclosure,
+  .cyberpunk-shell.page-session
+    .selected-stt-control.is-compact
+    > .selected-stt-error {
+    grid-column: 1 / -1;
+  }
+
+  .cyberpunk-shell.page-session
+    .selected-stt-control.is-compact
+    > .selected-stt-control__heading {
+    margin: 0;
+  }
+
+  .cyberpunk-shell.page-session
+    .selected-stt-control.is-compact
+    > .selected-stt-actions {
+    grid-column: 1;
+    margin: 0;
+  }
+
+  .cyberpunk-shell.page-session
+    .selected-stt-control.is-compact
+    > .control-reason {
+    grid-column: 2;
+    align-self: center;
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  .cyberpunk-shell.page-session .message-field textarea {
+    min-height: 88px;
+    height: 88px;
+    padding: 12px 14px;
+    font-size: 15px;
+    line-height: 1.45;
+  }
+
+  .cyberpunk-shell.page-session .session-controls {
+    margin-top: 12px;
+  }
+
+  .cyberpunk-shell.page-session .delivery-proof {
+    margin-top: 12px;
+    padding: 12px;
+  }
+
+  .cyberpunk-shell.page-session .session-side {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .cyberpunk-shell.page-session .session-side .compact-panel {
+    padding: 15px;
+  }
+}
+
+/* Games is one selection workspace: persistent roster and inspector on the
+   left, launch/connection actions on the right, secondary tools in dialogs. */
+.cyberpunk-shell .world-workspace > .page-heading {
+  grid-area: heading;
+}
+
+.cyberpunk-shell .world-workspace > .test-game-launcher {
+  grid-area: launcher;
+}
+
+.cyberpunk-shell .world-workspace > .native-target-workspace {
+  grid-area: target;
+}
+
+.cyberpunk-shell .world-workspace > .character-database {
+  grid-area: roster;
+}
+
+.cyberpunk-shell .world-workspace > .world-tool-dock {
+  grid-area: tools;
+}
+
+.cyberpunk-shell .world-tool-dock {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  border: 1px solid #653446;
+  background: #653446;
+}
+
+.cyberpunk-shell .world-tool-dock button {
+  min-width: 0;
+  min-height: 58px;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 9px 11px;
+  text-align: left;
+  background: #1a1119;
+  border: 0;
+}
+
+.cyberpunk-shell .world-tool-dock button:hover {
+  background: #281720;
+}
+
+.cyberpunk-shell .world-tool-dock span,
+.cyberpunk-shell .world-tool-dock small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cyberpunk-shell .world-tool-dock span {
+  color: #f0c5d0;
+  font: 500 13px/1.2 var(--data);
+}
+
+.cyberpunk-shell .world-tool-dock small {
+  color: #a98b98;
+  font-size: 12px;
+}
+
+.cyberpunk-shell .character-tool-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.cyberpunk-shell .character-tool-grid button {
+  min-width: 0;
+  min-height: 68px;
+  padding: 11px 12px;
+  text-align: left;
+  border: 1px solid #633344;
+  background: linear-gradient(115deg, #25141e, #151016);
+}
+
+.cyberpunk-shell .character-tool-grid button:hover {
+  border-color: #b04d63;
+  background: #2d1822;
+}
+
+.cyberpunk-shell .character-tool-grid b,
+.cyberpunk-shell .character-tool-grid small {
+  display: block;
+}
+
+.cyberpunk-shell .character-tool-grid b {
+  color: #efbdca;
+  font-size: 13px;
+}
+
+.cyberpunk-shell .character-tool-grid small {
+  margin-top: 4px;
+  color: #ad8d99;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+@media (min-width: 1050px) and (min-height: 700px) {
+  .cyberpunk-shell .world-workspace {
+    height: calc(100dvh - 68px - 40px - 14px - 18px);
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(345px, 390px);
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "heading heading"
+      "roster launcher"
+      "roster target"
+      "roster tools";
+    gap: 12px;
+  }
+
+  .cyberpunk-shell .world-workspace > .page-heading {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 22px;
+    align-items: baseline;
+    margin: 0;
+    padding-bottom: 8px;
+  }
+
+  .cyberpunk-shell .world-workspace > .page-heading .eyebrow {
+    display: none;
+  }
+
+  .cyberpunk-shell .world-workspace > .page-heading h1 {
+    margin: 0;
+    font-size: 26px;
+  }
+
+  .cyberpunk-shell .world-workspace > .page-heading p {
+    margin: 0;
+  }
+
+  .cyberpunk-shell .world-workspace > .test-game-launcher {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .cyberpunk-shell .world-workspace .test-game-beacon {
+    position: absolute;
+    top: 9px;
+    right: 9px;
+    width: 48px;
+    opacity: 0.42;
+  }
+
+  .cyberpunk-shell .world-workspace .test-game-copy {
+    padding-right: 46px;
+  }
+
+  .cyberpunk-shell .world-workspace .test-game-copy > p {
+    font-size: 14px;
+    line-height: 1.4;
+  }
+
+  .cyberpunk-shell .world-workspace .test-game-location,
+  .cyberpunk-shell .world-workspace .test-game-actions > small {
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
+  .cyberpunk-shell .world-workspace .test-game-copy > p {
+    max-width: 36ch;
+  }
+
+  .cyberpunk-shell .world-workspace .test-game-actions {
+    grid-column: 1 / -1;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 150px minmax(0, 1fr);
+    align-items: center;
+  }
+
+  .cyberpunk-shell .world-workspace .test-game-actions .primary-action {
+    min-height: 40px;
+    white-space: nowrap;
+  }
+
+  .cyberpunk-shell .world-workspace > .native-target-workspace,
+  .cyberpunk-shell .world-workspace > .character-database {
+    min-height: 0;
+    overflow: auto;
+    scrollbar-gutter: stable;
+  }
+
+  .cyberpunk-shell .world-workspace > .native-target-workspace {
+    padding: 15px;
+  }
+
+  .cyberpunk-shell .world-workspace > .world-tool-dock {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .cyberpunk-shell .world-workspace .world-tool-dock button {
+    min-height: 0;
+    height: 54px;
+    place-items: center;
+    padding: 6px 8px;
+    text-align: center;
+  }
+
+  .cyberpunk-shell .world-workspace .world-tool-dock button small {
+    display: none;
+  }
+
+  .cyberpunk-shell .world-workspace .world-tool-dock button span {
+    white-space: normal;
+    line-height: 1.25;
+  }
+
+  .cyberpunk-shell
+    .world-workspace
+    .native-target-workspace
+    > .workspace-heading {
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+  }
+
+  .cyberpunk-shell .world-workspace .game-target-compact__actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    margin: 9px 0 0;
+  }
+
+  .cyberpunk-shell .world-workspace .game-target-connected-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .cyberpunk-shell .world-workspace .game-target-connected-actions button {
+    min-width: 0;
+    min-height: 44px;
+    padding: 7px 8px;
+    font-size: 12px;
+    line-height: 1.25;
+  }
+
+  .cyberpunk-shell .world-workspace .game-target-compact {
+    padding: 12px 14px;
+  }
+
+  .cyberpunk-shell .world-workspace .game-target-compact > p {
+    font-size: 14px;
+    line-height: 1.4;
+  }
+
+  .cyberpunk-shell
+    .world-workspace
+    .game-target-compact__actions
+    .primary-action,
+  .cyberpunk-shell
+    .world-workspace
+    .game-target-compact__actions
+    .authorization-control {
+    min-height: 40px;
+    margin: 0;
+  }
+
+  .cyberpunk-shell
+    .world-workspace
+    .game-target-compact__actions
+    .authorization-control {
+    padding: 8px 0;
+  }
+
+  .cyberpunk-shell
+    .world-workspace
+    .game-target-compact__actions
+    .authorization-control
+    b {
+    font-size: 13px;
+  }
+
+  .cyberpunk-shell .world-workspace .native-target-workspace > .inline-status {
+    margin-top: 8px;
+  }
+
+  .cyberpunk-shell .world-workspace .game-visual-setup {
+    grid-template-columns: 1fr;
+    margin-top: 10px;
+  }
+
+  .cyberpunk-shell .world-workspace .game-actor-setup {
+    border-left: 0;
+    border-top: 1px solid #59353e;
+  }
+
+  .cyberpunk-shell .character-database {
+    padding: 16px;
+    display: grid;
+    grid-template-columns: minmax(210px, 0.38fr) minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    gap: 10px 14px;
+    align-content: stretch;
+  }
+
+  .cyberpunk-shell .character-database > .character-database__title,
+  .cyberpunk-shell .character-database > .source-disclosure,
+  .cyberpunk-shell .character-database > .inline-status {
+    grid-column: 1 / -1;
+    margin: 0;
+  }
+
+  .cyberpunk-shell .character-database > .character-database__title {
+    padding-bottom: 8px;
+  }
+
+  .cyberpunk-shell .character-database > .source-disclosure {
+    padding: 8px 10px;
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
+  .cyberpunk-shell .character-database > .character-roster-block {
+    min-height: 0;
+    margin: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .cyberpunk-shell .character-roster-block .workspace-step__heading {
+    flex: 0 0 auto;
+    margin-bottom: 8px;
+  }
+
+  .cyberpunk-shell .character-roster-block .workspace-step__heading h3 {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+  }
+
+  .cyberpunk-shell .character-roster-block .native-character-list {
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow: auto;
+    grid-template-columns: 1fr;
+    align-content: start;
+    margin: 0;
+    padding-right: 5px;
+  }
+
+  .cyberpunk-shell .native-character-list button {
+    min-height: 52px;
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+    align-items: center;
+    padding: 9px;
+  }
+
+  .cyberpunk-shell .native-character-list button > span:nth-child(2) {
+    min-width: 0;
+    padding-right: 0;
+  }
+
+  .cyberpunk-shell .native-character-list button b {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: normal;
+  }
+
+  .cyberpunk-shell .native-character-list button b {
+    font-size: 14px;
+  }
+
+  .cyberpunk-shell .native-character-list button > i {
+    max-width: 42px;
+    font-size: 11px;
+    text-align: right;
+  }
+
+  .cyberpunk-shell .character-database > .character-native-record {
+    min-height: 0;
+    overflow: auto;
+    padding-right: 6px;
+  }
+
+  .cyberpunk-shell
+    .character-database:not(:has(.character-roster-block))
+    > .character-native-record {
+    grid-column: 1 / -1;
+  }
+
+  .cyberpunk-shell .character-record__hero {
+    padding: 13px;
+  }
+
+  .cyberpunk-shell .character-record__hero h3 {
+    font-size: 22px;
+  }
+
+  .cyberpunk-shell .character-summary-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    margin-top: 10px;
+    gap: 7px;
+  }
+
+  .cyberpunk-shell .character-summary-grid > div {
+    padding: 8px;
+  }
+
+  .cyberpunk-shell .character-summary-grid dd {
+    text-align: left;
+  }
+
+  .cyberpunk-shell .character-native-record > .character-tool-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .cyberpunk-shell .character-native-record > .character-tool-grid button {
+    min-height: 80px;
+  }
+
+  .cyberpunk-shell .character-database > .inline-status {
+    padding-top: 7px;
+    border-top: 1px solid #4f2a38;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+/* Settings has stable section navigation and an editor canvas. Categories keep
+   state mounted while showing one understandable workspace at a time. */
+.cyberpunk-shell .preference-editor-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
+  min-height: 0;
+}
+
+.cyberpunk-shell .preference-editor-nav {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  align-self: stretch;
+  border: 1px solid #5c3140;
+  background: #5c3140;
+}
+
+.cyberpunk-shell .preference-editor-nav button {
+  min-height: 58px;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 0;
+  text-align: left;
+  background: #171016;
+}
+
+.cyberpunk-shell .preference-editor-nav button[aria-current] {
+  background: linear-gradient(90deg, rgba(44, 81, 84, 0.58), #1d131a);
+  box-shadow: inset 3px 0 #65e1e2;
+}
+
+.cyberpunk-shell .preference-editor-nav b,
+.cyberpunk-shell .preference-editor-nav small {
+  display: block;
+}
+
+.cyberpunk-shell .preference-editor-nav b {
+  color: #efc3cd;
+  font-size: 13px;
+}
+
+.cyberpunk-shell .preference-editor-nav small {
+  color: #a88a97;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.cyberpunk-shell .preference-editor-nav button[aria-current] b {
+  color: #83ebeb;
+}
+
+.cyberpunk-shell .preference-editor-pane {
+  min-width: 0;
+  min-height: 0;
+}
+
+.cyberpunk-shell .preference-editor-pane[hidden] {
+  display: none;
+}
+
+.cyberpunk-shell .preference-scope-command {
+  display: grid;
+  grid-template-columns: minmax(560px, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+}
+
+.cyberpunk-shell .preference-scope-command .preference-scope-tabs {
+  margin: 10px 0;
+}
+
+.cyberpunk-shell .preference-scope-command .preference-scope-context {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.cyberpunk-shell .preference-actions--persistent {
+  position: sticky;
+  z-index: 4;
+  top: 0;
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center;
+  justify-content: flex-end;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.cyberpunk-shell .conversation-group-nav {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 12px;
+  border: 1px solid #5d3141;
+  background: #5d3141;
+}
+
+.cyberpunk-shell .conversation-group-nav button {
+  min-height: 52px;
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  padding: 8px 12px;
+  text-align: left;
+  border: 0;
+  background: #171016;
+}
+
+.cyberpunk-shell .conversation-group-nav button[aria-current] {
+  background: linear-gradient(90deg, rgba(44, 81, 84, 0.58), #1d131a);
+  box-shadow: inset 0 -2px #65e1e2;
+}
+
+.cyberpunk-shell .conversation-group-nav b {
+  color: #efc3cd;
+  font-size: 14px;
+}
+
+.cyberpunk-shell .conversation-group-nav small {
+  color: #aa8b98;
+  font-size: 12px;
+}
+
+.cyberpunk-shell .conversation-group-nav button[aria-current] b {
+  color: #83ebeb;
+}
+
+.cyberpunk-shell .preference-preset-grid[hidden],
+.cyberpunk-shell .preference-overrides [hidden],
+.cyberpunk-shell .preference-migration[hidden] {
+  display: none;
+}
+
+.cyberpunk-shell
+  .preference-overrides
+  > .preference-field-grid
+  > .preference-control {
+  display: none;
+}
+
+.cyberpunk-shell
+  .preference-overrides[data-conversation-group="response"]
+  > .preference-field-grid
+  > .preference-control:nth-child(1),
+.cyberpunk-shell
+  .preference-overrides[data-conversation-group="response"]
+  > .preference-field-grid
+  > .preference-control:nth-child(2),
+.cyberpunk-shell
+  .preference-overrides[data-conversation-group="response"]
+  > .preference-field-grid
+  > .preference-control:nth-child(5),
+.cyberpunk-shell
+  .preference-overrides[data-conversation-group="interaction"]
+  > .preference-field-grid
+  > .preference-control:nth-child(3),
+.cyberpunk-shell
+  .preference-overrides[data-conversation-group="interaction"]
+  > .preference-field-grid
+  > .preference-control:nth-child(4),
+.cyberpunk-shell
+  .preference-overrides[data-conversation-group="interaction"]
+  > .preference-field-grid
+  > .preference-control:nth-child(6),
+.cyberpunk-shell
+  .preference-overrides[data-conversation-group="interaction"]
+  > .preference-field-grid
+  > .preference-control:nth-child(7) {
+  display: grid;
+}
+
+.cyberpunk-shell .preference-routing-overview {
+  margin-bottom: 12px;
+  padding: 16px;
+}
+
+.cyberpunk-shell .preference-routing-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 12px;
+  background: #5c3140;
+}
+
+.cyberpunk-shell .preference-routing-summary > div {
+  min-width: 0;
+  padding: 11px;
+  background: #171016;
+}
+
+.cyberpunk-shell .preference-routing-summary dt {
+  color: #ad8794;
+  font: 10px/1.2 var(--mono);
+  text-transform: uppercase;
+}
+
+.cyberpunk-shell .preference-routing-summary dd {
+  margin-top: 6px;
+  color: #f0ccd5;
+  font-size: 14px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.cyberpunk-shell .preference-routing-migration {
+  margin-top: 10px;
+  padding: 9px 11px;
+  border-left: 2px solid #65e1e2;
+  color: #b99aa6;
+  background: rgba(101, 225, 226, 0.04);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.cyberpunk-shell .character-tool-dialog .facts dd,
+.cyberpunk-shell .character-tool-dialog .character-biography {
+  text-align: left;
+  white-space: pre-line;
+}
+
+@media (min-width: 1050px) and (min-height: 700px) {
+  .cyberpunk-shell.page-settings .page-stack {
+    height: calc(100dvh - 68px - 40px - 14px - 18px);
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .cyberpunk-shell.page-settings .page-heading {
+    display: flex;
+    align-items: baseline;
+    gap: 20px;
+    margin: 0;
+    padding-bottom: 8px;
+  }
+
+  .cyberpunk-shell.page-settings .page-heading .eyebrow {
+    display: none;
+  }
+
+  .cyberpunk-shell.page-settings .page-heading h1 {
+    margin: 0;
+    font-size: 26px;
+    white-space: nowrap;
+  }
+
+  .cyberpunk-shell.page-settings .page-heading p {
+    margin: 0;
+  }
+
+  .cyberpunk-shell.page-settings .workspace-sections {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 190px minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .cyberpunk-shell.page-settings .workspace-section-nav {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-self: start;
+    gap: 1px;
+    margin: 0;
+    border: 1px solid #5c3140;
+    background: #5c3140;
+  }
+
+  .cyberpunk-shell.page-settings .workspace-section-nav button {
+    min-width: 0;
+    width: 100%;
+    min-height: 64px;
+    padding: 10px 12px;
+    text-align: left;
+    border: 0;
+    background: #171016;
+  }
+
+  .cyberpunk-shell.page-settings .workspace-section-nav button[aria-current] {
+    border: 0;
+    background: linear-gradient(90deg, rgba(44, 81, 84, 0.58), #1d131a);
+    box-shadow: inset 3px 0 #65e1e2;
+  }
+
+  .cyberpunk-shell.page-settings .workspace-section-content {
+    min-height: 0;
+    height: 100%;
+    overflow: auto;
+    scrollbar-gutter: stable;
+  }
+
+  .cyberpunk-shell.page-settings .preference-editor-shell {
+    height: 100%;
+  }
+
+  .cyberpunk-shell.page-settings .preference-editor-pane {
+    height: 100%;
+    overflow: auto;
+    scrollbar-gutter: stable;
+    padding-right: 5px;
+  }
+
+  .cyberpunk-shell.page-settings .product-preferences-workspace,
+  .cyberpunk-shell.page-settings .subtitle-preferences-workspace,
+  .cyberpunk-shell.page-settings .effective-configuration-inspector,
+  .cyberpunk-shell.page-settings .settings-output-panel,
+  .cyberpunk-shell.page-settings .guide-list {
+    padding: 18px;
+  }
+
+  .cyberpunk-shell.page-settings .product-preferences-workspace {
+    display: grid;
+    grid-template-columns: minmax(260px, auto) minmax(0, 1fr);
+    grid-auto-rows: auto;
+    align-content: start;
+    gap: 0 18px;
+  }
+
+  .cyberpunk-shell.page-settings
+    .product-preferences-workspace
+    > .workspace-heading {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .cyberpunk-shell.page-settings .preference-scope-command,
+  .cyberpunk-shell.page-settings .conversation-group-nav,
+  .cyberpunk-shell.page-settings .preference-preset-grid,
+  .cyberpunk-shell.page-settings .preference-overrides,
+  .cyberpunk-shell.page-settings .preference-technical-disclosure,
+  .cyberpunk-shell.page-settings .preference-migration,
+  .cyberpunk-shell.page-settings .product-preferences-workspace > .empty-state,
+  .cyberpunk-shell.page-settings
+    .product-preferences-workspace
+    > .inline-status {
+    grid-column: 1 / -1;
+  }
+
+  .cyberpunk-shell.page-settings
+    .product-preferences-workspace
+    > .workspace-heading {
+    padding-bottom: 8px;
+  }
+
+  .cyberpunk-shell.page-settings
+    .product-preferences-workspace
+    > .source-disclosure {
+    margin-top: 0;
+  }
+
+  .cyberpunk-shell.page-settings .preference-overrides {
+    margin-top: 12px;
+    padding-top: 12px;
+  }
+
+  .cyberpunk-shell.page-settings .preference-overrides > .preference-field-grid,
+  .cyberpunk-shell.page-settings
+    .optional-capability-disclosure
+    > .preference-field-grid {
+    max-width: none;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 22px;
+  }
+}
+
+@media (min-width: 1050px) and (min-height: 700px) {
+  .cyberpunk-shell.page-voice .voice-workspace {
+    height: calc(100dvh - 68px - 40px - 14px - 18px);
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .cyberpunk-shell.page-voice .voice-workspace > .workspace-sections,
+  .cyberpunk-shell.page-voice
+    .voice-workspace
+    > .workspace-sections
+    > .workspace-section-content {
+    min-height: 0;
+  }
+}
+
+@media (max-width: 1049px), (max-height: 699px) {
+  .cyberpunk-shell.workspace-dialog-layer {
+    padding: 12px;
+  }
+
+  .cyberpunk-shell .world-workspace,
+  .cyberpunk-shell .preference-editor-shell {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .cyberpunk-shell .world-workspace > * {
+    grid-area: auto;
+  }
+
+  .cyberpunk-shell .preference-editor-nav {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .cyberpunk-shell .preference-scope-command {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .cyberpunk-shell .preference-scope-command .preference-scope-context {
+    margin-bottom: 10px;
+  }
+
+  .cyberpunk-shell .conversation-group-nav {
+    grid-template-columns: 1fr;
+  }
+
+  .cyberpunk-shell .preference-overrides > .preference-field-grid,
+  .cyberpunk-shell .optional-capability-disclosure > .preference-field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cyberpunk-shell .character-tool-grid,
+  .cyberpunk-shell .world-tool-dock {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .cyberpunk-shell .preference-editor-nav {
+    grid-template-columns: 1fr;
+  }
+
+  .cyberpunk-shell .workspace-dialog__header {
+    min-height: 64px;
+    padding: 10px 12px;
+  }
+
+  .cyberpunk-shell .workspace-dialog__body {
+    padding: 10px;
+  }
+}
+
+@media (forced-colors: active) {
+  .cyberpunk-shell .workspace-dialog,
+  .cyberpunk-shell.workspace-dialog-layer,
+  .cyberpunk-shell .character-tool-grid button,
+  .cyberpunk-shell .world-tool-dock button,
+  .cyberpunk-shell .preference-editor-nav button {
+    background: Canvas;
+    color: CanvasText;
+  }
+}

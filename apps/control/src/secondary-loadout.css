@@ -1,0 +1,156 @@
+/* Secondary loadout pages keep selection and setup actions beside each other. */
+.local-model-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 0 0 12px;
+  font-size: 14px;
+}
+.local-resource-workspace--sectioned {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 16px;
+  min-height: 0;
+}
+.local-resource-workspace--sectioned > [hidden] {
+  display: none;
+}
+.local-resource-nav {
+  display: flex;
+  flex-direction: column;
+  align-self: start;
+  border: 1px solid #633344;
+}
+.local-resource-nav button {
+  min-height: 58px;
+  padding: 12px 16px;
+  border: 0;
+  border-bottom: 1px solid #633344;
+  background: #191017;
+  color: #f1dfe0;
+  text-align: left;
+  font-size: 15px;
+}
+.local-resource-nav button:last-child {
+  border-bottom: 0;
+}
+.local-resource-nav button[aria-current] {
+  box-shadow: inset 3px 0 #65e1e2;
+  color: #65e1e2;
+  background: #193035;
+}
+.local-resource-workspace--sectioned > .instrument-panel {
+  min-width: 0;
+  margin: 0;
+  align-self: start;
+}
+@media (min-width: 1050px) and (min-height: 700px) {
+  .page-voice .voice-workspace > .workspace-sections {
+    display: flex;
+    flex-direction: column;
+  }
+  .page-voice .voice-workspace > .workspace-sections > .workspace-section-nav {
+    flex-shrink: 0;
+  }
+  .page-voice
+    .voice-workspace
+    > .workspace-sections
+    > .workspace-section-content {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+  }
+  .page-voice .local-model-workbench {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .page-voice .local-model-toolbar {
+    flex-shrink: 0;
+  }
+  .page-voice .local-resource-workspace--sectioned {
+    flex: 1;
+    min-height: 0;
+  }
+  .page-voice .local-resource-workspace--sectioned > .instrument-panel {
+    max-height: 100%;
+    overflow: auto;
+  }
+  .page-voice .microphone-workbench {
+    max-width: none;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+  }
+  .page-voice .microphone-workbench > .panel-title {
+    grid-column: 1 / -1;
+    margin: 0;
+  }
+  .page-voice .microphone-workbench .audio-input-picker {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    margin: 0;
+  }
+  .page-voice .microphone-workbench .audio-input-picker > * {
+    width: 100%;
+  }
+  .page-voice .microphone-workbench .selected-stt-control {
+    margin: 0;
+    padding: 14px;
+    border: 1px solid #633344;
+  }
+}
+@media (max-width: 700px) {
+  .local-resource-workspace--sectioned {
+    grid-template-columns: 1fr;
+  }
+  .local-resource-nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .local-model-toolbar {
+    flex-wrap: wrap;
+  }
+}
+@media (forced-colors: active) {
+  .local-resource-nav button {
+    color: ButtonText;
+    background: ButtonFace;
+  }
+  .local-resource-nav button[aria-current] {
+    color: HighlightText;
+    background: Highlight;
+  }
+}
+.local-resource-workspace--sectioned > .local-benchmark-pane {
+  min-width: 0;
+  min-height: 0;
+  max-height: 100%;
+  overflow: auto;
+}
+.local-resource-workspace--sectioned
+  > .local-benchmark-pane
+  > .instrument-panel {
+  margin: 0;
+}
+@media (min-width: 1050px) and (min-height: 700px) {
+  .page-voice .microphone-workbench {
+    grid-template-rows: auto minmax(0, 1fr);
+    align-content: start;
+  }
+}
+@media (min-width: 1050px) and (min-height: 700px) {
+  .page-voice .microphone-workbench .selected-stt-control {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: stretch;
+    gap: 16px;
+  }
+  .page-voice .microphone-workbench .selected-stt-control > * {
+    margin-block: 0;
+  }
+}
