@@ -882,3 +882,42 @@
     background: Canvas;
   }
 }
+
+/* Use the viewport for decisions rather than repeated page chrome. */
+@media (min-width: 900px) {
+  .cyberpunk-shell .product-rail {
+    height: 68px;
+    padding-inline: 26px;
+  }
+  .cyberpunk-shell .product-main {
+    height: calc(100vh - 68px);
+    padding-inline: 26px;
+  }
+  .cyberpunk-shell .product-topbar {
+    height: 40px;
+    min-height: 40px;
+    margin-bottom: 14px;
+  }
+  .cyberpunk-shell .page-heading {
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+  }
+  .cyberpunk-shell .page-heading h1 {
+    font-size: 28px;
+  }
+  .cyberpunk-shell .voice-workspace > .page-heading {
+    display: flex;
+    align-items: baseline;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .cyberpunk-shell .voice-workspace > .page-heading > .eyebrow {
+    display: none;
+  }
+  .cyberpunk-shell .voice-workspace > .page-heading p {
+    margin: 0;
+  }
+  .cyberpunk-shell .workspace-section-nav {
+    margin-bottom: 12px;
+  }
+}

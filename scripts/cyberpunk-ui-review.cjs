@@ -36,7 +36,7 @@ async function main() {
       results.push({name, ...metrics, errors});
       if(name.endsWith('-wide')) {
         const regions = name === 'loadout-wide'
-          ? ['.product-rail','.page-heading','.cyberware-anatomy','.loadout-role']
+          ? ['.product-rail','.page-heading','.neural-map','.loadout-role']
           : name === 'channel-wide'
             ? ['.product-rail','.panel-heading','.turn-composer','.session-side']
             : name === 'world-wide'

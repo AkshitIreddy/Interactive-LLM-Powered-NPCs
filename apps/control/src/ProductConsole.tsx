@@ -75,6 +75,7 @@ import {
   fromNativeSnapshot,
 } from "./providerLoadoutBridge";
 import { SetupSystemCheck } from "./SetupSystemCheck";
+import { TestGameLauncher } from "./TestGameLauncher";
 import { ContentPackWorkspace } from "./ContentPackWorkspace";
 import {
   activeBrowserLoadoutFor,
@@ -3124,7 +3125,6 @@ function WorldPage({
   onSetupMouthTracking,
   onPreferencesSnapshot,
   onConnectReviewGame,
-  reviewLaunchAvailable,
   captureBusy,
   captureAvailable,
   captureProof,
@@ -3172,6 +3172,12 @@ function WorldPage({
             : "Your Cyberpunk characters, voices and memories. Connect a game in the desktop app."}
         </p>
       </header>
+      <TestGameLauncher
+        availability={syntheticReviewTargetAvailability()}
+        connected={Boolean(captureProof)}
+        busy={captureBusy}
+        onLaunchAndConnect={onConnectReviewGame}
+      />
       <GameTargetWorkspace
         onSetupMouthTracking={onSetupMouthTracking}
         nativeAvailable={nativeAvailable}
@@ -3183,7 +3189,7 @@ function WorldPage({
       />
       <details className="practice-lab evidence-disclosure">
         <summary>
-          Practice environment{" "}
+          Practice environment details{" "}
           <span>Try a conversation in the included test game</span>
         </summary>
         <div className="world-layout">
@@ -3240,17 +3246,6 @@ function WorldPage({
               </div>
             </dl>
             <div className="capture-verification-actions">
-              <button
-                className="primary-action"
-                disabled={!reviewLaunchAvailable || captureBusy}
-                onClick={onConnectReviewGame}
-              >
-                {captureBusy
-                  ? "Connecting…"
-                  : captureProof?.receipt?.verified
-                    ? "Reconnect test game"
-                    : "Start & connect test game"}
-              </button>
               <button
                 className="secondary-action"
                 disabled={!captureAvailable}

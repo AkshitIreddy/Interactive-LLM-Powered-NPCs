@@ -3,7 +3,6 @@ import {
   modelFor,
   providerFor,
   ROLE_META,
-  ROLE_ORDER,
   type ProviderLoadout,
   type ProviderRole,
 } from "./providerLoadouts";
@@ -15,14 +14,49 @@ interface CyberwareAnatomyProps {
   onSelect: (role: ProviderRole) => void;
 }
 
-const anatomyLabels: Record<ProviderRole, string> = {
-  llm: "Cognition",
-  stt: "Hearing",
-  tts: "Voice",
-  embeddings: "Memory",
-  vision: "Sight",
-  lipSync: "Mouth sync",
-};
+const systems: {
+  role: ProviderRole;
+  label: string;
+  purpose: string;
+  point: [number, number];
+}[] = [
+  {
+    role: "llm",
+    label: "Cognition",
+    purpose: "Compose the reply",
+    point: [404, 137],
+  },
+  {
+    role: "embeddings",
+    label: "Memory",
+    purpose: "Recall relevant context",
+    point: [293, 193],
+  },
+  {
+    role: "stt",
+    label: "Hearing",
+    purpose: "Understand your speech",
+    point: [347, 269],
+  },
+  {
+    role: "vision",
+    label: "Sight",
+    purpose: "Read the scene",
+    point: [451, 268],
+  },
+  {
+    role: "tts",
+    label: "Voice",
+    purpose: "Speak the reply",
+    point: [489, 353],
+  },
+  {
+    role: "lipSync",
+    label: "Mouth sync",
+    purpose: "Animate the response",
+    point: [482, 372],
+  },
+];
 
 export function CyberwareAnatomy({
   activeRole,
@@ -30,70 +64,67 @@ export function CyberwareAnatomy({
   isAvailable,
   onSelect,
 }: CyberwareAnatomyProps) {
+  const activeIndex = systems.findIndex((system) => system.role === activeRole);
+  const active = systems[activeIndex];
+  const [x, y] = active.point;
+  const rowY = 100 + activeIndex * 65;
   return (
-    <div className="cyberware-anatomy" aria-label="Conversation system map">
-      <div className="cyberware-anatomy__field" aria-hidden="true">
-        <span />
-        <span />
-        <span />
+    <div className="neural-map" aria-label="Conversation system map">
+      <div className="neural-map__heading">
+        <span>SYSTEM MAP</span>
+        <small>Select a capability to configure</small>
       </div>
-      <img
-        className="cyberware-anatomy__figure"
-        src="/art/neural-anatomy.png"
-        alt=""
-        aria-hidden="true"
-      />
-      <div className="cyberware-anatomy__core" aria-hidden="true">
-        <span />
-      </div>
-      {ROLE_ORDER.map((role) => {
-        const route = routes[role];
-        const provider = providerFor(role, route.providerId);
-        const model = modelFor(role, route);
-        const available = isAvailable(role, provider.id);
-        const mouthMotionUsesGameSetup =
-          role === "lipSync" && provider.id === "disabled";
-        return (
-          <Button
-            key={role}
-            className={`cyberware-node cyberware-node--${role} ${
-              activeRole === role ? "is-selected" : ""
-            } ${available ? "" : "is-unavailable"}`}
-            aria-pressed={activeRole === role}
-            aria-label={`${ROLE_META[role].label}. ${provider.name}. ${model.name}. ${
-              available ? provider.execution : "Unavailable"
-            }`}
-            onPress={() => onSelect(role)}
-          >
-            <span className="cyberware-node__pin" aria-hidden="true">
-              <i />
-            </span>
-            <span className="cyberware-node__content">
-              <span className="cyberware-node__index">
-                {String(ROLE_ORDER.indexOf(role) + 1).padStart(2, "0")}
-              </span>
-              <span>
-                <strong>{anatomyLabels[role]}</strong>
-                <small>
-                  {mouthMotionUsesGameSetup
-                    ? "Games setup · optional model Off"
-                    : `${provider.name} · ${model.name}`}
-                </small>
-              </span>
-              <em>
-                {mouthMotionUsesGameSetup
-                  ? "Game setup"
-                  : available
-                    ? provider.execution
-                    : "Setup needed"}
-              </em>
-            </span>
-          </Button>
-        );
-      })}
-      <div className="cyberware-anatomy__caption" aria-hidden="true">
-        <span>NEURAL ROUTE</span>
-        <strong>{anatomyLabels[activeRole]}</strong>
+      <div className="neural-map__canvas">
+        <img
+          className="neural-map__figure"
+          src="/art/neural-interface-v2.png"
+          alt="Synthetic intelligence head with brain circuitry, memory modules, hearing receiver, optical sensor and articulated mouth"
+        />
+        <svg
+          className="neural-map__links"
+          viewBox="0 0 560 500"
+          aria-hidden="true"
+          preserveAspectRatio="none"
+        >
+          <path d={`M 183 ${rowY} H 219 L ${x - 22} ${y} H ${x}`} />
+          <circle cx={x} cy={y} r="9" />
+          <circle cx={x} cy={y} r="2.5" />
+        </svg>
+        <div className="neural-map__systems">
+          {systems.map(({ role, label, purpose }, index) => {
+            const route = routes[role];
+            const provider = providerFor(role, route.providerId);
+            const model = modelFor(role, route);
+            const available = isAvailable(role, provider.id);
+            const gameSetup = role === "lipSync" && provider.id === "disabled";
+            return (
+              <Button
+                key={role}
+                className={`neural-system ${activeRole === role ? "is-selected" : ""}`}
+                aria-pressed={activeRole === role}
+                aria-label={`${ROLE_META[role].label}. ${provider.name}. ${model.name}. ${available ? provider.execution : "Unavailable"}`}
+                onPress={() => onSelect(role)}
+              >
+                <span className="neural-system__number">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <span className="neural-system__copy">
+                  <strong>{label}</strong>
+                  <small>{purpose}</small>
+                  <em>{gameSetup ? "Set up in Games" : provider.name}</em>
+                </span>
+                <span
+                  className={`neural-system__status ${available && provider.execution !== "Off" ? "is-ready" : ""}`}
+                  aria-hidden="true"
+                />
+              </Button>
+            );
+          })}
+        </div>
+        <div className="neural-map__caption" aria-hidden="true">
+          <span>SELECTED SYSTEM</span>
+          <strong>{active.label}</strong>
+        </div>
       </div>
     </div>
   );
