@@ -129,12 +129,17 @@ select option:disabled {
 
   select {
     min-height: 36px;
+    align-items: center;
     padding: 7px 11px;
     gap: 12px;
+    line-height: 1.25;
   }
 
   select::picker-icon {
+    align-self: center;
+    block-size: 1em;
     color: var(--control-accent);
+    line-height: 1;
     transition: rotate 140ms ease;
   }
 
