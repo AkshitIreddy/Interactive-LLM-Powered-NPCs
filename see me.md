@@ -1,5 +1,9 @@
 # See me — mandatory product rework handoff
 
+## Latest continuation — 16 September 2026
+
+Read [NEXT_AGENT_HANDOFF_2026-09-16.md](NEXT_AGENT_HANDOFF_2026-09-16.md) for the current v21 build, full user feedback, whole-app changes, provider/content/pack state, and the reopened test-game connection failure. The user reports that connection still fails even when they open the test game. It is **not fixed or live-verified**. The newer handoff distinguishes observed facts from investigation leads; historical build paths and completion statements below must not override it. Preserve the display-safety restrictions below.
+
 ## Display safety — renewed explicit instruction, 8 September 2026
 
 The user again reported an epilepsy concern after the native media-broker smoke

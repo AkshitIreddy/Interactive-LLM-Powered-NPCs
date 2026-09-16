@@ -1,5 +1,7 @@
 # Interactive LLM Powered NPCs 2.0 — headless visual-core handoff
 
+> Current continuation: [NEXT_AGENT_HANDOFF_2026-09-16.md](NEXT_AGENT_HANDOFF_2026-09-16.md). The user reports v21 still cannot connect to the test game even when it is open. This older Sep 5 document is historical; use the newer handoff for current source/artifacts, feedback, investigation leads and remaining work.
+
 Updated: 2026-09-05 IST
 
 ## Current decision
