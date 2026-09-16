@@ -5646,8 +5646,7 @@ mod tests {
     }
 
     #[cfg(debug_assertions)]
-    fn test_review_atlas_identity() -> RequestedCharacterMouthAtlasIdentity<'static> {
-        RequestedCharacterMouthAtlasIdentity {
+    fn test_review_atlas_identity() -> RequestedCharacterMouthAtlasIdentity<'static> {        RequestedCharacterMouthAtlasIdentity {
             game_profile_id: "cyberpunk-2077",
             character_id: "misty",
             actor_id: stable_nonzero_id("cyberpunk-2077:misty"),
@@ -7517,5 +7516,47 @@ mod tests {
         let mut wire = response_wire_prefix();
         wire.u32(0);
         wire
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn review_openseeface_launch_rejects_missing_or_empty_roots() {
+        let missing = std::path::PathBuf::from("C:/missing/review-openseeface-root");
+        assert!(matches!(
+            resolve_project_owned_review_provider(Some(missing.as_path()), 4242),
+            Err(VisualRuntimeError::Admission(_))
+        ));
+        assert!(matches!(
+            resolve_project_owned_review_provider(None, 4242),
+            Err(VisualRuntimeError::Admission(_))
+        ));
+        assert!(matches!(
+            resolve_project_owned_review_provider(
+                Some(std::path::Path::new("C:/missing/review-openseeface-root")),
+                0
+            ),
+            Err(VisualRuntimeError::Admission(_))
+        ));
+    }
+
+    /// Optional live check against a real installed review pack root (for
+    /// example the owner review profile install). Set
+    /// REVIEW_OPENSEEFACE_PACK_ROOT to the version directory and run with
+    /// `-- --ignored`. Asserts the exact pinned files the review visual path
+    /// requires; it performs no inference and creates no windows.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[ignore = "requires REVIEW_OPENSEEFACE_PACK_ROOT pointing at an installed review pack"]
+    fn review_openseeface_launch_accepts_installed_pack() {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("REVIEW_OPENSEEFACE_PACK_ROOT").expect("pack root is required"),
+        );
+        let launch = resolve_project_owned_review_provider(Some(root.as_path()), 4242)
+            .expect("installed review pack resolves");
+        assert_eq!(launch.detector.size_bytes, 568_302);
+        assert_eq!(launch.landmark.size_bytes, 4_842_329);
+        assert_eq!(launch.runtime.size_bytes, 12_416_032);
+        assert_eq!(launch.runtime_shared.size_bytes, 22_048);
+        assert_eq!(launch.exact_target_pid, 4242);
     }
 }
