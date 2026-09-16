@@ -287,7 +287,7 @@
   ],
   "static_files": [
     {"path": "LICENSE", "install_path": "product-audit/legal/LICENSE.txt", "sha256": "8703e8c956a5accb5322bf6160ae4b5612683d680d8803a2288ff0a95f834ce8", "component_id": "project:legal-resources"},
-    {"path": "catalog/v1/catalog.json", "install_path": "catalog/v1/catalog.json", "sha256": "27cc185fa53005d26374d298242b859c960c41903a48f009f6d342d06cdc752b", "component_id": "project:static-resources"},
+    {"path": "catalog/v1/catalog.json", "install_path": "catalog/v1/catalog.json", "sha256": "9c017834102bca7a71cdc27f2a4d934bbb498a24885fa8129a053f0e7dee06b5", "component_id": "project:static-resources"},
     {"path": "apps/control/public/art/city-afterhours.png", "install_path": "frontend-resource-in-executable", "sha256": "e1dfe974b7594fc707c7105896d71b4239571f055ec77b969fb705bf6ed9a5ff", "component_id": "project:static-resources"},
     {"path": "apps/control/public/art/neural-anatomy.png", "install_path": "frontend-resource-in-executable", "sha256": "5fa56622d05dcf2a2e7a461abfb08255e1e69590e88840c1ebc563e7c78b907f", "component_id": "project:static-resources"},
     {"path": "apps/control/public/art/PROVENANCE.md", "install_path": "frontend-resource-in-executable", "sha256": "8122e62766f1341fb886c385829bf71ffd15d833b39e13ee1d138c82a9000c9a", "component_id": "project:static-resources"},
