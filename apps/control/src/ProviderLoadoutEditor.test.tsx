@@ -230,7 +230,7 @@ describe("provider and model loadouts", () => {
     expect(screen.getByRole("option", { name: "GPT-OSS 20B" })).toBeEnabled();
     await user.selectOptions(
       screen.getByLabelText("Reply model model"),
-      "qwen/qwen3.6-27b",
+      "qwen/qwen3.8-27b",
     );
     await user.click(screen.getByRole("button", { name: "Advanced routing" }));
     expect(

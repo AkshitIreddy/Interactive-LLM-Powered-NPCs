@@ -96,7 +96,7 @@ class Target:
 
 TARGETS = (
     Target("groq", "openai/gpt-oss-20b", "https://api.groq.com/openai/v1/chat/completions", "chat", "groq", 2),
-    Target("groq", "qwen/qwen3.6-27b", "https://api.groq.com/openai/v1/chat/completions", "chat", "groq", 2),
+    Target("groq", "qwen/qwen3.8-27b", "https://api.groq.com/openai/v1/chat/completions", "chat", "groq", 2),
     Target("mistral", "ministral-3b-2512", "https://api.mistral.ai/v1/chat/completions", "chat", "mistral", 2),
     Target("mistral", "ministral-8b-2512", "https://api.mistral.ai/v1/chat/completions", "chat", "mistral", 2),
     Target("gemini", "gemini-3.1-flash-lite", "https://generativelanguage.googleapis.com/v1beta", "gemini", "googlegemini", 2),

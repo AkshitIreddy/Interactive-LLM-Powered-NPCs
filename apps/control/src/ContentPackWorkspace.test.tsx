@@ -33,7 +33,7 @@ const preview = {
     {
       role: "llm" as const,
       providerId: "groq",
-      modelId: "qwen/qwen3.6-27b",
+      modelId: "qwen/qwen3.8-27b",
       characterId: null,
       voiceId: null,
       rationale: "Fast structured dialogue candidate.",

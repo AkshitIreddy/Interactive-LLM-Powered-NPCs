@@ -169,8 +169,8 @@ export const ROUTE_OPTIONS: Record<ProviderRole, RouteProviderOption[]> = {
       models: [
         { id: "openai/gpt-oss-20b", name: "GPT-OSS 20B" },
         {
-          id: "qwen/qwen3.6-27b",
-          name: "Qwen 3.6 27B · non-reasoning profile",
+          id: "qwen/qwen3.8-27b",
+          name: "Qwen 3.8 27B · non-reasoning profile",
           note: "Uses the exact qualified Groq non-reasoning request profile so the response budget produces dialogue.",
         },
       ],
@@ -444,7 +444,7 @@ const initialLoadouts: ProviderLoadout[] = [
     active: true,
     revision: 3,
     routes: {
-      llm: { providerId: "groq", modelId: "qwen/qwen3.6-27b" },
+      llm: { providerId: "groq", modelId: "qwen/qwen3.8-27b" },
       stt: { providerId: "assemblyai", modelId: "u3-rt-pro" },
       tts: {
         providerId: "cartesia",

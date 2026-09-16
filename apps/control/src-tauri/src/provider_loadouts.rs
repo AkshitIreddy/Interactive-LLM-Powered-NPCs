@@ -374,6 +374,11 @@ fn migrate_document(mut document: ProviderLoadoutDocumentV1) -> ProviderLoadoutD
         return document;
     };
     if let Some(RoleOverrideV1::Route(llm)) = starter.roles.get_mut(&ProviderRole::Llm) {
+        if llm.primary.provider_id == "groq" && llm.primary.model_id == "qwen/qwen3.6-27b" {
+            // Groq retired the 3.6 upstream model (model_not_found observed
+            // 2026-09-17); the qualified non-reasoning successor is 3.8.
+            llm.primary.model_id = "qwen/qwen3.8-27b".into();
+        }
         if llm.primary.provider_id == "nvidia-nim"
             && llm.primary.model_id == "nvidia/nemotron-3-nano-30b-a3b"
         {
@@ -1494,7 +1499,7 @@ pub(crate) fn starter_document() -> ProviderLoadoutDocumentV1 {
                 ProviderRole::Llm,
                 hosted(
                     "groq",
-                    "qwen/qwen3.6-27b",
+                    "qwen/qwen3.8-27b",
                     None,
                     "Transcript, selected game context, and memory context are sent to Groq when this route is used.",
                     "Uses the user's Groq account and its current free or paid limits.",
@@ -1719,7 +1724,7 @@ mod tests {
             pinned
                 .route(ProviderRole::Llm)
                 .map(|route| (route.provider_id.as_str(), route.model_id.as_str())),
-            Some(("groq", "qwen/qwen3.6-27b"))
+            Some(("groq", "qwen/qwen3.8-27b"))
         );
         assert_eq!(
             pinned.route(ProviderRole::Tts).map(|route| (

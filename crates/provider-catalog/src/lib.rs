@@ -1327,13 +1327,14 @@ mod tests {
             assert!(ids.contains(expected), "missing provider {expected}");
         }
         assert_eq!(document.content.providers.len(), 22);
-        assert_eq!(document.content.models.len(), 34);
+        assert_eq!(document.content.models.len(), 35);
         assert_eq!(document.content.pack_templates.len(), 8);
         assert_eq!(document.content.voice_intents.len(), 8);
         for id in [
             "gemini.llm.gemini-3.1-flash-lite",
             "groq.llm.gpt-oss-20b",
             "groq.llm.qwen3.6-27b",
+            "groq.llm.qwen3.8-27b",
             "mistral.llm.ministral-8b-2512",
             "mistral.llm.ministral-3b-2512",
             "openrouter.llm.liquid-lfm-2.5-2.6b-free",
@@ -1633,7 +1634,7 @@ mod tests {
 
         assert_eq!(
             document.signing_sha256().unwrap(),
-            "a2c5ea813ed701b7894a15e06c9dfe3ad75128cef6ab67269a1b05c2258335ee"
+            "cc81430efac696c96125b642e5c9805d24cac6b97bbb3ddeac62a231e66553c3"
         );
     }
 

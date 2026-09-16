@@ -20,7 +20,7 @@
     {
       "role": "llm",
       "provider_id": "groq",
-      "model_id": "qwen/qwen3.6-27b",
+      "model_id": "qwen/qwen3.8-27b",
       "rationale": "A current selectable low-latency structured-dialogue candidate. The player must intentionally adopt it in Voice & models."
     },
     {

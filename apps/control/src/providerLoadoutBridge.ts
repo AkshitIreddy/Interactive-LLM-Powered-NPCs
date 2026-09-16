@@ -176,7 +176,7 @@ export type LoadoutSource =
   | { kind: "native"; snapshot: NativeLoadoutSnapshot };
 
 const hasTauri = () => "__TAURI_INTERNALS__" in window;
-export const BROWSER_CATALOG_REVISION = 9;
+export const BROWSER_CATALOG_REVISION = 10;
 const nativeRole = (role: ProviderRole): NativeRole =>
   role === "lipSync" ? "lipsync" : role;
 
@@ -390,7 +390,7 @@ function inheritedRole(
 }
 
 const safeDefaults: Record<ProviderRole, RouteChoice> = {
-  llm: { providerId: "groq", modelId: "qwen/qwen3.6-27b" },
+  llm: { providerId: "groq", modelId: "qwen/qwen3.8-27b" },
   stt: { providerId: "assemblyai", modelId: "u3-rt-pro" },
   tts: {
     providerId: "cartesia",

@@ -355,7 +355,7 @@ async fn groq_chat_completions_handles_done_and_usage_chunk() {
 }
 
 #[tokio::test]
-async fn groq_qwen_36_uses_only_its_qualified_non_reasoning_profile() {
+async fn groq_qwen_38_uses_only_its_qualified_non_reasoning_profile() {
     let sse = concat!(
         "data: {\"id\":\"chat-qwen\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Ready\"},\"finish_reason\":null}]}\n\n",
         "data: {\"id\":\"chat-qwen\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
@@ -370,7 +370,7 @@ async fn groq_qwen_36_uses_only_its_qualified_non_reasoning_profile() {
     .await;
     let adapter = GroqChatCompletions::new(config(fixture.base, "/openai/v1")).expect("adapter");
     let mut llm_request = request();
-    llm_request.model = "qwen/qwen3.6-27b".into();
+    llm_request.model = "qwen/qwen3.8-27b".into();
     let events = adapter
         .stream(llm_request, CancellationToken::new())
         .await
@@ -385,7 +385,7 @@ async fn groq_qwen_36_uses_only_its_qualified_non_reasoning_profile() {
     let body: serde_json::Value =
         serde_json::from_str(received.split("\r\n\r\n").nth(1).expect("request body"))
             .expect("JSON request");
-    assert_eq!(body["model"], "qwen/qwen3.6-27b");
+    assert_eq!(body["model"], "qwen/qwen3.8-27b");
     assert_eq!(body["reasoning_effort"], "none");
     assert_eq!(body["reasoning_format"], "hidden");
 }

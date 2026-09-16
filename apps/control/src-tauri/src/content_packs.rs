@@ -700,7 +700,7 @@ mod tests {
             provider_recommendations: vec![ContentPackProviderRecommendationV1 {
                 role: ContentPackProviderRoleV1::Llm,
                 provider_id: "groq".into(),
-                model_id: "qwen/qwen3.6-27b".into(),
+                model_id: "qwen/qwen3.8-27b".into(),
                 character_id: None,
                 voice_id: None,
                 rationale: "Fast structured dialogue candidate.".into(),

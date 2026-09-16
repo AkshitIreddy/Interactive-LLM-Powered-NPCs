@@ -50,7 +50,7 @@ const MODEL_ID: &str = "ministral-8b-2512";
 const GROQ_KEY_ENV: &str = "GROQ_API_KEY";
 const CARTESIA_KEY_ENV: &str = "CARTESIA_API_KEY";
 const COMBINED_REPORT_ENV: &str = "GROQ_CARTESIA_STREAMING_REPORT";
-const GROQ_QWEN_MODEL_ID: &str = "qwen/qwen3.6-27b";
+const GROQ_QWEN_MODEL_ID: &str = "qwen/qwen3.8-27b";
 const VOICE_INTENT_ID: &str = "selected.stock.voice";
 
 fn repo_root() -> PathBuf {
@@ -427,7 +427,7 @@ async fn synthesize_to_memory(
 }
 
 #[tokio::test]
-#[ignore = "explicit one-request Groq Qwen 3.6 to Cartesia streaming qualification"]
+#[ignore = "explicit one-request Groq Qwen 3.8 to Cartesia streaming qualification"]
 async fn groq_qwen_speech_first_field_dispatches_one_cartesia_request_without_playback() {
     let report_path = PathBuf::from(
         env::var_os(COMBINED_REPORT_ENV).expect("combined qualification report path is required"),

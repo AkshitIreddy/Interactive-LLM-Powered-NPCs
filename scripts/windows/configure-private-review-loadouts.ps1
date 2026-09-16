@@ -93,7 +93,7 @@ function New-FtsRole {
 
 if ($null -eq $document) {
     $starterRoles = [ordered]@{
-        llm = New-HostedRole -Provider 'groq' -Model 'qwen/qwen3.6-27b' `
+        llm = New-HostedRole -Provider 'groq' -Model 'qwen/qwen3.8-27b' `
             -Privacy 'Transcript, selected game context, and memory context are sent to Groq when this route is used.' `
             -Cost "Uses the user's Groq account and its current free or paid limits." `
             -Data @('transcript', 'game_context', 'memory_context')
@@ -141,7 +141,7 @@ $llmPresets = [ordered]@{
     groq = [ordered]@{
         id = 'cyberpunk-private-fast-groq'
         name = 'Cyberpunk - Groq fast'
-        model = 'qwen/qwen3.6-27b'
+        model = 'qwen/qwen3.8-27b'
         privacy = 'Dialogue and selected Cyberpunk context are sent to Groq for this turn.'
         cost = 'Uses the connected Groq account.'
     }

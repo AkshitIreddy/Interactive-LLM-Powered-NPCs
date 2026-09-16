@@ -1061,12 +1061,14 @@ fn apply_qualified_model_parameters(
     options: &CompatibleOptions,
     model: &str,
 ) {
-    // Groq's Qwen 3.6 route otherwise spends a bounded NPC response budget on
+    // Groq's Qwen 3.6/3.8 routes otherwise spend a bounded NPC response budget on
     // reasoning tokens and can finish without any dialogue. These parameters
     // are deliberately exact-provider/exact-model: other Groq models retain
     // their documented defaults, and generic compatible endpoints never
     // inherit provider-specific request fields.
-    if options.provider_id == "groq" && model == "qwen/qwen3.6-27b" {
+    if options.provider_id == "groq"
+        && (model == "qwen/qwen3.6-27b" || model == "qwen/qwen3.8-27b")
+    {
         body.insert("reasoning_effort".into(), json!("none"));
         body.insert("reasoning_format".into(), json!("hidden"));
     }
