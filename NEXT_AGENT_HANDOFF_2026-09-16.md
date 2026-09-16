@@ -208,4 +208,12 @@ Unresolved areas recorded at handoff, without prescribing their order or solutio
 
 Other helpful commits: `9b468b8` launcher status/refresh, `259e0cb` availability/error propagation, `62b18ed` themed controls, `47121f4` selector alignment, `07fe5be` compact loadout, `3eaac5a` dialog-aware credential tests, `12081ee` corpus expansion, `8abd21a` mouth-pack pipeline, `78066d9` catalog rotation, `e1d1989` cache prevention.
 
+## Addendum 2026-09-16 (evening): connection fix + review-v22
+
+- Diagnosis: the review broker read only the `.review` metadata namespace while a double-clicked game writes the production namespace, so manual opens could never attach (production handoff existed with dead PID; review handoff missing). Errors were also discarded into a generic 10 s timeout, broker block reasons were stripped, and `connected` status did not require a live broker binding.
+- Fix commit `833e8be` (`media_broker.rs`, `commands.rs` only): production-handoff fallback for manual opens, distinct `closed`-state error, surfaced `TargetBlocked` reasons, pre/post-launch errors plus both PIDs in the timeout, `connected` gated on live broker binding. Windowless checks: 40/40 Rust, 36/36 frontend launcher/bridge, tsc and Clippy clean.
+- Fresh review package: `E:\temp\InteractiveNPCs\review-v22` (source `833e8be` clean; app SHA-256 `2a95740d…999b0`; manifest `6f0324fc…32dc`; all verifications passed, `launched=false`). Delivery record: `E:\temp\InteractiveNPCs\review-v22-delivery-20260916.md`. Independent verification: `E:\temp\InteractiveNPCs\review-v22-independent-verification.json`.
+- The v22 app binary provably embeds the new error strings. Live user verification of Launch & connect (launcher and manual paths) is still open; ask for the exact new error text if it fails.
+- Environment note: packaging requires `pwsh.exe`, which is absent system-wide; portable PowerShell 7.6.6 is staged at `E:\temp\InteractiveNPCs\tools\pwsh-7.6.6` for build shells only (no system install). Private catalog `202609141801` expires 2026-09-21 18:01 UTC.
+
 The user explicitly wants the successor to use this context to reach its own conclusions. No algorithm, diagnosis, architecture or work sequence in earlier agent notes is an obligation to preserve that approach.
