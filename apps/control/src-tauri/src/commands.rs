@@ -2913,9 +2913,16 @@ fn map_debug_synthetic_capture_error(error: crate::media_broker::MediaBrokerErro
     match error {
         crate::media_broker::MediaBrokerError::DebugSyntheticTargetInvalid
         | crate::media_broker::MediaBrokerError::DebugSyntheticTargetMismatch
-        | crate::media_broker::MediaBrokerError::DebugSyntheticMetadataInvalid => {
+        | crate::media_broker::MediaBrokerError::DebugSyntheticMetadataInvalid
+        | crate::media_broker::MediaBrokerError::DebugSyntheticTargetClosed
+        | crate::media_broker::MediaBrokerError::TargetBlocked(_) => {
             CommandError::InvalidRequest {
                 message: error.to_string(),
+            }
+        }
+        crate::media_broker::MediaBrokerError::DebugSyntheticMetadataUnavailable => {
+            CommandError::InvalidRequest {
+                message: "the included game has not published a running session yet. Use Launch & connect, or manually start the game with --metadata pointing at this app's debug-synthetic-replay-target.json and keep its window visible.".into(),
             }
         }
         _ => CommandError::Runtime {
@@ -3039,12 +3046,23 @@ pub fn synthetic_review_target_status(
                             crate::synthetic_review_target::SYNTHETIC_TARGET_BASENAME,
                         )
                 });
+            // Selection alone does not prove broker binding: the broker may
+            // have restarted, quarantined, or never bound this PID/HWND. Only
+            // report connected while the broker still holds the same
+            // project-owned synthetic target.
+            let broker_bound = state.media_broker.project_owned_review_target_selected();
             let (state_name, process_id, window_handle, detail) = match selected {
-                Some(selection) => (
+                Some(selection) if broker_bound => (
                     "connected",
                     Some(selection.target.process_id),
                     Some(selection.target.native_window),
                     "The included practice-game window is connected for this session.".into(),
+                ),
+                Some(_) => (
+                    "readyToLaunch",
+                    None,
+                    None,
+                    "A previous practice-game selection lost its broker binding. Choose Launch & connect to rebind the exact game window.".into(),
                 ),
                 None => (
                     "readyToLaunch",
@@ -3103,17 +3121,20 @@ pub async fn prepare_synthetic_review_target(
         .synthetic_review_target
         .executable_path()
         .map_err(product_error)?;
-    if let Ok(snapshot) = select_synthetic_replay_capture_target(&state).await {
-        return Ok(PreparedSyntheticReviewTarget {
-            schema_version: 1,
-            launched: false,
-            executable_path: executable_path.to_string_lossy().into_owned(),
-            target_process_id: snapshot.target_process_id,
-            target_window_handle: snapshot.target_window_handle,
-            target_executable_basename: snapshot.target_executable_basename,
-            fixture_motion_mode: snapshot.fixture_motion_mode,
-        });
-    }
+    let initial_error = match select_synthetic_replay_capture_target(&state).await {
+        Ok(snapshot) => {
+            return Ok(PreparedSyntheticReviewTarget {
+                schema_version: 1,
+                launched: false,
+                executable_path: executable_path.to_string_lossy().into_owned(),
+                target_process_id: snapshot.target_process_id,
+                target_window_handle: snapshot.target_window_handle,
+                target_executable_basename: snapshot.target_executable_basename,
+                fixture_motion_mode: snapshot.fixture_motion_mode,
+            });
+        }
+        Err(error) => error.to_string(),
+    };
 
     let mut launched = state
         .synthetic_review_target
@@ -3121,6 +3142,7 @@ pub async fn prepare_synthetic_review_target(
         .map_err(product_error)?;
     let launched_process_id = launched.child.id();
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut last_error: String;
     loop {
         match select_synthetic_replay_capture_target(&state).await {
             Ok(snapshot) if snapshot.target_process_id == launched_process_id => {
@@ -3134,13 +3156,23 @@ pub async fn prepare_synthetic_review_target(
                     fixture_motion_mode: snapshot.fixture_motion_mode,
                 });
             }
-            Ok(_) | Err(_) => {}
+            Ok(snapshot) => {
+                last_error = format!(
+                    "broker bound PID {} but the launcher started PID {}; a manually opened game may be competing for the single metadata handoff",
+                    snapshot.target_process_id, launched_process_id
+                );
+            }
+            Err(error) => {
+                last_error = error.to_string();
+            }
         }
         if tokio::time::Instant::now() >= deadline {
             let _ = launched.child.kill();
             let _ = launched.child.wait();
             return Err(CommandError::Runtime {
-                message: "the manifest-attested synthetic target did not publish metadata for its own capturable PID/HWND within 10 seconds".into(),
+                message: format!(
+                    "the manifest-attested synthetic target did not become capturable within 10 seconds. Before launch: {initial_error}. After launch (PID {launched_process_id}): {last_error}."
+                ),
             });
         }
         if launched.child.try_wait().map_err(product_error)?.is_some() {

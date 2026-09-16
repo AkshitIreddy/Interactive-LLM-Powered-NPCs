@@ -2645,10 +2645,40 @@ fn request_blocking(
         response.cancellation_generation,
         status,
     )?;
+    if status == BrokerStatus::TargetBlocked && command != BrokerCommand::SubmitPatch {
+        return Err(MediaBrokerError::TargetBlocked(
+            target_block_reason_name(&response.payload).into(),
+        ));
+    }
     if status != BrokerStatus::Ok && command != BrokerCommand::SubmitPatch {
         return Err(MediaBrokerError::Remote(status));
     }
     Ok(response)
+}
+
+#[cfg(debug_assertions)]
+fn target_block_reason_name(payload: &[u8]) -> &'static str {
+    if payload.len() < 4 {
+        return "target_blocked";
+    }
+    match u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]) {
+        1 => "invalid_window: the game window handle is no longer valid; relaunch the game and try connect again",
+        2 => "minimized: the game window is minimized; restore it and try connect again",
+        3 => "protected_process: the target process is protected; capture stays blocked",
+        4 => "process_mismatch: the window no longer belongs to the expected game process; relaunch and try again",
+        5 => "cross_session: the game runs in another Windows session; start it in this session",
+        6 => "cross_user: the game runs as another Windows user; start it as this user",
+        7 => "inspection_incomplete: the broker could not inspect the game window; relaunch and try again",
+        8 => "anti_cheat_marker: an anti-cheat marker was detected; capture stays blocked",
+        9 => "online_ambiguity: the target may be an online session; capture stays blocked",
+        10 => "not_allowlisted: the process is not the expected synthetic game executable",
+        _ => "target_blocked",
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn target_block_reason_name(_payload: &[u8]) -> &'static str {
+    "target_blocked"
 }
 
 fn reconcile_response_generation(
@@ -3573,7 +3603,8 @@ impl MediaBrokerSupervisor {
     pub async fn debug_select_synthetic_replay_capture_target(
         &self,
     ) -> Result<DebugSyntheticReplayCaptureSnapshot, MediaBrokerError> {
-        let identity = read_debug_synthetic_target(&self.config.debug_synthetic_metadata_path)?;
+        let identity =
+            read_debug_synthetic_target_with_fallback(&self.config.debug_synthetic_metadata_path)?;
         let _operation = self.debug_synthetic_capture_gate.lock().await;
         {
             let state = self.state.lock().map_err(|_| MediaBrokerError::State)?;
@@ -3859,6 +3890,52 @@ fn validate_debug_synthetic_target(
 }
 
 #[cfg(debug_assertions)]
+fn debug_synthetic_metadata_fallback(primary: &Path) -> Option<PathBuf> {
+    if primary.file_name().and_then(|value| value.to_str())
+        != Some(DEBUG_SYNTHETIC_METADATA_FILE_NAME)
+    {
+        return None;
+    }
+    let parent = primary.parent()?;
+    let dir_name = parent.file_name()?.to_str()?;
+    let production_dir = dir_name.strip_suffix(".review")?;
+    if production_dir.is_empty() {
+        return None;
+    }
+    let grandparent = parent.parent()?;
+    Some(
+        grandparent
+            .join(production_dir)
+            .join(DEBUG_SYNTHETIC_METADATA_FILE_NAME),
+    )
+}
+
+#[cfg(debug_assertions)]
+fn read_debug_synthetic_target_with_fallback(
+    primary: &Path,
+) -> Result<DebugSyntheticTargetIdentity, MediaBrokerError> {
+    match read_debug_synthetic_target(primary) {
+        Ok(identity) => Ok(identity),
+        Err(MediaBrokerError::DebugSyntheticMetadataUnavailable) => {
+            if let Some(fallback) = debug_synthetic_metadata_fallback(primary) {
+                match read_debug_synthetic_target(&fallback) {
+                    Ok(identity) => Ok(identity),
+                    // A manually opened game that was closed reports Closed;
+                    // that answer is more actionable than "missing", so keep it.
+                    Err(MediaBrokerError::DebugSyntheticTargetClosed) => {
+                        Err(MediaBrokerError::DebugSyntheticTargetClosed)
+                    }
+                    Err(_) => Err(MediaBrokerError::DebugSyntheticMetadataUnavailable),
+                }
+            } else {
+                Err(MediaBrokerError::DebugSyntheticMetadataUnavailable)
+            }
+        }
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(debug_assertions)]
 fn read_debug_synthetic_target(
     path: &Path,
 ) -> Result<DebugSyntheticTargetIdentity, MediaBrokerError> {
@@ -3888,6 +3965,9 @@ fn decode_debug_synthetic_target_metadata(
 ) -> Result<DebugSyntheticTargetIdentity, MediaBrokerError> {
     let metadata: DebugSyntheticTargetMetadata = serde_json::from_slice(bytes)
         .map_err(|_| MediaBrokerError::DebugSyntheticMetadataInvalid)?;
+    if metadata.state == "closed" {
+        return Err(MediaBrokerError::DebugSyntheticTargetClosed);
+    }
     if metadata.fixture_kind != "synthetic-original-video-replay"
         || metadata.state != "playing"
         || metadata.decoded_frames == 0
@@ -5977,6 +6057,8 @@ pub enum MediaBrokerError {
     Malformed,
     #[error("media broker rejected the request with status {0:?}")]
     Remote(BrokerStatus),
+    #[error("media broker blocked the capture target: {0}")]
+    TargetBlocked(String),
     #[error("media broker supervisor is quarantined")]
     Quarantined,
     #[error("media broker is skipped in this unbundled development build")]
@@ -6018,6 +6100,11 @@ pub enum MediaBrokerError {
     #[cfg(debug_assertions)]
     #[error("synthetic replay capture metadata is unavailable in the fixed app-data handoff")]
     DebugSyntheticMetadataUnavailable,
+    #[cfg(debug_assertions)]
+    #[error(
+        "synthetic game reported closed state; relaunch the included game and try connect again"
+    )]
+    DebugSyntheticTargetClosed,
     #[cfg(debug_assertions)]
     #[error("synthetic replay capture metadata is malformed or not ready")]
     DebugSyntheticMetadataInvalid,
@@ -7286,6 +7373,100 @@ mod tests {
         assert!(decode_diagnostics(&[0; 103]).is_err());
         assert!(decode_diagnostics(&[0; 80]).is_ok());
         assert!(decode_diagnostics(&[0; 104]).is_ok());
+    }
+
+    #[test]
+    fn closed_synthetic_metadata_reports_closed_not_malformed() {
+        let fixture = serde_json::json!({
+            "schema_version": 2,
+            "fixture_kind": "synthetic-original-video-replay",
+            "state": "closed",
+            "pid": 77,
+            "process_id": 77,
+            "window_handle": 4660,
+            "hwnd": 4660,
+            "executable_basename": DEBUG_SYNTHETIC_TARGET_BASENAME,
+            "exe_basename": DEBUG_SYNTHETIC_TARGET_BASENAME,
+            "decoded_frames": 3,
+            "visual_source": DEBUG_SYNTHETIC_MOVING_VISUAL_SOURCE,
+            "portrait_sha256": DEBUG_SYNTHETIC_PORTRAIT_SHA256,
+            "source_sequence_sha256": DEBUG_SYNTHETIC_SOURCE_SEQUENCE_SHA256,
+            "source_frame_count": 42,
+            "source_frame_width": 960,
+            "source_frame_height": 720,
+            "source_frame_rate": 30,
+            "source_frame_motion": true,
+            "source_actor_motion": false,
+            "rendered_actor_motion": true,
+            "rendered_blink_motion": true,
+            "rendered_breathing_motion": true,
+            "source_mouth_articulation": false,
+            "product_lip_sync": false,
+            "visual_mode": "moving-source-controlled-idle-v2",
+            "content_frame_index": 7,
+            "content_frame_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        });
+        assert!(matches!(
+            decode_debug_synthetic_target_metadata(
+                &serde_json::to_vec(&fixture).expect("serialize closed metadata")
+            ),
+            Err(MediaBrokerError::DebugSyntheticTargetClosed)
+        ));
+    }
+
+    #[test]
+    fn review_metadata_falls_back_to_manually_opened_production_handoff() {
+        let root = tempfile::tempdir().expect("config root");
+        let review_dir = root
+            .path()
+            .join("io.github.akshitireddy.interactive-npcs.review");
+        let production_dir = root.path().join("io.github.akshitireddy.interactive-npcs");
+        std::fs::create_dir_all(&review_dir).expect("review dir");
+        std::fs::create_dir_all(&production_dir).expect("production dir");
+        let fixture = serde_json::json!({
+            "schema_version": 1,
+            "fixture_kind": "synthetic-original-video-replay",
+            "state": "playing",
+            "pid": 77,
+            "process_id": 77,
+            "window_handle": 4660,
+            "hwnd": 4660,
+            "executable_basename": DEBUG_SYNTHETIC_TARGET_BASENAME,
+            "exe_basename": DEBUG_SYNTHETIC_TARGET_BASENAME,
+            "decoded_frames": 3,
+            "visual_source": DEBUG_SYNTHETIC_VISUAL_SOURCE,
+            "portrait_sha256": DEBUG_SYNTHETIC_PORTRAIT_SHA256,
+            "source_mouth_motion": false,
+        });
+        std::fs::write(
+            production_dir.join(DEBUG_SYNTHETIC_METADATA_FILE_NAME),
+            serde_json::to_vec(&fixture).expect("serialize fallback metadata"),
+        )
+        .expect("write fallback metadata");
+        let primary = review_dir.join(DEBUG_SYNTHETIC_METADATA_FILE_NAME);
+        assert!(!primary.exists());
+        let identity = read_debug_synthetic_target_with_fallback(&primary)
+            .expect("manual production handoff is accepted");
+        assert_eq!(identity.process_id, 77);
+        assert_eq!(identity.native_window, 4660);
+
+        let missing_primary = root
+            .path()
+            .join("io.github.akshitireddy.interactive-npcs.review-2")
+            .join(DEBUG_SYNTHETIC_METADATA_FILE_NAME);
+        assert!(matches!(
+            read_debug_synthetic_target_with_fallback(&missing_primary),
+            Err(MediaBrokerError::DebugSyntheticMetadataUnavailable)
+        ));
+        assert!(debug_synthetic_metadata_fallback(&missing_primary).is_none());
+    }
+
+    #[test]
+    fn target_blocked_reason_names_stay_actionable() {
+        assert!(target_block_reason_name(&1_u32.to_le_bytes()).starts_with("invalid_window"));
+        assert!(target_block_reason_name(&2_u32.to_le_bytes()).starts_with("minimized"));
+        assert!(target_block_reason_name(&10_u32.to_le_bytes()).starts_with("not_allowlisted"));
+        assert_eq!(target_block_reason_name(&[]), "target_blocked");
     }
 
     #[test]
