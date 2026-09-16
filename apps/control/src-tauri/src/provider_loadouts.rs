@@ -525,6 +525,10 @@ fn validate_route_against_catalog_for_distribution(
 fn hosted_tts_route_supported(provider_id: &str, private_evaluation_enabled: bool) -> bool {
     match provider_id {
         "cartesia" | "deepgram" | "elevenlabs" | "inworld" => true,
+        // The testing dummy voice is a local transport implemented by the
+        // runtime host. It is authorized by exact route match below, needs no
+        // credential, and never leaves the machine.
+        "testing" => true,
         // Magpie is executable only in an isolated private-evaluation namespace.
         // Activation separately requires the persisted current provider-wide
         // NVIDIA trial acknowledgement, exact credential, and stock-voice gates;
@@ -536,6 +540,12 @@ fn hosted_tts_route_supported(provider_id: &str, private_evaluation_enabled: boo
 
 fn qualified_hosted_tts_route(route: &ProviderModelRouteV1) -> bool {
     match route.provider_id.as_str() {
+        "testing" => {
+            route.model_id == "testing-synth-v1"
+                && route.voice_id.as_deref() == Some("testing-voice-1")
+                && route.credential.is_none()
+                && route.explicit_user_selection
+        }
         "cartesia" => {
             route.model_id == CARTESIA_QUALIFIED_MODEL_ID
                 && route.voice_id.as_deref() == Some(CARTESIA_QUALIFIED_STOCK_VOICE_ID)
@@ -1792,7 +1802,7 @@ mod tests {
 
         let snapshot = store.load();
         assert_eq!(snapshot.document.activation.global, id("api-first-starter"));
-        assert_eq!(snapshot.document.loadouts.len(), 4);
+        assert_eq!(snapshot.document.loadouts.len(), 5);
         let resolved = snapshot
             .document
             .resolve(
@@ -1862,7 +1872,23 @@ mod tests {
             ProviderLoadoutPersistenceHealth::Healthy
         );
         assert_eq!(snapshot.document.activation.global, id("api-first-starter"));
-        assert_eq!(snapshot.document.loadouts.len(), 4);
+        assert_eq!(snapshot.document.loadouts.len(), 5);
+        let testing = snapshot
+            .document
+            .loadouts
+            .get(&id("testing-dummy"))
+            .expect("seeded testing loadout");
+        let RoleOverrideV1::Route(route) = testing
+            .roles
+            .get(&ProviderRole::Tts)
+            .expect("testing tts route")
+        else {
+            panic!("expected testing tts route")
+        };
+        assert_eq!(route.primary.provider_id, "testing");
+        assert_eq!(route.primary.model_id, "testing-synth-v1");
+        assert_eq!(route.primary.voice_id.as_deref(), Some("testing-voice-1"));
+        assert!(route.primary.credential.is_none());
         let resolved = snapshot
             .document
             .resolve(
@@ -2150,6 +2176,65 @@ mod tests {
             .expect_err("cloud routes cannot resolve offline");
         assert!(matches!(error, CommandError::InvalidRequest { .. }));
         assert!(!error.to_string().contains("nvidia"));
+    }
+
+    #[test]
+    fn testing_dummy_routes_persist_resolve_and_pin_ready_without_credentials() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let store = ProviderLoadoutStore::new_for_distribution(
+            temp.path(),
+            REVIEW_APPLICATION_NAMESPACE.into(),
+        );
+        let mut document = starter_document();
+        let loadout = document
+            .loadouts
+            .get_mut(&id("api-first-starter"))
+            .expect("starter loadout");
+        let RoleOverrideV1::Route(route) = loadout
+            .roles
+            .get_mut(&ProviderRole::Llm)
+            .expect("llm route")
+        else {
+            panic!("expected route")
+        };
+        route.primary.provider_id = "testing".into();
+        route.primary.model_id = "testing-echo-v1".into();
+        route.primary.voice_id = None;
+        route.primary.credential = None;
+        route.primary.disclosure.execution = ExecutionLocationV1::Local;
+        route.primary.disclosure.egress = EgressClassV1::None;
+        route.primary.disclosure.transmitted_data = BTreeSet::new();
+        let RoleOverrideV1::Route(route) = loadout
+            .roles
+            .get_mut(&ProviderRole::Tts)
+            .expect("tts route")
+        else {
+            panic!("expected route")
+        };
+        route.primary.provider_id = "testing".into();
+        route.primary.model_id = "testing-synth-v1".into();
+        route.primary.voice_id = Some("testing-voice-1".into());
+        route.primary.credential = None;
+        route.primary.disclosure.execution = ExecutionLocationV1::Local;
+        route.primary.disclosure.egress = EgressClassV1::None;
+        route.primary.disclosure.transmitted_data = BTreeSet::new();
+        store.save(&document).expect("testing routes persist");
+        let loaded = store.load();
+        assert_eq!(
+            loaded.persistence_health,
+            ProviderLoadoutPersistenceHealth::Healthy
+        );
+        let resolved = loaded
+            .document
+            .resolve(&LoadoutContextV1::global(), &ValidationContextV1::online())
+            .expect("testing routes resolve");
+        let pinned = resolved.pin_turn_routes(1);
+        let llm = pinned.route(ProviderRole::Llm).expect("llm route");
+        assert_eq!(llm.provider_id.as_str(), "testing");
+        assert_eq!(llm.model_id.as_str(), "testing-echo-v1");
+        let tts = pinned.route(ProviderRole::Tts).expect("tts route");
+        assert_eq!(tts.provider_id.as_str(), "testing");
+        assert_eq!(tts.voice_id.as_deref(), Some("testing-voice-1"));
     }
 
     #[test]

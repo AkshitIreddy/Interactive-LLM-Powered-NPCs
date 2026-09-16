@@ -212,6 +212,22 @@ export const ROUTE_OPTIONS: Record<ProviderRole, RouteProviderOption[]> = {
       cost: "Evaluation limits or metered usage",
       models: [{ id: "command-a-plus-05-2026", name: "Command A+" }],
     },
+    {
+      id: "testing",
+      name: "Testing · local dummy",
+      execution: "Local",
+      privacy: "Nothing leaves this PC: no network calls, no account, no credentials",
+      egress: "None",
+      cost: "Free · echo replies for zero-spend pipeline testing",
+      note: "Replies repeat the turn transcript with a testing prefix. No inference happens; memory stores the labeled echo.",
+      models: [
+        {
+          id: "testing-echo-v1",
+          name: "Echo v1 · repeats your text",
+          note: "Deterministic local echo for testing the turn, subtitle, memory, and audio path without spending API calls.",
+        },
+      ],
+    },
   ],
   stt: [
     {
@@ -330,6 +346,22 @@ export const ROUTE_OPTIONS: Record<ProviderRole, RouteProviderOption[]> = {
         {
           id: "magpie-tts-multilingual",
           name: "Magpie multilingual · stock voice",
+        },
+      ],
+    },
+    {
+      id: "testing",
+      name: "Testing · local dummy voice",
+      execution: "Local",
+      privacy: "Reply text stays on this PC: no network calls, no account, no credentials",
+      egress: "None",
+      cost: "Free · synthetic beeps for zero-spend pipeline testing",
+      note: "Produces clearly synthetic test beeps scaled by text length through the normal speaker path. It is not a voice.",
+      models: [
+        {
+          id: "testing-synth-v1",
+          name: "Synth v1 · test beeps",
+          note: "Deterministic local sine-pattern audio for testing speech, subtitles, and lip-sync motion without spending API calls.",
         },
       ],
     },

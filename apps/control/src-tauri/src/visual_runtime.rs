@@ -88,10 +88,10 @@ const REVIEW_DETECTOR_SHA256: &str =
 const REVIEW_LANDMARK_SHA256: &str =
     "5bec42b298a24142cdb249a7256d65bc3fc0fbc673fa1752a64f4d7164719c9f";
 #[cfg(debug_assertions)]
-const REVIEW_ORT_SHA256: &str = "ea37f63d94a0f37405bf47eaf9c2287cd84b8084bfc37f682d07c4bc305105ed";
+const REVIEW_ORT_SHA256: &str = "7788f3f38e9a339003f7d7e1bf47f928287cf409bb5273273149e1282fbf503f";
 #[cfg(debug_assertions)]
 const REVIEW_ORT_SHARED_SHA256: &str =
-    "6da7afec6c88cf51572c1d0ce60cd97c865b5f348c2431b0733ce48cd03c201c";
+    "7a71dbee513692aeb0bd2346a50ae0edd28c8b34defc17254605a29e81c60569";
 #[cfg(debug_assertions)]
 const LEGACY_MARA_GAME_PROFILE_ID: &str = "eclipse-harbor";
 #[cfg(debug_assertions)]
@@ -4745,13 +4745,13 @@ fn resolve_project_owned_review_provider(
     let runtime = verify_review_provider_file(
         &root,
         Path::new("runtime/onnxruntime-1.22.1-cpu/lib/onnxruntime.dll"),
-        14_854_728,
+        12_416_032,
         REVIEW_ORT_SHA256,
     )?;
     let runtime_shared = verify_review_provider_file(
         &root,
         Path::new("runtime/onnxruntime-1.22.1-cpu/lib/onnxruntime_providers_shared.dll"),
-        22_072,
+        22_048,
         REVIEW_ORT_SHARED_SHA256,
     )?;
     let content_tree_sha256 = sha256_hex(

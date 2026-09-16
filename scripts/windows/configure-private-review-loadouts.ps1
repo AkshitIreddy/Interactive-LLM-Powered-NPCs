@@ -37,24 +37,42 @@ function New-HostedRole {
         [string]$Voice,
         [Parameter(Mandatory)][string]$Privacy,
         [Parameter(Mandatory)][string]$Cost,
-        [Parameter(Mandatory)][string[]]$Data
+        [string[]]$Data = @(),
+        [switch]$Local
     )
-    $primary = [ordered]@{
-        provider_id = $Provider
-        model_id = $Model
-        credential = [ordered]@{
+    if ($Local) {
+        $primary = [ordered]@{
             provider_id = $Provider
-            reference_id = 'personal'
+            model_id = $Model
+            credential = $null
+            disclosure = [ordered]@{
+                catalog_revision = $catalogRevision
+                execution = 'local'
+                egress = 'none'
+                privacy_summary = $Privacy
+                cost_summary = $Cost
+                transmitted_data = @()
+            }
+            explicit_user_selection = $true
         }
-        disclosure = [ordered]@{
-            catalog_revision = $catalogRevision
-            execution = 'hosted'
-            egress = 'provider_cloud'
-            privacy_summary = $Privacy
-            cost_summary = $Cost
-            transmitted_data = @($Data)
+    } else {
+        $primary = [ordered]@{
+            provider_id = $Provider
+            model_id = $Model
+            credential = [ordered]@{
+                provider_id = $Provider
+                reference_id = 'personal'
+            }
+            disclosure = [ordered]@{
+                catalog_revision = $catalogRevision
+                execution = 'hosted'
+                egress = 'provider_cloud'
+                privacy_summary = $Privacy
+                cost_summary = $Cost
+                transmitted_data = @($Data)
+            }
+            explicit_user_selection = $true
         }
-        explicit_user_selection = $true
     }
     if (-not [string]::IsNullOrWhiteSpace($Voice)) {
         $primary['voice_id'] = $Voice
@@ -205,6 +223,41 @@ foreach ($provider in $llmPresets.Keys) {
 }
 
 $activeId = [string]$llmPresets[$ActivateLlm].id
+# Zero-spend local dummy loadout. It is seeded as an available option and is
+# never activated here: the active setup keeps real providers. The user
+# activates testing-dummy explicitly in Loadout when they want to test the
+# turn, subtitle, memory, and speaker path without spending API calls. The
+# echo reply and sine-pattern voice are deliberately identifiable as dummy.
+if ($null -eq $document.loadouts.PSObject.Properties['testing-dummy']) {
+    $testingRoles = [ordered]@{
+        llm = New-HostedRole -Provider 'testing' -Model 'testing-echo-v1' -Local `
+            -Privacy 'Nothing leaves this PC: the reply echoes the transcript locally.' `
+            -Cost 'Free. No inference, no network calls, no credentials.' `
+            -Data @()
+        stt = New-HostedRole -Provider 'assemblyai' -Model 'u3-rt-pro' `
+            -Privacy 'Microphone audio is sent to AssemblyAI while push to talk is active.' `
+            -Cost 'Uses the connected AssemblyAI account.' -Data @('microphone_audio')
+        tts = New-HostedRole -Provider 'testing' -Model 'testing-synth-v1' -Local `
+            -Voice 'testing-voice-1' `
+            -Privacy 'Reply text stays on this PC: clearly synthetic beeps are synthesized locally.' `
+            -Cost 'Free. No network calls, no credentials.' `
+            -Data @()
+        embeddings = New-FtsRole
+        vision = [ordered]@{ mode = 'disabled' }
+        lipsync = [ordered]@{ mode = 'disabled' }
+    }
+    $testingLoadout = [ordered]@{
+        id = 'testing-dummy'
+        name = 'Testing - Local dummy (no API spend)'
+        scope = [ordered]@{ kind = 'global' }
+        parent = $null
+        roles = $testingRoles
+    }
+    $document.loadouts | Add-Member -NotePropertyName 'testing-dummy' -NotePropertyValue $testingLoadout
+    $changes += [ordered]@{ id = 'testing-dummy'; status = 'created' }
+} else {
+    $changes += [ordered]@{ id = 'testing-dummy'; status = 'already_present' }
+}
 if ($null -eq $document.activation.games) {
     $document.activation | Add-Member -NotePropertyName games -NotePropertyValue ([pscustomobject]@{})
 }

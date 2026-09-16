@@ -1323,11 +1323,12 @@ mod tests {
             "qwen-tts-local",
             "llamacpp-local",
             "onnx-embedding-local",
+            "testing",
         ] {
             assert!(ids.contains(expected), "missing provider {expected}");
         }
-        assert_eq!(document.content.providers.len(), 22);
-        assert_eq!(document.content.models.len(), 35);
+        assert_eq!(document.content.providers.len(), 23);
+        assert_eq!(document.content.models.len(), 37);
         assert_eq!(document.content.pack_templates.len(), 8);
         assert_eq!(document.content.voice_intents.len(), 8);
         for id in [
@@ -1436,6 +1437,20 @@ mod tests {
             .map(|provider| (provider.id.as_str(), provider))
             .collect();
         for model in &document.content.models {
+            if model.provider_id == "testing" {
+                // Built-in zero-spend dummy adapters are the single exception
+                // to the offline pack flow: no pack, download, credential, or
+                // network call exists, so they stay experimental, selectable,
+                // and explicitly non-default by construction.
+                assert_eq!(model.availability, RouteAvailability::ImplementedAdapter);
+                assert_eq!(model.lifecycle, Lifecycle::Experimental);
+                assert!(model.is_selectable());
+                assert!(!model.eligibility.default_candidate);
+                assert!(!model.eligibility.automatic_fallback_candidate);
+                assert!(model.qualification_requirements.is_empty());
+                assert!(model.qualification_evidence.is_none());
+                continue;
+            }
             if providers[model.provider_id.as_str()].egress == EgressClass::Offline {
                 assert_eq!(
                     model.availability,
@@ -1634,7 +1649,7 @@ mod tests {
 
         assert_eq!(
             document.signing_sha256().unwrap(),
-            "cc81430efac696c96125b642e5c9805d24cac6b97bbb3ddeac62a231e66553c3"
+            "df2a0ba6b5ed5cb850ace84baddad87126ab086b2e7b266027d92be976aa0a1d"
         );
     }
 

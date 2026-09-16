@@ -87,6 +87,16 @@ const DEV_LIVE_TTS_PROVIDER_ID: &str = "elevenlabs";
 const DEV_LIVE_TTS_MODEL_ID: &str = "eleven_flash_v2_5";
 const DEV_LIVE_TTS_STOCK_VOICE_IDS: &[&str] = &["EXAVITQu4vr4xnSDxMaL"];
 
+/// Zero-spend local dummy providers. They perform no inference, make no
+/// network calls, and need no credential. The echo reply and the sine-pattern
+/// voice are deliberately identifiable as testing output.
+const TESTING_LLM_PROVIDER_ID: &str = "testing";
+const TESTING_LLM_MODEL_ID: &str = "testing-echo-v1";
+const TESTING_TTS_PROVIDER_ID: &str = "testing";
+const TESTING_TTS_MODEL_ID: &str = "testing-synth-v1";
+const TESTING_TTS_VOICE_ID: &str = "testing-voice-1";
+const TESTING_TTS_SAMPLE_RATE_HZ: u32 = 24_000;
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SimulationRequest {
@@ -872,7 +882,22 @@ impl HostState {
                         "The pinned reply-model route is not ready. Choose Retry or explicitly activate a manual fallback.",
                     );
                 };
-                if primary.provider_id == "mock-llm"
+                if primary.provider_id == TESTING_LLM_PROVIDER_ID
+                    && primary.model_id == TESTING_LLM_MODEL_ID
+                {
+                    // Zero-spend local echo: no inference, no network, no
+                    // credential. The testing prefix keeps dummy output
+                    // identifiable in subtitles, memory, and evidence.
+                    let echo = format!("Testing echo: {}", request.transcript.trim());
+                    Arc::new(FixtureLlm {
+                        descriptor: local_descriptor(
+                            TESTING_LLM_PROVIDER_ID,
+                            ProviderModality::LanguageModel,
+                        ),
+                        response: echo,
+                        delta_delay: Some(Duration::from_millis(50)),
+                    })
+                } else if primary.provider_id == "mock-llm"
                     && matches!(
                         primary.model_id.as_str(),
                         "mock-stream-v1" | "mock-stream-cancellable-v1"
@@ -928,6 +953,35 @@ impl HostState {
                 .filter(|_| delivery.audio)
                 .and_then(|snapshot| ready_primary(&snapshot.roles.tts))
             {
+                Some(route)
+                    if route.provider_id == TESTING_TTS_PROVIDER_ID
+                        && route.model_id == TESTING_TTS_MODEL_ID
+                        && route.voice_id.as_deref() == Some(TESTING_TTS_VOICE_ID)
+                        && !broker_leases.is_empty() =>
+                {
+                    // Zero-spend local synth voice over the normal broker
+                    // playback path: no credential, no network. The measured
+                    // no-lease variant lives beside the mock fixture below.
+                    match build_testing_dependencies(
+                        route,
+                        broker_leases,
+                        Arc::clone(&turn_audio_receipts),
+                    ) {
+                        Ok(dependencies) => Some(dependencies),
+                        Err(_) => {
+                            return manual_retry_result(
+                                &request,
+                                selected_route.as_deref().expect("selected route is present"),
+                                &display_name,
+                                character_context_evidence.clone(),
+                                input,
+                                "tts",
+                                Some(route.provider_id.clone()),
+                                "The testing voice route could not be constructed. No automatic fallback was activated.",
+                            );
+                        }
+                    }
+                }
                 Some(route)
                     if matches!(
                         route.provider_id.as_str(),
@@ -1010,6 +1064,31 @@ impl HostState {
                     }
                     Some(snapshot) => match ready_primary(&snapshot.roles.tts) {
                         Some(primary)
+                            if primary.provider_id == TESTING_TTS_PROVIDER_ID
+                                && primary.model_id == TESTING_TTS_MODEL_ID
+                                && primary.voice_id.as_deref() == Some(TESTING_TTS_VOICE_ID) =>
+                        {
+                            // Zero-spend local synth voice measured without a
+                            // device: the broker-lease variant above plays the
+                            // same dummy audio through speakers when leases
+                            // exist. Not debug-gated: testing is a product
+                            // feature for zero-spend pipeline checks.
+                            (
+                                vec![Arc::new(TestingSynthTts {
+                                    descriptor: local_descriptor(
+                                        TESTING_TTS_PROVIDER_ID,
+                                        ProviderModality::Speech,
+                                    ),
+                                })],
+                                Arc::new(MeasuredMockAudio::testing_sink(Arc::clone(
+                                    &turn_audio_receipts,
+                                ))),
+                                None,
+                                Some(Arc::clone(&turn_audio_receipts)),
+                                None,
+                            )
+                        }
+                        Some(primary)
                             if primary.provider_id == "mock-tts"
                                 && primary.model_id == "mock-pcm-v1"
                                 && primary.voice_id.as_deref() == Some("mock-stock-voice-1")
@@ -1022,9 +1101,9 @@ impl HostState {
                                         ProviderModality::Speech,
                                     ),
                                 })],
-                                Arc::new(MeasuredMockAudio {
-                                    ledger: Arc::clone(&turn_audio_receipts),
-                                }),
+                                Arc::new(MeasuredMockAudio::mock_sink(Arc::clone(
+                                    &turn_audio_receipts,
+                                ))),
                                 None,
                                 Some(Arc::clone(&turn_audio_receipts)),
                                 None,
@@ -1316,11 +1395,23 @@ impl HostState {
                     "Executable adapters and action proposals are disabled.".into(),
                 ]
             } else if selected_route.is_some() {
-                vec![
+                let mut notices = vec![
                     "The admitted route snapshot was consumed immutably for this turn; automatic provider fallback remained disabled.".into(),
                     "Audio delivery is reported only when a sink returns a completed, nonzero receipt; otherwise the response is explicitly degraded to subtitles.".into(),
                     "Executable adapters and action proposals are disabled.".into(),
-                ]
+                ];
+                if selected_route.as_deref().is_some_and(|snapshot| {
+                    ready_primary(&snapshot.roles.llm)
+                        .is_some_and(|route| route.provider_id == TESTING_LLM_PROVIDER_ID)
+                        || ready_primary(&snapshot.roles.tts)
+                            .is_some_and(|route| route.provider_id == TESTING_TTS_PROVIDER_ID)
+                }) {
+                    notices.insert(
+                        0,
+                        "Testing routes produced local dummy output for this turn: echoed text and synthesized beeps, no inference, no network calls, no credentials used.".into(),
+                    );
+                }
+                notices
             } else if generic_mode {
                 vec![
                     "Identity is manual and experimental; no visual identity claim is made.".into(),
@@ -2622,6 +2713,21 @@ fn build_dev_live_dependencies(
     })
 }
 
+fn build_testing_dependencies(
+    route: &SelectedProviderRoute,
+    leases: Vec<BrokerAudioPlaybackLease>,
+    receipt_summaries: Arc<AudioReceiptLedger>,
+) -> Result<LiveTtsDependencies, SimulationError> {
+    debug_assert_eq!(route.provider_id, TESTING_TTS_PROVIDER_ID);
+    if leases.is_empty() {
+        return Err(SimulationError::DevLiveTtsUnavailable);
+    }
+    let tts: Arc<dyn TtsProvider> = Arc::new(TestingSynthTts {
+        descriptor: local_descriptor(TESTING_TTS_PROVIDER_ID, ProviderModality::Speech),
+    });
+    broker_receipt_checked_dependencies(tts, leases, receipt_summaries)
+}
+
 async fn build_selected_live_dependencies(
     state: &HostState,
     route: &SelectedProviderRoute,
@@ -3685,10 +3791,102 @@ impl TtsSession for MockStockTtsSession {
     }
 }
 
-struct MeasuredMockAudio {
-    ledger: Arc<AudioReceiptLedger>,
+/// Zero-spend local dummy voice for the testing provider. It synthesizes a
+/// deterministic sine sweep (440-660 Hz) with attack/decay envelopes,
+/// scaled by input text length. The output is deliberately identifiable as
+/// synthetic test audio: it carries prosody-free beeps, never a voice.
+struct TestingSynthTts {
+    descriptor: ProviderDescriptor,
 }
 
+struct TestingSynthTtsSession {
+    descriptor: ProviderDescriptor,
+}
+
+#[async_trait]
+impl TtsProvider for TestingSynthTts {
+    fn descriptor(&self) -> &ProviderDescriptor {
+        &self.descriptor
+    }
+
+    async fn start_session(
+        &self,
+        _identity: &TurnIdentity,
+        _locale: &str,
+        cancellation: CancellationToken,
+    ) -> Result<Box<dyn TtsSession>, ProviderError> {
+        if cancellation.is_cancelled() {
+            return Err(ProviderError::cancelled(&self.descriptor.id));
+        }
+        Ok(Box::new(TestingSynthTtsSession {
+            descriptor: self.descriptor.clone(),
+        }))
+    }
+}
+
+#[async_trait]
+impl TtsSession for TestingSynthTtsSession {
+    fn provider(&self) -> &ProviderDescriptor {
+        &self.descriptor
+    }
+
+    async fn synthesize(
+        &mut self,
+        request: SpeechRequest,
+        cancellation: CancellationToken,
+    ) -> Result<SpeechStream, ProviderError> {
+        if cancellation.is_cancelled() {
+            return Err(ProviderError::cancelled(&self.descriptor.id));
+        }
+        let frames = (request.text.chars().count().max(1) * 240).clamp(2_400, 48_000);
+        let mut pcm_s16le = Vec::with_capacity(frames * 2);
+        let mut phase = 0.0_f64;
+        for frame in 0..frames {
+            let progress = frame as f64 / frames as f64;
+            let frequency = 440.0 + 220.0 * progress;
+            phase += frequency / TESTING_TTS_SAMPLE_RATE_HZ as f64;
+            let attack = (frame as f64 / 480.0).min(1.0);
+            let release = ((frames - frame) as f64 / 480.0).min(1.0);
+            let envelope = attack.min(release);
+            let sample = (8_192.0 * envelope * (2.0 * std::f32::consts::PI as f64 * phase).sin())
+                as i16;
+            pcm_s16le.extend_from_slice(&sample.to_le_bytes());
+        }
+        Ok(Box::pin(stream::iter([Ok(SpeechStreamItem::Audio(
+            AudioChunk {
+                sequence: 1,
+                sample_rate_hz: TESTING_TTS_SAMPLE_RATE_HZ,
+                channels: 1,
+                pcm_s16le,
+                end_of_stream: true,
+            },
+        ))])))
+    }
+}
+
+struct MeasuredMockAudio {
+    ledger: Arc<AudioReceiptLedger>,
+    receipt_tag: &'static str,
+    sink_label: &'static str,
+}
+
+impl MeasuredMockAudio {
+    fn mock_sink(ledger: Arc<AudioReceiptLedger>) -> Self {
+        Self {
+            ledger,
+            receipt_tag: "deterministic-mock",
+            sink_label: "deterministicMock",
+        }
+    }
+
+    fn testing_sink(ledger: Arc<AudioReceiptLedger>) -> Self {
+        Self {
+            ledger,
+            receipt_tag: "testing-local",
+            sink_label: "testingLocal",
+        }
+    }
+}
 #[async_trait]
 impl AudioSink for MeasuredMockAudio {
     async fn play(
@@ -3734,9 +3932,9 @@ impl AudioSink for MeasuredMockAudio {
         let duration = Duration::from_secs_f64(frames as f64 / 24_000.0);
         let rms = (squared_sum / frames as f64).sqrt() as f32;
         self.ledger.record(AudioReceiptSummary {
-            receipt_id: audio_receipt_id(identity, sentence_id, "deterministic-mock"),
+            receipt_id: audio_receipt_id(identity, sentence_id, self.receipt_tag),
             sentence_id,
-            sink: "deterministicMock".into(),
+            sink: self.sink_label.into(),
             transport_schema_version: None,
             stream_id: None,
             session_id: Some(identity.session_id.clone()),
@@ -4001,6 +4199,50 @@ mod tests {
                 committed: true,
             })
         }
+    }
+
+    #[tokio::test]
+    async fn testing_synth_voice_records_measured_receipt() {
+        use npc_runtime_core::{SpeechRequest, TurnIdentity};
+
+        let ledger = Arc::new(AudioReceiptLedger::default());
+        let tts = TestingSynthTts {
+            descriptor: local_descriptor(TESTING_TTS_PROVIDER_ID, ProviderModality::Speech),
+        };
+        let identity = TurnIdentity {
+            session_id: "testing-unit".into(),
+            turn_id: "testing-unit-1".into(),
+            cancellation_generation: 1,
+        };
+        let mut session = tts
+            .start_session(&identity, "en", CancellationToken::new())
+            .await
+            .expect("testing session starts");
+        let stream = session
+            .synthesize(
+                SpeechRequest {
+                    identity: identity.clone(),
+                    sentence_id: 7,
+                    text: "Testing echo: harbor lantern check".into(),
+                    locale: "en".into(),
+                    voice_hint: None,
+                },
+                CancellationToken::new(),
+            )
+            .await
+            .expect("testing synth produces audio");
+        let sink = MeasuredMockAudio::testing_sink(Arc::clone(&ledger));
+        let receipt = sink
+            .play(&identity, 7, stream, CancellationToken::new())
+            .await
+            .expect("measured sink accepts testing synth");
+        assert!(receipt.completed);
+        assert_eq!(receipt.audible_frames, 34 * 240);
+        let records = ledger.snapshot().expect("ledger snapshot");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].sentence_id, 7);
+        assert_eq!(records[0].sink, "testingLocal");
+        assert!(records[0].submitted && records[0].source_frames > 0);
     }
 
     #[tokio::test]

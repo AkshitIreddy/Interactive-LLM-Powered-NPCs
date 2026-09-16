@@ -418,7 +418,16 @@ impl RuntimeRouter {
             .iter()
             .map(ExpectedPlaybackReceipt::from)
             .collect::<Vec<_>>();
-        if overlay_enabled {
+        // The project-owned synthetic fixture exists to exercise the visual
+        // path end to end, so its turns always attempt it in review builds.
+        // Real games stay gated on the explicit overlay preference, and every
+        // rejected visual gate restores untouched frames without failing audio.
+        let review_visual_turn = cfg!(debug_assertions)
+            && matches!(
+                trusted_safety_context.profile_policy,
+                crate::sidecar_protocol::NativeProfileSafetyPolicy::SyntheticFixture
+            );
+        if overlay_enabled || review_visual_turn {
             self.visual_coordinator.start_turn(&playback_leases).await;
         }
         if playback_pool_allocated {
@@ -719,6 +728,15 @@ fn selected_playback_format(
         .as_ref()
         .map(|credential| credential.provider_id.as_str());
     match route.provider_id.as_str() {
+        "testing"
+            if route.model_id == "testing-synth-v1"
+                && route.voice_id.as_deref() == Some("testing-voice-1") =>
+        {
+            // Zero-spend local dummy voice: no credential exists or is
+            // required. The runtime synthesizes labeled test audio and plays
+            // it through the same broker leases as hosted voices.
+            Some((24_000, 1))
+        }
         "cartesia"
             if credential_provider == Some("cartesia")
                 && route.model_id == "sonic-3.6"
@@ -1944,6 +1962,22 @@ mod tests {
         assert_eq!(
             selected_playback_format(&StartSimulationRequest::default(), &routes),
             None
+        );
+
+        // Zero-spend testing voice needs no credential and still allocates
+        // the exact broker PCM format so dummy audio reaches speakers.
+        let tts = routes
+            .roles
+            .get_mut(&ProviderRole::Tts)
+            .and_then(|role| role.primary.as_mut())
+            .expect("TTS route");
+        tts.provider_id = "testing".into();
+        tts.model_id = "testing-synth-v1".into();
+        tts.voice_id = Some("testing-voice-1".into());
+        tts.credential = None;
+        assert_eq!(
+            selected_playback_format(&StartSimulationRequest::default(), &routes),
+            Some((24_000, 1))
         );
 
         let debug = StartSimulationRequest {

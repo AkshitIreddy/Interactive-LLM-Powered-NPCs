@@ -2831,7 +2831,9 @@ pub fn start_this_pc_benchmark(
                 voice_id: primary.voice_id.clone(),
                 route_revision: format!("catalog-{}", primary.disclosure.catalog_revision),
                 egress: canonical_benchmark_egress(&primary.disclosure),
-                execution_mode: if primary.provider_id.starts_with("mock-") {
+                execution_mode: if primary.provider_id.starts_with("mock-")
+                    || primary.provider_id == "testing"
+                {
                     EvidenceExecutionMode::Mocked
                 } else {
                     EvidenceExecutionMode::Live

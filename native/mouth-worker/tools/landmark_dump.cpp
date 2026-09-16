@@ -35,9 +35,9 @@ constexpr std::string_view yunet_detector_sha256 =
 constexpr std::string_view landmark_sha256 =
     "5bec42b298a24142cdb249a7256d65bc3fc0fbc673fa1752a64f4d7164719c9f";
 constexpr std::string_view runtime_sha256 =
-    "ea37f63d94a0f37405bf47eaf9c2287cd84b8084bfc37f682d07c4bc305105ed";
+    "7788f3f38e9a339003f7d7e1bf47f928287cf409bb5273273149e1282fbf503f";
 constexpr std::string_view runtime_shared_sha256 =
-    "6da7afec6c88cf51572c1d0ce60cd97c865b5f348c2431b0733ce48cd03c201c";
+    "7a71dbee513692aeb0bd2346a50ae0edd28c8b34defc17254605a29e81c60569";
 
 [[nodiscard]] Nanoseconds monotonic_ns() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(

@@ -87,6 +87,8 @@ function qualifiedStockVoiceId(providerId: string) {
       return "Arcas";
     case "inworld":
       return "Dennis";
+    case "testing":
+      return "testing-voice-1";
     default:
       return undefined;
   }
@@ -100,6 +102,7 @@ function stockVoicePresetFor(providerId: string) {
     cartesia: "Greg · clear and grounded",
     deepgram: "Arcas · natural English",
     inworld: "Dennis · expressive English",
+    testing: "Test beeps · clearly synthetic",
   };
   return { voiceId, label: labels[providerId] ?? "Verified stock voice" };
 }

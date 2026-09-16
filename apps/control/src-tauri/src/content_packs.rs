@@ -824,7 +824,7 @@ mod tests {
             "../../../../profiles/content-packs/local-review/cyberpunk-2077-authored-context-v1.pack.json"
         );
         let (pack, digest) = parse_and_validate_pack(json_text, &resources).expect("valid pack");
-        assert_eq!(pack.profile.content.knowledge.len(), 7);
+        assert_eq!(pack.profile.content.knowledge.len(), 36);
         assert_eq!(pack.provider_recommendations.len(), 2);
         assert!(is_sha256(&digest));
     }
