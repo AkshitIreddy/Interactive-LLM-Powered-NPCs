@@ -216,4 +216,13 @@ Other helpful commits: `9b468b8` launcher status/refresh, `259e0cb` availability
 - The v22 app binary provably embeds the new error strings. Live user verification of Launch & connect (launcher and manual paths) is still open; ask for the exact new error text if it fails.
 - Environment note: packaging requires `pwsh.exe`, which is absent system-wide; portable PowerShell 7.6.6 is staged at `E:\temp\InteractiveNPCs\tools\pwsh-7.6.6` for build shells only (no system install). Private catalog `202609141801` expires 2026-09-21 18:01 UTC.
 
+## Addendum 2026-09-17: silent-NPC fix + review-v23
+
+- Symptom: text-input turns ran ~0.25 s, committed nothing to memory, and produced subtitles with no voice.
+- Root cause (measured): Groq retired `qwen/qwen3.6-27b` (live 404 `model_not_found`); the starter loadout pinned it, so no provider request ever started and turns degraded to silent subtitles. Cartesia `sonic-3.6` + qualified stock voice was proven healthy the same day (4.72 s clean PCM, first audio 597 ms).
+- Fix commits `7456296` + `b22c246`: catalog r10 adds `groq.llm.qwen3.8-27b` (stable, live-qualified with the exact non-reasoning structured profile) and deprecates 3.6; starter default + private-review seeds + load-time migration move to 3.8; reasoning gate covers both IDs; distribution hash pins updated. Live Groq-3.8→Cartesia turn chain measured request-to-speech at 959 ms (redacted evidence under `E:\temp\InteractiveNPCs\tts-live-20260917\`).
+- Owner private review loadouts re-seeded via `configure-private-review-loadouts.ps1` (isolated review namespace only, no credential values, secret scan clean); `cyberpunk-private-fast-groq` active for Cyberpunk.
+- Fresh review package: `E:\temp\InteractiveNPCs\review-v23` (source `b22c246` clean; app SHA-256 `47adf3ab…096fc`; manifest `e0e259d8…98875b`; all verifications passed, `launched=false`). Delivery record: `E:\temp\InteractiveNPCs\review-v23-delivery-20260917.md`. Independent verification: `E:\temp\InteractiveNPCs\review-v23-independent-verification.json`.
+- Still open: the user's in-app text-turn voice check with v23 (acceptance for this fix); AssemblyAI STT path not re-qualified.
+
 The user explicitly wants the successor to use this context to reach its own conclusions. No algorithm, diagnosis, architecture or work sequence in earlier agent notes is an obligation to preserve that approach.
