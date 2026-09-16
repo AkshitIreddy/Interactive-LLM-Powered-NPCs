@@ -287,7 +287,7 @@
   ],
   "static_files": [
     {"path": "LICENSE", "install_path": "product-audit/legal/LICENSE.txt", "sha256": "8703e8c956a5accb5322bf6160ae4b5612683d680d8803a2288ff0a95f834ce8", "component_id": "project:legal-resources"},
-    {"path": "catalog/v1/catalog.json", "install_path": "catalog/v1/catalog.json", "sha256": "877b1e8750aeb534c1fa2619e56273f75db8af78fd56bb3cba0b54eede7fa039", "component_id": "project:static-resources"},
+    {"path": "catalog/v1/catalog.json", "install_path": "catalog/v1/catalog.json", "sha256": "27cc185fa53005d26374d298242b859c960c41903a48f009f6d342d06cdc752b", "component_id": "project:static-resources"},
     {"path": "apps/control/public/art/city-afterhours.png", "install_path": "frontend-resource-in-executable", "sha256": "e1dfe974b7594fc707c7105896d71b4239571f055ec77b969fb705bf6ed9a5ff", "component_id": "project:static-resources"},
     {"path": "apps/control/public/art/neural-anatomy.png", "install_path": "frontend-resource-in-executable", "sha256": "5fa56622d05dcf2a2e7a461abfb08255e1e69590e88840c1ebc563e7c78b907f", "component_id": "project:static-resources"},
     {"path": "apps/control/public/art/PROVENANCE.md", "install_path": "frontend-resource-in-executable", "sha256": "8122e62766f1341fb886c385829bf71ffd15d833b39e13ee1d138c82a9000c9a", "component_id": "project:static-resources"},
@@ -329,7 +329,7 @@
     {"path": "packaging/model-packs/review-evidence-index-v1.json", "sha256": "a2d9a652133e7e7d54e61380c597e3dd32b6e0df2c91d566b762901e2a042d95", "component_id": "project:static-resources"},
     {"path": "packaging/model-packs/review-evidence/moonshine-non-qualifying-review-summary-v1.json", "sha256": "1d9368f3c91d36430d787ba84474c380ca2904eb534029c1018d0ccd3cd7a96e", "component_id": "project:static-resources"},
     {"path": "packaging/runtime-components/onnxruntime-1.22.1-cpu.json", "install_path": "product-audit/packaging/runtime-components/onnxruntime-1.22.1-cpu.json", "sha256": "99352e1b8d8953515e0ff857980c000797967ed50d5a0316793a9388298fc79d", "component_id": "project:static-resources"},
-    {"path": "profiles/content-packs/local-review/cyberpunk-2077-authored-context-v1.pack.json", "sha256": "7b16dcef9e794593262e12475d281b34dc866a5584f0f2305f7ee13e1ebe4c38", "component_id": "project:static-resources"},
+    {"path": "profiles/content-packs/local-review/cyberpunk-2077-authored-context-v1.pack.json", "sha256": "f17fc20f85e3285aa5c24c437ef74a78c273cd089ccc50d7b3def87d3ae476e4", "component_id": "project:static-resources"},
     {"path": "profiles/games/baldurs-gate-3/profile.json", "sha256": "ef3094a7ddd6c0e527f42cabc4ee44ad3c4d47d40b1fa44072233a01173153d5", "component_id": "project:static-resources"},
     {"path": "profiles/games/cyberpunk-2077/profile.json", "sha256": "a72c61d64f540a59ff418f52d37fa34c02c8ebce69b1b7daaeb365ffdd8c6339", "component_id": "project:static-resources"},
     {"path": "profiles/games/divinity-original-sin-2/profile.json", "sha256": "5c88e007dc4d4277727de4497f7797ce3dbde22bb11db6bc92863ab4bfad03cf", "component_id": "project:static-resources"},
