@@ -391,6 +391,8 @@ async fn real_schema_four_worker_join_is_headless_and_fail_closed() {
             #[cfg(debug_assertions)]
             review_openseeface_root: None,
             #[cfg(debug_assertions)]
+            review_yunet_root: None,
+            #[cfg(debug_assertions)]
             review_mouth_atlas_root: None,
         },
         parent,

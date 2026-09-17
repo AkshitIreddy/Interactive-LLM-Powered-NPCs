@@ -3495,6 +3495,8 @@ mod tests {
                 #[cfg(debug_assertions)]
                 review_openseeface_root: None,
                 #[cfg(debug_assertions)]
+                review_yunet_root: None,
+                #[cfg(debug_assertions)]
                 review_mouth_atlas_root: None,
             },
             parent,

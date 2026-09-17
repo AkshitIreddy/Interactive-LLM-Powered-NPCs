@@ -85,6 +85,9 @@ const MAX_VISUAL_RECEIPT_HISTORY: usize = 128;
 const REVIEW_DETECTOR_SHA256: &str =
     "0e8e4806766d85ab067a52c7af0dcb59eb7f9dfe580b44f20a8e6ab712d89809";
 #[cfg(debug_assertions)]
+const REVIEW_YUNET_DETECTOR_SHA256: &str =
+    "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4";
+#[cfg(debug_assertions)]
 const REVIEW_LANDMARK_SHA256: &str =
     "5bec42b298a24142cdb249a7256d65bc3fc0fbc673fa1752a64f4d7164719c9f";
 #[cfg(debug_assertions)]
@@ -127,7 +130,30 @@ pub struct MouthWorkerLaunchConfig {
     #[cfg(debug_assertions)]
     pub review_openseeface_root: Option<PathBuf>,
     #[cfg(debug_assertions)]
+    pub review_yunet_root: Option<PathBuf>,
+    #[cfg(debug_assertions)]
     pub review_mouth_atlas_root: Option<PathBuf>,
+}
+
+#[cfg(debug_assertions)]
+fn review_pack_root(
+    executable: &Path,
+    config_directory: &Path,
+    pack_id: &str,
+) -> Option<PathBuf> {
+    let portable = executable
+        .parent()?
+        .join(Path::new("review-model-packs").join(pack_id).join(OPENSEEFACE_PACK_REVISION));
+    if portable.is_dir() {
+        Some(portable)
+    } else {
+        Some(
+            config_directory
+                .join("model-packs")
+                .join(pack_id)
+                .join(OPENSEEFACE_PACK_REVISION),
+        )
+    }
 }
 
 impl MouthWorkerLaunchConfig {
@@ -152,11 +178,29 @@ impl MouthWorkerLaunchConfig {
             if portable.is_dir() {
                 Some(portable)
             } else {
-                Some(
-                    config_directory
-                        .join("model-packs")
-                        .join(OPENSEEFACE_PACK_ID)
-                        .join(OPENSEEFACE_PACK_REVISION),
+                review_pack_root(
+                    &executable,
+                    config_directory,
+                    OPENSEEFACE_PACK_ID,
+                )
+            }
+        };
+        #[cfg(debug_assertions)]
+        let review_yunet_root = {
+            let portable_relative = Path::new("review-model-packs")
+                .join(YUNET_OPENSEEFACE_PACK_ID)
+                .join(OPENSEEFACE_PACK_REVISION);
+            let portable = executable
+                .parent()
+                .ok_or(VisualRuntimeError::InvalidBundle)?
+                .join(portable_relative);
+            if portable.is_dir() {
+                Some(portable)
+            } else {
+                review_pack_root(
+                    &executable,
+                    config_directory,
+                    YUNET_OPENSEEFACE_PACK_ID,
                 )
             }
         };
@@ -173,6 +217,8 @@ impl MouthWorkerLaunchConfig {
             development_fixture_allowed,
             #[cfg(debug_assertions)]
             review_openseeface_root,
+            #[cfg(debug_assertions)]
+            review_yunet_root,
             #[cfg(debug_assertions)]
             review_mouth_atlas_root,
         })
@@ -1337,7 +1383,8 @@ impl MouthWorkerSupervisor {
         if generation == 0 {
             return Err(VisualRuntimeError::NoSelectedTarget);
         }
-        let launch = resolve_project_owned_review_provider(
+        let launch = resolve_preferred_review_provider(
+            self.config.review_yunet_root.as_deref(),
             self.config.review_openseeface_root.as_deref(),
             evidence.selected_process_id,
         )?;
@@ -1731,7 +1778,8 @@ impl MouthWorkerSupervisor {
         if generation == 0 || audio_binding.generation == 0 {
             return Err(VisualRuntimeError::AudioAuthority);
         }
-        let launch = resolve_project_owned_review_provider(
+        let launch = resolve_preferred_review_provider(
+            self.config.review_yunet_root.as_deref(),
             self.config.review_openseeface_root.as_deref(),
             evidence.selected_process_id,
         )?;
@@ -2564,6 +2612,7 @@ struct ReviewVerifiedFile {
 #[cfg(debug_assertions)]
 #[derive(Clone, Debug)]
 struct ReviewOpenSeeFaceLaunch {
+    pack_id: String,
     artifact_root: PathBuf,
     detector: ReviewVerifiedFile,
     landmark: ReviewVerifiedFile,
@@ -2573,7 +2622,6 @@ struct ReviewOpenSeeFaceLaunch {
     measurement_sha256: String,
     exact_target_pid: u32,
 }
-
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ReviewMouthAtlasManifest {
@@ -3596,7 +3644,7 @@ fn encode_review_provider_configuration(
     };
     let mut wire = WireWriter::default();
     wire.u32(1);
-    wire.string(OPENSEEFACE_PACK_ID)?;
+    wire.string(&launch.pack_id)?;
     wire.string(OPENSEEFACE_PACK_REVISION)?;
     wire.string(&path(&launch.artifact_root)?)?;
     wire.string(&path(&launch.detector.path)?)?;
@@ -4707,8 +4755,67 @@ fn ns_to_qpc(value: i64, lease: &VisualSourceLease) -> Result<u64, VisualRuntime
 }
 
 #[cfg(debug_assertions)]
+fn resolve_preferred_review_provider(
+    yunet_root: Option<&Path>,
+    mnv3_root: Option<&Path>,
+    exact_target_pid: u32,
+) -> Result<ReviewOpenSeeFaceLaunch, VisualRuntimeError> {
+    // Yunet detects the synthetic fixture on essentially every frame while
+    // mnv3 manages a small fraction, so an installed Yunet pack wins. A
+    // present-but-invalid Yunet root propagates instead of silently falling
+    // back to the weaker detector; a missing Yunet root falls through to
+    // mnv3, which reports its own admission error when also absent.
+    if yunet_root.is_some_and(|root| root.is_dir()) {
+        return resolve_yunet_review_provider(yunet_root, exact_target_pid);
+    }
+    resolve_project_owned_review_provider(mnv3_root, exact_target_pid)
+}
+
+#[cfg(debug_assertions)]
 fn resolve_project_owned_review_provider(
     configured_root: Option<&Path>,
+    exact_target_pid: u32,
+) -> Result<ReviewOpenSeeFaceLaunch, VisualRuntimeError> {
+    resolve_review_provider(
+        OPENSEEFACE_PACK_ID,
+        "npc.project-owned-review-openseeface/v1",
+        configured_root,
+        Path::new("models/mnv3_detection_opt.onnx"),
+        568_302,
+        REVIEW_DETECTOR_SHA256,
+        exact_target_pid,
+    )
+}
+
+/// Yunet review variant. Headless measurement on the synthetic Mara fixture
+/// accepts 42/42 frames at ~0.95 detector confidence versus 1/42 for mnv3,
+/// so the review path prefers Yunet and falls back to mnv3 only when no
+/// Yunet pack is installed.
+#[cfg(debug_assertions)]
+fn resolve_yunet_review_provider(
+    configured_root: Option<&Path>,
+    exact_target_pid: u32,
+) -> Result<ReviewOpenSeeFaceLaunch, VisualRuntimeError> {
+    resolve_review_provider(
+        YUNET_OPENSEEFACE_PACK_ID,
+        "npc.project-owned-review-yunet/v1",
+        configured_root,
+        Path::new("models/face_detection_yunet_2023mar.onnx"),
+        232_589,
+        REVIEW_YUNET_DETECTOR_SHA256,
+        exact_target_pid,
+    )
+}
+
+#[cfg(debug_assertions)]
+#[allow(clippy::too_many_arguments)]
+fn resolve_review_provider(
+    pack_id: &str,
+    measurement_scope: &str,
+    configured_root: Option<&Path>,
+    detector_relative: &Path,
+    detector_size: u64,
+    detector_sha256: &str,
     exact_target_pid: u32,
 ) -> Result<ReviewOpenSeeFaceLaunch, VisualRuntimeError> {
     if exact_target_pid == 0 {
@@ -4732,9 +4839,9 @@ fn resolve_project_owned_review_provider(
     })?;
     let detector = verify_review_provider_file(
         &root,
-        Path::new("models/mnv3_detection_opt.onnx"),
-        568_302,
-        REVIEW_DETECTOR_SHA256,
+        detector_relative,
+        detector_size,
+        detector_sha256,
     )?;
     let landmark = verify_review_provider_file(
         &root,
@@ -4765,12 +4872,10 @@ fn resolve_project_owned_review_provider(
         .as_bytes(),
     );
     let measurement_sha256 = sha256_hex(
-        format!(
-            "npc.project-owned-review-openseeface/v1\n{content_tree_sha256}\n{exact_target_pid}"
-        )
-        .as_bytes(),
+        format!("{measurement_scope}\n{content_tree_sha256}\n{exact_target_pid}").as_bytes(),
     );
     Ok(ReviewOpenSeeFaceLaunch {
+        pack_id: pack_id.into(),
         artifact_root: root,
         detector,
         landmark,
@@ -6409,6 +6514,8 @@ mod tests {
                 #[cfg(debug_assertions)]
                 review_openseeface_root: None,
                 #[cfg(debug_assertions)]
+                review_yunet_root: None,
+                #[cfg(debug_assertions)]
                 review_mouth_atlas_root: None,
             },
             parent,
@@ -6482,6 +6589,8 @@ mod tests {
                 development_fixture_allowed: false,
                 #[cfg(debug_assertions)]
                 review_openseeface_root: None,
+                #[cfg(debug_assertions)]
+                review_yunet_root: None,
                 #[cfg(debug_assertions)]
                 review_mouth_atlas_root: None,
             },
@@ -7553,10 +7662,40 @@ mod tests {
         );
         let launch = resolve_project_owned_review_provider(Some(root.as_path()), 4242)
             .expect("installed review pack resolves");
+        assert_eq!(launch.pack_id, OPENSEEFACE_PACK_ID);
         assert_eq!(launch.detector.size_bytes, 568_302);
         assert_eq!(launch.landmark.size_bytes, 4_842_329);
         assert_eq!(launch.runtime.size_bytes, 12_416_032);
         assert_eq!(launch.runtime_shared.size_bytes, 22_048);
         assert_eq!(launch.exact_target_pid, 4242);
+    }
+
+    /// Optional live check against a real installed Yunet review pack root.
+    /// Set REVIEW_YUNET_PACK_ROOT to the version directory and run with
+    /// `-- --ignored`. Yunet detects the synthetic fixture on essentially
+    /// every frame, so the review path prefers it over mnv3.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[ignore = "requires REVIEW_YUNET_PACK_ROOT pointing at an installed Yunet review pack"]
+    fn review_yunet_launch_accepts_installed_pack() {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("REVIEW_YUNET_PACK_ROOT").expect("pack root is required"),
+        );
+        let launch = resolve_yunet_review_provider(Some(root.as_path()), 4242)
+            .expect("installed Yunet review pack resolves");
+        assert_eq!(launch.pack_id, YUNET_OPENSEEFACE_PACK_ID);
+        assert_eq!(launch.detector.size_bytes, 232_589);
+        assert_eq!(launch.landmark.size_bytes, 4_842_329);
+        assert_eq!(launch.runtime.size_bytes, 12_416_032);
+        assert_eq!(launch.runtime_shared.size_bytes, 22_048);
+        // Preference: an installed Yunet pack wins; a missing one falls
+        // through to mnv3, which reports its own admission error here.
+        let preferred = resolve_preferred_review_provider(Some(root.as_path()), None, 4242)
+            .expect("preferred provider is Yunet");
+        assert_eq!(preferred.pack_id, YUNET_OPENSEEFACE_PACK_ID);
+        assert!(matches!(
+            resolve_preferred_review_provider(None, None, 4242),
+            Err(VisualRuntimeError::Admission(_))
+        ));
     }
 }
