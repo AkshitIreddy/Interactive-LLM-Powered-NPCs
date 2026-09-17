@@ -202,3 +202,27 @@ under one `testing` provider, for joint testing without API spend.
   always, positive env-gated via `REVIEW_OPENSEEFACE_PACK_ROOT`); the
   positive run passes against the installed owner pack (0.51 s).
 - §0 HEAD corrected to `3ebbb10`.
+
+## 11. Continuation session (2026-09-17 — review path prefers Yunet)
+
+- Implemented the pivot: `MouthWorkerLaunchConfig.review_yunet_root`
+  (portable `review-model-packs/<yunet-id>/<rev>` else config
+  `model-packs/<yunet-id>/<rev>`); `resolve_yunet_review_provider` with
+  Yunet detector pin (232,589 bytes) beside the shared lm1/ORT pins;
+  `pack_id` now travels on the launch struct into the worker wire
+  protocol (worker already admitted the Yunet pack id — no worker change);
+  `resolve_preferred_review_provider` prefers installed Yunet, falls back
+  to mnv3 only when no Yunet root exists, and fails closed on
+  corrupt-but-present Yunet roots. Both `prepare` and `present` call
+  sites use it. Install script gained `-PackVariant Yunet` (verified
+  closed world incl. both license files) and installed the owner
+  profile's Yunet pack (10 files verified).
+- Commit `994f22d`; single `review` folder rebuilt from it (source
+  clean; app SHA-256 `3ae69f05…9688b52b8`; manifest `d662ada9…1ebe6b40f`;
+  all verifications passed, `launched=false`). Delivery record
+  overwritten: `E:\temp\InteractiveNPCs\review-delivery.md`.
+- Coverage: new env-gated Yunet resolution test passes against the
+  installed pack; control lib 273/273; Clippy/fmt clean on touched code.
+- Not done: live in-app motion proof (needs game + broker + turn — joint
+  testing); compositor natural quality; STT testing (deliberately still
+  cloud-only).
