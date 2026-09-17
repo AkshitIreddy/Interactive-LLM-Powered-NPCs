@@ -7,7 +7,7 @@ for product mission and earlier history.
 
 ## 0. Where things stand
 
-- Branch: `feat/2.0-overhaul`. HEAD: `14db70e` (all work after remote
+- Branch: `feat/2.0-overhaul`. HEAD: `37f189d` (all work after remote
   `4874ca9` is local-only).
 - Remote `origin` has `feat/2.0-overhaul` at **`4874ca9` only**, pushed per one
   explicit user request (plus a declined PR prompt — do not open one
@@ -283,4 +283,55 @@ Left running on the user machine when this session stopped: the review
 app (showing the completed testing turn), the synthetic game window,
 tauri-driver on port 4444 (WebDriver session 0a0afe41-8072; the earlier de05bb9e-499e5 session was closed
 with its pre-fix build). Close or keep at the user direction.
+
+## 13. Live retest after the validation fix (stopped mid-analysis)
+
+- Commit `14db70e` fixed the leased-testing-turn rejection (runtime
+  `selected_hosted_tts_format` lacked the testing arm) plus a
+  leased-validation regression test. Single `review` folder rebuilt from
+  it (source clean, app SHA-256 `e5995f95…738f20fa50`, all verifications
+  passed); delivery-doc identity block updated to match.
+- Live retest, all observed (evidence: `lipsync-proof/live/app-2*.png`,
+  `game-turn2-*.png`, `game-quiet-*.png`, `app-dom-turn.html`):
+  manually started game (PID 21052) attached with WGC receipt verified;
+  testing-dummy still active from the earlier session; typed turn sent and
+  **completed** ("Testing echo: …" committed, 15 turn events, consumed
+  route testing-dummy gen 1, LLM testing-echo-v1, TTS
+  testing-synth-v1/voice-1).
+- Delivery-details disclosure in the UI: Audio "Not proven - requires live
+  TTS + submission + drain receipts"; Visible speech "Not reported - no
+  native visual presentation receipt". No degradation text is rendered in
+  the DOM for this turn.
+- Mouth verdict again negative: 10 turn-window frames vs 4 quiet frames,
+  mouth-box mean diffs 4–6.5/255 in both sets — indistinguishable from
+  idle breathing/camera motion. Diagnostics log
+  `visual turn.unavailable skipped
+  visual_actor_lock_or_admission_unavailable` on every turn, and zero
+  audio/broker/playback/lease diagnostic entries anywhere (submission and
+  drain are not logged on success — absence proves nothing).
+- Speaker-submission question still open (agent cannot hear). Rig ready
+  but unanalyzed: `tools/loopback-record.py` (sounddevice WASAPI loopback
+  of the default output — PortAudio exposes no loopback device by name;
+  use `WasapiSettings(loopback=True)` on WASAPI output index 16) plus a
+  testing turn (turn3, ~124-char echo) sent with 6 game captures;
+  `lipsync-proof/live/loopback-turn3.wav` (22 s) and `game-turn3-*.png`
+  exist on disk. Next: spectrum/onset analysis for the 440–660 Hz beeps
+  to prove or deny speaker submission, then frame comparison if audio is
+  present. If beeps are present, the fault is purely visual; if absent,
+  the broker sink path from the sidecar is broken too.
+- Visual-receipt detail is currently unreachable live: `debug_latest_
+  visual_presentation_receipt` is a Tauri command but the webview sets no
+  `window.__TAURI__` global, so WebDriver `execute` cannot invoke it.
+  To get the exact bypass reason, surface the latest visual receipt in
+  the turn trace UI or a diagnostics log line, then rebuild and re-run.
+- Driver caveats learned: launcher-spawn fails under driver-launched app
+  (suspected nested Job Object conflict — Explorer launches unaffected;
+  do not file as product bug without Explorer reproduction); always
+  capture the game with PrintWindow via `tools/shot-game.ps1` (screen-rect
+  capture catches whatever covers the game); dismiss toast notices before
+  clicking covered buttons; textarea `value` scripts replace text.
+- Running processes left as found: review app (completed testing turn
+  visible), synthetic game (PID 21052), tauri-driver on port 4444
+  (session 0a0afe41-8072). STT/mic path untouched; AssemblyAI not
+  requalified; nothing pushed.
 
