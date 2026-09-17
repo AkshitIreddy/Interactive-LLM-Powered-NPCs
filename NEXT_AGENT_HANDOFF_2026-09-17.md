@@ -135,4 +135,31 @@ under one `testing` provider, for joint testing without API spend.
   **never auto-activated**); active setup untouched.
 - Coverage: hermetic `apps/runtime-host/tests/testing_providers_turn.rs`
   (echo text, measured synth receipts, testing provenance —
-...[truncated 7373 chars]
+  HUD state; asserts Completed lifecycle, `Testing echo:` reply, non-live
+  flags, `audio_submitted`, capability notice, `testing` TTS provenance;
+  no network/credentials/GPU).
+  [Tail fix 2026-09-17: committed file ended mid-sentence with a pasted
+  `...[truncated N chars]` read artifact; completion restored from the
+  test source.]
+
+## 9. Successor session note (2026-09-17 — stopped before joint testing)
+
+- Brief was joint voice + testing-dummy turns, then lip-sync tracking
+  reacquisition + compositor quality on synthetic Mara, headless evidence
+  before any quality claim. User then said stop; update handoff only.
+  No implementation, build, live-key use, or test run happened.
+- This session: read `see me.md` + both handoffs (small-range reads;
+  long-range output truncates); read
+  `apps/runtime-host/tests/testing_providers_turn.rs` fully to restore the
+  tail from source; briefly inserted then removed a stray `...`
+  placeholder at old line 138 (removed).
+- Correction: an early message in this session claimed HEAD `d06cecd` —
+  wrong. Task brief + `git log` output show HEAD **`275a086`** on
+  `feat/2.0-overhaul`. §0 still says `HEAD: d06cecd` — stale; fix on the
+  next doc pass. Nothing pushed; no push/tag/release taken.
+- Trap: never paste read-output truncation markers into docs; re-read
+  smaller ranges instead.
+- Status reaffirmed, no new evidence: Groq qwen3.8 + Cartesia speech
+  fixed; testing-dummy rig hermetically verified; lip-sync structurally
+  unblocked but NOT proven live (tracking 1–2/40 frames, compositor
+  quality rejected). Do not claim lip-sync works.
