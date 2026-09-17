@@ -7,7 +7,7 @@ for product mission and earlier history.
 
 ## 0. Where things stand
 
-- Branch: `feat/2.0-overhaul`. HEAD: `d06cecd`.
+- Branch: `feat/2.0-overhaul`. HEAD: `3ebbb10`.
 - Remote `origin` has `feat/2.0-overhaul` at **`4874ca9` only**, pushed per one
   explicit user request (plus a declined PR prompt — do not open one
   unasked). Every commit after `4874ca9` is **local-only**:
@@ -163,3 +163,42 @@ under one `testing` provider, for joint testing without API spend.
   fixed; testing-dummy rig hermetically verified; lip-sync structurally
   unblocked but NOT proven live (tracking 1–2/40 frames, compositor
   quality rejected). Do not claim lip-sync works.
+
+## 10. Continuation session (2026-09-17 — pin provenance + Yunet comparison)
+
+- **ORT pin provenance solved.** The old review-path pins (`ea37f63d…`,
+  14,854,728 bytes) are byte-identical to the ONNX Runtime DLLs inside the
+  leftover *Yunet* native-test pack
+  (`model-packs\openseeface-yunet640-lm1-mouth-signal-native-test\…`).
+  A previous agent copied Yunet-pack runtime hashes into the mnv3
+  review-path pins. The corrected pins (`7788f3f3…`, 12,416,032 bytes)
+  match the project's documented source — the official Microsoft 1.22.1
+  zip, whose archive hash `855276cd…` is pinned in
+  `packaging/model-packs/openseeface-mnv3-lm1-mouth-signal.json` (verified
+  by re-download) — and agree with the in-tree `yunet_native_qualifier`
+  values. Same wrong pair also fixed in `landmark_dump.cpp` and
+  `headless_proof_support.hpp`.
+- **Yunet vs mnv3 on identical clean frames** (42-frame headless export
+  from the game binary; fresh-built `landmark_dump`; no GUI at any step):
+  mnv3 = **1/42 accepted** (32× seed-ROI track loss with no reacquisition,
+  9× found faces at detector conf 0.60–0.64 rejected by the hard 0.70
+  floor in `signal_adapter.cpp:19-21`); Yunet640 = **42/42 accepted**,
+  detector conf 0.946 mean, landmarks 0.89+, 17.6 ms mean inference,
+  mouth geometry on all frames. Evidence:
+  `E:\temp\InteractiveNPCs\lipsync-proof\mnv3-clean-frames.json` and
+  `yunet-clean-frames.json`. The Yunet run used a clearly-labeled
+  test-only pack assembly (`lipsync-proof\yunet-test-pack\`: verified
+  Yunet models + verified official ORT); it is not a product artifact.
+- **Pivot recommendation (not a directive):** the product path already
+  centers Yunet (catalog overlay, install/admission machinery,
+  `landmark_provider.cpp` YuNet tracking). The mnv3 debug review path now
+  initializes but will mostly bypass on this footage. Further lip-sync
+  effort likely belongs on the Yunet product path (admitted packs + actor
+  lock) plus compositor natural quality — not on mnv3 tracking surgery.
+  Do not lower the 0.70 confidence floor to admit 0.60 detections without
+  a false-accept study; animating the wrong face violates the product's
+  own identity rules.
+- Review-pack resolution test added (`visual_runtime.rs` tests: negative
+  always, positive env-gated via `REVIEW_OPENSEEFACE_PACK_ROOT`); the
+  positive run passes against the installed owner pack (0.51 s).
+- §0 HEAD corrected to `3ebbb10`.
