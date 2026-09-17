@@ -1,4 +1,4 @@
-# Successor handoff — lip-sync investigation, testing providers, speech fix (2026-09-17)
+﻿# Successor handoff — lip-sync investigation, testing providers, speech fix (2026-09-17)
 
 This is a context handoff for another AI agent, not a work plan. Challenge every
 conclusion below against source and measurements; nothing here obliges you to
@@ -7,19 +7,21 @@ for product mission and earlier history.
 
 ## 0. Where things stand
 
-- Branch: `feat/2.0-overhaul`. HEAD: `3ebbb10`.
+- Branch: `feat/2.0-overhaul`. HEAD: `14db70e` (all work after remote
+  `4874ca9` is local-only).
 - Remote `origin` has `feat/2.0-overhaul` at **`4874ca9` only**, pushed per one
   explicit user request (plus a declined PR prompt — do not open one
   unasked). Every commit after `4874ca9` is **local-only**:
   `833e8be` connection fallback/errors, `2ae2464` docs, `7456296` Groq model
   rotation, `b22c246` + `e073c84` distribution hash re-pins, `93bc3ed` docs,
   `f073ad2` testing providers + lip-sync unblockers, `fee23ee` docs,
-  `d06cecd` visual-pack resolution tests. Do not push, tag, release, or
+  `d06cecd` visual-pack resolution tests, `e4bed02` + `b93a0a0` docs,
+  `994f22d` review-path Yunet preference, `14db70e` testing validation-gate
+  fix. Do not push, tag, release, or
   publish anything without a fresh explicit instruction.
 - Single review package (no more v24-style versioned folders):
-  `E:\temp\InteractiveNPCs\review` (source `e073c84` clean, app SHA-256
-  `cc209227…f5878f727`, manifest `297dcafc…d4a639b476`, all verifications
-  passed, `launched=false`). Delivery record:
+  `E:\temp\InteractiveNPCs\review` (source `14db70e` clean, app SHA-256
+  `e5995f95…738f20fa50`, all verifications passed, `launched=false`). Delivery record:
   `E:\temp\InteractiveNPCs\review-delivery.md` (stable name, overwritten per
   release). Independent verification:
   `E:\temp\InteractiveNPCs\review-independent-verification.json`.
@@ -226,3 +228,59 @@ under one `testing` provider, for joint testing without API spend.
 - Not done: live in-app motion proof (needs game + broker + turn — joint
   testing); compositor natural quality; STT testing (deliberately still
   cloud-only).
+## 12. Live GUI test session (2026-09-17 � user lifted headless restriction)
+
+Tooling (kept under `E:\temp\InteractiveNPCs\tools\`, single-folder policy):
+`tauri-driver` 2.0.6 (cargo-installed) + Edge WebDriver 153
+(`tools\msedgedriver\`, matches installed Edge) + `tools\shot-game.ps1`
+(occlusion-proof game-window capture via PrintWindow � CopyFromScreen
+catches whatever covers the game, e.g. the user's other windows; the
+Transparency App warning from the 09-16 handoff applies). WebDriver session
+drives the review app DOM (nav buttons, launcher, loadout manager,
+composer); game frames captured per-turn with PrintWindow.
+
+Results, all observed live (evidence: `E:\temp\InteractiveNPCs\lipsync-proof\live\`):
+- App launch, onboarding dismiss, Games navigation all work under driver.
+- **Launcher-spawn failure under driver**: `Launch & connect` with no game
+  running reports "could not be launched". The game exe starts fine
+  standalone. Suspected cause is a nested Windows Job Object conflict:
+  the driver-launched app cannot assign the game to its own job. The
+  user's Explorer launches never hit this (their Sep-17 turns connected).
+  Do NOT treat as product bug without reproducing from an Explorer launch;
+  consider surfacing the OS/Job error distinctly instead of the generic
+  launch message.
+- **Manual-open attach works (the 833e8be fallback, proven live)**:
+  manually started game (PID 10692) attached on `Launch & connect` with
+  "Synthetic WGC receipt verified, exact-window pixels".
+- testing-dummy activated through the real Loadout UI (Cognition + Voice
+  show Testing, "Active for next turn"); owner setup otherwise untouched.
+- **Leased testing turns failed closed live** with
+  `simulation_request_invalid`: control allocated broker leases for the
+  exact testing triple but runtime `selected_hosted_tts_format` only knew
+  hosted providers. Fixed in `14db70e` (+ leased-validation regression
+  test), single `review` folder rebuilt from it (source clean, app SHA-256
+  `e5995f95�738f20fa50`, all verifications passed), delivery doc identity
+  block updated.
+- Re-run after fix: **testing echo turn completed live** ("Testing echo:
+  �" delivered, "Text committed", 15 turn events, consumed route
+  testing-dummy gen 1, LLM testing-echo-v1, TTS testing-synth-v1/voice-1).
+- **Lip-sync verdict: no articulation.** 10 game frames across the speech
+  window vs 4 quiet frames: mouth-box mean diffs 4�6.5/255 in both sets �
+  indistinguishable from idle breathing/camera motion. The app diagnostics
+  for every turn say `visual turn.unavailable skipped
+  visual_actor_lock_or_admission_unavailable`, i.e. no presented visual
+  receipt. Precise bypass point still unknown: start_turn should run for
+  synthetic turns (994f22d change), so every frame is failing open inside
+  prepare/present � but visual receipts are memory-only, so the exact
+  reason (capture diagnostics? atlas resolve? worker configure? envelope?
+  lease? landmark/track gates?) was not captured. Next step: expose the
+  latest visual receipt detail in the UI trace or a log before any further
+  visual guessing.
+- Game window note: the synthetic game renders Mara idle (breathing +
+  blink, mouth invariant) with "MOUTH UNARTICULATED" footer; any motion
+  must come from the overlay path.
+Left running on the user machine when this session stopped: the review
+app (showing the completed testing turn), the synthetic game window,
+tauri-driver on port 4444 (WebDriver session 0a0afe41-8072; the earlier de05bb9e-499e5 session was closed
+with its pre-fix build). Close or keep at the user direction.
+
