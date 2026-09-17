@@ -2626,6 +2626,15 @@ fn selected_nvidia_private_evaluation_modalities(
 
 fn selected_hosted_tts_format(route: &SelectedProviderRoute) -> Option<(u32, u16)> {
     match route.provider_id.as_str() {
+        TESTING_TTS_PROVIDER_ID
+            if route.model_id == TESTING_TTS_MODEL_ID
+                && route.voice_id.as_deref() == Some(TESTING_TTS_VOICE_ID) =>
+        {
+            // Zero-spend local dummy voice: no credential exists. Request
+            // validation must accept the same exact triple the turn path
+            // executes, otherwise leased testing turns fail closed here.
+            Some((TESTING_TTS_SAMPLE_RATE_HZ, 1))
+        }
         "cartesia"
             if route.credential_reference.as_deref() == Some("providers/cartesia")
                 && route.model_id == CARTESIA_QUALIFIED_MODEL_ID
@@ -4796,6 +4805,26 @@ mod tests {
             DEV_LIVE_TTS_PROVIDER_ID,
         )
         .is_ok());
+    }
+
+    #[test]
+    fn testing_voice_format_matches_turn_execution_gate() {
+        use crate::{SelectedProviderRoute, SelectedRouteState};
+        let route = SelectedProviderRoute {
+            provider_id: TESTING_TTS_PROVIDER_ID.into(),
+            model_id: TESTING_TTS_MODEL_ID.into(),
+            voice_id: Some(TESTING_TTS_VOICE_ID.into()),
+            execution: crate::RouteExecution::Local,
+            egress: "offline".into(),
+            credential_reference: None,
+        };
+        assert_eq!(
+            selected_hosted_tts_format(&route),
+            Some((TESTING_TTS_SAMPLE_RATE_HZ, 1))
+        );
+        let mut wrong_voice = route.clone();
+        wrong_voice.voice_id = Some("someone-elses-voice".into());
+        assert_eq!(selected_hosted_tts_format(&wrong_voice), None);
     }
 
     #[test]

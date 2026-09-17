@@ -11,6 +11,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use interactive_npcs_credential_vault::MemoryCredentialVault;
 use npc_runtime_core::TurnLifecycle;
+use npc_runtime_host::audio_output::broker::BrokerAudioPlaybackLease;
 use npc_runtime_host::simulation::SimulationSafetyContext;
 use npc_runtime_host::{
     HostConfig, HostState, RouteExecution, SelectedProviderRoute, SelectedRoleRoute,
@@ -74,22 +75,8 @@ fn testing_snapshot() -> SelectedRouteSnapshot {
     }
 }
 
-#[tokio::test]
-async fn testing_turn_echoes_transcript_and_measures_synth_audio() {
-    let app_data = tempfile::tempdir()
-        .expect("temporary app data")
-        .keep();
-    let vault = Arc::new(MemoryCredentialVault::default());
-    let host = HostState::initialize_with_test_vault(
-        HostConfig {
-            repo_root: repo_root(),
-            app_data,
-        },
-        vault,
-    )
-    .await
-    .expect("hermetic host state");
-    let request = SimulationRequest {
+fn testing_request() -> SimulationRequest {
+    SimulationRequest {
         session_id: "testing-turn-session".into(),
         turn_id: "testing-turn-1".into(),
         game_id: "eclipse-harbor".into(),
@@ -113,7 +100,57 @@ async fn testing_turn_echoes_transcript_and_measures_synth_audio() {
         audio_playback_leases: Vec::new(),
         private_evaluation_acknowledgements: Vec::new(),
         subtitle_presentation_context: None,
-    };
+    }
+}
+
+fn testing_lease() -> BrokerAudioPlaybackLease {
+    serde_json::from_value(serde_json::json!({
+        "schemaVersion": 2,
+        "streamId": "pcm-000",
+        "producerEndpoint": "\\\\.\\pipe\\npc-media-playback-test-000",
+        "oneTimeToken": format!("{:064x}", 1),
+        "sessionId": "testing-turn-session",
+        "turnId": "testing-turn-1",
+        "generation": 1,
+        "sampleRate": 24_000,
+        "channels": 1,
+        "maxFrames": 1_440_000,
+        "maxChunkBytes": 65_536,
+        "expiresQpc": 10_000_000,
+        "outputSelectionMode": "systemDefault",
+        "outputEndpointId": "{0.0.0.00000000}.fixture-output",
+        "outputEndpointGeneration": 17
+    }))
+    .expect("well-formed testing lease")
+}
+
+#[tokio::test]
+async fn testing_turn_with_leases_passes_request_validation() {
+    // Regression cover for the live failure where leased testing turns were
+    // rejected by the runtime format gate before any provider ran.
+    let mut request = testing_request();
+    request.audio_playback_leases = vec![testing_lease()];
+    request
+        .validate()
+        .expect("leased testing turn validates without network or credentials");
+}
+
+#[tokio::test]
+async fn testing_turn_echoes_transcript_and_measures_synth_audio() {
+    let app_data = tempfile::tempdir()
+        .expect("temporary app data")
+        .keep();
+    let vault = Arc::new(MemoryCredentialVault::default());
+    let host = HostState::initialize_with_test_vault(
+        HostConfig {
+            repo_root: repo_root(),
+            app_data,
+        },
+        vault,
+    )
+    .await
+    .expect("hermetic host state");
+    let request = testing_request();
     let result = host
         .simulate_turn(request)
         .await
