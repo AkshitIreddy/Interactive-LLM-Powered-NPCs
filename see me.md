@@ -1,5 +1,9 @@
 # See me — mandatory product rework handoff
 
+## Latest continuation — 20 September 2026
+
+Read [the inherited-work audit](docs/product-rework/inherited-work-audit-2026-09-20.md) for the keep/repair decisions, fresh headless evidence, GitHub main update, and limits of the September 17 claims. It also links the current research on optional mouth packs. The local package manifest identifies which source was actually built.
+
 ## Latest continuation — 16 September 2026
 
 Read [NEXT_AGENT_HANDOFF_2026-09-16.md](NEXT_AGENT_HANDOFF_2026-09-16.md) for the current v21 build, full user feedback, whole-app changes, provider/content/pack state, and the reopened test-game connection failure. The user reports that connection still fails even when they open the test game. It is **not fixed or live-verified**. The newer handoff distinguishes observed facts from investigation leads; historical build paths and completion statements below must not override it. Preserve the display-safety restrictions below.
