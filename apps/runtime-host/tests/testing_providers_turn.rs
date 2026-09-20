@@ -2,15 +2,16 @@
 //!
 //! No network calls, no credentials, and no ignored gate: the testing LLM
 //! echoes the transcript and the testing voice synthesizes labeled sine
-//! audio measured by the local receipt ledger. Nothing is played to a device
-//! here because no broker playback leases are supplied.
+//! audio measured in memory. Nothing is submitted to a device here because
+//! no broker playback leases are supplied, and the returned evidence must
+//! preserve that distinction.
 
 #![cfg(all(windows, feature = "test-fixture-vault"))]
 
 use std::{path::PathBuf, sync::Arc};
 
 use interactive_npcs_credential_vault::MemoryCredentialVault;
-use npc_runtime_core::TurnLifecycle;
+use npc_runtime_core::{DeliveryMode, TurnEvent, TurnLifecycle};
 use npc_runtime_host::audio_output::broker::BrokerAudioPlaybackLease;
 use npc_runtime_host::simulation::SimulationSafetyContext;
 use npc_runtime_host::{
@@ -136,10 +137,8 @@ async fn testing_turn_with_leases_passes_request_validation() {
 }
 
 #[tokio::test]
-async fn testing_turn_echoes_transcript_and_measures_synth_audio() {
-    let app_data = tempfile::tempdir()
-        .expect("temporary app data")
-        .keep();
+async fn testing_turn_echoes_transcript_without_claiming_audio_submission() {
+    let app_data = tempfile::tempdir().expect("temporary app data").keep();
     let vault = Arc::new(MemoryCredentialVault::default());
     let host = HostState::initialize_with_test_vault(
         HostConfig {
@@ -157,8 +156,8 @@ async fn testing_turn_echoes_transcript_and_measures_synth_audio() {
         .expect("testing turn runs without network or credentials");
     assert_eq!(result.outcome.lifecycle, TurnLifecycle::Completed);
     assert!(
-        !result.fixture_only,
-        "testing routes execute; they are not fixtures"
+        result.fixture_only,
+        "testing routes execute real code but remain explicit non-live dummy provenance"
     );
     let delivered: Vec<&str> = result
         .outcome
@@ -179,8 +178,30 @@ async fn testing_turn_echoes_transcript_and_measures_synth_audio() {
     assert!(!evidence.success.llm_provider_live);
     assert!(!evidence.success.tts_provider_live);
     assert!(
-        evidence.success.audio_submitted,
-        "synth audio measured nonzero: {evidence:?}"
+        !evidence.success.audio_submitted,
+        "in-memory synth measurement is not endpoint submission: {evidence:?}"
+    );
+    assert!(
+        !evidence.success.audio_drained,
+        "no endpoint existed to drain: {evidence:?}"
+    );
+    assert_eq!(evidence.success.audio_receipt_count, 0);
+    assert!(
+        evidence.audio_receipts.is_empty(),
+        "in-memory measurement must not cross as delivery evidence: {evidence:?}"
+    );
+    assert!(
+        result
+            .outcome
+            .delivered
+            .iter()
+            .all(|sentence| sentence.delivery == DeliveryMode::Subtitle),
+        "without a broker lease, generated text must use subtitle fallback"
+    );
+    assert!(evidence.success.subtitle_delivered);
+    assert_eq!(
+        evidence.success.subtitle_receipt_count,
+        result.outcome.delivered.len()
     );
     assert!(
         result
@@ -191,11 +212,14 @@ async fn testing_turn_echoes_transcript_and_measures_synth_audio() {
         result.capability_notices
     );
     assert!(
-        result
-            .outcome
-            .selected_tts_providers
-            .iter()
-            .any(|provider| provider == "testing"),
-        "tts provenance names testing"
+        result.events.iter().any(|event| matches!(
+            event,
+            TurnEvent::SpeechStarted { provider_id, .. } if provider_id == "testing"
+        )),
+        "testing synth ran before the no-endpoint subtitle fallback"
+    );
+    assert!(
+        result.outcome.selected_tts_providers.is_empty(),
+        "a provider without completed playback must not be reported as delivered"
     );
 }

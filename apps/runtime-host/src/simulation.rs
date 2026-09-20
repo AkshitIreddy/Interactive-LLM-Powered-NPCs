@@ -803,11 +803,16 @@ impl HostState {
         let turn_audio_receipts = Arc::new(AudioReceiptLedger::default());
         let turn_subtitle_receipts = Arc::new(SubtitleReceiptLedger::default());
         let fixture_subtitle_route = selected_route.as_deref().is_none_or(|snapshot| {
-            cfg!(debug_assertions)
+            let zero_spend_testing_route = ready_primary(&snapshot.roles.llm)
+                .is_some_and(|route| route.provider_id == TESTING_LLM_PROVIDER_ID)
+                && ready_primary(&snapshot.roles.tts)
+                    .is_some_and(|route| route.provider_id == TESTING_TTS_PROVIDER_ID);
+            let debug_mock_route = cfg!(debug_assertions)
                 && ready_primary(&snapshot.roles.llm)
                     .is_some_and(|route| route.provider_id == "mock-llm")
                 && ready_primary(&snapshot.roles.tts)
-                    .is_some_and(|route| route.provider_id == "mock-tts")
+                    .is_some_and(|route| route.provider_id == "mock-tts");
+            zero_spend_testing_route || debug_mock_route
         });
         let subtitle_presenter: Option<Arc<dyn SubtitlePresentationSink>> =
             if fixture_subtitle_route {
@@ -1289,10 +1294,13 @@ impl HostState {
             Some(ledger) => ledger.snapshot()?,
             None => Vec::new(),
         };
-        // Deterministic PCM measurement proves provider formatting only. It
-        // never touches an OS endpoint and therefore cannot cross the native
-        // response boundary as an audio delivery receipt.
-        audio_receipt_summaries.retain(|receipt| receipt.sink != "deterministicMock");
+        // In-memory PCM measurement proves provider formatting only. Neither
+        // the deterministic fixture nor the zero-spend testing sink touches an
+        // OS endpoint, so neither may cross the native response boundary as
+        // audio-submission or audio-delivery evidence. The broker and WASAPI
+        // wrappers add receipts only after real endpoint submission.
+        audio_receipt_summaries
+            .retain(|receipt| is_endpoint_audio_submission_sink(receipt.sink.as_str()));
         let subtitle_receipt_summaries = turn_subtitle_receipts.snapshot()?;
         let submitted_source_frames = live_receipts
             .iter()
@@ -2194,11 +2202,17 @@ fn outcome_fixture_only(outcome: &TurnOutcome) -> bool {
     outcome
         .selected_llm_provider
         .as_ref()
-        .is_none_or(|provider| provider.starts_with("mock-") || provider.starts_with("fixture-"))
+        .is_none_or(|provider| provider_is_non_live_fixture(provider))
         && outcome
             .selected_tts_providers
             .iter()
-            .all(|provider| provider.starts_with("mock-") || provider.starts_with("fixture-"))
+            .all(|provider| provider_is_non_live_fixture(provider))
+}
+
+fn provider_is_non_live_fixture(provider: &str) -> bool {
+    provider == TESTING_LLM_PROVIDER_ID
+        || provider.starts_with("mock-")
+        || provider.starts_with("fixture-")
 }
 
 fn input_degradations(input: &TurnInputSnapshot) -> Vec<TurnExecutionDegradation> {
@@ -3646,6 +3660,10 @@ fn audio_receipt_id(identity: &TurnIdentity, sentence_id: u64, sink: &str) -> St
     memory_turn_id(identity, &format!("audio-receipt-{sink}-{sentence_id}"))
 }
 
+fn is_endpoint_audio_submission_sink(sink: &str) -> bool {
+    matches!(sink, "nativeBrokerSubmission" | "devWasapiSubmission")
+}
+
 struct FixtureLlm {
     descriptor: ProviderDescriptor,
     response: String,
@@ -3857,8 +3875,8 @@ impl TtsSession for TestingSynthTtsSession {
             let attack = (frame as f64 / 480.0).min(1.0);
             let release = ((frames - frame) as f64 / 480.0).min(1.0);
             let envelope = attack.min(release);
-            let sample = (8_192.0 * envelope * (2.0 * std::f32::consts::PI as f64 * phase).sin())
-                as i16;
+            let sample =
+                (8_192.0 * envelope * (2.0 * std::f32::consts::PI as f64 * phase).sin()) as i16;
             pcm_s16le.extend_from_slice(&sample.to_le_bytes());
         }
         Ok(Box::pin(stream::iter([Ok(SpeechStreamItem::Audio(
@@ -3877,6 +3895,7 @@ struct MeasuredMockAudio {
     ledger: Arc<AudioReceiptLedger>,
     receipt_tag: &'static str,
     sink_label: &'static str,
+    endpoint_delivery: bool,
 }
 
 impl MeasuredMockAudio {
@@ -3885,6 +3904,7 @@ impl MeasuredMockAudio {
             ledger,
             receipt_tag: "deterministic-mock",
             sink_label: "deterministicMock",
+            endpoint_delivery: true,
         }
     }
 
@@ -3893,6 +3913,7 @@ impl MeasuredMockAudio {
             ledger,
             receipt_tag: "testing-local",
             sink_label: "testingLocal",
+            endpoint_delivery: false,
         }
     }
 }
@@ -3958,10 +3979,15 @@ impl AudioSink for MeasuredMockAudio {
             output_endpoint_id: None,
             output_endpoint_generation: None,
             cancelled: Some(false),
-            submitted: true,
-            drained: true,
-            completed: true,
+            submitted: self.endpoint_delivery,
+            drained: self.endpoint_delivery,
+            completed: self.endpoint_delivery,
         })?;
+        if !self.endpoint_delivery {
+            return Err(RuntimeDependencyError::Unavailable(
+                "testing synth was measured in memory, but no output endpoint was supplied".into(),
+            ));
+        }
         Ok(PlaybackReceipt {
             audible_frames: frames,
             duration,
@@ -4211,7 +4237,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn testing_synth_voice_records_measured_receipt() {
+    async fn testing_synth_voice_measures_pcm_without_claiming_endpoint_delivery() {
         use npc_runtime_core::{SpeechRequest, TurnIdentity};
 
         let ledger = Arc::new(AudioReceiptLedger::default());
@@ -4241,17 +4267,29 @@ mod tests {
             .await
             .expect("testing synth produces audio");
         let sink = MeasuredMockAudio::testing_sink(Arc::clone(&ledger));
-        let receipt = sink
+        let error = sink
             .play(&identity, 7, stream, CancellationToken::new())
             .await
-            .expect("measured sink accepts testing synth");
-        assert!(receipt.completed);
-        assert_eq!(receipt.audible_frames, 34 * 240);
+            .expect_err("an in-memory measurement is not endpoint delivery");
+        assert!(error
+            .to_string()
+            .contains("no output endpoint was supplied"));
         let records = ledger.snapshot().expect("ledger snapshot");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].sentence_id, 7);
         assert_eq!(records[0].sink, "testingLocal");
-        assert!(records[0].submitted && records[0].source_frames > 0);
+        assert_eq!(records[0].source_frames, 34 * 240);
+        assert!(!records[0].submitted);
+        assert!(!records[0].drained);
+        assert!(!records[0].completed);
+    }
+
+    #[test]
+    fn only_real_endpoint_sinks_cross_as_audio_submission_evidence() {
+        assert!(is_endpoint_audio_submission_sink("nativeBrokerSubmission"));
+        assert!(is_endpoint_audio_submission_sink("devWasapiSubmission"));
+        assert!(!is_endpoint_audio_submission_sink("testingLocal"));
+        assert!(!is_endpoint_audio_submission_sink("deterministicMock"));
     }
 
     #[tokio::test]
@@ -4809,7 +4847,7 @@ mod tests {
 
     #[test]
     fn testing_voice_format_matches_turn_execution_gate() {
-        use crate::{SelectedProviderRoute, SelectedRouteState};
+        use crate::SelectedProviderRoute;
         let route = SelectedProviderRoute {
             provider_id: TESTING_TTS_PROVIDER_ID.into(),
             model_id: TESTING_TTS_MODEL_ID.into(),
