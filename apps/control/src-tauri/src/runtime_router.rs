@@ -418,17 +418,19 @@ impl RuntimeRouter {
             .iter()
             .map(ExpectedPlaybackReceipt::from)
             .collect::<Vec<_>>();
-        // The project-owned synthetic fixture exists to exercise the visual
-        // path end to end, so its turns always attempt it in review builds.
-        // Real games stay gated on the explicit overlay preference, and every
-        // rejected visual gate restores untouched frames without failing audio.
-        let review_visual_turn = cfg!(debug_assertions)
-            && matches!(
-                trusted_safety_context.profile_policy,
-                crate::sidecar_protocol::NativeProfileSafetyPolicy::SyntheticFixture
-            );
-        if overlay_enabled || review_visual_turn {
+        // The lip-sync preference also applies to the included practice game.
+        // Fixture ownership does not override an explicit Off setting.
+        let visual_attempted = overlay_enabled;
+        if visual_attempted {
             self.visual_coordinator.start_turn(&playback_leases).await;
+            let _ = self.diagnostics.record_native_turn_event(
+                "visual",
+                "turn.started",
+                Severity::Info,
+                DiagnosticStatus::Ok,
+                None,
+                &simulation_id,
+            );
         }
         if playback_pool_allocated {
             let mut state = self.native.lock().map_err(|_| RouterError::State)?;
@@ -510,6 +512,8 @@ impl RuntimeRouter {
                         .is_some_and(|receipt| receipt.presented)
                     {
                         "turn.presented"
+                    } else if !visual_attempted {
+                        "turn.disabled"
                     } else {
                         "turn.unavailable"
                     },
@@ -529,10 +533,7 @@ impl RuntimeRouter {
                     } else {
                         DiagnosticStatus::Skipped
                     },
-                    (!visual_receipt
-                        .as_ref()
-                        .is_some_and(|receipt| receipt.presented))
-                    .then_some("visual_actor_lock_or_admission_unavailable"),
+                    visual_turn_error_code(visual_attempted, visual_receipt.as_ref()),
                     &task_id,
                 );
             }
@@ -686,6 +687,24 @@ impl RuntimeRouter {
     pub async fn shutdown(&self) {
         let _ = self.cancel().await;
         self.supervisor.shutdown().await;
+    }
+}
+
+fn visual_turn_error_code(
+    attempted: bool,
+    receipt: Option<&crate::visual_runtime::VisualPresentationReceipt>,
+) -> Option<&'static str> {
+    if !attempted {
+        return Some("visual_disabled");
+    }
+    match receipt {
+        Some(receipt) if receipt.presented => None,
+        Some(receipt) => Some(
+            receipt
+                .diagnostic_error_code
+                .unwrap_or("visual_frame_bypassed"),
+        ),
+        None => Some("visual_receipt_missing"),
     }
 }
 
@@ -1508,6 +1527,15 @@ mod tests {
     };
     use npc_provider_loadouts::{LoadoutContextV1, ValidationContextV1};
     use serde_json::json;
+
+    #[test]
+    fn visual_diagnostics_distinguish_disabled_from_missing_receipt() {
+        assert_eq!(visual_turn_error_code(false, None), Some("visual_disabled"));
+        assert_eq!(
+            visual_turn_error_code(true, None),
+            Some("visual_receipt_missing")
+        );
+    }
 
     fn test_renderer_authority() -> npc_subtitle_engine::SubtitleRendererAuthorityV1 {
         npc_subtitle_engine::bundled_default_renderer_authority()

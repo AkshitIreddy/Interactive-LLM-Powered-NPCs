@@ -136,14 +136,12 @@ pub struct MouthWorkerLaunchConfig {
 }
 
 #[cfg(debug_assertions)]
-fn review_pack_root(
-    executable: &Path,
-    config_directory: &Path,
-    pack_id: &str,
-) -> Option<PathBuf> {
-    let portable = executable
-        .parent()?
-        .join(Path::new("review-model-packs").join(pack_id).join(OPENSEEFACE_PACK_REVISION));
+fn review_pack_root(executable: &Path, config_directory: &Path, pack_id: &str) -> Option<PathBuf> {
+    let portable = executable.parent()?.join(
+        Path::new("review-model-packs")
+            .join(pack_id)
+            .join(OPENSEEFACE_PACK_REVISION),
+    );
     if portable.is_dir() {
         Some(portable)
     } else {
@@ -178,11 +176,7 @@ impl MouthWorkerLaunchConfig {
             if portable.is_dir() {
                 Some(portable)
             } else {
-                review_pack_root(
-                    &executable,
-                    config_directory,
-                    OPENSEEFACE_PACK_ID,
-                )
+                review_pack_root(&executable, config_directory, OPENSEEFACE_PACK_ID)
             }
         };
         #[cfg(debug_assertions)]
@@ -197,11 +191,7 @@ impl MouthWorkerLaunchConfig {
             if portable.is_dir() {
                 Some(portable)
             } else {
-                review_pack_root(
-                    &executable,
-                    config_directory,
-                    YUNET_OPENSEEFACE_PACK_ID,
-                )
+                review_pack_root(&executable, config_directory, YUNET_OPENSEEFACE_PACK_ID)
             }
         };
         #[cfg(debug_assertions)]
@@ -615,14 +605,20 @@ impl VisualCoordinator {
                                 .await
                             {
                                 handled = true;
+                                // A finished or not-yet-started sentence can
+                                // return a fail-open receipt. Keep probing the
+                                // bounded pool for the sentence playing now.
+                                let reached_audio_or_worker = receipt.product_disposition != 4;
                                 record_visual_receipt(
                                     &latest_receipt,
                                     &best_turn_receipts,
                                     &receipt_history,
                                     receipt,
                                 );
-                                preferred_stream = index;
-                                break;
+                                if reached_audio_or_worker {
+                                    preferred_stream = index;
+                                    break;
+                                }
                             }
                         }
                         if handled {
@@ -893,8 +889,7 @@ fn admitted_request_from_actor_lock(
     );
     let authority_admitted = match (&lock.selection_authority, &lock.provenance) {
         (
-            NativeActorSelectionAuthorityV1::Consensus
-            | NativeActorSelectionAuthorityV1::Explicit,
+            NativeActorSelectionAuthorityV1::Consensus | NativeActorSelectionAuthorityV1::Explicit,
             NativeActorLockProvenanceV1::QualifiedIdentity {
                 qualification_id,
                 catalog_admission_sha256,
@@ -1116,6 +1111,8 @@ pub struct VisualPresentationReceipt {
     pub desktop_luminance_excluded_from_pixel_evidence: bool,
     pub external_display_overlays_may_change_perceived_brightness: bool,
     pub detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostic_error_code: Option<&'static str>,
     pub broker: Option<BrokerPresentationReceipt>,
 }
 
@@ -1139,8 +1136,15 @@ impl VisualPresentationReceipt {
             desktop_luminance_excluded_from_pixel_evidence: false,
             external_display_overlays_may_change_perceived_brightness: false,
             detail: detail.into(),
+            diagnostic_error_code: Some("visual_bypassed"),
             broker: None,
         }
+    }
+
+    fn from_error(request_id: u64, prefix: &str, error: VisualRuntimeError) -> Self {
+        let mut receipt = Self::fail_open(request_id, format!("{prefix}:{error}"));
+        receipt.diagnostic_error_code = Some(error.diagnostic_code());
+        receipt
     }
 }
 
@@ -1342,9 +1346,10 @@ impl MouthWorkerSupervisor {
         };
         match self.present_current_frame_inner(&request).await {
             Ok(receipt) => receipt,
-            Err(error) => VisualPresentationReceipt::fail_open(
+            Err(error) => VisualPresentationReceipt::from_error(
                 request.request_id,
-                format!("visual_only_bypass:{error}"),
+                "visual_only_bypass",
+                error,
             ),
         }
     }
@@ -1416,9 +1421,10 @@ impl MouthWorkerSupervisor {
                 .await
             {
                 Ok(receipt) => receipt,
-                Err(error) => VisualPresentationReceipt::fail_open(
+                Err(error) => VisualPresentationReceipt::from_error(
                     request_id,
-                    format!("review_visual_only_bypass:{error}"),
+                    "review_visual_only_bypass",
+                    error,
                 ),
             },
         )
@@ -1529,9 +1535,10 @@ impl MouthWorkerSupervisor {
             .await
         {
             Ok(receipt) => receipt,
-            Err(error) => VisualPresentationReceipt::fail_open(
+            Err(error) => VisualPresentationReceipt::from_error(
                 request.request_id,
-                format!("visual_only_bypass:{error}"),
+                "visual_only_bypass",
+                error,
             ),
         }
     }
@@ -1559,9 +1566,9 @@ impl MouthWorkerSupervisor {
             (false, None) => None,
         };
         if request.user_assigned_character_pack {
-            let assigned = enabled_atlas
-                .as_ref()
-                .ok_or_else(|| VisualRuntimeError::Admission("assigned mouth pack is no longer enabled".into()))?;
+            let assigned = enabled_atlas.as_ref().ok_or_else(|| {
+                VisualRuntimeError::Admission("assigned mouth pack is no longer enabled".into())
+            })?;
             if request.assigned_pack_content_sha256.as_deref()
                 != Some(assigned.content_sha256.as_str())
                 || request.assigned_pack_enrollment_sha256.as_deref()
@@ -2078,6 +2085,7 @@ impl MouthWorkerSupervisor {
             desktop_luminance_excluded_from_pixel_evidence: false,
             external_display_overlays_may_change_perceived_brightness: false,
             detail: response.detail.clone(),
+            diagnostic_error_code: None,
             broker: None,
         };
         let Some(residual) = response.residual else {
@@ -4837,12 +4845,8 @@ fn resolve_review_provider(
     let root = root.canonicalize().map_err(|_| {
         VisualRuntimeError::Admission("review OpenSeeFace root cannot be resolved".into())
     })?;
-    let detector = verify_review_provider_file(
-        &root,
-        detector_relative,
-        detector_size,
-        detector_sha256,
-    )?;
+    let detector =
+        verify_review_provider_file(&root, detector_relative, detector_size, detector_sha256)?;
     let landmark = verify_review_provider_file(
         &root,
         Path::new("models/lm_model1_opt.onnx"),
@@ -5702,6 +5706,49 @@ pub enum VisualRuntimeError {
     Broker(#[from] crate::media_broker::MediaBrokerError),
 }
 
+impl VisualRuntimeError {
+    // Only fixed codes reach the persisted diagnostics log. Provider messages,
+    // file paths and raw worker/broker error text stay out of log labels.
+    fn diagnostic_code(&self) -> &'static str {
+        match self {
+            Self::Missing => "visual_worker_missing",
+            Self::InvalidBundle => "visual_bundle_invalid",
+            Self::Random | Self::Process | Self::Job(_) => "visual_worker_start_failed",
+            Self::Connection => "visual_worker_connection_failed",
+            Self::Timeout => "visual_worker_timeout",
+            Self::Payload | Self::Malformed => "visual_protocol_invalid",
+            Self::Worker(_) => "visual_worker_rejected",
+            Self::InvalidRequest => "visual_request_invalid",
+            Self::Admission(_) => "visual_admission_unavailable",
+            Self::CaptureAuthority => "visual_capture_authority_missing",
+            Self::AudioAuthority => "visual_audio_envelope_inactive",
+            Self::Scheduling(_) => "visual_schedule_bypassed",
+            Self::StaleLandmarks => "visual_frame_stale",
+            Self::NoSelectedTarget => "visual_target_missing",
+            Self::Clock => "visual_clock_failed",
+            Self::State => "visual_state_unavailable",
+            Self::Unsupported => "visual_platform_unsupported",
+            Self::BrokerStage {
+                stage: "query_visual_audio_envelope",
+                ..
+            } => "visual_audio_query_failed",
+            Self::BrokerStage {
+                stage: "allocate_visual_source",
+                ..
+            } => "visual_source_allocation_failed",
+            Self::BrokerStage {
+                stage: "submit_visual_patch",
+                ..
+            } => "visual_patch_submission_failed",
+            Self::BrokerStage {
+                stage: "release_visual_source",
+                ..
+            } => "visual_source_release_failed",
+            Self::BrokerStage { .. } | Self::Broker(_) => "visual_broker_failed",
+        }
+    }
+}
+
 #[cfg(test)]
 #[path = "visual_runtime_schema4_join_tests.rs"]
 mod schema4_join_tests;
@@ -5709,6 +5756,34 @@ mod schema4_join_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_visual_receipts_keep_typed_diagnostic_reasons_without_raw_log_labels() {
+        let receipt = VisualPresentationReceipt::from_error(
+            3,
+            "review_visual_only_bypass",
+            VisualRuntimeError::AudioAuthority,
+        );
+        assert_eq!(
+            receipt.diagnostic_error_code,
+            Some("visual_audio_envelope_inactive")
+        );
+        assert!(!receipt.presented);
+        assert!(receipt.degraded);
+        let rejected = VisualPresentationReceipt::from_error(
+            4,
+            "review_visual_only_bypass",
+            VisualRuntimeError::Worker("untrusted worker message".into()),
+        );
+        assert_eq!(
+            rejected.diagnostic_error_code,
+            Some("visual_worker_rejected")
+        );
+        assert_ne!(
+            receipt.diagnostic_error_code,
+            rejected.diagnostic_error_code
+        );
+    }
 
     fn test_character_mouth_atlas() -> CharacterMouthAtlas {
         let state = |jaw_open: f64, lip_close: f64, color: u8| {
@@ -5751,7 +5826,8 @@ mod tests {
     }
 
     #[cfg(debug_assertions)]
-    fn test_review_atlas_identity() -> RequestedCharacterMouthAtlasIdentity<'static> {        RequestedCharacterMouthAtlasIdentity {
+    fn test_review_atlas_identity() -> RequestedCharacterMouthAtlasIdentity<'static> {
+        RequestedCharacterMouthAtlasIdentity {
             game_profile_id: "cyberpunk-2077",
             character_id: "misty",
             actor_id: stable_nonzero_id("cyberpunk-2077:misty"),
@@ -7012,6 +7088,85 @@ mod tests {
         lock: Mutex<Option<Arc<NativeSelectedActorLockV1>>>,
     }
 
+    #[cfg(debug_assertions)]
+    struct SentenceReviewPresenter {
+        streams: Mutex<Vec<String>>,
+    }
+
+    #[cfg(debug_assertions)]
+    #[async_trait]
+    impl AdmittedVisualPresenter for SentenceReviewPresenter {
+        async fn present(
+            &self,
+            request: AdmittedVisualFrameRequest,
+            _now_monotonic_millis: u64,
+        ) -> VisualPresentationReceipt {
+            VisualPresentationReceipt::fail_open(request.request_id, "unexpected_product_path")
+        }
+
+        async fn present_project_owned_review(
+            &self,
+            request_id: u64,
+            audio: &VisualAudioBinding,
+            _sentence_id: u64,
+            _now_ns: i64,
+        ) -> Option<VisualPresentationReceipt> {
+            self.streams.lock().unwrap().push(audio.stream_id.clone());
+            let mut receipt = VisualPresentationReceipt::fail_open(request_id, "inactive_sentence");
+            receipt.cancellation_generation = audio.generation;
+            if audio.stream_id == "second-sentence" {
+                receipt.product_disposition = 0;
+                receipt.presented = true;
+                receipt.residual_proposed = true;
+                receipt.degraded = false;
+                receipt.detail = "second_sentence_presented".into();
+            }
+            Some(receipt)
+        }
+    }
+
+    #[cfg(all(windows, debug_assertions))]
+    #[tokio::test]
+    async fn review_coordinator_reaches_active_sentence_after_inactive_lease() {
+        let presenter = Arc::new(SentenceReviewPresenter {
+            streams: Mutex::new(Vec::new()),
+        });
+        let coordinator = VisualCoordinator::from_parts(
+            Arc::new(FakeActorLockSource {
+                lock: Mutex::new(None),
+            }),
+            presenter.clone(),
+        );
+        let audio = |stream: &str| VisualAudioBinding {
+            session_id: "session-native".into(),
+            turn_id: "turn-native".into(),
+            generation: 7,
+            stream_id: stream.into(),
+        };
+        coordinator
+            .start_audio_bindings(
+                7,
+                vec![audio("finished-sentence"), audio("second-sentence")],
+            )
+            .await;
+        tokio::time::sleep(Duration::from_millis(85)).await;
+        coordinator.stop_turn(Some(7)).await;
+        let receipt = coordinator
+            .best_receipt_for_generation(7)
+            .expect("turn receipt");
+        assert!(
+            receipt.presented,
+            "inactive first lease must not starve the speaking sentence: {}",
+            receipt.detail
+        );
+        assert!(presenter
+            .streams
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|stream| stream == "second-sentence"));
+    }
+
     impl ActorLockSource for FakeActorLockSource {
         fn selected_current(&self, now_unix_ms: u64) -> Option<Arc<NativeSelectedActorLockV1>> {
             self.lock.lock().ok().and_then(|lock| {
@@ -7338,11 +7493,8 @@ mod tests {
             stream_id: "pcm-explicit-qualified".into(),
         };
         let now_ns = monotonic_ns().expect("QPC clock");
-        let mut lock = native_actor_lock_fixture(
-            generation,
-            now_ns as u64,
-            current_unix_millis() + 1_000,
-        );
+        let mut lock =
+            native_actor_lock_fixture(generation, now_ns as u64, current_unix_millis() + 1_000);
         lock.selection_authority = NativeActorSelectionAuthorityV1::Explicit;
         let request = admitted_request_from_actor_lock(4, &lock, &audio, 1, now_ns)
             .expect("explicit qualified identity remains admissible");
