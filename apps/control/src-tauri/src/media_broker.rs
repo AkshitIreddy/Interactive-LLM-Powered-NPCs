@@ -3603,35 +3603,44 @@ impl MediaBrokerSupervisor {
     pub async fn debug_select_synthetic_replay_capture_target(
         &self,
     ) -> Result<DebugSyntheticReplayCaptureSnapshot, MediaBrokerError> {
-        let identity =
-            read_debug_synthetic_target_with_fallback(&self.config.debug_synthetic_metadata_path)?;
+        let candidates =
+            read_debug_synthetic_target_candidates(&self.config.debug_synthetic_metadata_path)?;
         let _operation = self.debug_synthetic_capture_gate.lock().await;
-        {
-            let state = self.state.lock().map_err(|_| MediaBrokerError::State)?;
-            if state
-                .debug_synthetic_target
-                .as_ref()
-                .is_some_and(|selected| selected != &identity)
-            {
-                return Err(MediaBrokerError::DebugSyntheticTargetMismatch);
-            }
-        }
-
         let client = self.ensure_ready().await?;
-        if let Err(error) = client
-            .select_target(
-                identity.native_window,
-                identity.process_id,
-                &identity.executable_basename,
-            )
-            .await
-        {
-            if let Ok(mut state) = self.state.lock() {
-                state.debug_synthetic_target = None;
-                state.diagnostics = None;
+        let candidate_count = candidates.len();
+        let mut last_stale_error = None;
+        let mut selected = None;
+        for (index, identity) in candidates.into_iter().enumerate() {
+            match client
+                .select_target(
+                    identity.native_window,
+                    identity.process_id,
+                    &identity.executable_basename,
+                )
+                .await
+            {
+                Ok(()) => {
+                    selected = Some(identity);
+                    break;
+                }
+                Err(error)
+                    if index + 1 < candidate_count
+                        && debug_synthetic_target_error_allows_fallback(&error) =>
+                {
+                    last_stale_error = Some(error);
+                }
+                Err(error) => {
+                    if let Ok(mut state) = self.state.lock() {
+                        state.debug_synthetic_target = None;
+                        state.diagnostics = None;
+                    }
+                    return Err(error);
+                }
             }
-            return Err(error);
         }
+        let identity = selected.ok_or_else(|| {
+            last_stale_error.unwrap_or(MediaBrokerError::DebugSyntheticMetadataUnavailable)
+        })?;
         if let Ok(mut state) = self.state.lock() {
             state.debug_synthetic_target = Some(identity.clone());
         }
@@ -3699,9 +3708,11 @@ impl MediaBrokerSupervisor {
             .ok_or(MediaBrokerError::DebugSyntheticTargetMismatch)
     }
 
-    /// Native-only capability check for the project-owned review target. This
-    /// state is populated only after the bounded metadata document proves the
-    /// exact executable, embedded portrait digest, and static source mouth.
+    /// Native-only cached selection check for the project-owned review target.
+    /// This state is populated only after the bounded metadata document and
+    /// native broker selection prove the exact executable and embedded source.
+    /// It is not a liveness probe; callers that need fresh capture authority
+    /// must query broker diagnostics/evidence.
     #[cfg(debug_assertions)]
     pub(crate) fn project_owned_review_target_selected(&self) -> bool {
         self.state
@@ -3910,29 +3921,77 @@ fn debug_synthetic_metadata_fallback(primary: &Path) -> Option<PathBuf> {
     )
 }
 
-#[cfg(debug_assertions)]
+#[cfg(all(debug_assertions, test))]
 fn read_debug_synthetic_target_with_fallback(
     primary: &Path,
 ) -> Result<DebugSyntheticTargetIdentity, MediaBrokerError> {
-    match read_debug_synthetic_target(primary) {
-        Ok(identity) => Ok(identity),
-        Err(MediaBrokerError::DebugSyntheticMetadataUnavailable) => {
-            if let Some(fallback) = debug_synthetic_metadata_fallback(primary) {
-                match read_debug_synthetic_target(&fallback) {
-                    Ok(identity) => Ok(identity),
-                    // A manually opened game that was closed reports Closed;
-                    // that answer is more actionable than "missing", so keep it.
-                    Err(MediaBrokerError::DebugSyntheticTargetClosed) => {
-                        Err(MediaBrokerError::DebugSyntheticTargetClosed)
-                    }
-                    Err(_) => Err(MediaBrokerError::DebugSyntheticMetadataUnavailable),
-                }
-            } else {
-                Err(MediaBrokerError::DebugSyntheticMetadataUnavailable)
+    read_debug_synthetic_target_candidates(primary)?
+        .into_iter()
+        .next()
+        .ok_or(MediaBrokerError::DebugSyntheticMetadataUnavailable)
+}
+
+#[cfg(debug_assertions)]
+fn read_debug_synthetic_target_candidates(
+    primary: &Path,
+) -> Result<Vec<DebugSyntheticTargetIdentity>, MediaBrokerError> {
+    let primary_result = read_debug_synthetic_target(primary);
+    let primary_missing = matches!(
+        &primary_result,
+        Err(MediaBrokerError::DebugSyntheticMetadataUnavailable)
+    );
+    let primary_closed = matches!(
+        &primary_result,
+        Err(MediaBrokerError::DebugSyntheticTargetClosed)
+    );
+    let mut candidates = match primary_result {
+        Ok(identity) => vec![identity],
+        Err(MediaBrokerError::DebugSyntheticMetadataUnavailable)
+        | Err(MediaBrokerError::DebugSyntheticTargetClosed) => Vec::new(),
+        Err(error) => return Err(error),
+    };
+
+    let Some(fallback) = debug_synthetic_metadata_fallback(primary) else {
+        return if primary_closed {
+            Err(MediaBrokerError::DebugSyntheticTargetClosed)
+        } else if primary_missing {
+            Err(MediaBrokerError::DebugSyntheticMetadataUnavailable)
+        } else {
+            Ok(candidates)
+        };
+    };
+    match read_debug_synthetic_target(&fallback) {
+        Ok(identity) => {
+            if !candidates.contains(&identity) {
+                candidates.push(identity);
             }
         }
-        Err(error) => Err(error),
+        Err(error) if candidates.is_empty() => {
+            return match (primary_missing, primary_closed, error) {
+                (_, _, MediaBrokerError::DebugSyntheticTargetClosed) => {
+                    Err(MediaBrokerError::DebugSyntheticTargetClosed)
+                }
+                (true, false, _) => Err(MediaBrokerError::DebugSyntheticMetadataUnavailable),
+                (false, true, error) => Err(error),
+                (_, _, error) => Err(error),
+            };
+        }
+        Err(_) => {
+            // A valid primary remains authoritative. A malformed secondary
+            // handoff cannot displace it, but also cannot be used as retry.
+        }
     }
+    Ok(candidates)
+}
+
+#[cfg(debug_assertions)]
+fn debug_synthetic_target_error_allows_fallback(error: &MediaBrokerError) -> bool {
+    matches!(
+        error,
+        MediaBrokerError::TargetBlocked(reason)
+            if reason.starts_with("invalid_window:")
+                || reason.starts_with("process_mismatch:")
+    )
 }
 
 #[cfg(debug_assertions)]
@@ -3965,11 +4024,8 @@ fn decode_debug_synthetic_target_metadata(
 ) -> Result<DebugSyntheticTargetIdentity, MediaBrokerError> {
     let metadata: DebugSyntheticTargetMetadata = serde_json::from_slice(bytes)
         .map_err(|_| MediaBrokerError::DebugSyntheticMetadataInvalid)?;
-    if metadata.state == "closed" {
-        return Err(MediaBrokerError::DebugSyntheticTargetClosed);
-    }
     if metadata.fixture_kind != "synthetic-original-video-replay"
-        || metadata.state != "playing"
+        || !matches!(metadata.state.as_str(), "playing" | "closed")
         || metadata.decoded_frames == 0
         || metadata.pid != metadata.process_id
         || metadata.hwnd != metadata.window_handle
@@ -4010,13 +4066,18 @@ fn decode_debug_synthetic_target_metadata(
         }
         _ => return Err(MediaBrokerError::DebugSyntheticMetadataInvalid),
     };
-    validate_debug_synthetic_target(
+    let identity = validate_debug_synthetic_target(
         metadata.window_handle as u64,
         metadata.process_id,
         &metadata.executable_basename,
         &metadata.portrait_sha256,
         qualification_mode,
-    )
+    )?;
+    if metadata.state == "closed" {
+        Err(MediaBrokerError::DebugSyntheticTargetClosed)
+    } else {
+        Ok(identity)
+    }
 }
 
 #[cfg(debug_assertions)]
@@ -7412,6 +7473,15 @@ mod tests {
             ),
             Err(MediaBrokerError::DebugSyntheticTargetClosed)
         ));
+
+        let mut corrupt = fixture.clone();
+        corrupt["exe_basename"] = serde_json::json!("notepad.exe");
+        assert!(matches!(
+            decode_debug_synthetic_target_metadata(
+                &serde_json::to_vec(&corrupt).expect("serialize corrupt closed metadata")
+            ),
+            Err(MediaBrokerError::DebugSyntheticMetadataInvalid)
+        ));
     }
 
     #[test]
@@ -7450,6 +7520,49 @@ mod tests {
         assert_eq!(identity.process_id, 77);
         assert_eq!(identity.native_window, 4660);
 
+        let mut closed_primary = fixture.clone();
+        closed_primary["state"] = serde_json::json!("closed");
+        std::fs::write(
+            &primary,
+            serde_json::to_vec(&closed_primary).expect("serialize closed primary metadata"),
+        )
+        .expect("write closed primary metadata");
+        let candidates = read_debug_synthetic_target_candidates(&primary)
+            .expect("closed review handoff does not mask live production handoff");
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].process_id, 77);
+        assert_eq!(candidates[0].native_window, 4660);
+
+        let mut current_primary = fixture.clone();
+        current_primary["process_id"] = serde_json::json!(88);
+        current_primary["pid"] = serde_json::json!(88);
+        current_primary["window_handle"] = serde_json::json!(4770);
+        current_primary["hwnd"] = serde_json::json!(4770);
+        std::fs::write(
+            &primary,
+            serde_json::to_vec(&current_primary).expect("serialize current primary metadata"),
+        )
+        .expect("write current primary metadata");
+        let candidates = read_debug_synthetic_target_candidates(&primary)
+            .expect("both live handoffs remain available for native validation");
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].process_id, 88);
+        assert_eq!(candidates[0].native_window, 4770);
+        assert_eq!(candidates[1].process_id, 77);
+        assert_eq!(candidates[1].native_window, 4660);
+
+        let mut corrupt_primary = fixture.clone();
+        corrupt_primary["exe_basename"] = serde_json::json!("notepad.exe");
+        std::fs::write(
+            &primary,
+            serde_json::to_vec(&corrupt_primary).expect("serialize corrupt primary metadata"),
+        )
+        .expect("write corrupt primary metadata");
+        assert!(matches!(
+            read_debug_synthetic_target_candidates(&primary),
+            Err(MediaBrokerError::DebugSyntheticMetadataInvalid)
+        ));
+
         let missing_primary = root
             .path()
             .join("io.github.akshitireddy.interactive-npcs.review-2")
@@ -7467,6 +7580,23 @@ mod tests {
         assert!(target_block_reason_name(&2_u32.to_le_bytes()).starts_with("minimized"));
         assert!(target_block_reason_name(&10_u32.to_le_bytes()).starts_with("not_allowlisted"));
         assert_eq!(target_block_reason_name(&[]), "target_blocked");
+    }
+
+    #[test]
+    fn synthetic_target_fallback_only_retries_stale_native_identity_failures() {
+        for reason in ["invalid_window:6", "process_mismatch:7"] {
+            assert!(debug_synthetic_target_error_allows_fallback(
+                &MediaBrokerError::TargetBlocked(reason.to_string())
+            ));
+        }
+        for reason in ["minimized:2", "not_allowlisted:10", "capture_denied:12"] {
+            assert!(!debug_synthetic_target_error_allows_fallback(
+                &MediaBrokerError::TargetBlocked(reason.to_string())
+            ));
+        }
+        assert!(!debug_synthetic_target_error_allows_fallback(
+            &MediaBrokerError::State
+        ));
     }
 
     #[test]
