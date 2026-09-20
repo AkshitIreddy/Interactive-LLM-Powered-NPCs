@@ -837,7 +837,11 @@ async fn emit_native_result(
                 }
                 sequence += 1;
                 set_native_stage(state, generation, stage);
-                let fixture_stage_ms = fixture_stage_duration(result.fixture_only, stage);
+                let fixture_stage_ms = fixture_stage_duration(
+                    result.fixture_only,
+                    &result.integration_mode,
+                    stage,
+                );
                 let _ = channel.send(SimulationEvent::StageStarted {
                     simulation_id: simulation_id.into(),
                     generation,
@@ -1304,8 +1308,10 @@ fn validate_visual_route_safety(
     Ok(())
 }
 
-fn fixture_stage_duration(fixture_only: bool, stage: ResponseStage) -> u64 {
-    if !fixture_only {
+fn fixture_stage_duration(fixture_only: bool, integration_mode: &str, stage: ResponseStage) -> u64 {
+    // Dummy provider provenance does not make an executed selected-route turn
+    // a paced demo. Its real endpoint may already have finished playing.
+    if !fixture_only || integration_mode == "selected_route_turn" {
         return 0;
     }
     FIXTURE_STAGE_TIMINGS
@@ -2319,17 +2325,22 @@ mod tests {
     }
 
     #[test]
-    fn only_fixture_results_receive_visible_stage_pacing() {
+    fn only_legacy_fixture_results_receive_visible_stage_pacing() {
         for (stage, expected_duration) in FIXTURE_STAGE_TIMINGS {
             assert_eq!(
-                fixture_stage_duration(true, *stage),
+                fixture_stage_duration(true, "authored_profile", *stage),
                 *expected_duration,
                 "fixture stage {stage:?}"
             );
             assert_eq!(
-                fixture_stage_duration(false, *stage),
+                fixture_stage_duration(false, "selected_route_turn", *stage),
                 0,
                 "non-fixture stage {stage:?}"
+            );
+            assert_eq!(
+                fixture_stage_duration(true, "selected_route_turn", *stage),
+                0,
+                "executed Testing provider stage {stage:?} must not add demo latency"
             );
         }
         assert!(FIXTURE_STAGE_TIMINGS

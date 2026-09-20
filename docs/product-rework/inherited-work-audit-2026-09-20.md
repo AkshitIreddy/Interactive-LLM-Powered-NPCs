@@ -4,7 +4,7 @@ The September 17 implementation was reviewed rather than reverted wholesale. Thi
 
 ## GitHub
 
-After the user authorized GitHub CLI as AkshitIreddy, remote `main` was fast-forwarded to the already published `feat/2.0-overhaul` commit `4874ca9fc4d00949b7092b5a50831ff69d2683ef`. Both remote heads were verified at that commit. Today's local repairs and the previously unpushed September 17 commits were not included in that update. No release or tag was created.
+After the user authorized GitHub CLI as AkshitIreddy, remote `main` was fast-forwarded to the already published `feat/2.0-overhaul` commit `4874ca9fc4d00949b7092b5a50831ff69d2683ef`. At the user's subsequent request, both branches received documentation commit `146ea50`: the old main README from `503ef3b` is restored byte-for-byte, and the overhaul guide is retained as `README-2.0.md`. Today's local repairs and the previously unpushed September 17 commits were not included in those updates. No release or tag was created. The README commit skips CI; no workflows were running when checked afterward.
 
 ## Kept
 
@@ -20,7 +20,7 @@ After the user authorized GitHub CLI as AkshitIreddy, remote `main` was fast-for
 2. In the review visual coordinator, an inactive first sentence lease no longer prevents reaching a later active sentence. The new regression test failed before the change and passed after it. This corrects scheduling; it does not establish live rendering quality.
 3. Visual diagnostics now distinguish Off, no returned receipt, inactive audio, missing target, capture authority, worker failures and broker stages. Diagnostic labels are bounded typed codes, not raw worker messages. A started event records that the visual loop was requested.
 4. The practice game now respects the user's Lip-sync Off preference. The inherited debug-only override was removed. Enable lip-sync explicitly when reviewing mouth motion.
-5. A Testing voice measured only in memory no longer claims speaker submission or drainage. Without an output lease it falls back to subtitle delivery. Only native broker/WASAPI submission receipts cross as endpoint audio evidence. Testing results are explicitly dummy/non-live. Broker-leased Testing requests still use the real endpoint path.
+5. A Testing voice measured only in memory no longer claims speaker submission or drainage. Without an output lease it falls back to subtitle delivery. Only native broker/WASAPI submission receipts cross as endpoint audio evidence. Testing results are explicitly dummy/non-live. Broker-leased Testing requests still use the real endpoint path. Executed selected-route turns do not replay the old fixture's artificial stage delays, even when the providers are Testing dummies.
 
 ## Fresh verification
 
@@ -30,6 +30,7 @@ All checks were headless, without launching the review application, game, flashi
 - Manual-attachment metadata/fallback: three focused tests passed.
 - Visual runtime: 37 passed, two installed-model checks ignored; includes the sentence scheduling and typed failure-code regressions.
 - Router disabled/missing-receipt distinction: one focused test passed.
+- Router Testing timing: one focused test passed; no artificial demo delays for selected-route execution.
 - Testing providers: two integration tests and two focused evidence unit tests passed.
 
 ## Evidence limits
