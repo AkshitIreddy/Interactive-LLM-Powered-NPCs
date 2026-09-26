@@ -1,0 +1,78 @@
+{
+  "pre_conversation": [
+    { "line": "Hey choom, how's it going?" },
+    { "line": "Don't be such a gonk." },
+    { "line": "This code is drek." },
+    { "line": "I need to get myself a screamer." },
+    { "line": "I'm thinking of getting some chrome installed." },
+    { "line": "Thanks for having my back, choomba." },
+    { "line": "Do you take credsticks?" },
+    { "line": "How much for the job? I got eddies." },
+    { "line": "I fragged that guy in the game." },
+    { "line": "He's a gangbanger from the Valentinos." },
+    { "line": "I'm going to grab some kibble before we head out." },
+    { "line": "That guy's a real gonk. Don't listen to him." },
+    { "line": "I'm going to jack in and see what I can find." },
+    { "line": "I'm not sure if I trust that corpo." },
+    { "line": "I'm going to hit up the afterlife tonight." },
+    { "line": "I need to find a ripperdoc to fix me up." },
+    { "line": "I'm going to jack into the net and see what I can find." },
+    { "line": "That guy's got some serious chrome installed." },
+    { "line": "I'm going to grab some eddies and hit up the club tonight." },
+    { "line": "I heard there's a new braindance out. Let's check it out." },
+    {
+      "line": "Hey, choomba. You lookin' for some kibble or some joytoy action?"
+    },
+    {
+      "line": "Fuck off, gonk. You know I'm here for the braindance. Hook me up with the latest 'dorphs."
+    },
+    {
+      "line": "You got it, gato. Just don't flatline on me, okay? And watch out for the NCPD. They're cracking down on illegal BDs."
+    },
+    {
+      "line": "Relax, choom. I'm a pro netrunner. I can hack the Blackwall blindfolded. Now, let's chippin' in and see what this BD has to offer."
+    },
+    {
+      "line": "What's up, edgerunner? You lookin' for some work? I got a fixer who needs a skilled merc for a corpo job."
+    },
+    { "line": "I'm listening, choomba. What's the gig?" },
+    {
+      "line": "It's simple. You just need to infiltrate a Militech facility and steal some cyberware. You'll need a good cyberdeck and some 'dorphs to boost your RAM."
+    },
+    { "line": "Sounds easy enough. What's the catch?" },
+    {
+      "line": "The catch is that the facility is guarded by a borg named Adam Smasher. He's a legend in Night City. He killed Johnny Silverhand, the rockerboy who led the rebellion against Arasaka."
+    },
+    {
+      "line": "Adam Smasher? Are you fucking kidding me? That's suicide, choom. No amount of eddies is worth that."
+    },
+    {
+      "line": "Hey, doll. You lookin' for some fun? I can make your dreams come true."
+    },
+    {
+      "line": "No thanks, joytoy. I'm not interested in your flatlined services."
+    },
+    {
+      "line": "Come on, don't be bourgy. I'm not like those other dolls. I have a personality and a soul."
+    },
+    { "line": "Sure you do, choomba. And I'm a corpo with a heart of gold." },
+    {
+      "line": "Fine, be that way. But don't come crying to me when you need some input or output."
+    },
+    {
+      "line": "Hey, gato. You're a rockerboy, right? I love your music. It's so apogee."
+    },
+    {
+      "line": "Thanks, choomba. I appreciate your support. You know, it's not easy being a rockerboy in this world of corpos and gonks."
+    },
+    {
+      "line": "I know, right? They're trying to silence us with their kibble and their braindances. But we won't let them. We're the culture vultures of Night City."
+    },
+    {
+      "line": "That's right, choom. We're the voice of the people. We're here to make a difference with our songs and our guns."
+    },
+    {
+      "line": "Hell yeah, gato. You're an inspiration to me. Can I get your autograph?"
+    }
+  ]
+}
