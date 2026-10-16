@@ -332,9 +332,12 @@ $placementHelper = Join-Path $env:USERPROFILE '.codex\skills\prefer-second-monit
 $playerArguments = @(
     '--metadata', $MetadataPath, '--title', $WindowTitle,
     '--width', [string]$Width, '--height', [string]$Height,
-    '--fps', $FramesPerSecond.ToString([System.Globalization.CultureInfo]::InvariantCulture),
     '--exit-after-seconds', [string]$ExitAfterSeconds
 )
+# Without an explicit -FramesPerSecond the player picks its own default (30 Hz in static mode).
+if ($PSBoundParameters.ContainsKey('FramesPerSecond')) {
+    $playerArguments += @('--fps', $FramesPerSecond.ToString([System.Globalization.CultureInfo]::InvariantCulture))
+}
 if ($NoLoop) { $playerArguments += '--no-loop' }
 if ($Mute) { $playerArguments += '--mute' }
 if ($PlaceOnSecondMonitor) {

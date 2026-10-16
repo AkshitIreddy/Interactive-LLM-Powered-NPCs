@@ -34,6 +34,7 @@ namespace InteractiveNpcs.SyntheticReplay
         public int Width = 960;
         public int Height = 600;
         public double FramesPerSecond = 15.0;
+        public bool FramesPerSecondExplicit;
         public int ExitAfterSeconds;
         public int HeadlessExportFrameCount = 36;
         public double HeadlessExportStartSeconds;
@@ -84,6 +85,7 @@ namespace InteractiveNpcs.SyntheticReplay
             options.Width = Integer(values, "--width", options.Width, 320, 7680);
             options.Height = Integer(values, "--height", options.Height, 240, 4320);
             options.FramesPerSecond = Number(values, "--fps", options.FramesPerSecond, 1, 240);
+            options.FramesPerSecondExplicit = values.ContainsKey("--fps");
             options.ExitAfterSeconds = Integer(values, "--exit-after-seconds", 0, 0, 86400);
             options.HeadlessExportFrameCount = Integer(values, "--headless-export-frame-count", options.HeadlessExportFrameCount, 2, 900);
             options.HeadlessExportStartSeconds = Number(values, "--headless-export-start-seconds", 0, 0, 86400);
@@ -299,11 +301,25 @@ namespace InteractiveNpcs.SyntheticReplay
         public const int SourceFrameWidth = 960;
         public const int SourceFrameHeight = 720;
         public const int SourceFrameRate = 30;
+        // Static mode keeps one cached portrait frame. Windows Graphics Capture only delivers a new frame when window
+        // pixels change, so a dark heartbeat patch changes at this rate and nothing else is repainted.
+        public const double StaticFramesPerSecond = 30.0;
+        public const int HeartbeatMargin = 8;
+        // The broker fingerprints each captured frame from a 16x16 grid of sample pixels, so the patch must span more
+        // than one grid cell in both directions or its changes are invisible to target verification.
+        public const int BrokerFingerprintGrid = 16;
+        public const int HeartbeatGridSlack = 8;
+        // The patch ramps one shade per tick up and down (period 2 * HeartbeatRampSteps ticks) instead of toggling,
+        // so consecutive frames always differ without anything that reads as a flash.
+        public const int HeartbeatRampSteps = 12;
 
         private static readonly byte[] PortraitBytes = LoadPortraitBytes();
         private static readonly Image Portrait = LoadPortrait();
         private static FrameSequence sequence;
         private static bool movingMode;
+        private static readonly object staticGate = new object();
+        private static Bitmap staticBase;
+        private static string staticBaseSha256;
 
         public static bool MovingMode { get { return movingMode; } }
         public static string VisualSource { get { return movingMode ? MovingVisualSource : StaticVisualSource; } }
@@ -324,7 +340,53 @@ namespace InteractiveNpcs.SyntheticReplay
                 if (options.PlaybackMode == "moving") throw new FileNotFoundException("Moving mode requires the verified sibling frame sequence.", sequencePath);
                 sequence = null;
                 movingMode = false;
+                if (!options.FramesPerSecondExplicit) options.FramesPerSecond = StaticFramesPerSecond;
             }
+        }
+
+        // The full static portrait frame (portrait + title panel, no heartbeat). Rendered once per size and cached.
+        // The returned bitmap is owned by the cache; callers must not dispose or modify it.
+        public static Bitmap StaticBaseFrame(int width, int height)
+        {
+            lock (staticGate)
+            {
+                if (staticBase == null || staticBase.Width != width || staticBase.Height != height)
+                {
+                    if (staticBase != null) staticBase.Dispose();
+                    staticBase = RenderStaticBase(width, height);
+                    staticBaseSha256 = Hashing.HashBitmap(staticBase);
+                }
+                return staticBase;
+            }
+        }
+
+        public static string StaticBaseFrameSha256(int width, int height)
+        {
+            StaticBaseFrame(width, height);
+            lock (staticGate) return staticBaseSha256;
+        }
+
+        public static Rectangle HeartbeatRectangle(int width, int height)
+        {
+            var patchWidth = (width + BrokerFingerprintGrid - 1) / BrokerFingerprintGrid + HeartbeatGridSlack;
+            var patchHeight = (height + BrokerFingerprintGrid - 1) / BrokerFingerprintGrid + HeartbeatGridSlack;
+            return new Rectangle(width - HeartbeatMargin - patchWidth, height - HeartbeatMargin - patchHeight, patchWidth, patchHeight);
+        }
+
+        // A dark grey that slowly brightens by at most HeartbeatRampSteps levels and dims again. Never bright, never
+        // red/blue, and adjacent ticks differ by one level, so it cannot read as a flash.
+        public static Color HeartbeatColor(long tick)
+        {
+            var phase = (int)(tick % (2 * HeartbeatRampSteps));
+            var level = phase <= HeartbeatRampSteps ? phase : 2 * HeartbeatRampSteps - phase;
+            return Color.FromArgb(255, 14 + level, 16 + level, 20 + level);
+        }
+
+        public static int HeartbeatMaxChannelDelta()
+        {
+            var lowest = HeartbeatColor(0);
+            var highest = HeartbeatColor(HeartbeatRampSteps);
+            return Math.Max(Math.Abs(lowest.R - highest.R), Math.Max(Math.Abs(lowest.G - highest.G), Math.Abs(lowest.B - highest.B)));
         }
 
         public static Bitmap RenderFrame(int width, int height, double seconds)
@@ -337,7 +399,7 @@ namespace InteractiveNpcs.SyntheticReplay
         {
             if (movingMode) return RenderMovingFrame(width, height, seconds, out contentFrameIndex);
             contentFrameIndex = -1;
-            return RenderStaticFrame(width, height, seconds);
+            return RenderStaticProbeFrame(width, height, (long)Math.Round(seconds * StaticFramesPerSecond));
         }
 
         public static Bitmap RenderSourceFrame(int width, int height, double seconds, out int contentFrameIndex)
@@ -478,26 +540,26 @@ namespace InteractiveNpcs.SyntheticReplay
             graphics.ResetTransform();
         }
 
-        private static Bitmap RenderStaticFrame(int width, int height, double seconds)
+        // A fresh copy of the cached static frame with the heartbeat marker for the given tick (self-test/probe use only).
+        private static Bitmap RenderStaticProbeFrame(int width, int height, long tick)
         {
-            var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+            var baseFrame = StaticBaseFrame(width, height);
+            var bitmap = baseFrame.Clone(new Rectangle(0, 0, width, height), PixelFormat.Format32bppArgb);
+            using (var graphics = Graphics.FromImage(bitmap))
+            using (var brush = new SolidBrush(HeartbeatColor(tick)))
+                graphics.FillRectangle(brush, HeartbeatRectangle(width, height));
+            return bitmap;
+        }
+
+        private static Bitmap RenderStaticBase(int width, int height)
+        {
+            var bitmap = new Bitmap(width, height, PixelFormat.Format32bppPArgb);
             using (var graphics = Graphics.FromImage(bitmap))
             {
                 graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
                 graphics.ScaleTransform(width / 960.0f, height / 600.0f);
-                var phase = (seconds % LoopSeconds) / LoopSeconds;
-                var beacon = 0.5f + 0.5f * (float)Math.Sin(phase * Math.PI * 8.0);
                 DrawCover(graphics, Portrait, new Rectangle(0, 0, 960, 600));
-                using (var rain = new Pen(Color.FromArgb(72, 190, 220, 232), 1.25f))
-                {
-                    for (var index = 0; index < 20; index++)
-                    {
-                        var x = index < 10 ? 18 + index * 31 : 684 + (index - 10) * 27;
-                        var y = (float)((index * 61 + seconds * 125.0) % 620.0) - 20.0f;
-                        graphics.DrawLine(rain, x, y, x - 7, y + 22);
-                    }
-                }
                 using (var panel = new SolidBrush(Color.FromArgb(205, 7, 10, 24)))
                 using (var border = new Pen(Color.FromArgb(170, 255, 176, 124), 1.5f))
                 {
@@ -512,7 +574,6 @@ namespace InteractiveNpcs.SyntheticReplay
                     graphics.DrawString("ECLIPSE HARBOR", title, titleBrush, 40, 34);
                     graphics.DrawString("STATIC PORTRAIT CONTROL  //  MOUTH INVARIANT", small, mutedBrush, 42, 78);
                 }
-                using (var beaconBrush = new SolidBrush(Color.FromArgb((int)(80 + beacon * 175), 255, 94, 115))) graphics.FillEllipse(beaconBrush, 905, 28, 20, 20);
             }
             return bitmap;
         }
@@ -636,6 +697,8 @@ namespace InteractiveNpcs.SyntheticReplay
         private readonly System.Windows.Forms.Timer frameTimer;
         private readonly System.Windows.Forms.Timer exitTimer;
         private Bitmap currentFrame;
+        private Bitmap staticFrame;
+        private long heartbeatTick;
         private MemoryStream audioStream;
         private SoundPlayer audioPlayer;
         private string placementStatus = "not-requested";
@@ -656,7 +719,7 @@ namespace InteractiveNpcs.SyntheticReplay
             FormBorderStyle = FormBorderStyle.Sizable;
             MaximizeBox = true;
             DoubleBuffered = true;
-            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             frameTimer = new System.Windows.Forms.Timer();
             frameTimer.Interval = Math.Max(8, (int)Math.Round(1000.0 / options.FramesPerSecond));
             frameTimer.Tick += delegate { AdvanceFrame(); };
@@ -673,7 +736,8 @@ namespace InteractiveNpcs.SyntheticReplay
         private void OnShown(object sender, EventArgs eventArgs)
         {
             placementStatus = PlaceWindowIfRequested();
-            GenerateFrame(0);
+            if (SyntheticScene.MovingMode) GenerateFrame(0);
+            else ShowStaticFrame();
             StartAudio();
             WriteMetadata("playing", null);
             frameTimer.Start();
@@ -684,8 +748,33 @@ namespace InteractiveNpcs.SyntheticReplay
         {
             var frameIndex = Interlocked.Read(ref generatedFrames);
             if (!options.Loop && frameIndex >= (long)Math.Round(SyntheticScene.LoopSeconds * options.FramesPerSecond)) { Close(); return; }
-            GenerateFrame(frameIndex);
+            if (SyntheticScene.MovingMode) GenerateFrame(frameIndex);
+            else BeatHeartbeat(frameIndex);
             if (frameIndex % Math.Max(1, (int)Math.Round(options.FramesPerSecond)) == 0) WriteMetadata("playing", null);
+        }
+
+        // Static mode: the full portrait frame is rendered and hashed exactly once. Afterwards each tick only steps the shade of a
+        // dark heartbeat patch in the bottom-right corner and invalidates that rectangle.
+        private void ShowStaticFrame()
+        {
+            var cached = SyntheticScene.StaticBaseFrame(options.Width, options.Height);
+            var hash = SyntheticScene.StaticBaseFrameSha256(options.Width, options.Height);
+            lock (frameGate)
+            {
+                staticFrame = cached;
+                currentContentFrameIndex = -1;
+                currentFrameSha256 = hash;
+            }
+            heartbeatTick = 0;
+            Interlocked.Increment(ref generatedFrames);
+            Invalidate();
+        }
+
+        private void BeatHeartbeat(long frameIndex)
+        {
+            heartbeatTick = frameIndex;
+            Interlocked.Increment(ref generatedFrames);
+            Invalidate(SyntheticScene.HeartbeatRectangle(ClientSize.Width, ClientSize.Height));
         }
 
         private void GenerateFrame(long frameIndex)
@@ -719,6 +808,7 @@ namespace InteractiveNpcs.SyntheticReplay
         protected override void OnPaint(PaintEventArgs eventArgs)
         {
             base.OnPaint(eventArgs);
+            if (!SyntheticScene.MovingMode) { PaintStatic(eventArgs); return; }
             Bitmap frame = null;
             lock (frameGate) if (currentFrame != null) frame = (Bitmap)currentFrame.Clone();
             if (frame == null) return;
@@ -728,6 +818,32 @@ namespace InteractiveNpcs.SyntheticReplay
                 eventArgs.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
                 eventArgs.Graphics.DrawImage(frame, Fit(frame.Size, ClientSize));
             }
+        }
+
+        private void PaintStatic(PaintEventArgs eventArgs)
+        {
+            var source = staticFrame;
+            if (source == null) return;
+            var graphics = eventArgs.Graphics;
+            var client = ClientSize;
+            var clip = Rectangle.Intersect(eventArgs.ClipRectangle, new Rectangle(Point.Empty, client));
+            if (clip.Width <= 0 || clip.Height <= 0) return;
+            graphics.CompositingMode = CompositingMode.SourceCopy;
+            if (client.Width == source.Width && client.Height == source.Height)
+            {
+                // Native size: a 1:1 pixel copy of just the invalid rectangle, no resampling.
+                graphics.DrawImage(source, clip, clip.X, clip.Y, clip.Width, clip.Height, GraphicsUnit.Pixel);
+            }
+            else
+            {
+                using (var background = new SolidBrush(BackColor)) graphics.FillRectangle(background, clip);
+                graphics.InterpolationMode = InterpolationMode.Default;
+                graphics.PixelOffsetMode = PixelOffsetMode.Default;
+                graphics.DrawImage(source, Fit(source.Size, client));
+            }
+            var marker = SyntheticScene.HeartbeatRectangle(client.Width, client.Height);
+            if (clip.IntersectsWith(marker))
+                using (var brush = new SolidBrush(SyntheticScene.HeartbeatColor(heartbeatTick))) graphics.FillRectangle(brush, marker);
         }
 
         private static Rectangle Fit(Size source, Size destination)
@@ -788,7 +904,7 @@ namespace InteractiveNpcs.SyntheticReplay
                 { "source_frame_motion", SyntheticScene.MovingMode }, { "source_actor_motion", false },
                 { "rendered_actor_motion", SyntheticScene.MovingMode }, { "rendered_blink_motion", SyntheticScene.MovingMode }, { "rendered_breathing_motion", SyntheticScene.MovingMode },
                 { "source_mouth_motion", false }, { "source_mouth_articulation", false }, { "product_lip_sync", false },
-                { "content_frame_index", contentIndex }, { "content_frame_sha256", frameHash },
+                { "content_frame_index", contentIndex >= 0 ? (object)contentIndex : null }, { "content_frame_sha256", frameHash },
                 { "audio_source", "project-owned-generated-pcm-v1" }, { "audio_output", options.Muted ? "muted" : "windows-soundplayer-waveout" },
                 { "audio_output_started", audioStarted }, { "hardware_acceleration", false }, { "nvidia_compute_requested", false },
                 { "third_party_binaries_loaded", false }, { "placement_status", placementStatus }, { "error", error }
@@ -1094,14 +1210,23 @@ namespace InteractiveNpcs.SyntheticReplay
             var frameDirectory = options.SelfTestFrameDirectory ?? Path.Combine(Path.GetDirectoryName(options.SelfTestReportPath), "frames");
             Directory.CreateDirectory(frameDirectory);
             var frameAPath = Path.Combine(frameDirectory, "static-frame-000.png");
-            var frameBPath = Path.Combine(frameDirectory, "static-frame-045.png");
+            var frameBPath = Path.Combine(frameDirectory, "static-frame-003.png");
             string frameAHash;
             string frameBHash;
             string mouthAHash;
             string mouthBHash;
             var mouthGuard = SyntheticScene.MouthGuardRectangle(options.Width, options.Height);
-            using (var frame = SyntheticScene.RenderFrame(options.Width, options.Height, 0)) { frame.Save(frameAPath, ImageFormat.Png); frameAHash = Hashing.HashFile(frameAPath); mouthAHash = Hashing.HashRegion(frame, mouthGuard); }
-            using (var frame = SyntheticScene.RenderFrame(options.Width, options.Height, 3)) { frame.Save(frameBPath, ImageFormat.Png); frameBHash = Hashing.HashFile(frameBPath); mouthBHash = Hashing.HashRegion(frame, mouthGuard); }
+            var heartbeat = SyntheticScene.HeartbeatRectangle(options.Width, options.Height);
+            var heartbeatConfined = false;
+            // Frame A is tick 0 and frame B is tick 3 at the static frame rate; only the heartbeat marker may differ.
+            using (var frameA = SyntheticScene.RenderFrame(options.Width, options.Height, 0))
+            using (var frameB = SyntheticScene.RenderFrame(options.Width, options.Height, 3.0 / SyntheticScene.StaticFramesPerSecond))
+            {
+                frameA.Save(frameAPath, ImageFormat.Png); frameAHash = Hashing.HashFile(frameAPath); mouthAHash = Hashing.HashRegion(frameA, mouthGuard);
+                frameB.Save(frameBPath, ImageFormat.Png); frameBHash = Hashing.HashFile(frameBPath); mouthBHash = Hashing.HashRegion(frameB, mouthGuard);
+                heartbeatConfined = DifferencesConfinedTo(frameA, frameB, heartbeat);
+            }
+            var heartbeatDelta = SyntheticScene.HeartbeatMaxChannelDelta();
             AudioMetrics audio;
             var waveHash = Hashing.HashBytes(SyntheticScene.CreateWave(out audio));
             var framesDiffer = !string.Equals(frameAHash, frameBHash, StringComparison.OrdinalIgnoreCase);
@@ -1109,7 +1234,7 @@ namespace InteractiveNpcs.SyntheticReplay
             var audioPassed = audio.NonzeroSamples > audio.SampleCount / 2 && audio.Peak > 256 && audio.Peak < short.MaxValue && audio.Rms > 128 && audio.ClippedSamples == 0 && audio.LoopBoundaryDelta < 256;
             var portraitHash = SyntheticScene.EmbeddedPortraitHash();
             var portraitVerified = string.Equals(portraitHash, SyntheticScene.PortraitSha256, StringComparison.OrdinalIgnoreCase);
-            var passed = framesDiffer && mouthRegionInvariant && portraitVerified && audioPassed;
+            var passed = framesDiffer && mouthRegionInvariant && portraitVerified && audioPassed && heartbeatConfined && heartbeatDelta <= 16;
             var payload = new Dictionary<string, object> {
                 { "schema_version", 1 }, { "status", passed ? "passed" : "failed" }, { "fixture_source", "project-source-generated-native-v1" },
                 { "renderer", "project-owned-gdi-generated-v1" }, { "generated_frame_count", 2 }, { "generated_probe_frames", 2 }, { "frames_differ", framesDiffer },
@@ -1119,6 +1244,8 @@ namespace InteractiveNpcs.SyntheticReplay
                 { "mouth_guard_x", mouthGuard.X }, { "mouth_guard_y", mouthGuard.Y }, { "mouth_guard_width", mouthGuard.Width }, { "mouth_guard_height", mouthGuard.Height },
                 { "mouth_region_frame_a_sha256", mouthAHash }, { "mouth_region_frame_b_sha256", mouthBHash }, { "mouth_region_invariant", mouthRegionInvariant },
                 { "frame_a_path", frameAPath }, { "frame_a_sha256", frameAHash }, { "frame_b_path", frameBPath }, { "frame_b_sha256", frameBHash },
+                { "static_frames_per_second", SyntheticScene.StaticFramesPerSecond }, { "heartbeat_x", heartbeat.X }, { "heartbeat_y", heartbeat.Y },
+                { "heartbeat_size", heartbeat.Width }, { "heartbeat_max_channel_delta", heartbeatDelta }, { "frame_difference_confined_to_heartbeat", heartbeatConfined },
                 { "audio_source", "project-owned-generated-pcm-v1" }, { "audio_sha256", waveHash }, { "audio_duration_seconds", audio.DurationSeconds },
                 { "audio_sample_rate", audio.SampleRate }, { "audio_sample_count", audio.SampleCount }, { "audio_nonzero_samples", audio.NonzeroSamples },
                 { "audio_peak", audio.Peak }, { "audio_rms", audio.Rms }, { "audio_clipped_samples", audio.ClippedSamples },
@@ -1127,6 +1254,36 @@ namespace InteractiveNpcs.SyntheticReplay
             };
             WriteJson(options.SelfTestReportPath, payload);
             return passed ? 0 : 2;
+        }
+
+        private static bool DifferencesConfinedTo(Bitmap a, Bitmap b, Rectangle allowed)
+        {
+            if (a.Size != b.Size) return false;
+            var rectangle = new Rectangle(Point.Empty, a.Size);
+            var dataA = a.LockBits(rectangle, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            var dataB = b.LockBits(rectangle, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            try
+            {
+                var row = Math.Abs(dataA.Stride);
+                var bytesA = new byte[row];
+                var bytesB = new byte[row];
+                var anyDifference = false;
+                for (var y = 0; y < a.Height; y++)
+                {
+                    Marshal.Copy(IntPtr.Add(dataA.Scan0, y * dataA.Stride), bytesA, 0, row);
+                    Marshal.Copy(IntPtr.Add(dataB.Scan0, y * dataB.Stride), bytesB, 0, row);
+                    for (var x = 0; x < a.Width; x++)
+                    {
+                        var offset = x * 4;
+                        if (bytesA[offset] == bytesB[offset] && bytesA[offset + 1] == bytesB[offset + 1] &&
+                            bytesA[offset + 2] == bytesB[offset + 2] && bytesA[offset + 3] == bytesB[offset + 3]) continue;
+                        if (!allowed.Contains(x, y)) return false;
+                        anyDifference = true;
+                    }
+                }
+                return anyDifference;
+            }
+            finally { a.UnlockBits(dataA); b.UnlockBits(dataB); }
         }
 
         private static void SaveCrop(Bitmap frame, Rectangle rectangle, string path)

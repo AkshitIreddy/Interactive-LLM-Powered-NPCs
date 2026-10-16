@@ -21,7 +21,7 @@ function Assert-VerificationFails {
 }
 
 try {
-    $preparedJson = & $prepareScript -DestinationDirectory $destination
+    $preparedJson = & $prepareScript -DestinationDirectory $destination -StaticOnly
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $prepared = $preparedJson | ConvertFrom-Json
     if ($prepared.schema_version -ne 2 -or $prepared.status -ne 'prepared' -or

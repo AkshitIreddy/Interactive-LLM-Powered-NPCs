@@ -3,7 +3,7 @@
   "component_id": "interactive-npcs-synthetic-review-game",
   "component_version": "2.0.0",
   "source_path": "scripts/synthetic-game-replay/SyntheticGameReplay.cs",
-  "source_sha256": "862ca28984ce4a20ece96458a1af1f81a869725a94d98cee8092ccbbc298b243",
+  "source_sha256": "f8741572db72f6fea294c39dee0f542e18d433d31102f5f25055e64ab54bf9bf",
   "source_spdx_identifier": "MIT",
   "license_path": "LICENSE",
   "license_sha256": "8703e8c956a5accb5322bf6160ae4b5612683d680d8803a2288ff0a95f834ce8",
@@ -95,15 +95,15 @@
   },
   "build_toolchain": {
     "host_path": "%ProgramFiles%/dotnet/dotnet.exe",
-    "host_sha256": "c9fbb23d644f162894635776ad92ff137f0de05b34ace4a3737882609872fa48",
+    "host_sha256": "21a46f1e5235cf4e844b9de5429f0e198b9c97a41f0503a66442f1d639ca3ee6",
     "sdk_version": "9.0.302",
     "compiler_path": "%ProgramFiles%/dotnet/sdk/9.0.302/Roslyn/bincore/csc.dll",
     "compiler_sha256": "0124776082578cebfe5d7cdf6ca37e7dc87771e224ba3a9c59d04b28260e9569",
     "framework_reference_root": "%WINDIR%/Microsoft.NET/Framework64/v4.0.30319",
     "framework_references": [
-      { "path": "mscorlib.dll", "sha256": "a8cae3d326f7d973ca79cba849939d4837ad18d507ef6d5f6ebab802b7fb157a" },
+      { "path": "mscorlib.dll", "sha256": "11ac114c43ecf6996bef58ba3c99fba3693a4560a84eeadde54d193060dc626c" },
       { "path": "System.dll", "sha256": "2b3c17c6208a0b4b6beb94e1a066f99ba06cdb2ea919479e99d47e8c6d96dc71" },
-      { "path": "System.Core.dll", "sha256": "06fbe25901c981f00f6dc823be375e1468cf6c05f000606bc93897732172fdd6" },
+      { "path": "System.Core.dll", "sha256": "8b898bed54ae8cc61f9c58cc3eb062724f8357d2bdda338b5d363654ecff333d" },
       { "path": "System.Drawing.dll", "sha256": "e16f7abead4afde7f03b82e5869c5544043be2eae29647a9de5f565d61a3bd29" },
       { "path": "System.Windows.Forms.dll", "sha256": "8c0f533e089647aeffb3ce0868f01d696a3fd2893ced5c3570e8438c96613a98" },
       { "path": "System.Web.Extensions.dll", "sha256": "5e6378edc06f5a61920aaadb2aba839dd3cf302d6192e08aacd4454ba4cff0b3" }
