@@ -126,7 +126,7 @@ describe("per-role route test", () => {
       <RoleTestPanel
         role="stt"
         roleLabel="Speech recognition"
-        route={{ providerId: "assemblyai", modelId: "u3-rt-pro" }}
+        route={{ providerId: "assemblyai", modelId: "universal-3-6-pro" }}
         providerName="AssemblyAI"
         testable
       />,

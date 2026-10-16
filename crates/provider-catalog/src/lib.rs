@@ -1649,7 +1649,7 @@ mod tests {
 
         assert_eq!(
             document.signing_sha256().unwrap(),
-            "d7d6635a56bf3ff31d1ea941b75850513b0f351f78fb2dbc6de5714210d32150"
+            "3e5af99b28a23d3a67aa988b93c766083b43e7435706aacd807e836bcb37c8d9"
         );
     }
 

@@ -339,7 +339,7 @@ mod tests {
     #[test]
     fn missing_or_unreadable_key_is_reported_without_asking_the_runtime() {
         let missing = plan(
-            &request(LoadoutTestRole::Stt, "assemblyai", "u3-rt-pro"),
+            &request(LoadoutTestRole::Stt, "assemblyai", "universal-3-6-pro"),
             CredentialReferenceStatus::Missing,
         );
         assert!(matches!(
@@ -351,7 +351,7 @@ mod tests {
             )
         ));
         let unavailable = plan(
-            &request(LoadoutTestRole::Stt, "assemblyai", "u3-rt-pro"),
+            &request(LoadoutTestRole::Stt, "assemblyai", "universal-3-6-pro"),
             CredentialReferenceStatus::Unavailable,
         );
         assert!(matches!(
