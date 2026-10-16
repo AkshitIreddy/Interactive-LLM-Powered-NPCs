@@ -22,6 +22,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -95,6 +96,15 @@ constexpr int onnx_tensor_float = 1;
 constexpr std::size_t detector_input_size = 224U;
 constexpr std::size_t detector_grid_size = 56U;
 constexpr std::size_t yunet_input_size = 640U;
+
+// One intra-op thread put YuNet640 plus the landmark model well past the
+// 150 ms capture-to-signal budget. A few threads keep a speaking frame fresh
+// while still leaving most cores to the game.
+[[nodiscard]] int provider_intra_op_threads() noexcept {
+    const unsigned hardware = std::thread::hardware_concurrency();
+    if (hardware <= 2U) return 1;
+    return static_cast<int>(std::min(4U, hardware / 2U));
+}
 constexpr std::size_t landmark_grid_size = 28U;
 constexpr std::size_t landmark_channels = 198U;
 constexpr float detector_threshold = 0.60F;
@@ -575,7 +585,8 @@ public:
                                                                           ort_enable_all),
                  failure, "provider_graph_optimization_failed") &&
             call(api_function<SetThreadCountFn>(api_, ApiSlot::set_intra_op_num_threads)(
-                     options, 1), failure, "provider_intra_threads_failed") &&
+                     options, provider_intra_op_threads()), failure,
+                 "provider_intra_threads_failed") &&
             call(api_function<SetThreadCountFn>(api_, ApiSlot::set_inter_op_num_threads)(
                      options, 1), failure, "provider_inter_threads_failed");
         bool sessions_created = false;
