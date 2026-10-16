@@ -1905,14 +1905,16 @@ describe("native evidence in the product console", () => {
     await user.click(
       screen.getByRole("button", { name: "Run native diagnostics" }),
     );
-    await user.click(
-      screen.getByRole("button", { name: "Refresh native checks" }),
-    );
+    // Opening Diagnostics runs the native checks without another click.
     expect(await screen.findByText("15 checks")).toBeInTheDocument();
     expect(bridge.diagnostics).toHaveBeenCalledOnce();
     expect(bridge.diagnosticsV2).toHaveBeenCalledWith(100);
     expect(bridge.diagnosticsMatrix).toHaveBeenCalledWith();
     expect(bridge.diagnosticsSettings).toHaveBeenCalledOnce();
+    await user.click(
+      screen.getByRole("button", { name: "Refresh native checks" }),
+    );
+    await waitFor(() => expect(bridge.diagnostics).toHaveBeenCalledTimes(2));
     expect(screen.getAllByText("unmeasured").length).toBeGreaterThan(0);
     await user.selectOptions(
       screen.getByRole("combobox", { name: "Diagnostics verbosity" }),
@@ -1985,5 +1987,469 @@ describe("native evidence in the product console", () => {
     expect(
       screen.getByRole("heading", { name: "Neural loadout" }),
     ).toBeInTheDocument();
+  });
+
+  describe("product flows", { timeout: 20_000 }, () => {
+    const profileSummary = (id: string, displayName: string) => ({
+      id,
+      displayName,
+      wave: "1",
+      safety: "singlePlayerOnly" as const,
+      catalogState: "bundled" as const,
+      defaultFallback: "audioOnly" as const,
+    });
+    const bootstrapWithProfiles = (profiles: Array<[string, string]>) => ({
+      ...authenticatedBootstrap,
+      snapshot: {
+        ...authenticatedBootstrap.snapshot,
+        gameProfiles: profiles.map(([id, name]) => profileSummary(id, name)),
+      },
+    });
+    const inspectionFor = (
+      gameProfileId: string,
+      gameDisplayName: string,
+      characterId: string,
+      displayName: string,
+      deliveredMemory: unknown[] = [],
+    ) => ({
+      schemaVersion: 1,
+      gameProfileId,
+      gameDisplayName,
+      selectedCharacterId: characterId,
+      character: { id: characterId, displayName, promptRole: "Test role" },
+      authoredKnowledge: [],
+      provenance: [],
+      deliveredMemory,
+      memoryScope: { crossGameWideningAllowed: false },
+    });
+    const persistOnboarding = () =>
+      bridge.saveOnboarding.mockImplementation(async (onboarding) => ({
+        onboarding,
+        persistence: { health: "healthy", detail: "Saved." },
+      }));
+    const testingCompletion = {
+      type: "completed" as const,
+      simulationId: "setup-testing",
+      generation: 1,
+      sequence: 8,
+      fixtureFirstAudioMs: null,
+      runtimeFixtureOnly: true,
+      deliveredText: "Testing echo: hello",
+      turnExecution: {
+        consumedRoute: {
+          schemaVersion: 1,
+          sourceLoadoutId: "testing-dummy",
+          generation: 1,
+          sha256: "testing-route",
+          llm: {
+            providerId: "testing",
+            modelId: "testing-echo-v1",
+            voiceId: null,
+          },
+          tts: {
+            providerId: "testing",
+            modelId: "testing-synth-v1",
+            voiceId: "testing-voice-1",
+          },
+        },
+        deliveryState: "delivered" as const,
+        commitState: "committed" as const,
+        degradations: [],
+        success: {
+          llmProviderLive: false,
+          ttsProviderLive: false,
+          sttSkipped: true,
+          subtitleDelivered: true,
+          subtitleReceiptCount: 0,
+          audioSubmitted: false,
+          audioDrained: false,
+          audioReceiptCount: 0,
+        },
+        audioReceipts: [],
+        subtitlePresentationReceipts: [],
+      },
+    };
+    const skipLabel = /Skip — I.ll connect a game later/;
+
+    async function reachSetupTestStep(
+      user: ReturnType<typeof userEvent.setup>,
+    ) {
+      await screen.findByRole("dialog", { name: /get you connected/i });
+      await user.click(screen.getByRole("button", { name: "Continue" }));
+      await user.click(
+        screen.getByRole("button", { name: "Select running synthetic target" }),
+      );
+      await user.click(
+        screen.getByRole("button", { name: "Verify live capture" }),
+      );
+      await user.click(screen.getByRole("button", { name: "Continue" }));
+      await user.selectOptions(
+        screen.getByRole("combobox", { name: "Audio output route" }),
+        "systemDefault",
+      );
+      await user.selectOptions(
+        screen.getByRole("combobox", { name: "Audio input route" }),
+        "systemDefault",
+      );
+      await user.click(await screen.findByRole("button", { name: "Continue" }));
+    }
+
+    async function skipToSetupTestStep(
+      user: ReturnType<typeof userEvent.setup>,
+    ) {
+      await screen.findByRole("dialog", { name: /get you connected/i });
+      await user.click(screen.getByRole("button", { name: "Continue" }));
+      await user.click(screen.getByRole("button", { name: skipLabel }));
+      await user.selectOptions(
+        screen.getByRole("combobox", { name: "Audio output route" }),
+        "systemDefault",
+      );
+      await user.selectOptions(
+        screen.getByRole("combobox", { name: "Audio input route" }),
+        "systemDefault",
+      );
+      await user.click(await screen.findByRole("button", { name: "Continue" }));
+      await user.click(
+        screen.getByRole("button", { name: "Use a typed setup turn instead" }),
+      );
+    }
+
+    it("aims the setup test turn at the practice game profile, not the selected game", async () => {
+      const user = userEvent.setup();
+      window.history.replaceState(null, "", "/?onboarding=1");
+      persistOnboarding();
+      bridge.loadBootstrap.mockResolvedValue(
+        bootstrapWithProfiles([
+          ["cyberpunk-2077", "Cyberpunk 2077"],
+          ["eclipse-harbor", "Eclipse Harbor"],
+        ]),
+      );
+      bridge.inspect.mockImplementation(async (gameId: string) =>
+        gameId === "cyberpunk-2077"
+          ? inspectionFor(
+              "cyberpunk-2077",
+              "Cyberpunk 2077",
+              "misty-olszewski",
+              "Misty Olszewski",
+            )
+          : inspectionFor(
+              "eclipse-harbor",
+              "Eclipse Harbor",
+              "mara-venn",
+              "Mara of the Harbor",
+            ),
+      );
+      render(<App />);
+      await reachSetupTestStep(user);
+      expect(
+        screen.getByText(/What has this city been like for you lately/),
+      ).toBeInTheDocument();
+      expect(document.body).not.toHaveTextContent(/lighthouse/i);
+      await user.click(
+        screen.getByRole("button", { name: "Use a typed setup turn instead" }),
+      );
+      await user.click(
+        screen.getByRole("button", { name: "Run bounded typed turn" }),
+      );
+      expect(bridge.start).toHaveBeenCalledWith(
+        "cloud",
+        expect.any(Function),
+        expect.objectContaining({
+          gameProfileId: "eclipse-harbor",
+          characterId: "mara-venn",
+          characterName: "Mara of the Harbor",
+        }),
+      );
+    });
+
+    it("lets setup skip the world step and finish with a labeled test-voice turn", async () => {
+      const user = userEvent.setup();
+      window.history.replaceState(null, "", "/?onboarding=1");
+      persistOnboarding();
+      render(<App />);
+      await screen.findByRole("dialog", { name: /get you connected/i });
+      await user.click(screen.getByRole("button", { name: "Continue" }));
+      expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+      await user.click(screen.getByRole("button", { name: skipLabel }));
+      expect(
+        await screen.findByRole("heading", {
+          name: "Choose your voice & models",
+        }),
+      ).toBeInTheDocument();
+      expect(bridge.saveOnboarding).toHaveBeenLastCalledWith(
+        expect.objectContaining({ completed: false, currentStep: "providers" }),
+      );
+      await user.selectOptions(
+        screen.getByRole("combobox", { name: "Audio output route" }),
+        "systemDefault",
+      );
+      await user.selectOptions(
+        screen.getByRole("combobox", { name: "Audio input route" }),
+        "systemDefault",
+      );
+      await user.click(await screen.findByRole("button", { name: "Continue" }));
+      await user.click(
+        screen.getByRole("button", { name: "Use a typed setup turn instead" }),
+      );
+      expect(
+        screen.getByText(/choose the Testing · local dummy reply and voice/i),
+      ).toBeInTheDocument();
+      await user.click(
+        screen.getByRole("button", { name: "Run bounded typed turn" }),
+      );
+      act(() => bridge.callback?.(testingCompletion));
+      expect(
+        screen.getByText(/dummy voice, not a live reply/i),
+      ).toBeInTheDocument();
+      const finish = screen.getByRole("button", {
+        name: "Finish with test voice",
+      });
+      expect(finish).toBeEnabled();
+      await user.click(finish);
+      expect(bridge.saveOnboarding).toHaveBeenLastCalledWith(
+        expect.objectContaining({ completed: true, currentStep: "ready" }),
+      );
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.getByRole("status")).toHaveTextContent(/local test voice/i);
+    });
+
+    it("does not treat a turn that used a non-testing voice as a test-voice finish", async () => {
+      const user = userEvent.setup();
+      window.history.replaceState(null, "", "/?onboarding=1");
+      persistOnboarding();
+      render(<App />);
+      await skipToSetupTestStep(user);
+      await user.click(
+        screen.getByRole("button", { name: "Run bounded typed turn" }),
+      );
+      act(() =>
+        bridge.callback?.({
+          ...testingCompletion,
+          turnExecution: {
+            ...testingCompletion.turnExecution,
+            consumedRoute: {
+              ...testingCompletion.turnExecution.consumedRoute,
+              tts: {
+                providerId: "elevenlabs",
+                modelId: "eleven_flash_v2_5",
+                voiceId: "voice",
+              },
+            },
+          },
+        }),
+      );
+      expect(
+        screen.getByRole("button", { name: "Finish setup" }),
+      ).toBeDisabled();
+    });
+
+    it("binds the rail footer to the game in use instead of a fixed title", async () => {
+      bridge.loadBootstrap.mockResolvedValue(
+        bootstrapWithProfiles([["eclipse-harbor", "Eclipse Harbor"]]),
+      );
+      const { unmount } = render(<App />);
+      await screen.findByText("Runtime and media broker authenticated");
+      const footer = document.querySelector(".rail-safety");
+      expect(footer).toHaveTextContent("Eclipse Harbor");
+      expect(footer).toHaveTextContent("Practice game · not connected");
+      expect(document.body).not.toHaveTextContent(/Personal build/);
+      unmount();
+
+      bridge.loadBootstrap.mockResolvedValue(
+        bootstrapWithProfiles([["cyberpunk-2077", "Cyberpunk 2077"]]),
+      );
+      bridge.inspect.mockResolvedValue(
+        inspectionFor(
+          "cyberpunk-2077",
+          "Cyberpunk 2077",
+          "misty-olszewski",
+          "Misty Olszewski",
+        ),
+      );
+      render(<App />);
+      await screen.findByRole("heading", { name: "Misty Olszewski" });
+      const selectedFooter = document.querySelector(".rail-safety");
+      expect(selectedFooter).toHaveTextContent("Cyberpunk 2077");
+      expect(selectedFooter).toHaveTextContent("Not connected");
+    });
+
+    it("marks the voice node ready for the credential-free test voice", async () => {
+      nativeLoadouts.snapshot.mockResolvedValue({
+        ...nativeLoadoutSnapshot,
+        document: {
+          ...nativeLoadoutSnapshot.document,
+          loadouts: {
+            "native-balanced-api": {
+              ...nativeLoadoutSnapshot.document.loadouts["native-balanced-api"],
+              roles: {
+                tts: {
+                  mode: "route" as const,
+                  route: {
+                    primary: {
+                      provider_id: "testing",
+                      model_id: "testing-synth-v1",
+                      voice_id: "testing-voice-1",
+                      credential: null,
+                      disclosure: {
+                        catalog_revision: 7,
+                        execution: "local" as const,
+                        egress: "none" as const,
+                        privacy_summary: "Nothing leaves this PC.",
+                        cost_summary: "Free",
+                        transmitted_data: [],
+                      },
+                      explicit_user_selection: true,
+                    },
+                    fallbacks: [],
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+      render(<App />);
+      const voice = await screen.findByText("Test beeps · dummy voice");
+      const node = voice.closest("button");
+      await waitFor(() =>
+        expect(node?.querySelector(".signal-index")).toHaveClass("ready"),
+      );
+      expect(screen.getByText("Local test voice")).toBeInTheDocument();
+    });
+
+    it("leaves the voice node unready when the selected voice has no account", async () => {
+      render(<App />);
+      await screen.findByText("Runtime and media broker authenticated");
+      const node = screen
+        .getByText("Voice", { selector: "small" })
+        .closest("button");
+      expect(node?.querySelector(".signal-index")).not.toHaveClass("ready");
+    });
+
+    it("shows persisted delivered turns for the selected character and an honest empty state", async () => {
+      bridge.loadBootstrap.mockResolvedValue(
+        bootstrapWithProfiles([["cyberpunk-2077", "Cyberpunk 2077"]]),
+      );
+      bridge.inspect.mockResolvedValue(
+        inspectionFor(
+          "cyberpunk-2077",
+          "Cyberpunk 2077",
+          "misty-olszewski",
+          "Misty Olszewski",
+          [
+            {
+              turnId: "turn-1",
+              speaker: "Misty Olszewski",
+              deliveredText: "The cards have been restless today.",
+              deliveredAtMs: 2_000,
+              sequence: 1,
+            },
+            {
+              turnId: "turn-0",
+              speaker: "Misty Olszewski",
+              deliveredText: "Come in, choom.",
+              deliveredAtMs: 1_000,
+              sequence: 0,
+            },
+          ],
+        ),
+      );
+      const { unmount } = render(<App />);
+      const history = await screen.findByRole("region", {
+        name: "Delivered turns",
+      });
+      await waitFor(() =>
+        expect(history).toHaveTextContent(
+          "The cards have been restless today.",
+        ),
+      );
+      expect(
+        within(history)
+          .getAllByRole("listitem")
+          .map((item) => item.textContent),
+      ).toEqual([
+        expect.stringContaining("restless"),
+        expect.stringContaining("Come in"),
+      ]);
+      unmount();
+
+      bridge.inspect.mockResolvedValue(
+        inspectionFor(
+          "cyberpunk-2077",
+          "Cyberpunk 2077",
+          "misty-olszewski",
+          "Misty Olszewski",
+        ),
+      );
+      render(<App />);
+      expect(
+        await screen.findByText(/Nothing delivered yet with Misty Olszewski/),
+      ).toBeInTheDocument();
+    });
+
+    it("lists every bundled game profile and scopes characters to the chosen one", async () => {
+      const user = userEvent.setup();
+      bridge.loadBootstrap.mockResolvedValue(
+        bootstrapWithProfiles([
+          ["cyberpunk-2077", "Cyberpunk 2077"],
+          ["skyrim-special-edition", "Skyrim Special Edition"],
+        ]),
+      );
+      bridge.inspect.mockImplementation(async (gameId: string) =>
+        gameId === "skyrim-special-edition"
+          ? inspectionFor(gameId, "Skyrim Special Edition", "lydia", "Lydia")
+          : inspectionFor(
+              "cyberpunk-2077",
+              "Cyberpunk 2077",
+              "misty-olszewski",
+              "Misty Olszewski",
+            ),
+      );
+      render(<App />);
+      await screen.findByRole("heading", { name: "Misty Olszewski" });
+      await user.click(screen.getByRole("button", { name: "Games" }));
+      const roster = screen.getByRole("region", { name: "Game profiles" });
+      expect(
+        within(roster).getByRole("button", { name: /Cyberpunk 2077/ }),
+      ).toHaveAttribute("aria-pressed", "true");
+      await user.click(
+        within(roster).getByRole("button", { name: /Skyrim Special Edition/ }),
+      );
+      expect(bridge.inspect).toHaveBeenCalledWith("skyrim-special-edition");
+      expect(
+        await screen.findByRole("button", {
+          name: "Scan for Skyrim Special Edition",
+        }),
+      ).toBeEnabled();
+    });
+
+    it("reaches Diagnostics and a PC benchmark from Settings and can reset setup", async () => {
+      const user = userEvent.setup();
+      persistOnboarding();
+      render(<App />);
+      await screen.findByText("Runtime and media broker authenticated");
+      await user.click(screen.getByRole("button", { name: "Settings" }));
+      await user.click(screen.getByRole("button", { name: /^Performance/i }));
+      expect(
+        screen.getByRole("heading", { name: "This PC benchmark" }),
+      ).toBeVisible();
+
+      await user.click(screen.getByRole("button", { name: /^System/i }));
+      await user.click(
+        screen.getByRole("button", { name: "Open diagnostics" }),
+      );
+      expect(await screen.findByText("15 checks")).toBeInTheDocument();
+      expect(bridge.diagnostics).toHaveBeenCalledOnce();
+
+      await user.click(screen.getByRole("button", { name: "Settings" }));
+      await user.click(screen.getByRole("button", { name: /^System/i }));
+      await user.click(screen.getByRole("button", { name: "Reset setup" }));
+      expect(bridge.saveOnboarding).toHaveBeenLastCalledWith(
+        expect.objectContaining({ completed: false, currentStep: "scan" }),
+      );
+      expect(
+        await screen.findByRole("dialog", { name: /get you connected/i }),
+      ).toBeInTheDocument();
+    }, 15_000);
   });
 });

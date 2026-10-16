@@ -99,8 +99,10 @@ import {
 import {
   CharacterDatabase,
   EncounterLifecycleControls,
+  GameRoster,
   GameTargetWorkspace,
   LocalResourcePlanner,
+  ThisPcBenchmark,
 } from "./ProductWorkspaces";
 import { ProductPreferencesWorkspace } from "./ProductPreferencesWorkspace";
 import {
@@ -268,6 +270,50 @@ function hasSpokenSetupTurn(
   );
 }
 
+/**
+ * A keyless setup turn: the native route that actually ran was the local
+ * dummy provider pair and the turn was delivered. It is never reported as a
+ * live reply; the UI labels it as a test turn.
+ */
+function hasTestingSetupTurn(
+  completed: (NativeSimulationEvent & { type: "completed" }) | null,
+) {
+  const evidence = completed?.turnExecution;
+  if (!completed || !evidence) return false;
+  const { consumedRoute, success } = evidence;
+  return (
+    evidence.deliveryState === "delivered" &&
+    consumedRoute.llm?.providerId === "testing" &&
+    consumedRoute.tts?.providerId === "testing" &&
+    !success.llmProviderLive &&
+    !success.ttsProviderLive &&
+    completed.deliveredText.trim().length > 0
+  );
+}
+
+/** The local dummy voice needs no account; every other voice needs a key. */
+function ttsCredentialReady(
+  loadout: ProviderLoadout,
+  accounts: NativeProviderCredentialSummary[],
+) {
+  const providerId = loadout.routes.tts.providerId;
+  if (providerId === "testing") return true;
+  const credentialId =
+    providerId === "nvidia-nim-magpie" ? "nvidia-nim" : providerId;
+  return accounts.some(
+    (account) =>
+      account.providerId === credentialId && account.status === "present",
+  );
+}
+
+const PRACTICE_FALLBACK = {
+  gameProfileId: "eclipse-harbor",
+  characterId: "mara-venn",
+  characterName: "Mara Venn",
+  gameDisplayName: "Eclipse Harbor",
+};
+type PracticeCharacter = typeof PRACTICE_FALLBACK;
+
 function subtitleReceiptSurfaceLabel(
   receipts: NativeTurnExecutionEvidence["subtitlePresentationReceipts"],
 ) {
@@ -402,6 +448,8 @@ export function ProductConsole() {
     "syntheticReview" | "selectedWorld"
   >("syntheticReview");
   const explicitWorldModeChoice = useRef(false);
+  const [practiceInspection, setPracticeInspection] =
+    useState<NativeCharacterInspection | null>(null);
   const [turnInputMode, setTurnInputMode] = useState<"typed" | "ptt">(
     DEFAULT_PREFERENCES.ptt ? "ptt" : "typed",
   );
@@ -467,6 +515,20 @@ export function ProductConsole() {
     [],
   );
 
+  // The practice game's character comes from the bundled profile when it is
+  // present; the constant is only a fallback for when that data is absent.
+  const practice = useMemo<PracticeCharacter>(
+    () =>
+      practiceInspection
+        ? {
+            gameProfileId: practiceInspection.gameProfileId,
+            characterId: practiceInspection.character.id,
+            characterName: practiceInspection.character.displayName,
+            gameDisplayName: practiceInspection.gameDisplayName,
+          }
+        : PRACTICE_FALLBACK,
+    [practiceInspection],
+  );
   const currentSttScope = useMemo<SelectedSttScope>(
     () =>
       turnWorldMode === "selectedWorld" && selectedCharacter
@@ -476,11 +538,11 @@ export function ProductConsole() {
             characterLabel: `${selectedCharacter.gameDisplayName} · ${selectedCharacter.character.displayName}`,
           }
         : {
-            gameProfileId: "eclipse-harbor",
-            characterId: "mara-venn",
-            characterLabel: "Eclipse Harbor · Mara Venn",
+            gameProfileId: practice.gameProfileId,
+            characterId: practice.characterId,
+            characterLabel: `${practice.gameDisplayName} · ${practice.characterName}`,
           },
-    [selectedCharacter, turnWorldMode],
+    [practice, selectedCharacter, turnWorldMode],
   );
   const currentProductPreferenceScope = useMemo<NativeProductPreferenceScope>(
     () => ({
@@ -1008,6 +1070,67 @@ export function ProductConsole() {
   }, [bootstrap.kind, selectedGameProfileId]);
 
   const snapshot = bootstrap.kind === "snapshot" ? bootstrap.snapshot : null;
+  const practiceProfileAvailable = Boolean(
+    snapshot?.gameProfiles?.some(
+      (profile) => profile.id === PRACTICE_FALLBACK.gameProfileId,
+    ),
+  );
+  useEffect(() => {
+    if (!practiceProfileAvailable) {
+      setPracticeInspection(null);
+      return;
+    }
+    let active = true;
+    void inspectCharacterDatabase(
+      PRACTICE_FALLBACK.gameProfileId,
+      PRACTICE_FALLBACK.characterId,
+    )
+      .then((inspection) => {
+        if (
+          active &&
+          inspection?.gameProfileId === PRACTICE_FALLBACK.gameProfileId
+        )
+          setPracticeInspection(inspection);
+      })
+      .catch(() => {
+        if (active) setPracticeInspection(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [practiceProfileAvailable]);
+
+  // Setup always rehearses with the practice game; the previous conversation
+  // source is restored when setup closes.
+  const turnWorldModeRef = useRef(turnWorldMode);
+  turnWorldModeRef.current = turnWorldMode;
+  const selectedCharacterRef = useRef(selectedCharacter);
+  selectedCharacterRef.current = selectedCharacter;
+  const worldModeBeforeSetup = useRef<{
+    mode: "syntheticReview" | "selectedWorld";
+    explicit: boolean;
+  } | null>(null);
+  useEffect(() => {
+    if (setupOpen) {
+      worldModeBeforeSetup.current ??= {
+        mode: turnWorldModeRef.current,
+        explicit: explicitWorldModeChoice.current,
+      };
+      explicitWorldModeChoice.current = true;
+      setTurnWorldMode("syntheticReview");
+      return;
+    }
+    const before = worldModeBeforeSetup.current;
+    if (!before) return;
+    worldModeBeforeSetup.current = null;
+    explicitWorldModeChoice.current = before.explicit;
+    setTurnWorldMode(
+      !before.explicit &&
+        selectedCharacterRef.current?.gameProfileId === "cyberpunk-2077"
+        ? "selectedWorld"
+        : before.mode,
+    );
+  }, [setupOpen]);
   const nativeWorldReady = Boolean(
     snapshot?.gameProfiles?.some(
       (profile) => profile.id === selectedGameProfileId,
@@ -1043,17 +1166,12 @@ export function ProductConsole() {
       currentSttScope.characterId,
     );
   const configuredSttRoute = configuredLoadout.routes.stt;
-  const configuredTtsCredentialId =
-    configuredLoadout.routes.tts.providerId === "nvidia-nim-magpie"
-      ? "nvidia-nim"
-      : configuredLoadout.routes.tts.providerId;
+  const configuredTtsKeyless =
+    configuredLoadout.routes.tts.providerId === "testing";
   const configuredTtsPresent = Boolean(
     nativeLoadouts &&
-      snapshot?.providers?.some(
-        (item) =>
-          item.providerId === configuredTtsCredentialId &&
-          item.status === "present",
-      ),
+      snapshot?.providers &&
+      ttsCredentialReady(configuredLoadout, snapshot.providers),
   );
   const selectedSttReadiness: SelectedSttReadiness = {
     ready: Boolean(
@@ -1126,6 +1244,11 @@ export function ProductConsole() {
     [preferences],
   );
 
+  const testingSetupTurn = hasTestingSetupTurn(deliveredTurn);
+  const setupTurnComplete =
+    hasSpokenSetupTurn(deliveredTurn, preferences.subtitles) ||
+    testingSetupTurn;
+
   const nextSetupStep = async () => {
     if (setupStep === 1 && !captureProof?.receipt?.verified) {
       setNotice(
@@ -1150,13 +1273,13 @@ export function ProductConsole() {
       return;
     }
     if (
-      !hasSpokenSetupTurn(deliveredTurn, preferences.subtitles) ||
+      !setupTurnComplete ||
       !turnRoute ||
       turnRoute.configurationChangedAt !== configurationChangedAt.current ||
       turnRoute.configurationRevision !== configurationRevision
     ) {
       setNotice(
-        "Run a spoken test turn first. Setup finishes when the selected voice returns audio and playback completes.",
+        "Run a test turn first. Setup finishes when the selected voice returns audio and playback completes, or when the local test voice delivers a turn.",
       );
       return;
     }
@@ -1166,7 +1289,84 @@ export function ProductConsole() {
       return;
     }
     setSetupOpen(false);
-    setNotice("Setup saved. Session deck is ready.");
+    setNotice(
+      testingSetupTurn
+        ? "Setup saved with the local test voice. Connect a voice account in Loadout for live replies."
+        : "Setup saved. Session deck is ready.",
+    );
+  };
+
+  // The practice launcher is debug-only, so the World step must be skippable.
+  const skipWorldStep = async () => {
+    const next = ONBOARDING_STEPS.findIndex((item) => item.id === "providers");
+    const saved = await persistSetup(false, ONBOARDING_STEPS[next].id);
+    if (!saved) {
+      setNotice(
+        "Open the native desktop app to save and continue guided setup.",
+      );
+      return;
+    }
+    setSetupStep(next);
+    setNotice("Skipped for now. Connect a game any time from Games.");
+  };
+
+  const openSetup = () => {
+    setNotice(null);
+    setSetupOpen(true);
+  };
+
+  const resetSetup = async () => {
+    try {
+      const saved = await persistSetup(false, "scan");
+      if (!saved) {
+        setNotice("Open the native desktop app to reset setup.");
+        return;
+      }
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "Setup could not be reset.",
+      );
+      return;
+    }
+    if (!running) {
+      setDeliveredTurn(null);
+      setTurnEvents([]);
+      setTurnRoute(null);
+    }
+    setSetupStep(0);
+    openSetup();
+  };
+
+  // Re-reads the persisted delivered turns after a completion so the Channel
+  // history reflects the stored record, not a client-side copy.
+  const refreshDeliveredHistory = (
+    gameProfileId: string,
+    characterId: string,
+  ) => {
+    void inspectCharacterDatabase(gameProfileId, characterId)
+      .then((inspection) => {
+        if (
+          !inspection ||
+          inspection.gameProfileId !== gameProfileId ||
+          inspection.character.id !== characterId
+        )
+          return;
+        setSelectedCharacter((current) =>
+          current &&
+          current.gameProfileId === gameProfileId &&
+          current.character.id === characterId
+            ? inspection
+            : current,
+        );
+        setPracticeInspection((current) =>
+          gameProfileId === PRACTICE_FALLBACK.gameProfileId &&
+          characterId ===
+            (current?.character.id ?? PRACTICE_FALLBACK.characterId)
+            ? inspection
+            : current,
+        );
+      })
+      .catch(() => undefined);
   };
 
   const runTurn = async () => {
@@ -1203,13 +1403,13 @@ export function ProductConsole() {
       turnWorldMode === "selectedWorld" && selectedCharacter !== null;
     const turnGameProfileId = selectedWorldTurn
       ? selectedCharacter.gameProfileId
-      : "eclipse-harbor";
+      : practice.gameProfileId;
     const turnCharacterId = selectedWorldTurn
       ? selectedCharacter.character.id
-      : "mara-venn";
+      : practice.characterId;
     const turnCharacterName = selectedWorldTurn
       ? selectedCharacter.character.displayName
-      : "Mara Venn";
+      : practice.characterName;
     setTurnRoute({
       loadout: structuredClone(configuredLoadout),
       capturedAtEpochMs: Date.now(),
@@ -1225,6 +1425,7 @@ export function ProductConsole() {
           if (event.type === "completed") {
             setDeliveredTurn(event);
             setRunning(false);
+            refreshDeliveredHistory(turnGameProfileId, turnCharacterId);
           }
           if (event.type === "cancelled") {
             setRunning(false);
@@ -1479,6 +1680,13 @@ export function ProductConsole() {
     }
   };
 
+  const refreshDiagnosticsRef = useRef(refreshDiagnostics);
+  refreshDiagnosticsRef.current = refreshDiagnostics;
+  useEffect(() => {
+    if (page !== "diagnostics" || bootstrap.kind !== "snapshot") return;
+    void refreshDiagnosticsRef.current();
+  }, [page, bootstrap.kind]);
+
   const persistDiagnosticsVerbosity = async (
     verbosity: NativeDiagnosticsSettings["verbosity"],
   ) => {
@@ -1611,6 +1819,9 @@ export function ProductConsole() {
 
   const verifySyntheticCapture = () => verifySyntheticCaptureFor(captureProof);
   const connectReviewGame = async (reportError = false) => {
+    // The practice target is what this connection proves, so turns follow it.
+    explicitWorldModeChoice.current = true;
+    setTurnWorldMode("syntheticReview");
     markConfigurationChanged();
     setCaptureBusy(true);
     setNotice(null);
@@ -1664,6 +1875,26 @@ export function ProductConsole() {
     }
   };
 
+  const selectedWorldActive =
+    turnWorldMode === "selectedWorld" && selectedCharacter !== null;
+  const railGame = !snapshot
+    ? { name: "No game selected", status: "Browser preview" }
+    : selectedWorldActive
+      ? {
+          name: selectedCharacter.gameDisplayName,
+          status: selectedTarget?.processInstanceBound
+            ? `Connected · PID ${selectedTarget.target.processId}`
+            : "Not connected",
+        }
+      : {
+          name: practice.gameDisplayName,
+          status: captureProof?.receipt?.verified
+            ? `Practice game · PID ${captureProof.pid}`
+            : captureProof
+              ? "Practice game · selected"
+              : "Practice game · not connected",
+        };
+
   return (
     <div className={`product-shell cyberpunk-shell page-${page}`}>
       <aside
@@ -1697,8 +1928,8 @@ export function ProductConsole() {
         </nav>
         <div className="rail-safety">
           <span className="status-dot" />
-          <b>Cyberpunk 2077</b>
-          <small>Personal build</small>
+          <b>{railGame.name}</b>
+          <small>{railGame.status}</small>
         </div>
       </aside>
 
@@ -1715,13 +1946,7 @@ export function ProductConsole() {
             <span className="status-dot" />
             {runtimeSummary(bootstrap).label}
           </div>
-          <button
-            className="quiet-button"
-            onClick={() => {
-              setNotice(null);
-              setSetupOpen(true);
-            }}
-          >
+          <button className="quiet-button" onClick={openSetup}>
             Setup
           </button>
         </header>
@@ -1745,6 +1970,7 @@ export function ProductConsole() {
             selectedCharacter={selectedCharacter}
             selectedTarget={selectedTarget}
             turnWorldMode={turnWorldMode}
+            practice={practice}
             loadout={configuredLoadout}
             accounts={snapshot?.providers ?? []}
             onNavigate={navigate}
@@ -1757,6 +1983,9 @@ export function ProductConsole() {
             deliveredTurn={deliveredTurn}
             events={turnEvents}
             providerPresent={configuredTtsPresent}
+            voiceKeyless={configuredTtsKeyless}
+            practice={practice}
+            practiceInspection={practiceInspection}
             captureProof={captureProof}
             selectedCharacter={selectedCharacter}
             selectedTarget={selectedTarget}
@@ -1827,10 +2056,12 @@ export function ProductConsole() {
             gameProfiles={snapshot?.gameProfiles ?? []}
             gameProfileId={selectedGameProfileId}
             onGameProfileChange={(gameProfileId) => {
+              if (gameProfileId === selectedGameProfileId) return;
               explicitWorldModeChoice.current = true;
               setSelectedGameProfileId(gameProfileId);
               setSelectedCharacter(null);
             }}
+            selectedTarget={selectedTarget}
             onTargetChange={setSelectedTarget}
             onCharacterChange={(inspection) => {
               explicitWorldModeChoice.current = true;
@@ -1938,8 +2169,9 @@ export function ProductConsole() {
             onProductPreferenceSnapshot={acceptPreferenceWorkspaceSnapshot}
             onSetup={() => {
               setSetupStep(0);
-              setSetupOpen(true);
+              openSetup();
             }}
+            onResetSetup={() => void resetSetup()}
             onDiagnostics={() => navigate("diagnostics")}
             onNavigate={navigate}
             nativeAvailable={bootstrap.kind === "snapshot"}
@@ -1949,6 +2181,11 @@ export function ProductConsole() {
 
       {setupOpen && (
         <OnboardingOverlay
+          practice={practice}
+          samplePrompt={turnPrompt}
+          testingTurn={testingSetupTurn}
+          setupTurnComplete={setupTurnComplete}
+          onSkipWorld={() => void skipWorldStep()}
           onConnectReviewGame={connectReviewGame}
           reviewLaunchAvailable={reviewTargetAvailable.available}
           captureBusy={captureBusy}
@@ -2035,6 +2272,7 @@ function SignalRail({
   selectedCharacter,
   selectedTarget,
   turnWorldMode,
+  practice,
   loadout,
   accounts,
   onNavigate,
@@ -2047,6 +2285,7 @@ function SignalRail({
   selectedCharacter: NativeCharacterInspection | null;
   selectedTarget: NativeGameTargetSelection | null;
   turnWorldMode: "syntheticReview" | "selectedWorld";
+  practice: PracticeCharacter;
   loadout: ProviderLoadout;
   accounts: NativeProviderCredentialSummary[];
   onNavigate: (page: ProductPage) => void;
@@ -2064,7 +2303,7 @@ function SignalRail({
           ? `WGC verified · PID ${captureProof.pid}`
           : captureProof
             ? `Selected · PID ${captureProof.pid}`
-            : "Eclipse Harbor · not selected",
+            : `${practice.gameDisplayName} · not selected`,
       ready: selectedWorld
         ? Boolean(selectedTarget?.processInstanceBound)
         : Boolean(captureProof?.receipt?.verified),
@@ -2074,29 +2313,28 @@ function SignalRail({
       value: selectedWorld
         ? selectedCharacter.character.displayName
         : captureProof
-          ? "Mara Venn · test character"
-          : "Mara Venn · preview",
+          ? `${practice.characterName} · test character`
+          : `${practice.characterName} · preview`,
       ready: selectedWorld || Boolean(captureProof),
     },
     {
       label: "Voice service",
       value: providerFor("tts", loadout.routes.tts.providerId).name,
-      ready: accounts.some(
-        (account) =>
-          account.providerId ===
-            (loadout.routes.tts.providerId === "nvidia-nim-magpie"
-              ? "nvidia-nim"
-              : loadout.routes.tts.providerId) && account.status === "present",
-      ),
+      ready: ttsCredentialReady(loadout, accounts),
     },
     {
       label: "Voice",
       value: loadout.routes.tts.voiceId
-        ? loadout.routes.tts.voiceId.startsWith("Magpie-")
-          ? (loadout.routes.tts.voiceId.split(".").at(-1) ?? "Configured voice")
-          : "Stock voice configured"
+        ? loadout.routes.tts.providerId === "testing"
+          ? "Test beeps · dummy voice"
+          : loadout.routes.tts.voiceId.startsWith("Magpie-")
+            ? (loadout.routes.tts.voiceId.split(".").at(-1) ??
+              "Configured voice")
+            : "Stock voice configured"
         : "Choose a stock voice",
-      ready: false,
+      ready:
+        Boolean(loadout.routes.tts.voiceId) &&
+        ttsCredentialReady(loadout, accounts),
     },
     {
       label: "Delivery",
@@ -2376,6 +2614,9 @@ function SessionPage({
   deliveredTurn,
   events,
   providerPresent,
+  voiceKeyless,
+  practice,
+  practiceInspection,
   captureProof,
   selectedCharacter,
   selectedTarget,
@@ -2413,6 +2654,9 @@ function SessionPage({
   deliveredTurn: (NativeSimulationEvent & { type: "completed" }) | null;
   events: NativeSimulationEvent[];
   providerPresent: boolean;
+  voiceKeyless: boolean;
+  practice: PracticeCharacter;
+  practiceInspection: NativeCharacterInspection | null;
   captureProof: SyntheticCaptureProof | null;
   selectedCharacter: NativeCharacterInspection | null;
   selectedTarget: NativeGameTargetSelection | null;
@@ -2451,6 +2695,17 @@ function SessionPage({
   onStop: () => void;
   onNavigate: (page: ProductPage) => void;
 }) {
+  const historyInspection =
+    turnWorldMode === "selectedWorld" && selectedCharacter
+      ? selectedCharacter
+      : practiceInspection;
+  const historyName =
+    turnWorldMode === "selectedWorld" && selectedCharacter
+      ? selectedCharacter.character.displayName
+      : practice.characterName;
+  const deliveredHistory = [...(historyInspection?.deliveredMemory ?? [])]
+    .sort((left, right) => right.deliveredAtMs - left.deliveredAtMs)
+    .slice(0, 8);
   const audioDelivered = hasReceiptBackedAudio(deliveredTurn);
   const subtitleDelivered = hasReceiptBackedSubtitle(deliveredTurn);
   const visualPresentation = deliveredTurn?.visualPresentation;
@@ -2498,18 +2753,18 @@ function SessionPage({
             <h1>
               {turnWorldMode === "selectedWorld" && selectedCharacter
                 ? selectedCharacter.character.displayName
-                : "Mara Venn"}
+                : practice.characterName}
             </h1>
             <p>
               {turnWorldMode === "selectedWorld" && selectedCharacter
                 ? `${selectedCharacter.gameDisplayName} · ${selectedCharacter.character.promptRole} · selected by you`
-                : "Eclipse Harbor · local test game"}
+                : `${practice.gameDisplayName} · local test game`}
             </p>
           </div>
           <span className="identity-seal" aria-hidden="true">
             {(turnWorldMode === "selectedWorld" && selectedCharacter
               ? selectedCharacter.character.displayName
-              : "Mara Venn"
+              : practice.characterName
             )
               .split(/\s+/)
               .slice(0, 2)
@@ -2523,7 +2778,7 @@ function SessionPage({
               <span>
                 {turnWorldMode === "selectedWorld" && selectedCharacter
                   ? selectedCharacter.gameDisplayName
-                  : "Eclipse Harbor"}
+                  : practice.gameDisplayName}
               </span>
               <b>Change conversation</b>
             </summary>
@@ -2931,7 +3186,9 @@ function SessionPage({
             <h2>Your connection</h2>
             <span className={providerPresent ? "badge good" : "badge wait"}>
               {providerPresent
-                ? "Credential ready"
+                ? voiceKeyless
+                  ? "Local test voice"
+                  : "Credential ready"
                 : nativeAvailable
                   ? "Credential missing"
                   : "Browser preview"}
@@ -2955,7 +3212,7 @@ function SessionPage({
               <dd>
                 {turnWorldMode === "selectedWorld" && selectedCharacter
                   ? `${selectedCharacter.character.displayName} · native selected`
-                  : "Mara Venn · synthetic review"}
+                  : `${practice.characterName} · synthetic review`}
               </dd>
             </div>
             <div>
@@ -2985,6 +3242,35 @@ function SessionPage({
               </small>
             </span>
           </div>
+        </section>
+        <section
+          className="instrument-panel compact-panel delivered-history"
+          aria-label="Delivered turns"
+        >
+          <div className="panel-title">
+            <h2>Delivered turns</h2>
+            <span className="badge">
+              {historyInspection?.deliveredMemory.length ?? 0}
+            </span>
+          </div>
+          {deliveredHistory.length === 0 ? (
+            <p className="empty-copy">
+              Nothing delivered yet with {historyName}. Replies you receive are
+              saved here.
+            </p>
+          ) : (
+            <ol className="delivered-turns">
+              {deliveredHistory.map((turn) => (
+                <li key={turn.turnId}>
+                  <small>
+                    {turn.speaker} ·{" "}
+                    {new Date(turn.deliveredAtMs).toLocaleString()}
+                  </small>
+                  <p>{turn.deliveredText}</p>
+                </li>
+              ))}
+            </ol>
+          )}
         </section>
         <details className="instrument-panel trace-panel evidence-disclosure">
           <summary>
@@ -3205,6 +3491,7 @@ function WorldPage({
   gameProfiles,
   gameProfileId,
   onGameProfileChange,
+  selectedTarget,
   onTargetChange,
   onCharacterChange,
   selectedCharacter,
@@ -3228,6 +3515,7 @@ function WorldPage({
   gameProfiles: NativeGameProfileSummary[];
   gameProfileId: string;
   onGameProfileChange: (gameProfileId: string) => void;
+  selectedTarget: NativeGameTargetSelection | null;
   onTargetChange: (selection: NativeGameTargetSelection | null) => void;
   onCharacterChange: (inspection: NativeCharacterInspection) => void;
   selectedCharacter: NativeCharacterInspection | null;
@@ -3245,8 +3533,8 @@ function WorldPage({
         <h1>Games</h1>
         <p>
           {nativeAvailable
-            ? "Connect Cyberpunk 2077. Choose who you want to talk to."
-            : "Your Cyberpunk characters, voices and memories. Connect a game in the desktop app."}
+            ? "Pick a game, connect its window, then choose who you want to talk to."
+            : "Your games, characters, voices and memories. Connect a game in the desktop app."}
         </p>
       </header>
       {feedback && worldTool !== "practice" && (
@@ -3257,6 +3545,13 @@ function WorldPage({
           </button>
         </div>
       )}
+      <GameRoster
+        nativeAvailable={nativeAvailable}
+        gameProfiles={gameProfiles}
+        gameProfileId={gameProfileId}
+        target={selectedTarget}
+        onSelect={onGameProfileChange}
+      />
       <TestGameLauncher
         availability={reviewTargetAvailable}
         connected={Boolean(captureProof)}
@@ -3270,7 +3565,6 @@ function WorldPage({
         onPreferencesSnapshot={onPreferencesSnapshot}
         gameProfiles={gameProfiles}
         gameProfileId={gameProfileId}
-        onGameProfileChange={onGameProfileChange}
         onSelectionChange={onTargetChange}
       />
       <div className="world-tool-dock" aria-label="More game tools">
@@ -4167,6 +4461,7 @@ function SettingsPage({
   characterId,
   onProductPreferenceSnapshot,
   onSetup,
+  onResetSetup,
   onDiagnostics,
   onNavigate,
   nativeAvailable,
@@ -4189,6 +4484,7 @@ function SettingsPage({
     snapshot: NativeProductPreferenceSnapshot,
   ) => void;
   onSetup: () => void;
+  onResetSetup: () => void;
   onDiagnostics: () => void;
   onNavigate: (page: ProductPage) => void;
   nativeAvailable: boolean;
@@ -4276,6 +4572,55 @@ function SettingsPage({
                   onRefresh={onRefreshAudioInputs}
                   onSelect={onSelectAudioInput}
                 />
+              </section>
+            ),
+          },
+          {
+            id: "performance",
+            label: "Performance",
+            description: "Benchmark this PC",
+            content: <ThisPcBenchmark nativeAvailable={nativeAvailable} />,
+          },
+          {
+            id: "system",
+            label: "System",
+            description: "Diagnostics & setup",
+            content: (
+              <section className="instrument-panel settings-system-panel">
+                <div className="panel-title">
+                  <h2>System</h2>
+                </div>
+                <div className="settings-system-actions">
+                  <article>
+                    <div>
+                      <b>Diagnostics</b>
+                      <small>
+                        Run connection checks and export a local report.
+                      </small>
+                    </div>
+                    <button
+                      className="secondary-action"
+                      onClick={onDiagnostics}
+                    >
+                      Open diagnostics
+                    </button>
+                  </article>
+                  <article>
+                    <div>
+                      <b>Guided setup</b>
+                      <small>
+                        Start over with the game, voice and first-turn steps.
+                      </small>
+                    </div>
+                    <button
+                      className="quiet-button"
+                      disabled={!nativeAvailable}
+                      onClick={onResetSetup}
+                    >
+                      Reset setup
+                    </button>
+                  </article>
+                </div>
               </section>
             ),
           },
@@ -4592,6 +4937,11 @@ function AudioInputPicker({
 }
 
 function OnboardingOverlay({
+  practice,
+  samplePrompt,
+  testingTurn,
+  setupTurnComplete,
+  onSkipWorld,
   onManageMouthMotion,
   setupProofCurrent,
   onConnectReviewGame,
@@ -4645,6 +4995,11 @@ function OnboardingOverlay({
   onRun,
   onClose,
 }: {
+  practice: PracticeCharacter;
+  samplePrompt: string;
+  testingTurn: boolean;
+  setupTurnComplete: boolean;
+  onSkipWorld: () => void;
   onManageMouthMotion: () => void;
   setupProofCurrent: boolean;
   onConnectReviewGame: () => void;
@@ -4822,18 +5177,25 @@ function OnboardingOverlay({
             <>
               <span className="eyebrow">02 / world</span>
               <h1 id="setup-title" tabIndex={-1}>
-                Meet Mara at Eclipse Harbor
+                Meet {practice.characterName} at {practice.gameDisplayName}
               </h1>
               <p>
                 Use the included test game to check capture and audio before
                 choosing another game.
               </p>
               <div className="setup-selection selected">
-                <span>EH</span>
+                <span>
+                  {practice.gameDisplayName
+                    .split(/s+/)
+                    .slice(0, 2)
+                    .map((word) => word[0])
+                    .join("")}
+                </span>
                 <div>
-                  <b>Eclipse Harbor</b>
+                  <b>{practice.gameDisplayName}</b>
                   <small>
-                    Synthetic GUI target · single-player · Mara Venn
+                    Synthetic GUI target · single-player ·{" "}
+                    {practice.characterName}
                   </small>
                 </div>
                 <i>{captureProof ? `PID ${captureProof.pid}` : "Configured"}</i>
@@ -4870,8 +5232,18 @@ function OnboardingOverlay({
               <p className="control-reason">
                 {captureProof?.receipt?.verified
                   ? `Connected · frame ${captureProof.frames} · capture is advancing`
-                  : "Select the test game, then verify that its captured frames advance."}
+                  : !reviewLaunchAvailable && !captureAvailable
+                    ? "The practice game launcher is not available in this build."
+                    : "Select the test game, then verify that its captured frames advance."}
               </p>
+              {nativeAvailable && !captureProof?.receipt?.verified && (
+                <button
+                  className="quiet-button setup-inline-action"
+                  onClick={onSkipWorld}
+                >
+                  Skip — I’ll connect a game later
+                </button>
+              )}
             </>
           )}
           {step === 2 && (
@@ -4938,12 +5310,14 @@ function OnboardingOverlay({
                         gameProfileId={gameProfileId}
                         characterId={characterId}
                         gameProfileLabel={
-                          gameProfileId === "eclipse-harbor"
-                            ? "Eclipse Harbor"
+                          gameProfileId === practice.gameProfileId
+                            ? practice.gameDisplayName
                             : undefined
                         }
                         characterLabel={
-                          characterId === "mara-venn" ? "Mara Venn" : undefined
+                          characterId === practice.characterId
+                            ? practice.characterName
+                            : undefined
                         }
                         mode="onboarding"
                         onManageProvider={(id) => {
@@ -5001,9 +5375,10 @@ function OnboardingOverlay({
                 Try your first conversation
               </h1>
               <p>
-                Ask Mara about the old lighthouse. Use push-to-talk or send the
-                sample question. Setup completes after the selected voice
-                returns audio and playback finishes.
+                Ask {practice.characterName} something. Use push-to-talk, or
+                send the sample question: “{samplePrompt.trim()}”. Setup
+                completes after the selected voice returns audio and playback
+                finishes, or after the local test voice delivers a turn.
               </p>
               {preferences.ptt && (
                 <>
@@ -5045,18 +5420,22 @@ function OnboardingOverlay({
                 <div>
                   <b>
                     {deliveredTurn
-                      ? "Runtime completion received"
+                      ? testingTurn
+                        ? "Test turn delivered · dummy voice, not a live reply"
+                        : "Runtime completion received"
                       : running
                         ? "Turn in progress"
-                        : "Bounded lighthouse rehearsal"}
+                        : `Practice turn with ${practice.characterName}`}
                   </b>
                   <small>
                     {deliveredTurn
-                      ? hasReceiptBackedAudio(deliveredTurn)
-                        ? "Live TTS, nonzero submission, and endpoint-drain receipts were reported."
-                        : deliveredTurn.runtimeFixtureOnly
-                          ? "Deterministic delivery completed; live providers and audible speech were not claimed."
-                          : "Runtime text completed; this event did not prove audio submission and drain."
+                      ? testingTurn
+                        ? "The local echo reply and test voice ran. Connect a voice account in Loadout for live replies."
+                        : hasReceiptBackedAudio(deliveredTurn)
+                          ? "Live TTS, nonzero submission, and endpoint-drain receipts were reported."
+                          : deliveredTurn.runtimeFixtureOnly
+                            ? "Deterministic delivery completed; live providers and audible speech were not claimed."
+                            : "Runtime text completed; this event did not prove audio submission and drain."
                       : "Run the selected route and inspect its delivered-only result."}
                   </small>
                 </div>
@@ -5086,6 +5465,13 @@ function OnboardingOverlay({
                           : "Live PTT receipt required"
                       : "Run bounded typed turn"}
               </button>
+              {nativeAvailable && !setupTurnComplete && (
+                <p className="setup-blocked-reason" role="status">
+                  Finishing needs a delivered turn. Use a connected voice
+                  account, or choose the Testing · local dummy reply and voice
+                  in the Voice step to finish without one.
+                </p>
+              )}
             </>
           )}
           {feedback && (
@@ -5120,12 +5506,13 @@ function OnboardingOverlay({
                   !captureProof?.receipt?.verified) ||
                 (step === ONBOARDING_STEPS.length - 1 &&
                   nativeAvailable &&
-                  (!hasSpokenSetupTurn(deliveredTurn, preferences.subtitles) ||
-                    !setupProofCurrent))
+                  (!setupTurnComplete || !setupProofCurrent))
               }
             >
               {step === ONBOARDING_STEPS.length - 1
-                ? "Finish setup"
+                ? testingTurn
+                  ? "Finish with test voice"
+                  : "Finish setup"
                 : "Continue"}
             </button>
           </div>

@@ -95,6 +95,7 @@ import {
   CharacterDatabase,
   CharacterMouthPackWorkspace,
   EncounterLifecycleControls,
+  GameRoster,
   GameTargetWorkspace,
   LocalResourcePlanner,
   ThisPcBenchmark,
@@ -689,6 +690,124 @@ describe("native product workspaces", () => {
     expect(bridge.activateOptional).not.toHaveBeenCalled();
   });
 
+  it("lists profiles from native data and opens a detail view with real status", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    const profiles = [
+      {
+        id: "cyberpunk-2077",
+        displayName: "Cyberpunk 2077",
+        wave: "1",
+        safety: "singlePlayerOnly" as const,
+        catalogState: "bundled" as const,
+        defaultFallback: "audioOnly",
+      },
+      {
+        id: "skyrim-special-edition",
+        displayName: "Skyrim Special Edition",
+        wave: "2",
+        safety: "offlineOnly" as const,
+        catalogState: "missingFromBundle" as const,
+        defaultFallback: "audioOnly",
+      },
+    ];
+    render(
+      <GameRoster
+        nativeAvailable
+        gameProfiles={profiles}
+        gameProfileId="skyrim-special-edition"
+        target={null}
+        onSelect={onSelect}
+      />,
+    );
+    const roster = screen.getByRole("region", { name: "Game profiles" });
+    expect(
+      within(roster).getByRole("button", { name: /Skyrim Special Edition/ }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(roster).toHaveTextContent("Missing from build");
+    await user.click(
+      within(roster).getByRole("button", { name: /Cyberpunk 2077/ }),
+    );
+    expect(onSelect).toHaveBeenCalledWith("cyberpunk-2077");
+
+    await user.click(screen.getByRole("button", { name: "Profile details" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Skyrim Special Edition · profile",
+    });
+    expect(bridge.catalog).toHaveBeenCalledWith("skyrim-special-edition");
+    expect(await within(dialog).findByText("1 authored")).toBeVisible();
+    expect(dialog).toHaveTextContent("Not connected");
+    expect(dialog).toHaveTextContent("Missing from this build");
+    expect(dialog).toHaveTextContent("Offline only");
+    expect(dialog).toHaveTextContent("Audio only");
+    expect(dialog).toHaveTextContent("Lydia");
+  });
+
+  it("reports a bound game window in the profile detail", async () => {
+    const user = userEvent.setup();
+    render(
+      <GameRoster
+        nativeAvailable
+        gameProfiles={[
+          {
+            id: "cyberpunk-2077",
+            displayName: "Cyberpunk 2077",
+            wave: "1",
+            safety: "singlePlayerOnly",
+            catalogState: "bundled",
+            defaultFallback: "audioOnly",
+          },
+        ]}
+        gameProfileId="cyberpunk-2077"
+        target={{
+          schemaVersion: 1,
+          gameProfileId: "cyberpunk-2077",
+          target: {
+            processId: 44,
+            nativeWindow: 55,
+            executableName: "Cyberpunk2077.exe",
+            executablePathSha256: "a".repeat(64),
+            title: "Cyberpunk 2077 (C) 2020 by CD Projekt RED",
+            foreground: true,
+            clientWidth: 1920,
+            clientHeight: 1080,
+          },
+          processInstanceBound: true,
+          userConfirmedOfflineSinglePlayer: true,
+          captureAuthorized: true,
+          safetyState: "allowed",
+          safetyDetail: "Connected native game target.",
+        }}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole("region", { name: "Game profiles" }),
+    ).toHaveTextContent("Connected");
+    await user.click(screen.getByRole("button", { name: "Profile details" }));
+    expect(
+      await screen.findByRole("dialog", { name: "Cyberpunk 2077 · profile" }),
+    ).toHaveTextContent("PID 44");
+  });
+
+  it("says plainly when no game profiles were loaded", () => {
+    render(
+      <GameRoster
+        nativeAvailable={false}
+        gameProfiles={[]}
+        gameProfileId="cyberpunk-2077"
+        target={null}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByText(/load in the installed Windows app/i),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Profile details" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("keeps browser preview immutable and hardware state explicitly unavailable", () => {
     render(
       <>
@@ -696,7 +815,6 @@ describe("native product workspaces", () => {
           nativeAvailable={false}
           gameProfiles={[]}
           gameProfileId="eclipse-harbor"
-          onGameProfileChange={vi.fn()}
           onSelectionChange={vi.fn()}
         />
         <CharacterDatabase />
@@ -704,7 +822,7 @@ describe("native product workspaces", () => {
       </>,
     );
     expect(
-      screen.getByRole("heading", { name: "Cyberpunk 2077" }),
+      screen.getByRole("heading", { name: "No game selected" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Misty Olszewski" }),
@@ -968,7 +1086,7 @@ describe("native product workspaces", () => {
     bridge.discover.mockResolvedValue([candidate]);
     bridge.selectTarget.mockResolvedValue({
       schemaVersion: 1,
-      gameProfileId: "cyberpunk-2077",
+      gameProfileId: "skyrim-special-edition",
       target: candidate,
       processInstanceBound: true,
       userConfirmedOfflineSinglePlayer: true,
@@ -998,7 +1116,6 @@ describe("native product workspaces", () => {
           },
         ]}
         gameProfileId="skyrim-special-edition"
-        onGameProfileChange={vi.fn()}
         onSelectionChange={vi.fn()}
       />,
     );
@@ -1006,7 +1123,7 @@ describe("native product workspaces", () => {
       /No game process is selected in this native session/i,
     );
     await user.click(
-      screen.getByRole("button", { name: "Scan for Cyberpunk 2077" }),
+      screen.getByRole("button", { name: "Scan for Skyrim Special Edition" }),
     );
     await user.click(
       screen.getByRole("checkbox", { name: /single-player session/i }),
@@ -1014,9 +1131,9 @@ describe("native product workspaces", () => {
     await user.click(
       screen.getByRole("button", { name: "Connect this window" }),
     );
-    expect(bridge.discover).toHaveBeenCalledWith("cyberpunk-2077");
+    expect(bridge.discover).toHaveBeenCalledWith("skyrim-special-edition");
     expect(bridge.selectTarget).toHaveBeenCalledWith(
-      "cyberpunk-2077",
+      "skyrim-special-edition",
       55,
       true,
     );
@@ -1052,8 +1169,8 @@ describe("native product workspaces", () => {
       ).getByText("Not selected"),
     ).toBeVisible();
     expect(
-      screen.queryByText("Skyrim Special Edition"),
-    ).not.toBeInTheDocument();
+      screen.getByRole("heading", { name: "Skyrim Special Edition" }),
+    ).toBeVisible();
   });
 
   it("restores the native target and clears an expired NPC selection", async () => {
@@ -1092,7 +1209,6 @@ describe("native product workspaces", () => {
           },
         ]}
         gameProfileId="cyberpunk-2077"
-        onGameProfileChange={vi.fn()}
         onSelectionChange={vi.fn()}
       />,
     );

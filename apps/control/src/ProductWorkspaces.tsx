@@ -173,10 +173,12 @@ const errorText = (error: unknown, fallback: string) =>
 
 function CharacterToolDialog({
   title,
+  eyebrow = "Character workshop",
   onClose,
   children,
 }: {
   title: string;
+  eyebrow?: string;
   onClose: () => void;
   children: ReactNode;
 }) {
@@ -197,7 +199,7 @@ function CharacterToolDialog({
         >
           <header className="workspace-dialog__header">
             <div>
-              <span className="eyebrow">Character workshop</span>
+              <span className="eyebrow">{eyebrow}</span>
               <Heading slot="title">{title}</Heading>
             </div>
             <Button
@@ -216,7 +218,189 @@ function CharacterToolDialog({
   );
 }
 
-const CYBERPUNK_PROFILE_ID = "cyberpunk-2077";
+const humanizeCamel = (value: string) =>
+  value
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .toLowerCase()
+    .replace(/^./, (first) => first.toUpperCase());
+
+const SAFETY_LABEL: Record<NativeGameProfileSummary["safety"], string> = {
+  singlePlayerOnly: "Single-player only",
+  offlineOnly: "Offline only",
+};
+
+/** Game profiles from the native catalog, with an inspectable detail view. */
+export function GameRoster({
+  nativeAvailable,
+  gameProfiles,
+  gameProfileId,
+  target,
+  onSelect,
+}: {
+  nativeAvailable: boolean;
+  gameProfiles: NativeGameProfileSummary[];
+  gameProfileId: string;
+  target: NativeGameTargetSelection | null;
+  onSelect: (gameProfileId: string) => void;
+}) {
+  const [detailOpen, setDetailOpen] = useState(false);
+  const selected = gameProfiles.find((profile) => profile.id === gameProfileId);
+  const connected = (profile: NativeGameProfileSummary) =>
+    target?.gameProfileId === profile.id;
+  return (
+    <section
+      className="instrument-panel game-roster"
+      aria-label="Game profiles"
+    >
+      {gameProfiles.length === 0 ? (
+        <p className="empty-copy">
+          {nativeAvailable
+            ? "No game profiles were loaded by the native app."
+            : "Game profiles load in the installed Windows app."}
+        </p>
+      ) : (
+        <>
+          <div className="game-roster__list">
+            {gameProfiles.map((profile) => (
+              <button
+                key={profile.id}
+                className={profile.id === gameProfileId ? "selected" : ""}
+                aria-pressed={profile.id === gameProfileId}
+                onClick={() => onSelect(profile.id)}
+              >
+                <b>{profile.displayName}</b>
+                <small>
+                  {connected(profile)
+                    ? "Connected"
+                    : profile.catalogState === "missingFromBundle"
+                      ? "Missing from build"
+                      : SAFETY_LABEL[profile.safety]}
+                </small>
+              </button>
+            ))}
+          </div>
+          <button
+            className="quiet-button game-roster__detail"
+            disabled={!selected}
+            onClick={() => setDetailOpen(true)}
+          >
+            Profile details
+          </button>
+        </>
+      )}
+      {detailOpen && selected && (
+        <CharacterToolDialog
+          title={`${selected.displayName} · profile`}
+          eyebrow="Game profile"
+          onClose={() => setDetailOpen(false)}
+        >
+          <GameProfileDetail
+            nativeAvailable={nativeAvailable}
+            profile={selected}
+            target={connected(selected) ? target : null}
+          />
+        </CharacterToolDialog>
+      )}
+    </section>
+  );
+}
+
+function GameProfileDetail({
+  nativeAvailable,
+  profile,
+  target,
+}: {
+  nativeAvailable: boolean;
+  profile: NativeGameProfileSummary;
+  target: NativeGameTargetSelection | null;
+}) {
+  const [catalog, setCatalog] = useState<
+    AsyncState<NativeCharacterCatalogSnapshot>
+  >(nativeAvailable ? { kind: "loading" } : { kind: "empty" });
+  useEffect(() => {
+    if (!nativeAvailable) return;
+    let active = true;
+    setCatalog({ kind: "loading" });
+    void readCharacterDatabaseCatalog(profile.id)
+      .then((value) => {
+        if (!active) return;
+        setCatalog(value ? { kind: "ready", value } : { kind: "empty" });
+      })
+      .catch((error) => {
+        if (active)
+          setCatalog({
+            kind: "error",
+            detail: errorText(error, "Characters could not be read."),
+          });
+      });
+    return () => {
+      active = false;
+    };
+  }, [nativeAvailable, profile.id]);
+  const characters = catalog.kind === "ready" ? catalog.value.characters : [];
+  const authored = characters.filter((entry) => !entry.backgroundNpc);
+  return (
+    <div className="game-profile-detail">
+      <dl className="facts spacious">
+        <div>
+          <dt>Detection</dt>
+          <dd>
+            {target
+              ? `Connected · ${target.target.title} · PID ${target.target.processId}`
+              : "Not connected · start the game, then scan from Games"}
+          </dd>
+        </div>
+        <div>
+          <dt>Profile build</dt>
+          <dd>
+            {profile.catalogState === "bundled"
+              ? "Bundled with this build"
+              : "Missing from this build"}
+          </dd>
+        </div>
+        <div>
+          <dt>Play mode</dt>
+          <dd>{SAFETY_LABEL[profile.safety]}</dd>
+        </div>
+        <div>
+          <dt>Fallback</dt>
+          <dd>{humanizeCamel(profile.defaultFallback)}</dd>
+        </div>
+        <div>
+          <dt>Release wave</dt>
+          <dd>{profile.wave}</dd>
+        </div>
+        <div>
+          <dt>Characters</dt>
+          <dd>
+            {catalog.kind === "loading"
+              ? "Loading…"
+              : catalog.kind === "error"
+                ? catalog.detail
+                : catalog.kind === "empty"
+                  ? "Available in the installed Windows app"
+                  : `${authored.length} authored${
+                      characters.length > authored.length
+                        ? ` · ${characters.length - authored.length} background`
+                        : ""
+                    }`}
+          </dd>
+        </div>
+      </dl>
+      {authored.length > 0 && (
+        <ul className="game-profile-detail__characters" aria-label="Characters">
+          {authored.map((entry) => (
+            <li key={entry.id}>
+              <b>{entry.displayName}</b>
+              <small>{entry.voiceDescription}</small>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 export function GameTargetWorkspace({
   onSetupMouthTracking,
@@ -230,14 +414,12 @@ export function GameTargetWorkspace({
   nativeAvailable: boolean;
   gameProfiles: NativeGameProfileSummary[];
   gameProfileId: string;
-  onGameProfileChange: (gameProfileId: string) => void;
   onSelectionChange: (selection: NativeGameTargetSelection | null) => void;
   onPreferencesSnapshot?: (snapshot: NativeProductPreferenceSnapshot) => void;
 }) {
-  const cyberpunkProfile = gameProfiles.find(
-    (profile) => profile.id === CYBERPUNK_PROFILE_ID,
-  );
-  const activeGameProfileId = cyberpunkProfile?.id ?? gameProfileId;
+  const profile = gameProfiles.find((item) => item.id === gameProfileId);
+  const activeGameProfileId = gameProfileId;
+  const gameName = profile?.displayName ?? "this game";
   const [candidates, setCandidates] = useState<
     AsyncState<NativeGameTargetCandidate[]>
   >(nativeAvailable ? { kind: "loading" } : { kind: "empty" });
@@ -339,7 +521,7 @@ export function GameTargetWorkspace({
       if (!value?.length) {
         setCandidates({ kind: "empty" });
         setNotice(
-          `Cyberpunk 2077 is not running yet. Start the game, reach the main game window, then scan again.`,
+          `${gameName} is not running yet. Start the game, reach the main game window, then scan again.`,
         );
       } else {
         setCandidates({ kind: "ready", value });
@@ -466,7 +648,10 @@ export function GameTargetWorkspace({
     }
   };
 
-  const cyberpunkProfileReady = !nativeAvailable || Boolean(cyberpunkProfile);
+  const profileReady = !nativeAvailable || Boolean(profile);
+  // A window bound to a different game profile is not this game's connection.
+  const current =
+    selected && selected.gameProfileId === gameProfileId ? selected : null;
 
   return (
     <section
@@ -476,21 +661,25 @@ export function GameTargetWorkspace({
       <div className="panel-title workspace-heading">
         <div>
           <span className="eyebrow">Game link</span>
-          <h2 id="target-workspace-title">Cyberpunk 2077</h2>
+          <h2 id="target-workspace-title">
+            {profile?.displayName ?? "No game selected"}
+          </h2>
         </div>
-        <span className={selected ? "badge good" : "badge"}>
-          {selected ? "Connected · single-player" : "Not connected"}
+        <span className={current ? "badge good" : "badge"}>
+          {current ? "Connected · single-player" : "Not connected"}
         </span>
       </div>
       <div className="game-target-compact">
         <p role="status">
-          {selected
+          {current
             ? notice
-            : nativeAvailable
-              ? notice
-              : "Start Cyberpunk 2077, then connect its window."}
+            : selected
+              ? "Another game window is connected. Disconnect it to link this game."
+              : nativeAvailable
+                ? notice
+                : `Start ${gameName}, then connect its window.`}
         </p>
-        {selected ? (
+        {current ? (
           <div className="game-target-compact__actions game-target-connected-actions">
             <button
               className="secondary-action"
@@ -520,10 +709,10 @@ export function GameTargetWorkspace({
           <div className="game-target-compact__actions">
             <button
               className="primary-action"
-              disabled={!nativeAvailable || !cyberpunkProfileReady || busy}
+              disabled={!nativeAvailable || !profileReady || busy}
               onClick={discover}
             >
-              {busy ? "Scanning…" : "Scan for Cyberpunk 2077"}
+              {busy ? "Scanning…" : `Scan for ${gameName}`}
             </button>
             <label className="authorization-control compact">
               <input
@@ -539,15 +728,15 @@ export function GameTargetWorkspace({
           </div>
         )}
 
-        {nativeAvailable && !cyberpunkProfile && (
+        {nativeAvailable && !profile && (
           <div className="empty-state error compact">
-            <b>The Cyberpunk profile did not load.</b>
+            <b>This game profile did not load.</b>
           </div>
         )}
 
         {candidates.kind === "loading" && (
           <div className="empty-state compact" aria-live="polite">
-            <b>Looking for Cyberpunk2077.exe…</b>
+            <b>Looking for {gameName}…</b>
           </div>
         )}
         {candidates.kind === "error" && (
@@ -585,7 +774,7 @@ export function GameTargetWorkspace({
         )}
       </div>
 
-      {selected && (
+      {current && (
         <div className="game-visual-setup">
           <GameOverlaySetup
             nativeAvailable={nativeAvailable}
@@ -623,25 +812,25 @@ export function GameTargetWorkspace({
           </section>
         </div>
       )}
-      {selected && (
+      {current && (
         <details className="technical-disclosure actor-picker-disclosure">
           <summary>Connection details</summary>
           <div className="connection-evidence">
             <dl className="facts">
               <div>
                 <dt>Process</dt>
-                <dd>PID {selected.target.processId}</dd>
+                <dd>PID {current.target.processId}</dd>
               </div>
               <div>
                 <dt>Window</dt>
-                <dd>HWND {selected.target.nativeWindow}</dd>
+                <dd>HWND {current.target.nativeWindow}</dd>
               </div>
               <div>
                 <dt>Safety state</dt>
-                <dd>{selected.safetyState}</dd>
+                <dd>{current.safetyState}</dd>
               </div>
             </dl>
-            <p>{selected.safetyDetail}</p>
+            <p>{current.safetyDetail}</p>
           </div>
         </details>
       )}
@@ -754,11 +943,16 @@ export function CharacterDatabase({
     >
       <header className="panel-title character-database__title workspace-heading">
         <div>
-          <span className="eyebrow">Night City roster</span>
+          <span className="eyebrow">
+            {catalog?.gameDisplayName ?? value?.gameDisplayName ?? "Game"}{" "}
+            roster
+          </span>
           <h2 id="character-db-title">Choose who answers</h2>
         </div>
         <span className={nativeAvailable ? "badge good" : "badge wait"}>
-          {nativeAvailable ? "Cyberpunk profiles" : "Preview"}
+          {nativeAvailable
+            ? `${catalog?.gameDisplayName ?? "Character"} profiles`
+            : "Preview"}
         </span>
       </header>
       <p className="source-disclosure">
@@ -894,7 +1088,9 @@ export function CharacterDatabase({
               aria-labelledby="street-npc-mode-title"
             >
               <div>
-                <span className="eyebrow">For everyone else in Night City</span>
+                <span className="eyebrow">
+                  For everyone else in {value.gameDisplayName}
+                </span>
                 <h4 id="street-npc-mode-title">Stable street NPC mode</h4>
               </div>
               <p>
@@ -3212,7 +3408,6 @@ export function LocalResourcePlanner({
             ["tracking", "Mouth tracking"],
             ["budget", "PC budget"],
             ["downloads", "Downloads"],
-            ["benchmark", "Benchmark"],
             ["advanced", "Advanced packs"],
           ].map(([id, label]) => (
             <button
@@ -3234,7 +3429,7 @@ export function LocalResourcePlanner({
         <h2>Set up mouth tracking</h2>
         <p>
           Choose the supported tracking model, install it, then test and
-          activate it. With Cyberpunk connected, check PC budget and return to
+          activate it. With a game connected, check PC budget and return to
           Games to select an NPC.
         </p>
         <div className="target-toolbar">
@@ -4270,12 +4465,11 @@ export function LocalResourcePlanner({
           evidence are never presented as measured fit.
         </p>
       </section>
-      <div
-        className="local-benchmark-pane"
-        hidden={sectioned && localSection !== "benchmark"}
-      >
-        <ThisPcBenchmark nativeAvailable={nativeAvailable} />
-      </div>
+      {!sectioned && (
+        <div className="local-benchmark-pane">
+          <ThisPcBenchmark nativeAvailable={nativeAvailable} />
+        </div>
+      )}
       <div
         className="pack-manager instrument-panel"
         hidden={sectioned && localSection !== "advanced"}

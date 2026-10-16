@@ -34,7 +34,7 @@ describe("NPC 2.0 product console", () => {
     render(<App />);
     expect(screen.getByRole("heading", { name: "Games" })).toBeInTheDocument();
     expect(
-      screen.getByText(/Your Cyberpunk characters, voices and memories/i),
+      screen.getByText(/Your games, characters, voices and memories/i),
     ).toBeInTheDocument();
   });
 
