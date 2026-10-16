@@ -19,7 +19,7 @@ bounded control request
 ```
 
 This source path is broader than the proven product path. The normal STT selection is
-currently AssemblyAI `u3-rt-pro`; fixed-origin selected TTS routes and component tests do
+currently AssemblyAI `universal-3-6-pro`; fixed-origin selected TTS routes and component tests do
 not yet establish a complete normal physical-output route. The rights-cleared Eclipse Harbor target has the
 safe synthetic policy. Authored non-synthetic profiles are console-isolated, with capture,
 overlay, native identity, and visuals disabled. The production actor-lock bus is
@@ -72,7 +72,7 @@ different layers:
 - Hosted LLM bridges currently cover explicit OpenAI Responses, Anthropic Messages,
   Gemini, Groq, Mistral, OpenRouter, Cohere, and NVIDIA NIM routes. A cataloged generic
   `openai-compatible` entry is not an ordinary executable bridge.
-- The normal selected STT bridge currently accepts AssemblyAI `u3-rt-pro`. Other stable
+- The normal selected STT bridge currently accepts AssemblyAI `universal-3-6-pro`. Other stable
   STT catalog entries are not normal executable routes until the runtime bridge admits
   them.
 - Credentialed fixed-origin TTS runtime construction exists for Cartesia, Deepgram,

@@ -399,7 +399,7 @@ fn migrate_document(mut document: ProviderLoadoutDocumentV1) -> ProviderLoadoutD
     if let Some(RoleOverrideV1::Route(stt)) = starter.roles.get_mut(&ProviderRole::Stt) {
         if stt.primary.provider_id == "assemblyai" && stt.primary.model_id == "universal-streaming"
         {
-            stt.primary.model_id = "u3-rt-pro".into();
+            stt.primary.model_id = "universal-3-6-pro".into();
         }
     }
     if let Some(RoleOverrideV1::Route(tts)) = starter.roles.get_mut(&ProviderRole::Tts) {
@@ -426,6 +426,12 @@ fn migrate_retired_model(route: &mut ProviderModelRouteV1) {
         // Groq retired the 3.6 upstream model (model_not_found observed
         // 2026-09-17); the qualified non-reasoning successor is 3.8.
         route.model_id = "qwen/qwen3.8-27b".into();
+    }
+    if route.provider_id == "assemblyai" && route.model_id == "u3-rt-pro" {
+        // AssemblyAI lists `u3-rt-pro` as a legacy streaming id that is absent
+        // from the current API reference; `universal-3-6-pro` is the current
+        // recommended Streaming v3 model.
+        route.model_id = "universal-3-6-pro".into();
     }
 }
 
@@ -1554,7 +1560,7 @@ pub(crate) fn starter_document() -> ProviderLoadoutDocumentV1 {
                 ProviderRole::Stt,
                 hosted(
                     "assemblyai",
-                    "u3-rt-pro",
+                    "universal-3-6-pro",
                     None,
                     "Microphone audio is sent to AssemblyAI only while this speech route is used.",
                     "Uses the user's AssemblyAI account and its current trial or paid limits.",
@@ -2631,6 +2637,63 @@ mod tests {
             for fallback in &llm.fallbacks {
                 assert_eq!(fallback.route.model_id, "qwen/qwen3.8-27b", "{loadout}");
             }
+        }
+    }
+
+    #[test]
+    fn every_saved_assemblyai_u3_rt_pro_route_migrates_to_universal_3_6_pro_on_load() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let store = ProviderLoadoutStore::new(temp.path());
+        let mut legacy = starter_document();
+        let starter = legacy.loadouts[&id("api-first-starter")].clone();
+        let mut game = starter.clone();
+        game.id = id("cyberpunk-private-fast-groq");
+        game.name = "Cyberpunk - Groq fast".into();
+        game.scope = LoadoutScopeV1::Game {
+            game_id: "cyberpunk-2077".into(),
+        };
+        game.parent = Some(id("api-first-starter"));
+        legacy.insert(game).expect("game loadout");
+        let set_stt = |document: &mut ProviderLoadoutDocumentV1, loadout: &str, model: &str| {
+            let RoleOverrideV1::Route(stt) = document
+                .loadouts
+                .get_mut(&id(loadout))
+                .expect("loadout")
+                .roles
+                .get_mut(&ProviderRole::Stt)
+                .expect("stt")
+            else {
+                panic!("expected STT route")
+            };
+            stt.primary.model_id = model.into();
+            stt.primary.disclosure.catalog_revision -= 1;
+        };
+        set_stt(&mut legacy, "api-first-starter", "u3-rt-pro");
+        set_stt(&mut legacy, "cyberpunk-private-fast-groq", "u3-rt-pro");
+        fs::write(
+            store.primary_path(),
+            serde_json::to_string_pretty(&legacy).expect("serialize legacy fixture"),
+        )
+        .expect("write legacy fixture");
+
+        let loaded = store.load();
+        assert_eq!(
+            loaded.persistence_health,
+            ProviderLoadoutPersistenceHealth::Healthy
+        );
+        for loadout in ["api-first-starter", "cyberpunk-private-fast-groq"] {
+            let RoleOverrideV1::Route(stt) =
+                &loaded.document.loadouts[&id(loadout)].roles[&ProviderRole::Stt]
+            else {
+                panic!("expected STT route")
+            };
+            assert_eq!(stt.primary.provider_id, "assemblyai", "{loadout}");
+            assert_eq!(stt.primary.model_id, "universal-3-6-pro", "{loadout}");
+            assert_eq!(
+                stt.primary.disclosure.catalog_revision,
+                bundled_catalog().catalog_revision,
+                "{loadout}"
+            );
         }
     }
 

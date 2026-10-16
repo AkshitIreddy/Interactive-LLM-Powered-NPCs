@@ -1,4 +1,4 @@
-//! Explicit, ignored AssemblyAI Universal-3 Pro streaming qualification.
+//! Explicit, ignored AssemblyAI Universal-3.6 Pro streaming qualification.
 //!
 //! Credential values, provider transcript text, and PCM bytes never enter process arguments,
 //! output, or evidence. The sole input is a project-owned synthetic audio fixture.
@@ -22,7 +22,7 @@ use zeroize::Zeroizing;
 const KEYS_PATH_ENV: &str = "HOSTED_TEST_KEYS_FILE";
 const AUDIO_PATH_ENV: &str = "ASSEMBLYAI_LIVE_AUDIO_PATH";
 const EVIDENCE_PATH_ENV: &str = "ASSEMBLYAI_LIVE_METRICS_PATH";
-const MODEL_ID: &str = "u3-rt-pro";
+const MODEL_ID: &str = "universal-3-6-pro";
 const EXPECTED_TEXT: &str = "the north beacon is ready";
 
 struct KeyMaterial(Zeroizing<Vec<u8>>);

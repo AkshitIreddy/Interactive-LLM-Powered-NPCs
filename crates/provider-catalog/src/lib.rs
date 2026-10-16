@@ -1638,7 +1638,7 @@ mod tests {
             .iter()
             .find(|model| model.id == "assemblyai.stt.default")
             .unwrap();
-        assert_eq!(assemblyai.upstream_id, "u3-rt-pro");
+        assert_eq!(assemblyai.upstream_id, "universal-3-6-pro");
         assert_eq!(assemblyai.live_qualification, LiveQualification::PassedLive);
         assert_eq!(
             assemblyai.availability,
@@ -1649,7 +1649,7 @@ mod tests {
 
         assert_eq!(
             document.signing_sha256().unwrap(),
-            "df2a0ba6b5ed5cb850ace84baddad87126ab086b2e7b266027d92be976aa0a1d"
+            "d7d6635a56bf3ff31d1ea941b75850513b0f351f78fb2dbc6de5714210d32150"
         );
     }
 

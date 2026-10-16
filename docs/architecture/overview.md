@@ -61,7 +61,7 @@ business requests and responses are versioned JSON within that envelope. See
 
 Hosted LLM execution is integrated for a bounded set of provider-specific routes,
 including fixed-origin Mistral and OpenRouter routes. The normal selected STT bridge
-currently accepts AssemblyAI `u3-rt-pro`. Fixed-origin Cartesia, Deepgram, Inworld,
+currently accepts AssemblyAI `universal-3-6-pro`. Fixed-origin Cartesia, Deepgram, Inworld,
 ElevenLabs, and NVIDIA Magpie TTS construction exists. A production Groq Qwen → Cartesia
 component chain reached bridge PCM in 492.964 ms, but a complete microphone-to-physical-
 speaker selected turn is not qualified. NVIDIA embedding retrieval has an integrated

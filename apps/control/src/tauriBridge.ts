@@ -77,7 +77,7 @@ export interface NativeTurnExecutionEvidence {
       sourceLoadoutId: string;
       route: {
         providerId: "assemblyai";
-        modelId: "u3-rt-pro";
+        modelId: "universal-3-6-pro";
         credentialReference: string;
         egress: "microphone_audio_and_optional_non_secret_context";
         generation: number;
@@ -1251,7 +1251,7 @@ function normalizeTurnExecution(
         !isPositiveSafeInteger(receipt.pcmBytesSent) ||
         !isNonNegativeSafeInteger(receipt.partialEvents) ||
         route.providerId !== "assemblyai" ||
-        route.modelId !== "u3-rt-pro" ||
+        route.modelId !== "universal-3-6-pro" ||
         route.credentialReference !== "providers/assemblyai" ||
         route.egress !== "microphone_audio_and_optional_non_secret_context" ||
         !isPositiveSafeInteger(route.generation) ||
@@ -1288,7 +1288,7 @@ function normalizeTurnExecution(
           sourceLoadoutId: receipt.sourceLoadoutId,
           route: {
             providerId: "assemblyai",
-            modelId: "u3-rt-pro",
+            modelId: "universal-3-6-pro",
             credentialReference: "providers/assemblyai",
             egress: "microphone_audio_and_optional_non_secret_context",
             generation: route.generation,

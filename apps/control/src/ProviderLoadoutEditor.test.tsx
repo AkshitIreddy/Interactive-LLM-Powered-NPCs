@@ -151,7 +151,7 @@ describe("provider and model loadouts", () => {
     );
     expect(screen.getByLabelText("Speech recognition model")).toHaveAttribute(
       "title",
-      "Universal-3 Pro Streaming",
+      "Universal-3.6 Pro Streaming",
     );
     await user.click(
       screen.getByRole("button", { name: /Character voice.*Cartesia/i }),

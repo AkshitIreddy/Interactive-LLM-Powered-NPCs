@@ -257,7 +257,7 @@ export const ROUTE_OPTIONS: Record<ProviderRole, RouteProviderOption[]> = {
       privacy: "Push-to-talk audio leaves this PC",
       egress: "Audio → AssemblyAI",
       cost: "Introductory credit or per minute",
-      models: [{ id: "u3-rt-pro", name: "Universal-3 Pro Streaming" }],
+      models: [{ id: "universal-3-6-pro", name: "Universal-3.6 Pro Streaming" }],
     },
     {
       id: "elevenlabs",
@@ -477,7 +477,7 @@ const initialLoadouts: ProviderLoadout[] = [
     revision: 3,
     routes: {
       llm: { providerId: "groq", modelId: "qwen/qwen3.8-27b" },
-      stt: { providerId: "assemblyai", modelId: "u3-rt-pro" },
+      stt: { providerId: "assemblyai", modelId: "universal-3-6-pro" },
       tts: {
         providerId: "cartesia",
         modelId: "sonic-3.6",
@@ -524,7 +524,7 @@ const initialLoadouts: ProviderLoadout[] = [
         providerId: "nvidia-nim",
         modelId: "nvidia/nemotron-3.5-lightning-30b-a3b",
       },
-      stt: { providerId: "assemblyai", modelId: "u3-rt-pro" },
+      stt: { providerId: "assemblyai", modelId: "universal-3-6-pro" },
       tts: {
         providerId: "nvidia-nim-magpie",
         modelId: "magpie-tts-multilingual",

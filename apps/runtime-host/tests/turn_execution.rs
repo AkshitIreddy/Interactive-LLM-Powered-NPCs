@@ -158,7 +158,7 @@ fn with_selected_stt(mut snapshot: SelectedRouteSnapshot) -> SelectedRouteSnapsh
         state: SelectedRouteState::Ready,
         primary: Some(SelectedProviderRoute {
             provider_id: "assemblyai".into(),
-            model_id: "u3-rt-pro".into(),
+            model_id: "universal-3-6-pro".into(),
             voice_id: None,
             execution: RouteExecution::Cloud,
             egress: "microphone_audio_and_optional_non_secret_context".into(),
@@ -185,7 +185,7 @@ fn selected_stt_receipt(transcript: &str) -> SelectedSttTurnEvidenceV1 {
         source_loadout_id: "integration-loadout".into(),
         route: SelectedSttRouteReceiptV1 {
             provider_id: "assemblyai".into(),
-            model_id: "u3-rt-pro".into(),
+            model_id: "universal-3-6-pro".into(),
             credential_reference: "providers/assemblyai".into(),
             egress: "microphone_audio_and_optional_non_secret_context".into(),
             generation: 9,

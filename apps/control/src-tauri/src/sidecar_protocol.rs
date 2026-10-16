@@ -1611,7 +1611,7 @@ mod tests {
             source_loadout_id: "api-first-starter".into(),
             route: NativeSelectedSttRouteReceipt {
                 provider_id: "assemblyai".into(),
-                model_id: "u3-rt-pro".into(),
+                model_id: "universal-3-6-pro".into(),
                 credential_reference: "providers/assemblyai".into(),
                 egress: "microphone_audio_and_optional_non_secret_context".into(),
                 generation: 7,

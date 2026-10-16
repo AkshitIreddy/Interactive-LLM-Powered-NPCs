@@ -406,7 +406,7 @@ impl SelectedSttController {
             input_endpoint_generation,
             route: SelectedSttRouteSummaryV1 {
                 provider_id: "assemblyai".into(),
-                model_id: "u3-rt-pro".into(),
+                model_id: "universal-3-6-pro".into(),
                 egress: STT_EGRESS.into(),
                 automatic_fallback: false,
             },
@@ -800,7 +800,7 @@ fn selected_stt_route(
         .as_ref()
         .ok_or(SelectedSttError::RouteUnavailable)?;
     if route.provider_id != "assemblyai"
-        || route.model_id != "u3-rt-pro"
+        || route.model_id != "universal-3-6-pro"
         || route.voice_id.is_some()
         || route.disclosure.execution != ExecutionLocationV1::Hosted
         || route.disclosure.egress != EgressClassV1::ProviderCloud
@@ -892,7 +892,7 @@ mod tests {
     fn receipt_route() -> crate::sidecar_protocol::NativeSelectedSttRouteReceipt {
         crate::sidecar_protocol::NativeSelectedSttRouteReceipt {
             provider_id: "assemblyai".into(),
-            model_id: "u3-rt-pro".into(),
+            model_id: "universal-3-6-pro".into(),
             credential_reference: "providers/assemblyai".into(),
             egress: STT_EGRESS.into(),
             generation: 7,
@@ -945,7 +945,7 @@ mod tests {
     fn terminal_receipt_requires_exact_route_generation_and_endpoint() {
         let route = NativeSelectedProviderRoute {
             provider_id: "assemblyai".into(),
-            model_id: "u3-rt-pro".into(),
+            model_id: "universal-3-6-pro".into(),
             voice_id: None,
             execution: NativeRouteExecution::Cloud,
             egress: STT_EGRESS.into(),

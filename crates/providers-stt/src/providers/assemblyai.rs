@@ -14,9 +14,9 @@ const AUDIO: &[AudioFormat] = &[AudioFormat::PCM_16KHZ_MONO];
 const LANGUAGES: &[&str] = &["en", "es", "de", "fr", "pt", "it", "multi"];
 static CAPABILITIES: RecognizerCapabilities = RecognizerCapabilities {
     provider_id: PROVIDER_ID,
-    display_name: "AssemblyAI Universal Streaming",
-    default_model: "u3-rt-pro",
-    capability_revision: "2026-08-30",
+    display_name: "AssemblyAI Universal-3.6 Pro Streaming",
+    default_model: "universal-3-6-pro",
+    capability_revision: "2026-10-16",
     languages: LANGUAGES,
     accepted_audio: AUDIO,
     partial_revisions: true,
@@ -84,8 +84,9 @@ impl ProviderSessionProtocol for AssemblySession {
                 "sample_rate".into(),
                 config.audio.sample_rate_hz.to_string(),
             ),
+            // Universal-3.6 Pro always returns formatted turns and has no
+            // `format_turns` or `end_of_turn_confidence_threshold` parameter.
             ("speech_model".into(), config.model.clone()),
-            ("format_turns".into(), "true".into()),
             ("language_detection".into(), "true".into()),
         ];
         for keyterm in &config.keyword_hints {
@@ -135,7 +136,7 @@ impl ProviderSessionProtocol for AssemblySession {
             "Begin" => Ok(vec![WireEvent::SessionStarted {
                 provider_session_id: value.get("id").and_then(Value::as_str).map(str::to_owned),
             }]),
-            // Universal-3 Pro emits this optional VAD signal before a Turn. The provider-neutral
+            // Universal-3.6 Pro emits this optional VAD signal before a Turn. The provider-neutral
             // contract currently has no speech-start event, so it is intentionally consumed.
             "SpeechStarted" => Ok(Vec::new()),
             "Turn" => self.parse_turn(value),
@@ -248,4 +249,70 @@ fn assembly_error(value: &Value) -> SttError {
         )
     };
     SttError::new(PROVIDER_ID, kind, message, retryable, Some(code))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+    use crate::providers::ProviderProtocol;
+    use crate::{EndpointingMode, SessionTimeouts};
+
+    fn config() -> RecognitionConfig {
+        RecognitionConfig {
+            model: "universal-3-6-pro".into(),
+            audio: AudioFormat::PCM_16KHZ_MONO,
+            languages: Vec::new(),
+            endpointing: EndpointingMode::Manual,
+            interim_results: true,
+            keyword_hints: vec!["ripperdoc".into()],
+            context_hint: Some("Cyberpunk character names".into()),
+            retention: RetentionPolicy::ProviderDefaultAllowed,
+            timeouts: SessionTimeouts {
+                connect: Duration::from_secs(1),
+                send: Duration::from_secs(1),
+                receive_idle: Duration::from_secs(1),
+                flush: Duration::from_secs(1),
+            },
+        }
+    }
+
+    #[test]
+    fn default_model_is_universal_3_6_pro_and_connect_query_omits_retired_params() {
+        assert_eq!(AssemblyAi.capabilities().default_model, "universal-3-6-pro");
+        let config = config();
+        let session = AssemblyAi.create_session(&config).expect("session");
+        let secret = SecretString::new("assembly-secret-never-print");
+        let request = session
+            .connect_request(&config, &secret)
+            .expect("connect request");
+        assert_eq!(request.url, "wss://streaming.assemblyai.com/v3/ws");
+        let names: Vec<&str> = request.query.iter().map(|(name, _)| name.as_str()).collect();
+        assert!(request
+            .query
+            .contains(&("speech_model".into(), "universal-3-6-pro".into())));
+        assert!(names.contains(&"keyterms_prompt") && names.contains(&"prompt"));
+        for retired in ["format_turns", "end_of_turn_confidence_threshold"] {
+            assert!(!names.contains(&retired), "{retired} must not be sent");
+        }
+    }
+
+    #[test]
+    fn formatted_end_of_turn_is_the_final_transcript() {
+        let mut session = AssemblyAi.create_session(&config()).expect("session");
+        let frame = ServerFrame::Text(
+            json!({
+                "type": "Turn", "turn_order": 3, "end_of_turn": true,
+                "transcript": "The north beacon is ready.", "language_code": "en"
+            })
+            .to_string(),
+        );
+        let events = session.parse_frame(frame).expect("turn parses");
+        assert!(matches!(
+            &events[0],
+            WireEvent::Transcript(WireTranscript { status: TranscriptStatus::Final, .. })
+        ));
+        assert!(matches!(&events[1], WireEvent::TurnEnded { .. }));
+    }
 }

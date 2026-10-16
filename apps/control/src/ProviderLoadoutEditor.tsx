@@ -1150,7 +1150,7 @@ export function ProviderLoadoutEditor({
                       <p className="loadout-role__note is-error" role="status">
                         <Icon name="warning" size={14} />
                         {role === "stt"
-                          ? "The current push-to-talk path supports AssemblyAI · Universal-3 Pro Streaming. Choose it before testing microphone input."
+                          ? "The current push-to-talk path supports AssemblyAI · Universal-3.6 Pro Streaming. Choose it before testing microphone input."
                           : role === "vision"
                             ? "No vision provider is executed by the current turn runtime. Keep this route off."
                             : role === "lipSync"

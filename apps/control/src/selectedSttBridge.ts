@@ -20,7 +20,7 @@ export interface SelectedSttCapturing {
   inputEndpointGeneration: number;
   route: {
     providerId: "assemblyai";
-    modelId: "u3-rt-pro";
+    modelId: "universal-3-6-pro";
     egress: "microphone_audio_and_optional_non_secret_context";
     automaticFallback: false;
   };
@@ -28,7 +28,7 @@ export interface SelectedSttCapturing {
 
 export interface SelectedSttRouteReceipt {
   providerId: "assemblyai";
-  modelId: "u3-rt-pro";
+  modelId: "universal-3-6-pro";
   credentialReference: string;
   egress: "microphone_audio_and_optional_non_secret_context";
   generation: number;
@@ -171,7 +171,7 @@ export function normalizeSelectedSttCapturing(
     !isCount(record.inputEndpointGeneration) ||
     record.inputEndpointGeneration === 0 ||
     route.providerId !== "assemblyai" ||
-    route.modelId !== "u3-rt-pro" ||
+    route.modelId !== "universal-3-6-pro" ||
     route.egress !== "microphone_audio_and_optional_non_secret_context" ||
     route.automaticFallback !== false
   )
@@ -226,7 +226,7 @@ export function normalizeSelectedSttTerminal(
     !route ||
     !hasOnlyKeys(route, RECEIPT_ROUTE_KEYS) ||
     route.providerId !== "assemblyai" ||
-    route.modelId !== "u3-rt-pro" ||
+    route.modelId !== "universal-3-6-pro" ||
     !isCredentialReference(route.credentialReference) ||
     route.egress !== "microphone_audio_and_optional_non_secret_context" ||
     route.generation !== expected.generation ||
