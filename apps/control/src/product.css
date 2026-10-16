@@ -3878,3 +3878,8 @@ body {
     width: 100%;
   }
 }
+.stage-timing-list article.is-unmeasured b {
+  color: var(--p-muted);
+  font-size: 13px;
+  font-weight: 500;
+}

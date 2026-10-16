@@ -171,6 +171,32 @@ export interface NativeTtsStockVoiceDiscovery {
   error?: { code: string; detail: string; retryable: boolean };
 }
 
+export type NativeLoadoutRoleTestOutcome =
+  | "ok"
+  | "unknownRoute"
+  | "notSelectable"
+  | "needsCredential"
+  | "credentialStoreUnavailable"
+  | "runtimeUnavailable"
+  | "providerContractUnavailable";
+
+/**
+ * Result of the bounded per-role readiness check. `latencyMs` is how long the
+ * check itself took (including the runtime round trip), not model latency.
+ */
+export interface NativeLoadoutRoleTestResult {
+  role: ProviderRole;
+  providerId: string;
+  modelId: string;
+  outcome: NativeLoadoutRoleTestOutcome;
+  latencyMs: number;
+  credentialStatus: "present" | "missing" | "notRequired" | "unavailable";
+  runtimeChecked: boolean;
+  networkRequestPerformed: boolean;
+  responseBodyReturned: boolean;
+  detail: string;
+}
+
 export type LoadoutSource =
   | { kind: "browser"; detail: string }
   | { kind: "native"; snapshot: NativeLoadoutSnapshot };
@@ -515,6 +541,21 @@ export async function nativeReview(loadout: ProviderLoadout, offline: boolean) {
   return invoke<NativeProviderLoadoutReview>("review_provider_loadout", {
     context: contextFor(loadout),
     offline,
+  });
+}
+
+/**
+ * Runs the native readiness check for one role's selected provider and model.
+ * Resolves to null outside the installed app. The credential is read and
+ * checked natively; only its presence state is returned.
+ */
+export async function nativeTestRole(
+  role: Exclude<ProviderRole, "lipSync">,
+  route: RouteChoice,
+): Promise<NativeLoadoutRoleTestResult | null> {
+  if (!hasTauri()) return null;
+  return invoke<NativeLoadoutRoleTestResult>("test_loadout_role", {
+    request: { role, providerId: route.providerId, modelId: route.modelId },
   });
 }
 

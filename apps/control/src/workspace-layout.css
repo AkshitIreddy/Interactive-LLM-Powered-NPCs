@@ -1251,6 +1251,7 @@
   flex: 0 0 auto;
 }
 
+.cyberpunk-shell .game-profile-detail__capabilities,
 .cyberpunk-shell .game-profile-detail__characters {
   display: grid;
   gap: 6px;
@@ -1259,6 +1260,7 @@
   list-style: none;
 }
 
+.cyberpunk-shell .game-profile-detail__capabilities li,
 .cyberpunk-shell .game-profile-detail__characters li {
   display: grid;
   gap: 2px;
@@ -1266,6 +1268,7 @@
   border: 1px solid #633344;
 }
 
+.cyberpunk-shell .game-profile-detail__capabilities small,
 .cyberpunk-shell .game-profile-detail__characters small {
   color: #a98b98;
 }

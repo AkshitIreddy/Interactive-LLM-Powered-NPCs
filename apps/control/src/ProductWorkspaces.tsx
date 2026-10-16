@@ -230,6 +230,14 @@ const SAFETY_LABEL: Record<NativeGameProfileSummary["safety"], string> = {
   offlineOnly: "Offline only",
 };
 
+/** Tier names as the profile declares them; nothing is implied beyond them. */
+const CAPABILITY_TIER_LABEL: Record<string, string> = {
+  unsupported: "Unsupported",
+  experimental: "Experimental",
+  replay_verified: "Replay verified",
+  live_certified: "Live certified",
+};
+
 /** Game profiles from the native catalog, with an inspectable detail view. */
 export function GameRoster({
   nativeAvailable,
@@ -371,6 +379,76 @@ function GameProfileDetail({
           <dt>Release wave</dt>
           <dd>{profile.wave}</dd>
         </div>
+        {profile.detection && (
+          <div>
+            <dt>Game process</dt>
+            <dd>
+              {profile.detection.processes.length === 0
+                ? "No process declared"
+                : profile.detection.processes
+                    .map(
+                      (process) =>
+                        `${process.executable}${process.required ? "" : " (auxiliary)"}`,
+                    )
+                    .join(", ")}
+            </dd>
+          </div>
+        )}
+        {profile.detection?.processes.some(
+          (process) => process.windowTitleRegex,
+        ) && (
+          <div>
+            <dt>Window title</dt>
+            <dd>
+              {profile.detection.processes
+                .filter((process) => process.windowTitleRegex)
+                .map((process) => process.windowTitleRegex)
+                .join(" · ")}
+            </dd>
+          </div>
+        )}
+        {profile.detection && profile.detection.stores.length > 0 && (
+          <div>
+            <dt>Stores</dt>
+            <dd>
+              {profile.detection.stores
+                .map(
+                  (store) =>
+                    `${humanizeCamel(store.store)}${store.appId ? ` ${store.appId}` : ""}`,
+                )
+                .join(", ")}
+            </dd>
+          </div>
+        )}
+        {profile.detection && (
+          <div>
+            <dt>Capture</dt>
+            <dd>
+              {profile.detection.preferredCaptureMethods.length === 0
+                ? "No capture method declared"
+                : profile.detection.preferredCaptureMethods
+                    .map(humanizeCamel)
+                    .join(" → ")}
+              {` · fallback ${humanizeCamel(profile.detection.captureFallback)}`}
+              {profile.detection.allowExclusiveFullscreen
+                ? " · exclusive fullscreen allowed"
+                : " · windowed or borderless only"}
+            </dd>
+          </div>
+        )}
+        {profile.detection && profile.detection.builds.length > 0 && (
+          <div>
+            <dt>Known builds</dt>
+            <dd>
+              {profile.detection.builds
+                .map(
+                  (build) =>
+                    `${build.buildId} (${humanizeCamel(build.status)})`,
+                )
+                .join(", ")}
+            </dd>
+          </div>
+        )}
         <div>
           <dt>Characters</dt>
           <dd>
@@ -388,6 +466,22 @@ function GameProfileDetail({
           </dd>
         </div>
       </dl>
+      {profile.capabilities && profile.capabilities.length > 0 && (
+        <ul
+          className="game-profile-detail__capabilities"
+          aria-label="Profile capabilities"
+        >
+          {profile.capabilities.map((capability) => (
+            <li key={capability.id}>
+              <b>{humanizeCamel(capability.id)}</b>
+              <small>
+                {CAPABILITY_TIER_LABEL[capability.tier] ??
+                  humanizeCamel(capability.tier)}
+              </small>
+            </li>
+          ))}
+        </ul>
+      )}
       {authored.length > 0 && (
         <ul className="game-profile-detail__characters" aria-label="Characters">
           {authored.map((entry) => (

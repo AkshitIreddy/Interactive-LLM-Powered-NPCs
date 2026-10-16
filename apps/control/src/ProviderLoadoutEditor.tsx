@@ -9,6 +9,7 @@ import {
 import { CyberwareAnatomy } from "./CyberwareAnatomy";
 import { ActionButton, StatusPill } from "./components";
 import { Icon } from "./icons";
+import { RoleTestPanel } from "./RoleTestPanel";
 import "./loadout.css";
 import {
   makeLoadout,
@@ -1113,6 +1114,15 @@ export function ProviderLoadoutEditor({
                           </ActionButton>
                         )}
                     </div>
+                    {role !== "lipSync" && (
+                      <RoleTestPanel
+                        role={role}
+                        roleLabel={ROLE_META[role].label}
+                        route={route}
+                        providerName={provider.name.split(" · ")[0]}
+                        testable={routeAvailable && provider.id !== "disabled"}
+                      />
+                    )}
                     {role === "lipSync" && (
                       <section
                         className="mouth-motion-handoff"

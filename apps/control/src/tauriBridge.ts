@@ -22,7 +22,26 @@ export interface NativeManualActorPickerPresentation {
   detail: string;
 }
 
+/**
+ * Stage durations the runtime measured on its own monotonic clock for one
+ * live-provider turn. Absent for fixture, testing and failed turns. Stages not
+ * listed here (listening, transcribing, remembering, animating) were not
+ * measured and must be shown as such.
+ */
+export interface NativeMeasuredTurnTiming {
+  responseToFirstAudioMs: number;
+  identityMs: number;
+  llmFirstTokenMs: number;
+  llmCompleteMs: number;
+  ttsFirstAudioMs: number;
+  ttsCompleteMs: number;
+  budgetStatus?: "meetsTarget" | "withinCeiling" | "exceedsCeiling";
+  budgetTargetMs?: number;
+  budgetCeilingMs?: number;
+}
+
 export interface NativeTurnExecutionEvidence {
+  measuredTiming?: NativeMeasuredTurnTiming;
   consumedRoute: {
     schemaVersion: number;
     sourceLoadoutId: string;
@@ -386,6 +405,36 @@ export interface NativeGameProfileSummary {
   safety: "singlePlayerOnly" | "offlineOnly";
   catalogState: "bundled" | "missingFromBundle";
   defaultFallback: string;
+  /** Detection hints read from the bundled profile; absent when not loaded. */
+  detection?: NativeGameProfileDetection | null;
+  /** Capability tier claims read from the bundled profile. */
+  capabilities?: NativeGameProfileCapability[];
+}
+
+export interface NativeGameProfileDetection {
+  processes: {
+    executable: string;
+    required: boolean;
+    windowTitleRegex: string | null;
+  }[];
+  stores: {
+    store: string;
+    appId: string | null;
+    installDirectoryHints: string[];
+  }[];
+  builds: { buildId: string; status: string; reason: string | null }[];
+  preferredCaptureMethods: string[];
+  captureFallback: string;
+  allowExclusiveFullscreen: boolean;
+  excludedWindowTitlePatternCount: number;
+}
+
+export interface NativeGameProfileCapability {
+  /** Profile capability key, e.g. `conversation` or `screen_space_lip_sync`. */
+  id: string;
+  tier: string;
+  fallback: string;
+  evidenceCount: number;
 }
 
 export interface NativeModelSummary {
@@ -1058,6 +1107,55 @@ function normalizeCharacterContext(
   };
 }
 
+/**
+ * Accepts only a complete, finite, non-negative timing block. Anything else is
+ * treated as "not measured" rather than partially trusted or zero-filled.
+ */
+function normalizeMeasuredTiming(
+  value: unknown,
+): NativeMeasuredTurnTiming | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const read = (key: string) => {
+    const number = finiteNumber(record[key]);
+    return number !== null && number >= 0 ? number : null;
+  };
+  const responseToFirstAudioMs = read("responseToFirstAudioMs");
+  const identityMs = read("identityMs");
+  const llmFirstTokenMs = read("llmFirstTokenMs");
+  const llmCompleteMs = read("llmCompleteMs");
+  const ttsFirstAudioMs = read("ttsFirstAudioMs");
+  const ttsCompleteMs = read("ttsCompleteMs");
+  if (
+    responseToFirstAudioMs === null ||
+    identityMs === null ||
+    llmFirstTokenMs === null ||
+    llmCompleteMs === null ||
+    ttsFirstAudioMs === null ||
+    ttsCompleteMs === null
+  )
+    return null;
+  const budgetStatus =
+    record.budgetStatus === "meetsTarget" ||
+    record.budgetStatus === "withinCeiling" ||
+    record.budgetStatus === "exceedsCeiling"
+      ? record.budgetStatus
+      : undefined;
+  const budgetTargetMs = read("budgetTargetMs");
+  const budgetCeilingMs = read("budgetCeilingMs");
+  return {
+    responseToFirstAudioMs,
+    identityMs,
+    llmFirstTokenMs,
+    llmCompleteMs,
+    ttsFirstAudioMs,
+    ttsCompleteMs,
+    ...(budgetStatus ? { budgetStatus } : {}),
+    ...(budgetTargetMs !== null ? { budgetTargetMs } : {}),
+    ...(budgetCeilingMs !== null ? { budgetCeilingMs } : {}),
+  };
+}
+
 function normalizeTurnExecution(
   value: unknown,
 ): NativeTurnExecutionEvidence | null {
@@ -1476,7 +1574,9 @@ function normalizeTurnExecution(
         return [];
       })
     : [];
+  const measuredTiming = normalizeMeasuredTiming(execution.measuredTiming);
   return {
+    ...(measuredTiming ? { measuredTiming } : {}),
     consumedRoute: {
       schemaVersion: consumedSchemaVersion,
       sourceLoadoutId: consumedRoute.sourceLoadoutId,
@@ -2748,6 +2848,17 @@ async function nativeInvoke<T>(
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<T>(command, args);
 }
+
+export interface NativeOpenLogsFolderResult {
+  opened: boolean;
+  /** Known sidecar log file names present; never a path or file contents. */
+  files: string[];
+  detail: string;
+}
+
+/** Opens the app's sidecar log folder in Explorer. Null outside the app. */
+export const openLogsFolder = () =>
+  nativeInvoke<NativeOpenLogsFolderResult>("open_logs_folder");
 
 export const discoverGameTargets = (gameProfileId: string) =>
   nativeInvoke<NativeGameTargetCandidate[]>("discover_game_targets", {

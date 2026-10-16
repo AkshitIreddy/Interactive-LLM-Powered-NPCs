@@ -12,6 +12,7 @@ mod game_targets;
 pub(crate) mod identity_runtime;
 pub(crate) mod identity_worker_transport;
 mod lifecycle;
+mod loadout_role_test;
 mod local_resources;
 pub mod media_broker;
 mod optional_pack_activation;
@@ -76,6 +77,8 @@ pub fn run() {
             commands::delete_provider_credential,
             commands::test_provider_connection,
             commands::diagnostic_summary,
+            commands::open_logs_folder,
+            loadout_role_test::test_loadout_role,
             commands::discover_tts_stock_voices,
             commands::enumerate_audio_outputs,
             commands::selected_audio_output,

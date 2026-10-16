@@ -1,6 +1,7 @@
 use crate::domain::{
-    CatalogState, CredentialReferenceStatus, GameProfileSummary, ModelInstallation, ModelSummary,
-    ProfileSafety, ProviderCredentialSummary,
+    CatalogState, CredentialReferenceStatus, GameProfileBuildSummary, GameProfileCapabilitySummary,
+    GameProfileDetectionSummary, GameProfileProcessSummary, GameProfileStoreSummary,
+    GameProfileSummary, ModelInstallation, ModelSummary, ProfileSafety, ProviderCredentialSummary,
 };
 use interactive_npcs_credential_vault::{
     credential_namespace_for_application, CredentialVault, SecretValue, VaultError,
@@ -17,7 +18,7 @@ pub(crate) const CREDENTIAL_NAMESPACE: &str = PRODUCTION_CREDENTIAL_NAMESPACE;
 
 const BUNDLED_PROVIDER_CATALOG: &[u8] = include_bytes!("../../../../catalog/v1/catalog.json");
 
-fn bundled_provider_catalog() -> CatalogDocument {
+pub(crate) fn bundled_provider_catalog() -> CatalogDocument {
     CatalogDocument::parse(BUNDLED_PROVIDER_CATALOG)
         .expect("the bundled provider catalog must remain schema-valid")
 }
@@ -307,20 +308,45 @@ impl ResourceCatalog {
         }
     }
 
+    /// Catalog summaries including the detection hints and capability claims
+    /// read from each bundled profile. Parses every profile, so use
+    /// [`Self::game_summaries_basic`] when only identity/safety is needed.
     pub fn game_summaries(&self) -> Vec<GameProfileSummary> {
+        self.build_game_summaries(true)
+    }
+
+    /// Catalog summaries without reading profile bodies: `detection` is `None`
+    /// and `capabilities` is empty.
+    pub fn game_summaries_basic(&self) -> Vec<GameProfileSummary> {
+        self.build_game_summaries(false)
+    }
+
+    fn build_game_summaries(&self, with_details: bool) -> Vec<GameProfileSummary> {
         GAMES
             .iter()
-            .map(|game| GameProfileSummary {
-                id: game.id.into(),
-                display_name: game.name.into(),
-                wave: game.wave.into(),
-                safety: game.safety,
-                catalog_state: if self.profile_exists(game.id) {
-                    CatalogState::Bundled
+            .map(|game| {
+                let profile = if with_details {
+                    self.load_fixed_game_profile(game.id).ok()
                 } else {
-                    CatalogState::MissingFromBundle
-                },
-                default_fallback: "Explicit character selection, audio, and subtitles".into(),
+                    None
+                };
+                GameProfileSummary {
+                    id: game.id.into(),
+                    display_name: game.name.into(),
+                    wave: game.wave.into(),
+                    safety: game.safety,
+                    catalog_state: if self.profile_exists(game.id) {
+                        CatalogState::Bundled
+                    } else {
+                        CatalogState::MissingFromBundle
+                    },
+                    default_fallback: "Explicit character selection, audio, and subtitles".into(),
+                    detection: profile.as_ref().map(detection_summary),
+                    capabilities: profile
+                        .as_ref()
+                        .map(capability_summaries)
+                        .unwrap_or_default(),
+                }
             })
             .collect()
     }
@@ -473,6 +499,70 @@ impl ResourceCatalog {
                 .into_iter()
                 .any(|path| path.is_file())
     }
+}
+
+fn serde_label<T: serde::Serialize>(value: &T) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+
+fn detection_summary(profile: &npc_game_profile::GameProfileV2) -> GameProfileDetectionSummary {
+    let detection = &profile.detection;
+    GameProfileDetectionSummary {
+        processes: detection
+            .processes
+            .iter()
+            .map(|process| GameProfileProcessSummary {
+                executable: process.executable.clone(),
+                required: process.required,
+                window_title_regex: process.window_title_regex.clone(),
+            })
+            .collect(),
+        stores: detection
+            .stores
+            .iter()
+            .map(|store| GameProfileStoreSummary {
+                store: serde_label(&store.store),
+                app_id: store.app_id.clone(),
+                install_directory_hints: store.install_directory_hints.clone(),
+            })
+            .collect(),
+        builds: detection
+            .builds
+            .iter()
+            .map(|build| GameProfileBuildSummary {
+                build_id: build.build_id.clone(),
+                status: serde_label(&build.status),
+                reason: build.reason.clone(),
+            })
+            .collect(),
+        preferred_capture_methods: detection
+            .capture
+            .preferred_methods
+            .iter()
+            .map(serde_label)
+            .collect(),
+        capture_fallback: serde_label(&detection.capture.fallback),
+        allow_exclusive_fullscreen: detection.capture.allow_exclusive_fullscreen,
+        excluded_window_title_pattern_count: detection.capture.excluded_window_title_regexes.len(),
+    }
+}
+
+fn capability_summaries(
+    profile: &npc_game_profile::GameProfileV2,
+) -> Vec<GameProfileCapabilitySummary> {
+    profile
+        .capabilities
+        .iter()
+        .map(|(id, claim)| GameProfileCapabilitySummary {
+            id: id.into(),
+            tier: serde_label(&claim.tier),
+            fallback: claim.fallback.clone(),
+            evidence_count: claim.evidence.len(),
+        })
+        .collect()
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -714,6 +804,64 @@ mod tests {
             synthetic.detection.processes[0].executable,
             "EclipseHarbor.exe"
         );
+    }
+
+    #[test]
+    fn summaries_carry_detection_and_capabilities_read_from_the_profile() {
+        let resources = ResourceCatalog::new(None);
+        let summaries = resources.game_summaries();
+        let cyberpunk = summaries
+            .iter()
+            .find(|game| game.id == "cyberpunk-2077")
+            .expect("cyberpunk summary");
+        let detection = cyberpunk.detection.as_ref().expect("detection summary");
+        assert!(detection
+            .processes
+            .iter()
+            .any(|process| process.executable == "Cyberpunk2077.exe" && process.required));
+        assert!(detection
+            .stores
+            .iter()
+            .any(|store| store.store == "steam" && store.app_id.as_deref() == Some("1091500")));
+        assert!(detection
+            .preferred_capture_methods
+            .contains(&"windows_graphics_capture".to_string()));
+        assert_eq!(detection.capture_fallback, "audio_subtitles");
+        let ids = cyberpunk
+            .capabilities
+            .iter()
+            .map(|capability| capability.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            [
+                "conversation",
+                "identity",
+                "capture",
+                "subtitles",
+                "memory",
+                "screen_space_lip_sync"
+            ]
+        );
+        let capture = cyberpunk
+            .capabilities
+            .iter()
+            .find(|capability| capability.id == "capture")
+            .expect("capture capability");
+        assert_eq!(capture.tier, "unsupported");
+        assert!(capture.evidence_count > 0);
+        // Every bundled profile contributes real detection data.
+        assert!(summaries.iter().all(|game| {
+            game.detection
+                .as_ref()
+                .is_some_and(|detection| !detection.processes.is_empty())
+                && game.capabilities.len() == 6
+        }));
+
+        let basic = resources.game_summaries_basic();
+        assert!(basic
+            .iter()
+            .all(|game| game.detection.is_none() && game.capabilities.is_empty()));
     }
 
     #[test]

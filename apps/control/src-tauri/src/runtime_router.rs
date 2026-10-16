@@ -893,6 +893,9 @@ async fn emit_native_result(
         .and_then(Value::as_str)
         .unwrap_or("failed");
     if let Some(evidence) = result.turn_execution.as_deref_mut() {
+        // Only the runtime's own producer-clock receipt is surfaced as
+        // measured latency; fixture turns carry none and stay unmeasured.
+        evidence.derive_measured_timing();
         if !audio_receipts_match_expected(evidence, expected_playback) {
             fail_closed_invalid_audio_evidence(evidence);
         }
@@ -1014,6 +1017,8 @@ fn fail_closed_invalid_audio_evidence(evidence: &mut NativeTurnExecutionEvidence
     evidence.success.audio_drained = false;
     evidence.success.audio_receipt_count = 0;
     evidence.audio_receipts.clear();
+    // A first-audio latency claim must not outlive rejected audio evidence.
+    evidence.measured_timing = None;
     let reason = "Runtime audio delivery evidence did not match the authenticated transport-v2 playback lease; audio delivery was not accepted.".to_owned();
     if evidence.success.subtitle_delivered {
         evidence
@@ -2409,6 +2414,91 @@ mod tests {
             output_endpoint_id: "{0.0.0.00000000}.fixture-output".into(),
             output_endpoint_generation: 17,
         }
+    }
+
+    fn evidence_with_timing(receipt: Option<serde_json::Value>) -> NativeTurnExecutionEvidence {
+        let mut value = serde_json::to_value(broker_audio_evidence()).expect("evidence json");
+        if let Some(receipt) = receipt {
+            value["runtimeTimingReceipt"] = receipt;
+            value["runtimeLatencyAssessment"] = json!({
+                "schemaVersion": 1,
+                "scope": "finalizedTranscriptToFirstDecodedPcm",
+                "targetMillis": 5000,
+                "ceilingMillis": 8000,
+                "responseToFirstAudioMillis": 1200,
+                "llmTimeToFirstTokenMillis": 400,
+                "firstTokenToTtsRequestMillis": 100,
+                "ttsTimeToFirstAudioMillis": 300,
+                "status": "meetsTarget"
+            });
+        }
+        serde_json::from_value(value).expect("evidence with timing")
+    }
+
+    fn timing_receipt(live: bool) -> serde_json::Value {
+        let stamp = |ms: u64| json!({"clockDomain": "windowsQpc", "qpcFrequencyHz": 1000, "qpcTicks": 10_000 + ms});
+        json!({
+            "schemaVersion": 1,
+            "inputFinalized": stamp(0),
+            "identityStarted": stamp(5),
+            "identityCompleted": stamp(25),
+            "llmRequested": stamp(40),
+            "llmFirstToken": stamp(440),
+            "llmProviderTerminal": stamp(900),
+            "structuredResponseValidated": stamp(910),
+            "outputTokens": 30,
+            "ttsRequested": stamp(540),
+            "ttsFirstDecodedPcm": stamp(1200),
+            "ttsFinalDecodedPcm": stamp(1800),
+            "liveProviderReceipts": live
+        })
+    }
+
+    #[test]
+    fn measured_timing_comes_only_from_a_live_runtime_receipt() {
+        let mut none = evidence_with_timing(None);
+        none.derive_measured_timing();
+        assert!(
+            none.measured_timing.is_none(),
+            "no receipt means not measured"
+        );
+
+        let mut fixture = evidence_with_timing(Some(timing_receipt(false)));
+        fixture.derive_measured_timing();
+        assert!(
+            fixture.measured_timing.is_none(),
+            "non-live receipt is not measured"
+        );
+
+        let mut live = evidence_with_timing(Some(timing_receipt(true)));
+        live.derive_measured_timing();
+        let timing = live.measured_timing.clone().expect("measured timing");
+        assert_eq!(timing.response_to_first_audio_ms, 1200);
+        assert_eq!(timing.identity_ms, 20);
+        assert_eq!(timing.llm_first_token_ms, 400);
+        assert_eq!(timing.llm_complete_ms, 860);
+        assert_eq!(timing.tts_first_audio_ms, 660);
+        assert_eq!(timing.tts_complete_ms, 1260);
+        assert_eq!(timing.budget_target_ms, Some(5000));
+        let wire = serde_json::to_value(&live).expect("wire evidence");
+        assert!(
+            wire.get("runtimeTimingReceipt").is_none(),
+            "raw ticks stay native"
+        );
+        assert_eq!(wire["measuredTiming"]["identityMs"], 20);
+
+        // Rejected audio evidence must drop the first-audio claim.
+        fail_closed_invalid_audio_evidence(&mut live);
+        assert!(live.measured_timing.is_none());
+    }
+
+    #[test]
+    fn inconsistent_receipt_clocks_are_not_measured() {
+        let mut receipt = timing_receipt(true);
+        receipt["ttsFirstDecodedPcm"]["qpcFrequencyHz"] = json!(2000);
+        let mut evidence = evidence_with_timing(Some(receipt));
+        evidence.derive_measured_timing();
+        assert!(evidence.measured_timing.is_none());
     }
 
     #[test]

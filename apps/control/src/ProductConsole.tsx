@@ -16,7 +16,7 @@ import {
 } from "react-aria-components";
 import "./workspace-layout.css";
 import "./secondary-loadout.css";
-import type { AppPreferences } from "./types";
+import type { AppPreferences, StageId } from "./types";
 import {
   deleteProviderCredential,
   promptAndSaveProviderCredential,
@@ -30,6 +30,7 @@ import {
   inspectCharacterDatabase,
   loadNativeBootstrapHealth,
   LOADING_NATIVE_BOOTSTRAP,
+  openLogsFolder,
   readDiagnosticSummary,
   readDiagnosticsV2,
   readDiagnosticsMatrix,
@@ -74,6 +75,7 @@ import {
   type NativeProductPreferenceSnapshot,
   type NativeProductPreferenceScope,
   type NativeScopedProductPreferences,
+  type NativeMeasuredTurnTiming,
   type NativeSimulationEvent,
   type NativeTurnExecutionEvidence,
   type OnboardingSnapshot,
@@ -4043,6 +4045,55 @@ function VoicePage({
   );
 }
 
+const TURN_STAGE_ROWS: { stage: StageId; label: string }[] = [
+  { stage: "listening", label: "Listening" },
+  { stage: "transcribing", label: "Transcribing" },
+  { stage: "identifying", label: "Identifying" },
+  { stage: "remembering", label: "Remembering" },
+  { stage: "responding", label: "Responding" },
+  { stage: "voicing", label: "Voicing" },
+  { stage: "animating", label: "Animating" },
+];
+
+const UNMEASURED_STAGE_REASON: Record<StageId, string> = {
+  listening: "capture is timed outside the turn",
+  transcribing: "speech-to-text is timed outside the turn",
+  identifying: "no runtime measurement",
+  remembering: "no runtime measurement",
+  responding: "no runtime measurement",
+  voicing: "no runtime measurement",
+  animating: "no runtime measurement",
+};
+
+const LATENCY_BUDGET_LABEL: Record<
+  NonNullable<NativeMeasuredTurnTiming["budgetStatus"]>,
+  string
+> = {
+  meetsTarget: "meets target",
+  withinCeiling: "within ceiling",
+  exceedsCeiling: "exceeds ceiling",
+};
+
+function measuredLatencyRows(timing: NativeMeasuredTurnTiming) {
+  return [
+    {
+      stage: "identifying" as const,
+      value: `${timing.identityMs} ms`,
+      basis: "character identity resolution",
+    },
+    {
+      stage: "responding" as const,
+      value: `${timing.llmCompleteMs} ms`,
+      basis: `first token after ${timing.llmFirstTokenMs} ms`,
+    },
+    {
+      stage: "voicing" as const,
+      value: `${timing.ttsFirstAudioMs} ms`,
+      basis: `first audio · all audio after ${timing.ttsCompleteMs} ms`,
+    },
+  ];
+}
+
 function DiagnosticsPage({
   bootstrap,
   diagnostics,
@@ -4073,20 +4124,47 @@ function DiagnosticsPage({
   turnEvents: NativeSimulationEvent[];
 }) {
   const checks = diagnostics?.checks ?? [];
+  const [logsNotice, setLogsNotice] = useState<{
+    tone: "ok" | "error";
+    text: string;
+  } | null>(null);
+  const [logsBusy, setLogsBusy] = useState(false);
+  const openLogs = async () => {
+    setLogsBusy(true);
+    try {
+      const result = await openLogsFolder();
+      setLogsNotice(
+        result
+          ? { tone: "ok", text: result.detail }
+          : {
+              tone: "error",
+              text: "The logs folder can only be opened from the installed Windows app.",
+            },
+      );
+    } catch (error) {
+      setLogsNotice({
+        tone: "error",
+        text: commandErrorMessage(
+          error,
+          "The logs folder could not be opened.",
+        ),
+      });
+    } finally {
+      setLogsBusy(false);
+    }
+  };
   const timingBasis = turnEvents.find((event) => event.type === "started");
   const completedTurn = turnEvents.find((event) => event.type === "completed");
-  const stageTimings = completedTurn
-    ? turnEvents.filter(
-        (event): event is NativeSimulationEvent & { type: "stageCompleted" } =>
-          event.type === "stageCompleted",
-      )
-    : [];
+  const measuredTiming = completedTurn?.turnExecution?.measuredTiming;
+  const latencyRows = measuredTiming ? measuredLatencyRows(measuredTiming) : [];
   const timingLabel = completedTurn
-    ? completedTurn.turnExecution
-      ? "Completed route evidence"
-      : completedTurn.runtimeFixtureOnly
-        ? "Completed runtime fixture"
-        : "Completed · provider unproven"
+    ? measuredTiming
+      ? "Measured by the runtime"
+      : completedTurn.turnExecution
+        ? "Completed · timing not reported"
+        : completedTurn.runtimeFixtureOnly
+          ? "Completed runtime fixture"
+          : "Completed · provider unproven"
     : timingBasis?.type === "started" &&
         timingBasis.measurementBasis === "pendingProviderEvidence"
       ? "Provider evidence pending"
@@ -4153,6 +4231,22 @@ function DiagnosticsPage({
           <small id="diagnostics-export-reason">
             Explicit local export only · maximum 100 events · never uploaded
             automatically.
+          </small>
+          <button
+            className="quiet-button"
+            onClick={() => void openLogs()}
+            disabled={logsBusy || !nativeAvailable}
+            aria-describedby="diagnostics-logs-reason"
+          >
+            {logsBusy ? "Opening…" : "Open logs folder"}
+          </button>
+          <small
+            id="diagnostics-logs-reason"
+            role="status"
+            className={logsNotice?.tone === "error" ? "is-error" : undefined}
+          >
+            {logsNotice?.text ??
+              "Opens runtime.log and media-broker.log in Explorer. Files stay on this PC."}
           </small>
         </div>
       </header>
@@ -4413,29 +4507,60 @@ function DiagnosticsPage({
             </div>
             <span className="badge wait">{timingLabel}</span>
           </div>
-          {stageTimings.length === 0 ? (
+          {!completedTurn ? (
             <div className="empty-state">
-              <b>No stage timing events in this session</b>
+              <b>No completed turn in this session</b>
               <p>
-                {timingBasis?.type === "started" && !completedTurn
-                  ? "A turn started, but completion evidence is still pending. Timing fields stay hidden until completion."
-                  : "Run a turn first. The UI does not substitute illustrative latency bars when native events are absent."}
+                {timingBasis?.type === "started"
+                  ? "A turn started, but completion evidence is still pending. Timings appear after it completes."
+                  : "Run a turn first. The UI does not substitute illustrative latency bars when no turn has been measured."}
               </p>
             </div>
           ) : (
-            <div className="stage-timing-list">
-              {stageTimings.map((event) => (
-                <article key={`${event.sequence}-${event.stage}`}>
-                  <span>{event.stage}</span>
-                  <b>{event.fixtureElapsedMs} ms</b>
-                  <small>event field: fixtureElapsedMs</small>
-                </article>
-              ))}
-              <p>
-                Values labeled <code>fixtureElapsedMs</code> are runtime event
-                fields, not a release benchmark. Provider retries and route
-                changes are never inferred from timing alone.
-              </p>
+            <div
+              className="stage-timing-list"
+              role="list"
+              aria-label="Stage timings"
+            >
+              {TURN_STAGE_ROWS.map(({ stage, label }) => {
+                const row = latencyRows.find((entry) => entry.stage === stage);
+                return (
+                  <article
+                    key={stage}
+                    role="listitem"
+                    className={row ? undefined : "is-unmeasured"}
+                  >
+                    <span>{label}</span>
+                    <b>{row ? row.value : "not measured"}</b>
+                    <small>
+                      {row ? row.basis : UNMEASURED_STAGE_REASON[stage]}
+                    </small>
+                  </article>
+                );
+              })}
+              {measuredTiming ? (
+                <p>
+                  Transcript to first audio:{" "}
+                  {measuredTiming.responseToFirstAudioMs} ms
+                  {measuredTiming.budgetStatus
+                    ? ` · ${LATENCY_BUDGET_LABEL[measuredTiming.budgetStatus]}${
+                        measuredTiming.budgetTargetMs !== undefined &&
+                        measuredTiming.budgetCeilingMs !== undefined
+                          ? ` (target ${measuredTiming.budgetTargetMs} ms, ceiling ${measuredTiming.budgetCeilingMs} ms)`
+                          : ""
+                      }`
+                    : ""}
+                  . Durations come from the runtime clock for the latest turn,
+                  not from a benchmark.
+                </p>
+              ) : (
+                <p>
+                  This turn has no runtime timing receipt. Receipts exist only
+                  for completed turns that used a live language-model and voice
+                  provider; fixture, testing and failed turns are never given
+                  timings.
+                </p>
+              )}
             </div>
           )}
         </section>

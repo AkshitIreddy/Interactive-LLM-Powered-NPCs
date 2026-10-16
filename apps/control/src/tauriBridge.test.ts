@@ -404,6 +404,49 @@ describe("Tauri bridge normalization", () => {
     ).toBeUndefined();
   });
 
+  it("keeps a complete measured timing block and drops partial or invalid ones", () => {
+    const completed = (measuredTiming: unknown) => {
+      const event = normalizeNativeSimulationEvent({
+        type: "completed",
+        simulationId: "native-timing",
+        generation: 5,
+        sequence: 9,
+        runtimeFixtureOnly: false,
+        deliveredText: "Timed.",
+        turnExecution: {
+          ...turnExecutionWithInput({
+            mode: "typed",
+            pushToTalkState: "notRequested",
+          }),
+          measuredTiming,
+        },
+      });
+      return event?.type === "completed"
+        ? event.turnExecution?.measuredTiming
+        : "no-event";
+    };
+    const full = {
+      responseToFirstAudioMs: 1200,
+      identityMs: 20,
+      llmFirstTokenMs: 400,
+      llmCompleteMs: 860,
+      ttsFirstAudioMs: 660,
+      ttsCompleteMs: 1260,
+      budgetStatus: "withinCeiling",
+      budgetTargetMs: 5000,
+      budgetCeilingMs: 8000,
+    };
+    expect(completed(full)).toEqual(full);
+    // Never zero-filled: a partial block is "not measured".
+    expect(completed({ ...full, ttsFirstAudioMs: undefined })).toBeUndefined();
+    expect(completed({ ...full, identityMs: -1 })).toBeUndefined();
+    expect(completed({ ...full, llmCompleteMs: "860" })).toBeUndefined();
+    expect(completed(undefined)).toBeUndefined();
+    expect(completed({ ...full, budgetStatus: "bogus" })).not.toHaveProperty(
+      "budgetStatus",
+    );
+  });
+
   it("preserves the accepted one-time STT receipt binding without transcript, PCM, or token data", () => {
     const input = selectedSttInputEvidence();
     const event = normalizeNativeSimulationEvent({

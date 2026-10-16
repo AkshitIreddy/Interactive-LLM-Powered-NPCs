@@ -743,6 +743,87 @@ describe("native product workspaces", () => {
     expect(dialog).toHaveTextContent("Lydia");
   });
 
+  it("shows detection hints and capability tiers read from the profile", async () => {
+    const user = userEvent.setup();
+    render(
+      <GameRoster
+        nativeAvailable
+        gameProfiles={[
+          {
+            id: "cyberpunk-2077",
+            displayName: "Cyberpunk 2077",
+            wave: "1",
+            safety: "singlePlayerOnly",
+            catalogState: "bundled",
+            defaultFallback: "audioOnly",
+            detection: {
+              processes: [
+                {
+                  executable: "Cyberpunk2077.exe",
+                  required: true,
+                  windowTitleRegex: "(?i)^Cyberpunk 2077$",
+                },
+                {
+                  executable: "REDlauncher.exe",
+                  required: false,
+                  windowTitleRegex: null,
+                },
+              ],
+              stores: [
+                { store: "steam", appId: "1091500", installDirectoryHints: [] },
+              ],
+              builds: [
+                { buildId: "2.*", status: "experimental", reason: null },
+              ],
+              preferredCaptureMethods: [
+                "windows_graphics_capture",
+                "audio_subtitles",
+              ],
+              captureFallback: "audio_subtitles",
+              allowExclusiveFullscreen: false,
+              excludedWindowTitlePatternCount: 3,
+            },
+            capabilities: [
+              {
+                id: "subtitles",
+                tier: "replay_verified",
+                fallback: "x",
+                evidenceCount: 1,
+              },
+              {
+                id: "screen_space_lip_sync",
+                tier: "unsupported",
+                fallback: "y",
+                evidenceCount: 1,
+              },
+            ],
+          },
+        ]}
+        gameProfileId="cyberpunk-2077"
+        target={null}
+        onSelect={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Profile details" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Cyberpunk 2077 · profile",
+    });
+    expect(dialog).toHaveTextContent(
+      "Cyberpunk2077.exe, REDlauncher.exe (auxiliary)",
+    );
+    expect(dialog).toHaveTextContent("(?i)^Cyberpunk 2077$");
+    expect(dialog).toHaveTextContent("Steam 1091500");
+    expect(dialog).toHaveTextContent(
+      "Windows graphics capture → Audio subtitles · fallback Audio subtitles · windowed or borderless only",
+    );
+    expect(dialog).toHaveTextContent("2.* (Experimental)");
+    const capabilities = within(dialog).getByRole("list", {
+      name: "Profile capabilities",
+    });
+    expect(capabilities).toHaveTextContent("SubtitlesReplay verified");
+    expect(capabilities).toHaveTextContent("Screen space lip syncUnsupported");
+  });
+
   it("reports a bound game window in the profile detail", async () => {
     const user = userEvent.setup();
     render(

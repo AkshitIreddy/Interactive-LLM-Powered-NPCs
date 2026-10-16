@@ -892,7 +892,7 @@ fn trusted_turn_safety_context(
     }
     let known_profile = request.game_profile_id.as_deref().and_then(|id| {
         resources
-            .game_summaries()
+            .game_summaries_basic()
             .into_iter()
             .find(|profile| profile.id == id)
     });
@@ -3301,10 +3301,7 @@ pub async fn test_provider_connection(
                         .into(),
             }),
         };
-    let provider_contract_available = doctor
-        .hosted_provider_contracts
-        .iter()
-        .any(|contract| contract.split([':', ',']).any(|id| id == provider_id));
+    let provider_contract_available = runtime_advertises_provider(&doctor, &provider_id);
     Ok(ProviderConnectionTestResult {
         provider_id,
         outcome: if provider_contract_available {
@@ -3323,6 +3320,18 @@ pub async fn test_provider_connection(
             "The runtime does not currently advertise this provider contract. No network request was made.".into()
         },
     })
+}
+
+/// Whether the runtime's doctor report lists a hosted role contract for the
+/// provider (contracts are `provider:role,...` style entries).
+pub(crate) fn runtime_advertises_provider(
+    doctor: &crate::sidecar_protocol::NativeDoctorReport,
+    provider_id: &str,
+) -> bool {
+    doctor
+        .hosted_provider_contracts
+        .iter()
+        .any(|contract| contract.split([':', ',']).any(|id| id == provider_id))
 }
 
 fn hosted_credential_reference(provider_id: &str) -> Result<String, CommandError> {
@@ -3418,6 +3427,55 @@ pub fn diagnostic_summary(state: State<'_, AppState>) -> DiagnosticSummary {
     build_diagnostics(&state)
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenLogsFolderResult {
+    pub opened: bool,
+    /// Known sidecar log files present when the folder was opened. Contents
+    /// and absolute paths are never sent to the WebView.
+    pub files: Vec<String>,
+    pub detail: String,
+}
+
+/// Opens the app-owned sidecar log folder (`<config dir>/logs`) in the file
+/// manager, creating it first when it does not exist yet. The path is resolved
+/// natively; the WebView cannot choose what is opened.
+#[tauri::command]
+pub fn open_logs_folder(state: State<'_, AppState>) -> Result<OpenLogsFolderResult, CommandError> {
+    open_logs_folder_with(
+        state.runtime.supervisor().log_directory(),
+        crate::sidecar_log::open_in_file_manager,
+    )
+}
+
+fn open_logs_folder_with(
+    directory: Option<PathBuf>,
+    open: impl FnOnce(&std::path::Path) -> std::io::Result<()>,
+) -> Result<OpenLogsFolderResult, CommandError> {
+    let directory = directory.ok_or_else(|| CommandError::Product {
+        message: "the logs folder location is unavailable".into(),
+    })?;
+    let directory = crate::sidecar_log::ensure_logs_directory(&directory).map_err(|_| {
+        CommandError::Product {
+            message: "the logs folder could not be created".into(),
+        }
+    })?;
+    let files = crate::sidecar_log::present_log_files(&directory);
+    open(&directory).map_err(|_| CommandError::Product {
+        message: "the logs folder could not be opened in the file manager".into(),
+    })?;
+    let detail = if files.is_empty() {
+        "Opened the logs folder. No sidecar log files exist yet; they are written when the runtime or media broker starts.".to_owned()
+    } else {
+        format!("Opened the logs folder ({}).", files.join(", "))
+    };
+    Ok(OpenLogsFolderResult {
+        opened: true,
+        files,
+        detail,
+    })
+}
+
 fn build_bootstrap(state: &AppState) -> BootstrapSnapshot {
     let (onboarding, onboarding_persistence) = state.onboarding_snapshot();
     let runtime = state.runtime.supervisor().health();
@@ -3461,7 +3519,7 @@ fn build_diagnostics(state: &AppState) -> DiagnosticSummary {
     let (_, persistence) = state.onboarding_snapshot();
     let runtime = state.runtime.supervisor().health();
     let media_broker = state.media_broker.health();
-    let profiles = state.resources.game_summaries();
+    let profiles = state.resources.game_summaries_basic();
     let bundled_profiles = profiles
         .iter()
         .filter(|profile| profile.catalog_state == CatalogState::Bundled)
@@ -3765,11 +3823,56 @@ mod tests {
     }
 
     #[test]
+    fn open_logs_folder_creates_the_directory_and_hands_it_to_the_opener() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let logs = temp.path().join("logs");
+        assert!(!logs.exists());
+        let mut opened = None;
+        let result = open_logs_folder_with(Some(logs.clone()), |directory| {
+            opened = Some(directory.to_path_buf());
+            Ok(())
+        })
+        .expect("open logs folder");
+        assert!(result.opened);
+        assert!(result.files.is_empty());
+        assert!(logs.is_dir(), "missing folder is created before opening");
+        assert_eq!(
+            opened
+                .expect("opener called")
+                .canonicalize()
+                .expect("opened path"),
+            logs.canonicalize().expect("logs path")
+        );
+
+        std::fs::write(logs.join("runtime.log"), b"x").expect("runtime log");
+        let result = open_logs_folder_with(Some(logs), |_| Ok(())).expect("second open");
+        assert_eq!(result.files, vec!["runtime.log".to_owned()]);
+        assert!(result.detail.contains("runtime.log"));
+        // The WebView only sees file names, never an absolute path.
+        assert!(!serde_json::to_string(&result)
+            .expect("result json")
+            .contains(temp.path().to_string_lossy().as_ref()));
+    }
+
+    #[test]
+    fn open_logs_folder_reports_unavailable_location_and_opener_failure() {
+        assert!(matches!(
+            open_logs_folder_with(None, |_| Ok(())),
+            Err(CommandError::Product { .. })
+        ));
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let failed = open_logs_folder_with(Some(temp.path().join("logs")), |_| {
+            Err(std::io::Error::other("no file manager"))
+        });
+        assert!(matches!(failed, Err(CommandError::Product { .. })));
+    }
+
+    #[test]
     fn service_checks_are_derived_not_hardcoded() {
         let temp = tempfile::tempdir().expect("temporary directory");
         let state = AppState::new(temp.path().to_path_buf(), None).expect("app state");
         let diagnostics = build_diagnostics(&state);
-        let total = state.resources.game_summaries().len();
+        let total = state.resources.game_summaries_basic().len();
         let profile = diagnostics
             .checks
             .iter()

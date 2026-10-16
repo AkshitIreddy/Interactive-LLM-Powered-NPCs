@@ -20,6 +20,7 @@ const bridge = vi.hoisted(() => ({
   diagnosticsSettings: vi.fn(),
   saveDiagnosticsSettings: vi.fn(),
   diagnosticsExport: vi.fn(),
+  openLogs: vi.fn(),
   audioCatalog: vi.fn(),
   audioSelected: vi.fn(),
   audioSelect: vi.fn(),
@@ -60,6 +61,7 @@ vi.mock("./tauriBridge", async (importOriginal) => ({
   readDiagnosticsSettings: bridge.diagnosticsSettings,
   saveDiagnosticsSettings: bridge.saveDiagnosticsSettings,
   exportDiagnosticsV2: bridge.diagnosticsExport,
+  openLogsFolder: bridge.openLogs,
   enumerateAudioOutputs: bridge.audioCatalog,
   readSelectedAudioOutput: bridge.audioSelected,
   selectAudioOutput: bridge.audioSelect,
@@ -1939,8 +1941,112 @@ describe("native evidence in the product console", () => {
         deliveredText: "Completed diagnostic rehearsal.",
       }),
     );
-    expect(screen.getByText("84 ms")).toBeInTheDocument();
+    // Fixture stage events carry no measurement: nothing shows 84 ms or 0 ms.
+    expect(screen.queryByText("84 ms")).not.toBeInTheDocument();
+    expect(screen.queryByText("0 ms")).not.toBeInTheDocument();
     expect(screen.getByText("Completed runtime fixture")).toBeInTheDocument();
+    const stages = screen.getByRole("list", { name: "Stage timings" });
+    expect(within(stages).getAllByText("not measured")).toHaveLength(7);
+    expect(stages).toHaveTextContent("This turn has no runtime timing receipt");
+  });
+
+  it("shows only the stage durations the runtime measured for the latest turn", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Typed message" }));
+    await user.click(screen.getByRole("button", { name: /Send message/i }));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("button", { name: /^Help/i }));
+    await user.click(screen.getByRole("button", { name: /^Troubleshooting/i }));
+    await user.click(
+      screen.getByRole("button", { name: "Run native diagnostics" }),
+    );
+    await screen.findByText("15 checks");
+    act(() =>
+      bridge.callback?.({
+        type: "completed",
+        simulationId: "native-1",
+        generation: 7,
+        sequence: 9,
+        fixtureFirstAudioMs: null,
+        runtimeFixtureOnly: false,
+        deliveredText: "Measured reply.",
+        turnExecution: {
+          consumedRoute: {
+            schemaVersion: 1,
+            sourceLoadoutId: "live",
+            generation: 7,
+            sha256: "route",
+            llm: { providerId: "groq", modelId: "m", voiceId: null },
+            tts: { providerId: "elevenlabs", modelId: "t", voiceId: "v" },
+          },
+          degradations: [],
+          success: {
+            llmProviderLive: true,
+            ttsProviderLive: true,
+            sttSkipped: true,
+            subtitleDelivered: true,
+            subtitleReceiptCount: 0,
+            audioSubmitted: true,
+            audioDrained: true,
+            audioReceiptCount: 0,
+          },
+          audioReceipts: [],
+          subtitlePresentationReceipts: [],
+          measuredTiming: {
+            responseToFirstAudioMs: 1200,
+            identityMs: 20,
+            llmFirstTokenMs: 400,
+            llmCompleteMs: 860,
+            ttsFirstAudioMs: 660,
+            ttsCompleteMs: 1260,
+            budgetStatus: "meetsTarget",
+            budgetTargetMs: 5000,
+            budgetCeilingMs: 8000,
+          },
+        },
+      }),
+    );
+    const stages = screen.getByRole("list", { name: "Stage timings" });
+    expect(screen.getByText("Measured by the runtime")).toBeInTheDocument();
+    expect(within(stages).getByText("20 ms")).toBeInTheDocument();
+    expect(within(stages).getByText("860 ms")).toBeInTheDocument();
+    expect(within(stages).getByText("first token after 400 ms")).toBeVisible();
+    expect(within(stages).getByText("660 ms")).toBeInTheDocument();
+    // Listening, transcribing, remembering and animating were not timed.
+    expect(within(stages).getAllByText("not measured")).toHaveLength(4);
+    expect(stages).toHaveTextContent(
+      "Transcript to first audio: 1200 ms · meets target (target 5000 ms, ceiling 8000 ms)",
+    );
+    expect(screen.queryByText("84 ms")).not.toBeInTheDocument();
+  });
+
+  it("opens the native logs folder from Diagnostics and reports the outcome", async () => {
+    const user = userEvent.setup();
+    bridge.openLogs.mockReset().mockResolvedValueOnce({
+      opened: true,
+      files: ["runtime.log"],
+      detail: "Opened the logs folder (runtime.log).",
+    });
+    render(<App />);
+    await screen.findByText("Runtime and media broker authenticated");
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("button", { name: /^Help/i }));
+    await user.click(screen.getByRole("button", { name: /^Troubleshooting/i }));
+    await user.click(
+      screen.getByRole("button", { name: "Run native diagnostics" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Open logs folder" }));
+    expect(bridge.openLogs).toHaveBeenCalledOnce();
+    expect(
+      await screen.findByText("Opened the logs folder (runtime.log)."),
+    ).toBeVisible();
+
+    bridge.openLogs.mockRejectedValueOnce(
+      "product operation failed: no explorer",
+    );
+    await user.click(screen.getByRole("button", { name: "Open logs folder" }));
+    expect(await screen.findByText(/no explorer/)).toBeVisible();
   });
 
   it("shows only the privacy-safe diagnostics export basename", async () => {

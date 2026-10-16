@@ -983,7 +983,7 @@ mod tests {
     fn hidden_synthetic_review_profile_has_a_debug_capture_policy() {
         let resources = ResourceCatalog::new(None);
         assert!(!resources
-            .game_summaries()
+            .game_summaries_basic()
             .iter()
             .any(|game| game.id == "eclipse-harbor"));
         let (rules, _) = profile_policy(&resources, "eclipse-harbor").expect("synthetic policy");

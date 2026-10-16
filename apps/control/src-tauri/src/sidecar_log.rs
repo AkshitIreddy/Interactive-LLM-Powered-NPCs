@@ -79,6 +79,63 @@ fn unix_seconds() -> u64 {
         .unwrap_or(0)
 }
 
+/// Log files the sidecars may have written, current generation first.
+const KNOWN_LOG_FILES: [&str; 4] = [
+    "runtime.log",
+    "runtime.log.1",
+    "media-broker.log",
+    "media-broker.log.1",
+];
+
+/// Creates the private logs directory when it is missing and returns its
+/// canonical path.
+pub(crate) fn ensure_logs_directory(directory: &Path) -> std::io::Result<PathBuf> {
+    ensure_private_directory(directory).map_err(|error| std::io::Error::other(error.to_string()))
+}
+
+/// Names of the known sidecar log files that currently exist as regular files.
+pub(crate) fn present_log_files(directory: &Path) -> Vec<String> {
+    KNOWN_LOG_FILES
+        .iter()
+        .filter(|name| {
+            std::fs::symlink_metadata(directory.join(name))
+                .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
+        })
+        .map(|name| (*name).to_owned())
+        .collect()
+}
+
+/// Windows `canonicalize` returns verbatim `\\?\C:\...` paths, which Explorer
+/// does not open reliably. Drops the prefix for ordinary drive paths only.
+pub(crate) fn display_path(path: &Path) -> PathBuf {
+    let text = path.to_string_lossy();
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) if !rest.starts_with(r"UNC\") => PathBuf::from(rest),
+        _ => path.to_path_buf(),
+    }
+}
+
+/// Opens `directory` in the platform file manager (Explorer on Windows). The
+/// path is app-owned and never comes from the WebView. Explorer reports exit
+/// code 1 even on success, so only a failure to start it is an error.
+pub(crate) fn open_in_file_manager(directory: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer.exe")
+            .arg(display_path(directory))
+            .spawn()
+            .map(|_| ())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = directory;
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "opening a folder is only supported on Windows",
+        ))
+    }
+}
+
 /// Size-bounded appending writer: rotates to `<name>.log.1` whenever the next
 /// write would pass `max_bytes`, so disk use never exceeds about twice the cap.
 pub(crate) struct BoundedLog {
@@ -172,6 +229,40 @@ mod tests {
             Some(PathBuf::from("cfg/logs"))
         );
         assert_eq!(logs_directory_for_app_data(Path::new("")), None);
+    }
+
+    #[test]
+    fn logs_directory_is_created_and_lists_only_known_regular_files() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let directory = temp.path().join("logs");
+        let created = ensure_logs_directory(&directory).expect("create logs directory");
+        assert!(created.is_dir());
+        assert!(present_log_files(&created).is_empty());
+        std::fs::write(created.join("runtime.log"), b"a").expect("runtime log");
+        std::fs::write(created.join("media-broker.log.1"), b"b").expect("rotated log");
+        std::fs::write(created.join("unrelated.txt"), b"c").expect("other file");
+        assert_eq!(
+            present_log_files(&created),
+            vec!["runtime.log".to_owned(), "media-broker.log.1".to_owned()]
+        );
+        // Idempotent when the directory already exists.
+        assert!(ensure_logs_directory(&directory).is_ok());
+    }
+
+    #[test]
+    fn verbatim_drive_prefix_is_dropped_for_the_file_manager() {
+        assert_eq!(
+            display_path(Path::new(r"\\?\C:\Users\me\logs")),
+            PathBuf::from(r"C:\Users\me\logs")
+        );
+        assert_eq!(
+            display_path(Path::new(r"\\?\UNC\server\share\logs")),
+            PathBuf::from(r"\\?\UNC\server\share\logs")
+        );
+        assert_eq!(
+            display_path(Path::new("relative/logs")),
+            PathBuf::from("relative/logs")
+        );
     }
 
     #[test]

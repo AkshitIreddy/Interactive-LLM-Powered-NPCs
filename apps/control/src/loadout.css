@@ -1957,3 +1957,22 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Per-role route test and voice audition. */
+.loadout-console .loadout-role-test {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 4px;
+}
+
+.loadout-console .loadout-role-test__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 0 16px;
+}
+
+.loadout-console .loadout-role-test .loadout-role__note {
+  margin: 0 16px;
+}

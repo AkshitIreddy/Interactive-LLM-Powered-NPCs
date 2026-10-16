@@ -506,9 +506,144 @@ pub struct NativeTurnExecutionEvidence {
     pub audio_receipts: Vec<NativeAudioReceiptSummary>,
     pub degradations: Vec<NativeTurnExecutionDegradation>,
     pub success: NativeTurnExecutionSuccess,
+    /// Producer-clock receipt exactly as the runtime measured it. Read only to
+    /// derive [`NativeMeasuredTurnTiming`]; raw ticks are never forwarded.
+    #[serde(default, skip_serializing)]
+    pub runtime_timing_receipt: Option<NativeRuntimeTimingReceipt>,
+    /// Runtime-derived latency budget status for the same receipt.
+    #[serde(default, skip_serializing)]
+    pub runtime_latency_assessment: Option<NativeRuntimeLatencyAssessment>,
+    /// Stage durations derived from the receipt by
+    /// [`NativeTurnExecutionEvidence::derive_measured_timing`]. Absent unless
+    /// the runtime produced a valid live-provider receipt for this turn.
+    #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
+    pub measured_timing: Option<NativeMeasuredTurnTiming>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeRuntimeClockStamp {
+    pub clock_domain: String,
+    pub qpc_frequency_hz: u64,
+    pub qpc_ticks: u64,
+}
+
+impl NativeRuntimeClockStamp {
+    /// Whole milliseconds from `self` to `end`, or `None` when the stamps are
+    /// from different clocks or run backwards.
+    fn elapsed_ms_to(&self, end: &Self) -> Option<u64> {
+        if self.clock_domain != end.clock_domain
+            || self.qpc_frequency_hz == 0
+            || self.qpc_frequency_hz != end.qpc_frequency_hz
+            || end.qpc_ticks < self.qpc_ticks
+        {
+            return None;
+        }
+        let millis = u128::from(end.qpc_ticks - self.qpc_ticks).checked_mul(1_000)?
+            / u128::from(self.qpc_frequency_hz);
+        u64::try_from(millis).ok()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeRuntimeTimingReceipt {
+    pub input_finalized: NativeRuntimeClockStamp,
+    pub identity_started: NativeRuntimeClockStamp,
+    pub identity_completed: NativeRuntimeClockStamp,
+    pub llm_requested: NativeRuntimeClockStamp,
+    pub llm_first_token: NativeRuntimeClockStamp,
+    pub llm_provider_terminal: NativeRuntimeClockStamp,
+    pub tts_requested: NativeRuntimeClockStamp,
+    pub tts_first_decoded_pcm: NativeRuntimeClockStamp,
+    pub tts_final_decoded_pcm: NativeRuntimeClockStamp,
+    #[serde(default)]
+    pub live_provider_receipts: bool,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum NativeLatencyBudgetStatus {
+    MeetsTarget,
+    WithinCeiling,
+    ExceedsCeiling,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeRuntimeLatencyAssessment {
+    pub target_millis: u64,
+    pub ceiling_millis: u64,
+    pub response_to_first_audio_millis: u64,
+    pub status: NativeLatencyBudgetStatus,
+}
+
+/// Per-stage durations measured by the runtime on its own monotonic clock for
+/// one live-provider turn. Stages the runtime did not time (listening,
+/// transcribing, remembering, animating) have no field here; the UI must say
+/// "not measured" rather than substitute a value.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeMeasuredTurnTiming {
+    /// Transcript-finalized to the first decoded PCM chunk.
+    pub response_to_first_audio_ms: u64,
+    /// Character identity resolution.
+    pub identity_ms: u64,
+    /// LLM request to first streamed token.
+    pub llm_first_token_ms: u64,
+    /// LLM request to provider-terminal event.
+    pub llm_complete_ms: u64,
+    /// TTS request to first decoded PCM chunk.
+    pub tts_first_audio_ms: u64,
+    /// TTS request to final decoded PCM chunk.
+    pub tts_complete_ms: u64,
+    pub budget_status: Option<NativeLatencyBudgetStatus>,
+    pub budget_target_ms: Option<u64>,
+    pub budget_ceiling_ms: Option<u64>,
+}
+
+impl NativeRuntimeTimingReceipt {
+    pub fn measured_timing(
+        &self,
+        assessment: Option<&NativeRuntimeLatencyAssessment>,
+    ) -> Option<NativeMeasuredTurnTiming> {
+        if !self.live_provider_receipts {
+            return None;
+        }
+        Some(NativeMeasuredTurnTiming {
+            response_to_first_audio_ms: self
+                .input_finalized
+                .elapsed_ms_to(&self.tts_first_decoded_pcm)?,
+            identity_ms: self
+                .identity_started
+                .elapsed_ms_to(&self.identity_completed)?,
+            llm_first_token_ms: self.llm_requested.elapsed_ms_to(&self.llm_first_token)?,
+            llm_complete_ms: self
+                .llm_requested
+                .elapsed_ms_to(&self.llm_provider_terminal)?,
+            tts_first_audio_ms: self
+                .tts_requested
+                .elapsed_ms_to(&self.tts_first_decoded_pcm)?,
+            tts_complete_ms: self
+                .tts_requested
+                .elapsed_ms_to(&self.tts_final_decoded_pcm)?,
+            budget_status: assessment.map(|value| value.status),
+            budget_target_ms: assessment.map(|value| value.target_millis),
+            budget_ceiling_ms: assessment.map(|value| value.ceiling_millis),
+        })
+    }
 }
 
 impl NativeTurnExecutionEvidence {
+    /// Fills `measured_timing` from the runtime receipt. A missing, non-live,
+    /// or inconsistent receipt leaves it `None` (never zero).
+    pub fn derive_measured_timing(&mut self) {
+        self.measured_timing = self
+            .runtime_timing_receipt
+            .as_ref()
+            .and_then(|receipt| receipt.measured_timing(self.runtime_latency_assessment.as_ref()));
+    }
+
     /// The runtime response cannot claim speech recognition success with only
     /// booleans. Push-to-talk completion must preserve the exact native
     /// one-time receipt; typed and unavailable capture states must not carry
@@ -1071,6 +1206,61 @@ pub struct GameProfileSummary {
     pub safety: ProfileSafety,
     pub catalog_state: CatalogState,
     pub default_fallback: String,
+    /// Detection hints read from the loaded profile. `None` when the profile
+    /// is missing from the bundle or was not loaded for this summary.
+    #[serde(default)]
+    pub detection: Option<GameProfileDetectionSummary>,
+    /// Per-capability tier claims read from the loaded profile. Empty when
+    /// the profile was not loaded.
+    #[serde(default)]
+    pub capabilities: Vec<GameProfileCapabilitySummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GameProfileDetectionSummary {
+    pub processes: Vec<GameProfileProcessSummary>,
+    pub stores: Vec<GameProfileStoreSummary>,
+    pub builds: Vec<GameProfileBuildSummary>,
+    pub preferred_capture_methods: Vec<String>,
+    pub capture_fallback: String,
+    pub allow_exclusive_fullscreen: bool,
+    pub excluded_window_title_pattern_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GameProfileProcessSummary {
+    pub executable: String,
+    pub required: bool,
+    pub window_title_regex: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GameProfileStoreSummary {
+    pub store: String,
+    pub app_id: Option<String>,
+    pub install_directory_hints: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GameProfileBuildSummary {
+    pub build_id: String,
+    pub status: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GameProfileCapabilitySummary {
+    /// Profile capability key such as `conversation` or `screen_space_lip_sync`.
+    pub id: String,
+    /// `unsupported`, `experimental`, `replay_verified`, or `live_certified`.
+    pub tier: String,
+    pub fallback: String,
+    pub evidence_count: usize,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
