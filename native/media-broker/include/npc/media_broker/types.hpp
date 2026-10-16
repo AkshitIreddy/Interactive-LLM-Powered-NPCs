@@ -108,6 +108,7 @@ enum class FailureCode {
     internal_error,
     exclusive_fullscreen,
     unsupported_path,
+    presentation_rate_limited,
 };
 
 enum class RecoveryAction {
@@ -529,6 +530,12 @@ struct TimingPolicy {
     std::chrono::milliseconds evidence_stale_after{120};
     std::chrono::milliseconds maximum_source_to_patch_latency{80};
     std::chrono::milliseconds source_timestamp_tolerance{2};
+    // A presented mouth residual stays on screen until a newer one replaces it,
+    // for at most this long, so a ~15 Hz worker cannot blink it on every capture.
+    std::chrono::milliseconds residual_hold_after_present{120};
+    // Photosensitivity guard: at most this many hidden-to-visible residual
+    // transitions in any rolling second.
+    std::uint32_t max_residual_reshows_per_second{3};
     std::chrono::milliseconds recovery_initial_backoff{50};
     std::chrono::milliseconds recovery_max_backoff{2000};
     std::uint32_t max_same_backend_retries{2};
@@ -574,6 +581,8 @@ struct Diagnostics {
     std::uint64_t patches_received{};
     std::uint64_t patches_presented{};
     std::uint64_t patches_rejected{};
+    std::uint64_t residual_frames_held{};
+    std::uint64_t residual_reshows_throttled{};
     std::uint32_t consecutive_failures{};
     std::optional<Failure> last_failure;
     std::uint64_t geometry_epoch{};

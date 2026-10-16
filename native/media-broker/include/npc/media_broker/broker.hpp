@@ -6,6 +6,7 @@
 
 #include <memory>
 #include <optional>
+#include <vector>
 
 namespace npc::media {
 
@@ -25,6 +26,11 @@ enum class CompositingDecision {
     pristine_unsafe_bounds,
     pristine_missing_texture,
     patch,
+    // The previous residual stays visible: no newer patch for this frame yet,
+    // and the hold is still within its bounded window.
+    held_patch,
+    // A valid patch was withheld because the residual reappeared too often.
+    pristine_reshow_throttled,
 };
 
 struct BrokerEventSink {
@@ -51,6 +57,16 @@ public:
     void cancel_generation(std::uint64_t new_generation) noexcept;
     void tick(MonotonicTime now = std::chrono::steady_clock::now());
 
+    // Every residual presentation, including the IPC shared-texture path, asks
+    // here first. Replacing a visible residual is always admitted; making a
+    // hidden residual visible again is rate limited for photosensitive safety.
+    [[nodiscard]] bool admit_residual_presentation(MonotonicTime now);
+    // Records a residual that the platform actually presented so later
+    // captures without a newer patch keep it on screen for a bounded time.
+    void note_residual_presented(const MouthPatch& patch, MonotonicTime now);
+    // Hides any residual and ends its hold.
+    void suppress_residual() noexcept;
+
     [[nodiscard]] const Diagnostics& diagnostics() const noexcept;
     [[nodiscard]] IMediaPlatform& platform() noexcept;
 
@@ -66,6 +82,8 @@ private:
     [[nodiscard]] CompositingDecision decide_compositing(const FrameDescriptor& frame,
                                                          const std::optional<MouthPatch>& patch,
                                                          MonotonicTime now) const noexcept;
+    [[nodiscard]] bool residual_hold_valid(const FrameDescriptor& frame,
+                                           MonotonicTime now) const noexcept;
     void publish();
     void fail(Failure failure, BrokerState state, RecoveryAction recovery);
 
@@ -79,6 +97,14 @@ private:
     std::optional<OcclusionEvidence> occlusion_evidence_;
     LatestValueMailbox<FrameDescriptor> frames_;
     LatestValueMailbox<MouthPatch> patches_;
+    struct HeldResidual {
+        std::uint64_t cancellation_generation{};
+        std::uint64_t device_generation{};
+        std::uint64_t geometry_epoch{};
+        MonotonicTime presented_at{};
+    };
+    std::optional<HeldResidual> held_residual_;
+    std::vector<MonotonicTime> recent_residual_reshows_;
     MonotonicTime recovery_due_{};
     std::uint32_t same_backend_retries_{};
     bool running_{};

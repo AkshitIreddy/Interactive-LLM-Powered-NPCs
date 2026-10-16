@@ -13,6 +13,9 @@ constexpr auto hard_patch_stale_after = std::chrono::milliseconds{80};
 constexpr auto hard_evidence_stale_after = std::chrono::milliseconds{120};
 constexpr auto hard_source_to_patch_latency = std::chrono::milliseconds{80};
 constexpr auto hard_source_timestamp_tolerance = std::chrono::milliseconds{2};
+constexpr auto hard_residual_hold_after_present = std::chrono::milliseconds{150};
+constexpr std::uint32_t hard_max_residual_reshows_per_second = 3;
+constexpr auto residual_reshow_window = std::chrono::seconds{1};
 constexpr double hard_maximum_residual_width = 0.45;
 constexpr double hard_maximum_residual_height = 0.35;
 constexpr double hard_maximum_residual_area = 0.12;
@@ -252,7 +255,7 @@ void MediaBroker::submit_patch(MouthPatch patch) {
         !residual_bounds_safe(patch.normalized_bounds, policy_.residual_bounds)) {
         // Do not let a previously accepted residual remain visible while an
         // unsafe newer result waits for the next capture frame.
-        platform_->suppress_residual();
+        suppress_residual();
     }
     const auto result = patches_.push(std::move(patch));
     (void)result;
@@ -263,7 +266,7 @@ void MediaBroker::submit_occlusion_evidence(OcclusionEvidence evidence) {
         !unit_confidence(evidence.landmark_confidence) ||
         !unit_confidence(evidence.visibility_ratio) ||
         evidence.source_device_generation != diagnostics_.device_generation) {
-        platform_->suppress_residual();
+        suppress_residual();
     }
     occlusion_evidence_ = std::move(evidence);
 }
@@ -274,7 +277,7 @@ void MediaBroker::cancel_generation(const std::uint64_t new_generation) noexcept
     if (auto* render = platform_->render_pcm_ring()) {
         render->clear();
     }
-    platform_->suppress_residual();
+    suppress_residual();
     ++diagnostics_.overlays_suppressed;
     publish();
 }
@@ -292,20 +295,30 @@ void MediaBroker::tick(const MonotonicTime now) {
     }
     auto patch = patches_.take_latest();
     auto decision = decide_compositing(*frame, patch, now);
-    if (decision == CompositingDecision::patch && patch) {
-        const auto patch_bounds = map_normalized_source_rect(patch->normalized_bounds, *overlay_geometry_);
-        if (patch_bounds) {
-            platform_->present_patch(*frame, *patch, *patch_bounds, *overlay_geometry_);
-            ++diagnostics_.frames_presented;
-            ++diagnostics_.patches_presented;
-        } else {
-            decision = CompositingDecision::pristine_unsafe_bounds;
-            platform_->present_pristine(*frame, *overlay_geometry_);
-            ++diagnostics_.frames_presented;
-            ++diagnostics_.overlays_suppressed;
-            ++diagnostics_.patches_rejected;
-        }
+    const auto patch_bounds =
+        decision == CompositingDecision::patch && patch
+            ? map_normalized_source_rect(patch->normalized_bounds, *overlay_geometry_)
+            : std::nullopt;
+    if (decision == CompositingDecision::patch && patch && !patch_bounds) {
+        decision = CompositingDecision::pristine_unsafe_bounds;
+    }
+    if (decision == CompositingDecision::patch && !admit_residual_presentation(now)) {
+        decision = CompositingDecision::pristine_reshow_throttled;
+    }
+    if (decision == CompositingDecision::patch && patch && patch_bounds) {
+        platform_->present_patch(*frame, *patch, *patch_bounds, *overlay_geometry_);
+        note_residual_presented(*patch, now);
+        ++diagnostics_.frames_presented;
+        ++diagnostics_.patches_presented;
+    } else if (decision == CompositingDecision::pristine_no_patch &&
+               residual_hold_valid(*frame, now)) {
+        // Keep the last residual on screen instead of blinking it off between
+        // worker updates; the overlay already shows it, so present nothing.
+        decision = CompositingDecision::held_patch;
+        ++diagnostics_.frames_presented;
+        ++diagnostics_.residual_frames_held;
     } else {
+        held_residual_.reset();
         platform_->present_pristine(*frame, *overlay_geometry_);
         ++diagnostics_.frames_presented;
         ++diagnostics_.overlays_suppressed;
@@ -317,6 +330,49 @@ void MediaBroker::tick(const MonotonicTime now) {
         sink_.on_compositing_decision(decision);
     }
     publish();
+}
+
+bool MediaBroker::admit_residual_presentation(const MonotonicTime now) {
+    if (held_residual_ &&
+        !older_than(held_residual_->presented_at, now,
+                    strict_limit(policy_.timing.residual_hold_after_present,
+                                 hard_residual_hold_after_present))) {
+        return true;
+    }
+    held_residual_.reset();
+    std::erase_if(recent_residual_reshows_, [&](const MonotonicTime at) {
+        return at > now || now - at >= residual_reshow_window;
+    });
+    const auto limit = std::min(policy_.timing.max_residual_reshows_per_second,
+                                hard_max_residual_reshows_per_second);
+    if (recent_residual_reshows_.size() >= limit) {
+        ++diagnostics_.residual_reshows_throttled;
+        return false;
+    }
+    recent_residual_reshows_.push_back(now);
+    return true;
+}
+
+void MediaBroker::note_residual_presented(const MouthPatch& patch, const MonotonicTime now) {
+    held_residual_ = HeldResidual{patch.cancellation_generation, patch.source_device_generation,
+                                  patch.source_geometry_epoch, now};
+}
+
+void MediaBroker::suppress_residual() noexcept {
+    platform_->suppress_residual();
+    held_residual_.reset();
+}
+
+bool MediaBroker::residual_hold_valid(const FrameDescriptor& frame,
+                                      const MonotonicTime now) const noexcept {
+    return held_residual_ &&
+           held_residual_->cancellation_generation == diagnostics_.cancellation_generation &&
+           held_residual_->device_generation == diagnostics_.device_generation &&
+           held_residual_->device_generation == frame.device_generation &&
+           held_residual_->geometry_epoch == frame.geometry_epoch &&
+           !older_than(held_residual_->presented_at, now,
+                       strict_limit(policy_.timing.residual_hold_after_present,
+                                    hard_residual_hold_after_present));
 }
 
 const Diagnostics& MediaBroker::diagnostics() const noexcept { return diagnostics_; }
@@ -340,7 +396,7 @@ void MediaBroker::handle_frame(FrameDescriptor frame) {
         frame.captured_qpc <= diagnostics_.latest_frame_qpc) {
         ++diagnostics_.frames_dropped;
         ++diagnostics_.nonadvancing_frames;
-        platform_->suppress_residual();
+        suppress_residual();
         return;
     }
     if (frame.protected_content) {
@@ -467,7 +523,7 @@ void MediaBroker::handle_target_state(const TargetState state, std::optional<Tar
             target_geometry_ = std::move(geometry);
         }
         platform_->stop_overlay();
-        platform_->suppress_residual();
+        suppress_residual();
         frames_.clear();
         patches_.clear();
         occlusion_evidence_.reset();
@@ -543,12 +599,13 @@ void MediaBroker::invalidate_geometry_epoch(TargetGeometry& geometry) {
     frames_.clear();
     patches_.clear();
     occlusion_evidence_.reset();
-    platform_->suppress_residual();
+    suppress_residual();
     ++diagnostics_.overlays_suppressed;
     reset_frame_evidence();
 }
 
 void MediaBroker::reset_frame_evidence() noexcept {
+    held_residual_.reset();
     diagnostics_.latest_frame_sequence = 0;
     diagnostics_.latest_frame_qpc = 0;
     diagnostics_.initial_content_hash = 0;
@@ -740,6 +797,7 @@ void MediaBroker::publish() {
 }
 
 void MediaBroker::fail(Failure failure, const BrokerState state, const RecoveryAction recovery) {
+    held_residual_.reset();
     diagnostics_.last_failure = std::move(failure);
     ++diagnostics_.consecutive_failures;
     diagnostics_.state = state;
@@ -803,6 +861,8 @@ std::string_view to_string(const CompositingDecision decision) noexcept {
     case CompositingDecision::pristine_unsafe_bounds: return "pristine_unsafe_bounds";
     case CompositingDecision::pristine_missing_texture: return "pristine_missing_texture";
     case CompositingDecision::patch: return "patch";
+    case CompositingDecision::held_patch: return "held_patch";
+    case CompositingDecision::pristine_reshow_throttled: return "pristine_reshow_throttled";
     }
     return "unknown";
 }

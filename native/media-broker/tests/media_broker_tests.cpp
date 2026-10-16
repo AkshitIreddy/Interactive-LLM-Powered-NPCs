@@ -601,6 +601,165 @@ void test_residual_safety_ceiling_cannot_be_disabled_by_configuration() {
     CHECK(!simulation->residual_visible());
 }
 
+// Drives a broker with one safe target and records how often the simulated
+// residual actually turns off after having been visible.
+struct ResidualRig {
+    explicit ResidualRig(BrokerPolicy policy = {}) {
+        auto owned = std::make_unique<SimulatedMediaPlatform>();
+        simulation = owned.get();
+        broker = std::make_unique<MediaBroker>(
+            std::move(owned), policy,
+            BrokerEventSink{.on_compositing_decision =
+                                [this](const CompositingDecision value) { decision = value; }});
+        CHECK(broker->start());
+        CHECK(broker->select_target(safe_target()));
+        simulation->emit_target(TargetState::selected, standard_geometry());
+        epoch = broker->diagnostics().device_generation;
+        base = std::chrono::steady_clock::now();
+    }
+
+    // A captured frame at `ms` after base, optionally carrying a valid patch.
+    CompositingDecision frame(const int ms, const bool with_patch, const bool occluded = false) {
+        const auto at = base + std::chrono::milliseconds(ms);
+        ++sequence;
+        simulation->emit_frame({sequence, epoch, at, {1920, 1080}, ColorSpace::sdr_srgb,
+                                static_cast<std::uintptr_t>(sequence), occluded, false});
+        if (with_patch) {
+            broker->submit_occlusion_evidence(valid_occlusion(at, sequence, epoch));
+            broker->submit_patch(valid_patch(at, sequence,
+                                             broker->diagnostics().cancellation_generation, epoch,
+                                             5000 + sequence));
+        }
+        broker->tick(at + std::chrono::milliseconds(1));
+        observe();
+        return decision;
+    }
+
+    void observe() {
+        const bool visible = simulation->residual_visible();
+        if (was_visible && !visible) {
+            ++turn_offs;
+        }
+        was_visible = visible;
+    }
+
+    SimulatedMediaPlatform* simulation{};
+    std::unique_ptr<MediaBroker> broker;
+    CompositingDecision decision{CompositingDecision::no_frame};
+    std::uint64_t epoch{};
+    std::uint64_t sequence{100};
+    MonotonicTime base{};
+    bool was_visible{};
+    int turn_offs{};
+};
+
+void test_residual_holds_between_worker_updates_without_blinking() {
+    ResidualRig rig;
+    // A ~15 Hz worker against ~60 Hz capture for one second: every fourth
+    // frame carries a new patch, the frames in between carry none.
+    for (int ms = 0; ms <= 1000; ms += 16) {
+        const bool with_patch = (ms / 16) % 4 == 0;
+        const auto decision = rig.frame(ms, with_patch);
+        CHECK(decision == (with_patch ? CompositingDecision::patch
+                                      : CompositingDecision::held_patch));
+        CHECK(rig.simulation->residual_visible());
+    }
+    CHECK(rig.turn_offs == 0);
+    CHECK(rig.simulation->counters().pristine_presentations == 0);
+    CHECK(rig.broker->diagnostics().residual_frames_held > 0);
+    CHECK(rig.broker->diagnostics().residual_reshows_throttled == 0);
+
+    // When the worker stops, the residual stays until the bounded hold
+    // expires and is then removed exactly once.
+    const int last_patch_ms = 1000 / 64 * 64;
+    CHECK(rig.frame(last_patch_ms + 100, false) == CompositingDecision::held_patch);
+    CHECK(rig.frame(last_patch_ms + 140, false) == CompositingDecision::pristine_no_patch);
+    CHECK(!rig.simulation->residual_visible());
+    CHECK(rig.frame(last_patch_ms + 160, false) == CompositingDecision::pristine_no_patch);
+    CHECK(rig.turn_offs == 1);
+}
+
+void test_residual_hold_ends_on_cancel_occlusion_and_geometry_change() {
+    {
+        ResidualRig rig;
+        CHECK(rig.frame(0, true) == CompositingDecision::patch);
+        rig.broker->cancel_generation(rig.broker->diagnostics().cancellation_generation + 1);
+        rig.observe();
+        CHECK(!rig.simulation->residual_visible());
+        CHECK(rig.frame(16, false) == CompositingDecision::pristine_no_patch);
+        CHECK(!rig.simulation->residual_visible());
+    }
+    {
+        ResidualRig rig;
+        CHECK(rig.frame(0, true) == CompositingDecision::patch);
+        CHECK(rig.frame(16, false, true) == CompositingDecision::pristine_occluded);
+        CHECK(!rig.simulation->residual_visible());
+        // Occlusion ends the hold; a later empty frame must not bring it back.
+        CHECK(rig.frame(32, false) == CompositingDecision::pristine_no_patch);
+        CHECK(!rig.simulation->residual_visible());
+    }
+    {
+        ResidualRig rig;
+        CHECK(rig.frame(0, true) == CompositingDecision::patch);
+        auto moved = standard_geometry();
+        moved.window_bounds_px.right += 200;
+        moved.client_bounds_px.right += 200;
+        moved.captured_desktop_bounds_px.right += 200;
+        moved.captured_content_px.width += 200;
+        rig.simulation->emit_target(TargetState::selected, moved);
+        rig.observe();
+        CHECK(!rig.simulation->residual_visible());
+        CHECK(rig.frame(16, false) != CompositingDecision::held_patch);
+        CHECK(!rig.simulation->residual_visible());
+    }
+    {
+        ResidualRig rig;
+        CHECK(rig.frame(0, true) == CompositingDecision::patch);
+        rig.broker->clear_target();
+        rig.observe();
+        CHECK(!rig.simulation->residual_visible());
+    }
+}
+
+void test_residual_reappearance_is_rate_limited() {
+    ResidualRig rig;
+    // Each patch is followed by an expired hold, so every new patch is a
+    // fresh hidden-to-visible transition. Only three may happen per second.
+    CHECK(rig.frame(0, true) == CompositingDecision::patch);
+    CHECK(rig.frame(140, false) == CompositingDecision::pristine_no_patch);
+    CHECK(rig.frame(200, true) == CompositingDecision::patch);
+    CHECK(rig.frame(340, false) == CompositingDecision::pristine_no_patch);
+    CHECK(rig.frame(400, true) == CompositingDecision::patch);
+    CHECK(rig.frame(540, false) == CompositingDecision::pristine_no_patch);
+    CHECK(rig.frame(600, true) == CompositingDecision::pristine_reshow_throttled);
+    CHECK(!rig.simulation->residual_visible());
+    CHECK(rig.frame(800, true) == CompositingDecision::pristine_reshow_throttled);
+    CHECK(rig.broker->diagnostics().residual_reshows_throttled == 2);
+    // Once the oldest reappearance leaves the one-second window, one more
+    // is allowed.
+    CHECK(rig.frame(1001, true) == CompositingDecision::patch);
+    CHECK(rig.simulation->residual_visible());
+    CHECK(rig.turn_offs == 3);
+
+    // The IPC path asks the same gate before drawing a shared residual.
+    CHECK(!rig.broker->admit_residual_presentation(rig.base + std::chrono::milliseconds(1200)));
+}
+
+void test_residual_hold_and_reshow_limits_cannot_be_relaxed_by_configuration() {
+    BrokerPolicy policy;
+    policy.timing.residual_hold_after_present = std::chrono::seconds(10);
+    policy.timing.max_residual_reshows_per_second = 100;
+    ResidualRig rig(policy);
+    CHECK(rig.frame(0, true) == CompositingDecision::patch);
+    CHECK(rig.frame(140, false) == CompositingDecision::held_patch);
+    CHECK(rig.frame(160, false) == CompositingDecision::pristine_no_patch);
+    CHECK(rig.frame(200, true) == CompositingDecision::patch);
+    CHECK(rig.frame(360, false) == CompositingDecision::pristine_no_patch);
+    CHECK(rig.frame(400, true) == CompositingDecision::patch);
+    CHECK(rig.frame(560, false) == CompositingDecision::pristine_no_patch);
+    CHECK(rig.frame(600, true) == CompositingDecision::pristine_reshow_throttled);
+}
+
 void test_occlusion_and_staleness_fail_open_to_pristine_game() {
     auto platform = std::make_unique<SimulatedMediaPlatform>();
     auto* simulation = platform.get();
@@ -1464,6 +1623,10 @@ int main() {
     test_latest_frame_and_high_confidence_patch_are_presented();
     test_residual_guard_rejects_unsafe_async_output_and_clears_prior_patch();
     test_residual_safety_ceiling_cannot_be_disabled_by_configuration();
+    test_residual_holds_between_worker_updates_without_blinking();
+    test_residual_hold_ends_on_cancel_occlusion_and_geometry_change();
+    test_residual_reappearance_is_rate_limited();
+    test_residual_hold_and_reshow_limits_cannot_be_relaxed_by_configuration();
     test_occlusion_and_staleness_fail_open_to_pristine_game();
     test_late_generation_is_never_composited();
     test_device_loss_recreates_generation_and_capture();

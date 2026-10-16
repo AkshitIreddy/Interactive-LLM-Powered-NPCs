@@ -289,7 +289,7 @@ void append_ring(std::vector<std::byte>& output, const SharedPcmRing* ring) {
         if (contract != ipc::ResidualContractStatus::accepted || !patch->shared_texture ||
             !occlusion_current) {
             broker.platform().release_shared_residual();
-            broker.platform().suppress_residual();
+            broker.suppress_residual();
             response.status = ipc::StatusCode::payload_invalid;
             append_little(response.payload, std::uint32_t{0});
         } else {
@@ -327,7 +327,7 @@ void append_ring(std::vector<std::byte>& output, const SharedPcmRing* ring) {
             if (!broker.platform().import_shared_residual(lease, native_texture, import_failure) ||
                 native_texture == 0) {
                 broker.platform().release_shared_residual();
-                broker.platform().suppress_residual();
+                broker.suppress_residual();
                 response.status = ipc::StatusCode::capability_unavailable;
                 append_little(response.payload, std::uint32_t{0});
                 append_little(response.payload, static_cast<std::uint32_t>(import_failure.code));
@@ -349,12 +349,22 @@ void append_ring(std::vector<std::byte>& output, const SharedPcmRing* ring) {
                     patch->track_epoch,
                 };
                 Failure presentation_failure;
-                const bool presented = broker.platform().present_shared_residual(
-                    mouth_patch, presentation_failure);
+                bool presented = false;
+                if (!broker.admit_residual_presentation(now)) {
+                    presentation_failure = {FailureDomain::overlay,
+                                            FailureCode::presentation_rate_limited, true,
+                                            "Residual reappearance is rate limited"};
+                } else {
+                    presented = broker.platform().present_shared_residual(
+                        mouth_patch, presentation_failure);
+                }
+                if (presented) {
+                    broker.note_residual_presented(mouth_patch, now);
+                }
                 append_little(response.payload, static_cast<std::uint32_t>(presented));
                 if (!presented) {
                     broker.platform().release_shared_residual();
-                    broker.platform().suppress_residual();
+                    broker.suppress_residual();
                     response.status = ipc::StatusCode::capability_unavailable;
                     append_little(response.payload,
                                   static_cast<std::uint32_t>(presentation_failure.code));
