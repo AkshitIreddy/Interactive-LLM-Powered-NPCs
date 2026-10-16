@@ -158,16 +158,20 @@ impl SecretResolver for MemorySecretResolver {
 
 #[cfg(test)]
 mod drop_observer {
-    use std::sync::Mutex;
+    use std::cell::RefCell;
 
-    static OBSERVED: Mutex<Option<Vec<u8>>> = Mutex::new(None);
+    // Thread-local so secrets dropped by other tests running in parallel
+    // cannot overwrite the observation made by the asserting test.
+    thread_local! {
+        static OBSERVED: RefCell<Option<Vec<u8>>> = const { RefCell::new(None) };
+    }
 
     pub(super) fn observe(bytes: &[u8]) {
-        *OBSERVED.lock().expect("drop observer lock") = Some(bytes.to_vec());
+        OBSERVED.with(|observed| *observed.borrow_mut() = Some(bytes.to_vec()));
     }
 
     pub(super) fn take() -> Option<Vec<u8>> {
-        OBSERVED.lock().expect("drop observer lock").take()
+        OBSERVED.with(|observed| observed.borrow_mut().take())
     }
 }
 
