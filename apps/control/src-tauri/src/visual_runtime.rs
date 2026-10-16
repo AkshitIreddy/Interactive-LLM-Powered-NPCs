@@ -52,6 +52,8 @@ const PHOTOMETRIC_FULL_LIP_ATLAS_SCHEMA: u32 = 3;
 const CURRENT_PIXEL_ORAL_STRIP_ATLAS_SCHEMA: u32 = 4;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_millis(500);
+/// Worker provider configuration loads the detector and landmark ONNX models.
+const PROVIDER_CONFIGURE_TIMEOUT: Duration = Duration::from_secs(15);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const OPENSEEFACE_PACK_ID: &str = "openseeface-mnv3-lm1-mouth-signal";
 const YUNET_OPENSEEFACE_PACK_ID: &str = "openseeface-yunet640-lm1-mouth-signal";
@@ -76,8 +78,10 @@ const PROVIDER_LOAD_SELF_TEST_TIMEOUT: Duration = Duration::from_secs(30);
 const PROVIDER_LOAD_SELF_TEST_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const VISUAL_COORDINATOR_INTERVAL: Duration = Duration::from_millis(67);
 const VISUAL_FRAME_DEADLINE_NS: i64 = 150_000_000;
+/// Kept below the worker's 80 ms audio-skew window: the drive is stamped just
+/// after the frame is bound, so an older frame could never satisfy the worker.
 #[cfg(debug_assertions)]
-const REVIEW_VISUAL_CAPTURE_MAX_AGE_NS: i64 = 120_000_000;
+const REVIEW_VISUAL_CAPTURE_MAX_AGE_NS: i64 = 70_000_000;
 #[cfg(debug_assertions)]
 const REVIEW_VISUAL_INFERENCE_BUDGET_NS: i64 = 220_000_000;
 const MAX_VISUAL_RECEIPT_HISTORY: usize = 128;
@@ -273,12 +277,19 @@ pub enum VisualPressure {
     Suspended = 4,
 }
 
+/// Audio drive carried to the worker. Every variant shares one audio clock:
+/// `first_sample_index`/`sample_count` bound the sample span the drive covers,
+/// and `playback_sample_index` is the exact sample being heard now, which must
+/// lie inside that span. `stream_generation` is compared by the worker with the
+/// broker capture generation of the leased frame's track.
 #[derive(Clone, Debug, PartialEq)]
 pub enum MouthDrive {
     CausalEnvelopeCoefficients {
         stream_generation: u64,
         segment_id: u64,
         first_sample_index: u64,
+        sample_count: u64,
+        playback_sample_index: u64,
         sample_rate: u32,
         channels: u16,
         playback_at_ns: i64,
@@ -288,6 +299,8 @@ pub enum MouthDrive {
         stream_generation: u64,
         segment_id: u64,
         first_sample_index: u64,
+        sample_count: u64,
+        playback_sample_index: u64,
         sample_rate: u32,
         channels: u16,
         playback_at_ns: i64,
@@ -298,6 +311,8 @@ pub enum MouthDrive {
         stream_generation: u64,
         segment_id: u64,
         first_sample_index: u64,
+        sample_count: u64,
+        playback_sample_index: u64,
         sample_rate: u32,
         channels: u16,
         playback_at_ns: i64,
@@ -416,8 +431,23 @@ trait AdmittedVisualPresenter: Send + Sync {
         now_monotonic_millis: u64,
     ) -> VisualPresentationReceipt;
 
+    /// Verifies and loads the practice game's providers once per turn. Returns
+    /// a typed failure receipt when preparation fails for the practice game.
     #[cfg(debug_assertions)]
-    async fn prepare_project_owned_review(&self) {}
+    async fn prepare_project_owned_review(
+        &self,
+        _request_id: u64,
+        _generation: u64,
+    ) -> Option<VisualPresentationReceipt> {
+        None
+    }
+
+    /// True when the practice game is the selected target but the broker no
+    /// longer holds its exact binding.
+    #[cfg(debug_assertions)]
+    fn practice_game_awaiting_broker_binding(&self) -> bool {
+        false
+    }
 
     #[cfg(debug_assertions)]
     async fn present_project_owned_review(
@@ -463,8 +493,32 @@ impl AdmittedVisualPresenter for ProductionVisualPresenter {
     }
 
     #[cfg(debug_assertions)]
-    async fn prepare_project_owned_review(&self) {
-        let _ = self.worker.prepare_project_owned_review_provider().await;
+    async fn prepare_project_owned_review(
+        &self,
+        request_id: u64,
+        generation: u64,
+    ) -> Option<VisualPresentationReceipt> {
+        // Ordinary games never reach the project-owned practice path.
+        if !self.worker.broker.project_owned_review_target_selected() {
+            return None;
+        }
+        match self.worker.prepare_project_owned_review_provider().await {
+            Ok(()) => None,
+            Err(error) => {
+                let mut receipt = VisualPresentationReceipt::from_error(
+                    request_id,
+                    "review_visual_prepare_failed",
+                    error,
+                );
+                receipt.cancellation_generation = generation;
+                Some(receipt)
+            }
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    fn practice_game_awaiting_broker_binding(&self) -> bool {
+        self.worker.practice_game_awaiting_broker_binding()
     }
 
     #[cfg(debug_assertions)]
@@ -552,16 +606,31 @@ impl VisualCoordinator {
             receipts.retain(|receipt| receipt.cancellation_generation != generation);
         }
         #[cfg(debug_assertions)]
-        self.presenter.prepare_project_owned_review().await;
+        {
+            let prepare_request_id = self
+                .next_request_id
+                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+                    value.checked_add(1)
+                })
+                .unwrap_or(1);
+            if let Some(receipt) = self
+                .presenter
+                .prepare_project_owned_review(prepare_request_id, generation)
+                .await
+            {
+                self.record_receipt(receipt);
+            }
+        }
         let pending_request_id = self
             .next_request_id
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
                 value.checked_add(1)
             })
             .unwrap_or(1);
-        let mut pending = VisualPresentationReceipt::fail_open(
+        let mut pending = VisualPresentationReceipt::fail_open_coded(
             pending_request_id,
             "visual_audio_coordinator_waiting_for_presentable_frame",
+            "visual_waiting_for_presentable_frame",
         );
         pending.cancellation_generation = generation;
         self.record_receipt(pending);
@@ -605,17 +674,19 @@ impl VisualCoordinator {
                                 .await
                             {
                                 handled = true;
-                                // A finished or not-yet-started sentence can
-                                // return a fail-open receipt. Keep probing the
-                                // bounded pool for the sentence playing now.
-                                let reached_audio_or_worker = receipt.product_disposition != 4;
+                                // A finished or not-yet-started sentence is
+                                // rejected by the cheap audio liveness gate.
+                                // Keep probing the bounded pool for the
+                                // sentence playing now, and stop at the first
+                                // lease that got past that gate.
+                                let found_stream = visual_receipt_ends_stream_probe(&receipt);
                                 record_visual_receipt(
                                     &latest_receipt,
                                     &best_turn_receipts,
                                     &receipt_history,
                                     receipt,
                                 );
-                                if reached_audio_or_worker {
+                                if found_stream {
                                     preferred_stream = index;
                                     break;
                                 }
@@ -630,10 +701,23 @@ impl VisualCoordinator {
                             value.checked_add(1)
                         })
                         .unwrap_or(1);
-                    let mut receipt = VisualPresentationReceipt::fail_open(
-                        request_id,
-                        "visual_actor_lock_unavailable",
-                    );
+                    #[cfg(debug_assertions)]
+                    let practice_unbound = presenter.practice_game_awaiting_broker_binding();
+                    #[cfg(not(debug_assertions))]
+                    let practice_unbound = false;
+                    let mut receipt = if practice_unbound {
+                        VisualPresentationReceipt::fail_open_coded(
+                            request_id,
+                            "visual_practice_game_not_broker_bound",
+                            "visual_practice_game_not_broker_bound",
+                        )
+                    } else {
+                        VisualPresentationReceipt::fail_open_coded(
+                            request_id,
+                            "visual_actor_lock_unavailable",
+                            "visual_actor_lock_unavailable",
+                        )
+                    };
                     receipt.cancellation_generation = generation;
                     record_visual_receipt(
                         &latest_receipt,
@@ -662,14 +746,14 @@ impl VisualCoordinator {
                     let receipt = presenter
                         .present(request, (now_ns as u64) / 1_000_000)
                         .await;
-                    let reached_audio_or_worker = receipt.product_disposition != 4;
+                    let found_stream = visual_receipt_ends_stream_probe(&receipt);
                     record_visual_receipt(
                         &latest_receipt,
                         &best_turn_receipts,
                         &receipt_history,
                         receipt,
                     );
-                    if reached_audio_or_worker {
+                    if found_stream {
                         preferred_stream = index;
                         break;
                     }
@@ -778,16 +862,89 @@ fn record_visual_receipt(
     }
 }
 
+/// Codes only produced after the audio liveness gate, i.e. for the lease that
+/// is actually being heard. A tick that produced one has found its stream.
+const POST_AUDIO_FAILURE_CODES: &[&str] = &[
+    "visual_capture_authority_missing",
+    "visual_target_missing",
+    "visual_admission_unavailable",
+    "visual_bundle_invalid",
+    "visual_worker_missing",
+    "visual_worker_start_failed",
+    "visual_worker_connection_failed",
+    "visual_worker_timeout",
+    "visual_protocol_invalid",
+    "visual_worker_rejected",
+    "visual_request_invalid",
+    "visual_schedule_bypassed",
+    "visual_clock_failed",
+    "visual_state_unavailable",
+    "visual_frame_stale",
+    "visual_source_allocation_failed",
+    "visual_patch_submission_failed",
+    "visual_source_release_failed",
+    "visual_broker_failed",
+];
+
+/// How far a receipt got through the pipeline, so the one retained per turn is
+/// the most informative failure (or success) rather than the latest one:
+/// 0 coordinator-level wait/unavailable, 1 idle lease, 2 capture authority,
+/// 3 pack/worker readiness, 4 frame lease, 5 worker exchange, 6 worker
+/// answered with a bypass, 7 residual proposed, 8 presented.
+fn visual_receipt_stage(receipt: &VisualPresentationReceipt) -> u8 {
+    if receipt.presented {
+        return 8;
+    }
+    if receipt.residual_proposed {
+        return 7;
+    }
+    if receipt.product_disposition != 4 || receipt.source_frame_sequence != 0 {
+        return 6;
+    }
+    match receipt.diagnostic_error_code {
+        Some("visual_audio_envelope_inactive" | "visual_audio_query_failed") => 1,
+        Some("visual_capture_authority_missing" | "visual_target_missing") => 2,
+        Some(
+            "visual_admission_unavailable"
+            | "visual_bundle_invalid"
+            | "visual_worker_missing"
+            | "visual_worker_start_failed"
+            | "visual_worker_connection_failed"
+            | "visual_request_invalid"
+            | "visual_schedule_bypassed"
+            | "visual_clock_failed"
+            | "visual_state_unavailable",
+        ) => 3,
+        Some("visual_source_allocation_failed" | "visual_frame_stale") => 4,
+        Some(
+            "visual_worker_timeout"
+            | "visual_protocol_invalid"
+            | "visual_worker_rejected"
+            | "visual_patch_submission_failed"
+            | "visual_source_release_failed"
+            | "visual_broker_failed",
+        ) => 5,
+        _ => 0,
+    }
+}
+
+/// True when the tick found the stream being heard (or the pipeline answered),
+/// so probing the remaining leases of the pool would be pure repeated work.
+fn visual_receipt_ends_stream_probe(receipt: &VisualPresentationReceipt) -> bool {
+    receipt.product_disposition != 4
+        || receipt
+            .diagnostic_error_code
+            .is_some_and(|code| POST_AUDIO_FAILURE_CODES.contains(&code))
+}
+
 fn better_visual_receipt(
     candidate: &VisualPresentationReceipt,
     current: &VisualPresentationReceipt,
 ) -> bool {
     let quality = |receipt: &VisualPresentationReceipt| {
         (
-            receipt.presented,
-            receipt.residual_proposed,
+            visual_receipt_stage(receipt),
             receipt.source_frame_sequence != 0,
-            receipt.product_disposition != 4,
             receipt.request_id,
         )
     };
@@ -1141,6 +1298,14 @@ impl VisualPresentationReceipt {
         }
     }
 
+    /// A fail-open receipt whose reason is a fixed typed code rather than the
+    /// generic `visual_bypassed`.
+    fn fail_open_coded(request_id: u64, detail: impl Into<String>, code: &'static str) -> Self {
+        let mut receipt = Self::fail_open(request_id, detail);
+        receipt.diagnostic_error_code = Some(code);
+        receipt
+    }
+
     fn from_error(request_id: u64, prefix: &str, error: VisualRuntimeError) -> Self {
         let mut receipt = Self::fail_open(request_id, format!("{prefix}:{error}"));
         receipt.diagnostic_error_code = Some(error.diagnostic_code());
@@ -1157,6 +1322,14 @@ pub struct MouthWorkerSupervisor {
     managed: Arc<tokio::sync::Mutex<Option<ManagedWorker>>>,
     startup_gate: Arc<tokio::sync::Mutex<()>>,
     frame_gate: Arc<tokio::sync::Mutex<()>>,
+    /// Pack/atlas authority resolved (and SHA-256 hashed) once per turn by
+    /// `prepare_project_owned_review_provider` and reused by every frame.
+    #[cfg(debug_assertions)]
+    review_turn: Arc<ReviewTurnCache>,
+    /// Reports whether the included practice game is the user's selected
+    /// target. Wired by the application; absent in unit tests.
+    #[cfg(debug_assertions)]
+    practice_target_probe: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
 }
 
 impl std::fmt::Debug for MouthWorkerSupervisor {
@@ -1182,7 +1355,31 @@ impl MouthWorkerSupervisor {
             managed: Arc::new(tokio::sync::Mutex::new(None)),
             startup_gate: Arc::new(tokio::sync::Mutex::new(())),
             frame_gate: Arc::new(tokio::sync::Mutex::new(())),
+            #[cfg(debug_assertions)]
+            review_turn: Arc::new(ReviewTurnCache::default()),
+            #[cfg(debug_assertions)]
+            practice_target_probe: None,
         }
+    }
+
+    /// Lets diagnostics tell "the practice game is selected but the broker
+    /// lost its binding" apart from "no actor lock for an ordinary game".
+    #[cfg(debug_assertions)]
+    pub(crate) fn with_practice_target_probe(
+        mut self,
+        probe: Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> Self {
+        self.practice_target_probe = Some(probe);
+        self
+    }
+
+    #[cfg(debug_assertions)]
+    fn practice_game_awaiting_broker_binding(&self) -> bool {
+        !self.broker.project_owned_review_target_selected()
+            && self
+                .practice_target_probe
+                .as_ref()
+                .is_some_and(|probe| probe())
     }
 
     pub(crate) fn with_character_mouth_packs(
@@ -1360,11 +1557,57 @@ impl MouthWorkerSupervisor {
     /// the broker's exact current WGC texture and drives the procedural mouth
     /// residual from the post-WASAPI causal envelope. It is unavailable in a
     /// release build and for every target except the native-bound fixture.
+    /// One command-29 query for a playback lease's causal envelope. A failure
+    /// here is typed as an audio-stage failure so diagnostics can tell it from
+    /// a failure of the worker or presentation stages.
+    async fn query_audio_envelope(
+        &self,
+        audio: &VisualAudioBinding,
+    ) -> Result<VisualAudioEnvelope, VisualRuntimeError> {
+        self.broker
+            .query_visual_audio_envelope(VisualAudioEnvelopeQuery {
+                session_id: audio.session_id.clone(),
+                turn_id: audio.turn_id.clone(),
+                generation: audio.generation,
+                stream_id: audio.stream_id.clone(),
+                segment_id: audio.stream_id.clone(),
+            })
+            .await
+            .map_err(|source| VisualRuntimeError::BrokerStage {
+                stage: "query_visual_audio_envelope",
+                source,
+            })
+    }
+
     #[cfg(debug_assertions)]
     async fn prepare_project_owned_review_provider(&self) -> Result<(), VisualRuntimeError> {
+        // A new turn re-verifies the installed pack/atlas exactly once; every
+        // frame of the turn then reuses that result instead of re-hashing
+        // roughly 17.5 MB of model files per attempt.
+        self.review_turn.begin_turn();
         if !self.broker.project_owned_review_target_selected() {
             return Err(VisualRuntimeError::NoSelectedTarget);
         }
+        let (evidence, generation) = self.project_owned_review_capture().await?;
+        if generation == 0 {
+            return Err(VisualRuntimeError::NoSelectedTarget);
+        }
+        let resources = self
+            .review_turn_resources(evidence.selected_process_id, generation)
+            .await?;
+        let (client, _) = self.ensure_ready(generation).await?;
+        self.configure_project_owned_review_provider(&client, generation, &resources.launch)
+            .await?;
+        self.configure_review_atlas(&client, generation, resources.atlas.as_ref())
+            .await
+    }
+
+    /// Fresh exact-window capture authority for the project-owned fixture and
+    /// the broker's current capture generation.
+    #[cfg(debug_assertions)]
+    async fn project_owned_review_capture(
+        &self,
+    ) -> Result<(NativeCaptureEvidence, u64), VisualRuntimeError> {
         let snapshot = self
             .broker
             .debug_synthetic_replay_capture_diagnostics()
@@ -1384,18 +1627,37 @@ impl MouthWorkerSupervisor {
         {
             return Err(VisualRuntimeError::CaptureAuthority);
         }
-        let generation = snapshot.diagnostics.cancellation_generation;
-        if generation == 0 {
-            return Err(VisualRuntimeError::NoSelectedTarget);
+        Ok((evidence, snapshot.diagnostics.cancellation_generation))
+    }
+
+    /// Returns this turn's verified pack/atlas, resolving it (off the async
+    /// runtime) only when the turn has not already done so.
+    #[cfg(debug_assertions)]
+    async fn review_turn_resources(
+        &self,
+        exact_target_pid: u32,
+        generation: u64,
+    ) -> Result<Arc<ReviewTurnResources>, VisualRuntimeError> {
+        if let Some(cached) = self.review_turn.lookup(exact_target_pid, generation) {
+            return cached;
         }
-        let launch = resolve_preferred_review_provider(
-            self.config.review_yunet_root.as_deref(),
-            self.config.review_openseeface_root.as_deref(),
-            evidence.selected_process_id,
-        )?;
-        let (client, _) = self.ensure_ready(generation).await?;
-        self.configure_project_owned_review_provider(&client, generation, &launch)
-            .await
+        let cache = Arc::clone(&self.review_turn);
+        let yunet_root = self.config.review_yunet_root.clone();
+        let mnv3_root = self.config.review_openseeface_root.clone();
+        let atlas_root = self.config.review_mouth_atlas_root.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            cache.get_or_resolve(exact_target_pid, generation, || {
+                resolve_review_turn_resources(
+                    yunet_root.as_deref(),
+                    mnv3_root.as_deref(),
+                    atlas_root.as_deref(),
+                    exact_target_pid,
+                    generation,
+                )
+            })
+        })
+        .await
+        .map_err(|_| VisualRuntimeError::Connection)?
     }
 
     #[cfg(debug_assertions)]
@@ -1551,6 +1813,14 @@ impl MouthWorkerSupervisor {
     ) -> Result<VisualPresentationReceipt, VisualRuntimeError> {
         let mut request = request.clone();
         validate_admitted_frame_request(&request)?;
+        // The coordinator probes every sentence lease of a turn each tick.
+        // Establish liveness with one cheap query before consuming a visual
+        // clock slot, queueing lip-sync work or touching the worker, so idle
+        // leases neither cost anything nor starve the sentence being heard.
+        let liveness = self.query_audio_envelope(&request.audio).await?;
+        if !visual_audio_envelope_is_presentable(&liveness) {
+            return Err(VisualRuntimeError::AudioAuthority);
+        }
         let launch = resources
             .resolve_admitted_openseeface_launch()
             .map_err(|error| VisualRuntimeError::Admission(error.to_string()))?;
@@ -1646,17 +1916,8 @@ impl MouthWorkerSupervisor {
         // exists, no cancellation point is crossed until the worker request
         // has been submitted; the blocking request keeps running even if its
         // outer future is dropped.
-        let audio = self
-            .broker
-            .query_visual_audio_envelope(VisualAudioEnvelopeQuery {
-                session_id: request.audio.session_id.clone(),
-                turn_id: request.audio.turn_id.clone(),
-                generation: request.audio.generation,
-                stream_id: request.audio.stream_id.clone(),
-                segment_id: request.audio.stream_id.clone(),
-            })
-            .await?;
-        let drive = drive_from_visual_audio_envelope(&audio, monotonic_ns()?)?;
+        let audio = self.query_audio_envelope(&request.audio).await?;
+        let drive = drive_from_visual_audio_envelope(&audio, monotonic_ns()?, generation)?;
         let lease = self
             .broker
             .allocate_visual_source(&worker, &request.track)
@@ -1762,68 +2023,31 @@ impl MouthWorkerSupervisor {
         if request_id == 0 || sentence_id == 0 || now_ns <= 0 {
             return Err(VisualRuntimeError::InvalidRequest);
         }
-        let snapshot = self
-            .broker
-            .debug_synthetic_replay_capture_diagnostics()
-            .await?;
-        let evidence = snapshot
-            .capture_evidence
-            .ok_or(VisualRuntimeError::CaptureAuthority)?;
-        if evidence.pixel_source != CapturePixelSource::WindowsGraphicsCaptureTexture
-            || evidence.pixel_scope != CapturePixelScope::ExactSelectedWindow
-            || !evidence.external_display_overlay_pixels_excluded
-            || !evidence.desktop_luminance_excluded_from_pixel_evidence
-            || evidence.selected_process_id != snapshot.target_process_id
-            || evidence.selected_window_handle != snapshot.target_window_handle
-            || !evidence
-                .selected_executable_name
-                .eq_ignore_ascii_case(&snapshot.target_executable_basename)
-        {
-            return Err(VisualRuntimeError::CaptureAuthority);
+        // Cheapest check first: one broker query tells an idle, finished or
+        // not-yet-started sentence lease apart from the sentence being heard
+        // now, so the 16-lease probe never does expensive work for idle ones.
+        let liveness = self.query_audio_envelope(audio_binding).await?;
+        if !visual_audio_envelope_is_presentable(&liveness) {
+            return Err(VisualRuntimeError::AudioAuthority);
         }
-        let generation = snapshot.diagnostics.cancellation_generation;
+        let (evidence, generation) = self.project_owned_review_capture().await?;
         if generation == 0 || audio_binding.generation == 0 {
             return Err(VisualRuntimeError::AudioAuthority);
         }
-        let launch = resolve_preferred_review_provider(
-            self.config.review_yunet_root.as_deref(),
-            self.config.review_openseeface_root.as_deref(),
-            evidence.selected_process_id,
-        )?;
         let review_actor_id = stable_nonzero_id("eclipse-harbor:mara-venn");
-        let requested_atlas_identity = RequestedCharacterMouthAtlasIdentity {
-            game_profile_id: LEGACY_MARA_GAME_PROFILE_ID,
-            character_id: LEGACY_MARA_CHARACTER_ID,
-            actor_id: review_actor_id,
-        };
-        let atlas = resolve_character_mouth_atlas(
-            self.config.review_mouth_atlas_root.as_deref(),
-            generation,
-            &requested_atlas_identity,
-        )?;
-        let (client, worker) = self.ensure_ready(generation).await?;
-        self.configure_project_owned_review_provider(&client, generation, &launch)
+        let resources = self
+            .review_turn_resources(evidence.selected_process_id, generation)
             .await?;
-        self.configure_character_mouth_atlas(&client, generation, &atlas)
+        let (client, worker) = self.ensure_ready(generation).await?;
+        self.configure_project_owned_review_provider(&client, generation, &resources.launch)
+            .await?;
+        self.configure_review_atlas(&client, generation, resources.atlas.as_ref())
             .await?;
 
         // Provider startup is the expensive cold-path operation. Read the
         // current causal envelope after it is ready, then lease the exact frame
         // last so audio/frame skew is dominated only by the two broker calls.
-        let audio = self
-            .broker
-            .query_visual_audio_envelope(VisualAudioEnvelopeQuery {
-                session_id: audio_binding.session_id.clone(),
-                turn_id: audio_binding.turn_id.clone(),
-                generation: audio_binding.generation,
-                stream_id: audio_binding.stream_id.clone(),
-                segment_id: audio_binding.stream_id.clone(),
-            })
-            .await
-            .map_err(|source| VisualRuntimeError::BrokerStage {
-                stage: "query_visual_audio_envelope",
-                source,
-            })?;
+        let audio = self.query_audio_envelope(audio_binding).await?;
 
         let track = VisualTrackBinding {
             actor_id: review_actor_id,
@@ -1877,7 +2101,7 @@ impl MouthWorkerSupervisor {
                 return Err(error);
             }
         };
-        let drive = match drive_from_visual_audio_envelope(&audio, drive_at_ns) {
+        let drive = match drive_from_visual_audio_envelope(&audio, drive_at_ns, generation) {
             Ok(drive) => drive,
             Err(error) => {
                 self.abandon_unsubmitted_visual_source(&lease).await;
@@ -2299,6 +2523,18 @@ impl MouthWorkerSupervisor {
                 .configure_enabled_character_atlas(client, generation, request, enabled)
                 .await;
         }
+        self.clear_character_atlas_if_bound(client, generation)
+            .await
+    }
+
+    /// Atlas-free operation: the worker's current-pixel route needs no enrolled
+    /// reference, so a previously installed atlas is removed rather than left
+    /// to be matched against a different actor.
+    async fn clear_character_atlas_if_bound(
+        &self,
+        client: &WorkerClient,
+        generation: u64,
+    ) -> Result<(), VisualRuntimeError> {
         let has_atlas = self
             .managed
             .lock()
@@ -2317,6 +2553,27 @@ impl MouthWorkerSupervisor {
         }
         worker.atlas_binding = None;
         Ok(())
+    }
+
+    /// The included practice game needs an enrolled mouth atlas only when one
+    /// is installed; with none, the worker uses its atlas-free source route.
+    #[cfg(debug_assertions)]
+    async fn configure_review_atlas(
+        &self,
+        client: &WorkerClient,
+        generation: u64,
+        atlas: Option<&CharacterMouthAtlas>,
+    ) -> Result<(), VisualRuntimeError> {
+        match atlas {
+            Some(atlas) => {
+                self.configure_character_mouth_atlas(client, generation, atlas)
+                    .await
+            }
+            None => {
+                self.clear_character_atlas_if_bound(client, generation)
+                    .await
+            }
+        }
     }
 
     pub async fn shutdown(&self) {
@@ -2630,6 +2887,96 @@ struct ReviewOpenSeeFaceLaunch {
     measurement_sha256: String,
     exact_target_pid: u32,
 }
+
+/// Everything one practice-game turn needs from disk, verified once: the
+/// pinned detector/landmark/runtime pack and, only when one is installed, the
+/// enrolled mouth atlas.
+#[cfg(debug_assertions)]
+#[derive(Debug)]
+struct ReviewTurnResources {
+    launch: ReviewOpenSeeFaceLaunch,
+    atlas: Option<CharacterMouthAtlas>,
+}
+
+#[cfg(debug_assertions)]
+#[derive(Debug)]
+struct ReviewTurnEntry {
+    exact_target_pid: u32,
+    generation: u64,
+    /// A failed resolution is kept for the turn too, so a missing or corrupt
+    /// pack is reported every frame without re-reading and re-hashing it.
+    outcome: Result<Arc<ReviewTurnResources>, String>,
+}
+
+/// Per-turn memo of `ReviewTurnResources`, keyed by the exact target process and
+/// broker capture generation (the atlas carries its generation).
+#[cfg(debug_assertions)]
+#[derive(Debug, Default)]
+struct ReviewTurnCache {
+    entry: Mutex<Option<ReviewTurnEntry>>,
+    resolutions: AtomicU64,
+}
+
+#[cfg(debug_assertions)]
+impl ReviewTurnCache {
+    fn begin_turn(&self) {
+        if let Ok(mut entry) = self.entry.lock() {
+            *entry = None;
+        }
+    }
+
+    fn lookup(
+        &self,
+        exact_target_pid: u32,
+        generation: u64,
+    ) -> Option<Result<Arc<ReviewTurnResources>, VisualRuntimeError>> {
+        let entry = self.entry.lock().ok()?;
+        let entry = entry.as_ref()?;
+        (entry.exact_target_pid == exact_target_pid && entry.generation == generation)
+            .then(|| Self::outcome(&entry.outcome))
+    }
+
+    fn get_or_resolve(
+        &self,
+        exact_target_pid: u32,
+        generation: u64,
+        resolve: impl FnOnce() -> Result<ReviewTurnResources, VisualRuntimeError>,
+    ) -> Result<Arc<ReviewTurnResources>, VisualRuntimeError> {
+        let mut guard = self.entry.lock().map_err(|_| VisualRuntimeError::State)?;
+        if let Some(entry) = guard.as_ref().filter(|entry| {
+            entry.exact_target_pid == exact_target_pid && entry.generation == generation
+        }) {
+            return Self::outcome(&entry.outcome);
+        }
+        self.resolutions.fetch_add(1, Ordering::AcqRel);
+        let outcome = resolve().map(Arc::new).map_err(|error| match error {
+            VisualRuntimeError::Admission(detail) => detail,
+            other => other.to_string(),
+        });
+        let result = Self::outcome(&outcome);
+        *guard = Some(ReviewTurnEntry {
+            exact_target_pid,
+            generation,
+            outcome,
+        });
+        result
+    }
+
+    #[cfg(test)]
+    fn resolution_count(&self) -> u64 {
+        self.resolutions.load(Ordering::Acquire)
+    }
+
+    fn outcome(
+        outcome: &Result<Arc<ReviewTurnResources>, String>,
+    ) -> Result<Arc<ReviewTurnResources>, VisualRuntimeError> {
+        match outcome {
+            Ok(resources) => Ok(Arc::clone(resources)),
+            Err(detail) => Err(VisualRuntimeError::Admission(detail.clone())),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ReviewMouthAtlasManifest {
@@ -2825,11 +3172,15 @@ impl WorkerClient {
         generation: u64,
         payload: Vec<u8>,
     ) -> Result<(), VisualRuntimeError> {
+        // Configuration loads the ONNX sessions, so it gets a model-load budget
+        // far above the per-frame request timeout. It runs while a turn is
+        // being prepared, never inside the 15 Hz frame path.
         let response = self
-            .request(
+            .request_with_timeout(
                 WorkerCommand::ConfigureAdmittedLandmarkProvider,
                 generation,
                 payload,
+                PROVIDER_CONFIGURE_TIMEOUT,
             )
             .await?;
         (response.status == 0 && response.detail == "admitted_landmark_provider_ready")
@@ -3053,7 +3404,21 @@ struct WorkerResidual {
     visibility_ratio: f64,
     mouth_occluded: bool,
     landmarks_measured_at_ns: i64,
+    /// Present from residual schema 3; the clock the worker rendered against.
+    audio_clock: Option<WorkerAudioClock>,
     produced_at_ns: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct WorkerAudioClock {
+    stream_generation: u64,
+    segment_id: u64,
+    first_sample_index: u64,
+    sample_count: u64,
+    playback_sample_index: u64,
+    sample_rate: u32,
+    channels: u16,
+    playback_at_ns: i64,
 }
 
 impl WorkerResidual {
@@ -3165,14 +3530,21 @@ fn validate_frame_request(request: &VisualFrameRequest) -> Result<(), VisualRunt
         MouthDrive::CausalEnvelopeCoefficients {
             stream_generation,
             segment_id,
+            first_sample_index,
+            sample_count,
+            playback_sample_index,
             sample_rate,
             channels,
             playback_at_ns,
             coefficients,
-            ..
         } => {
             if *stream_generation == 0
                 || *segment_id == 0
+                || !drive_sample_span_contains_playback(
+                    *first_sample_index,
+                    *sample_count,
+                    *playback_sample_index,
+                )
                 || !(8_000..=192_000).contains(sample_rate)
                 || !(1..=2).contains(channels)
                 || *playback_at_ns <= 0
@@ -3184,15 +3556,22 @@ fn validate_frame_request(request: &VisualFrameRequest) -> Result<(), VisualRunt
         MouthDrive::TimedViseme {
             stream_generation,
             segment_id,
+            first_sample_index,
+            sample_count,
+            playback_sample_index,
             sample_rate,
             channels,
             playback_at_ns,
             viseme,
             strength,
-            ..
         } => {
             if *stream_generation == 0
                 || *segment_id == 0
+                || !drive_sample_span_contains_playback(
+                    *first_sample_index,
+                    *sample_count,
+                    *playback_sample_index,
+                )
                 || !(8_000..=192_000).contains(sample_rate)
                 || !(1..=2).contains(channels)
                 || *playback_at_ns <= 0
@@ -3205,19 +3584,28 @@ fn validate_frame_request(request: &VisualFrameRequest) -> Result<(), VisualRunt
         MouthDrive::PcmWindow {
             stream_generation,
             segment_id,
+            first_sample_index,
+            sample_count,
+            playback_sample_index,
             sample_rate,
             channels,
             playback_at_ns,
             interleaved_pcm,
-            ..
         } => {
             if *stream_generation == 0
                 || *segment_id == 0
+                || !drive_sample_span_contains_playback(
+                    *first_sample_index,
+                    *sample_count,
+                    *playback_sample_index,
+                )
                 || !(8_000..=192_000).contains(sample_rate)
                 || !(1..=2).contains(channels)
                 || *playback_at_ns <= 0
                 || interleaved_pcm.is_empty()
                 || interleaved_pcm.len() > 32 * 1024
+                || interleaved_pcm.len() % usize::from(*channels) != 0
+                || (interleaved_pcm.len() / usize::from(*channels)) as u64 != *sample_count
                 || interleaved_pcm.iter().any(|sample| !sample.is_finite())
             {
                 return Err(VisualRuntimeError::InvalidRequest);
@@ -3225,6 +3613,12 @@ fn validate_frame_request(request: &VisualFrameRequest) -> Result<(), VisualRunt
         }
     }
     Ok(())
+}
+
+/// The worker rejects any drive whose playback sample is not inside the
+/// `[first, first + count)` span it declares (`valid_drive` in worker.cpp).
+fn drive_sample_span_contains_playback(first: u64, count: u64, playback: u64) -> bool {
+    count != 0 && first.checked_add(count).is_some_and(|end| end > playback) && playback >= first
 }
 
 fn validate_admitted_frame_request(
@@ -3934,12 +4328,20 @@ fn write_texture(writer: &mut WireWriter, texture: TextureWire) {
     writer.i64(texture.expires_at_ns);
 }
 
+/// Wire layout (little endian), matching `write_drive`/`read_drive` in
+/// `native/mouth-worker/src/service_protocol.cpp`:
+/// kind u8, stream_generation u64, segment_id u64, first_sample_index u64,
+/// sample_count u64, playback_sample_index u64, sample_rate u32, channels u16,
+/// playback_at_ns i64, 8 x f64 coefficients, viseme u8, viseme_strength f64,
+/// pcm_count u32, pcm_count x f32 bits.
 fn write_drive(writer: &mut WireWriter, drive: &MouthDrive) {
     let (
         kind,
         stream_generation,
         segment_id,
         first_sample_index,
+        sample_count,
+        playback_sample_index,
         sample_rate,
         channels,
         playback_at_ns,
@@ -3948,6 +4350,8 @@ fn write_drive(writer: &mut WireWriter, drive: &MouthDrive) {
             stream_generation,
             segment_id,
             first_sample_index,
+            sample_count,
+            playback_sample_index,
             sample_rate,
             channels,
             playback_at_ns,
@@ -3957,6 +4361,8 @@ fn write_drive(writer: &mut WireWriter, drive: &MouthDrive) {
             *stream_generation,
             *segment_id,
             *first_sample_index,
+            *sample_count,
+            *playback_sample_index,
             *sample_rate,
             *channels,
             *playback_at_ns,
@@ -3965,6 +4371,8 @@ fn write_drive(writer: &mut WireWriter, drive: &MouthDrive) {
             stream_generation,
             segment_id,
             first_sample_index,
+            sample_count,
+            playback_sample_index,
             sample_rate,
             channels,
             playback_at_ns,
@@ -3974,6 +4382,8 @@ fn write_drive(writer: &mut WireWriter, drive: &MouthDrive) {
             *stream_generation,
             *segment_id,
             *first_sample_index,
+            *sample_count,
+            *playback_sample_index,
             *sample_rate,
             *channels,
             *playback_at_ns,
@@ -3982,6 +4392,8 @@ fn write_drive(writer: &mut WireWriter, drive: &MouthDrive) {
             stream_generation,
             segment_id,
             first_sample_index,
+            sample_count,
+            playback_sample_index,
             sample_rate,
             channels,
             playback_at_ns,
@@ -3991,6 +4403,8 @@ fn write_drive(writer: &mut WireWriter, drive: &MouthDrive) {
             *stream_generation,
             *segment_id,
             *first_sample_index,
+            *sample_count,
+            *playback_sample_index,
             *sample_rate,
             *channels,
             *playback_at_ns,
@@ -4000,6 +4414,8 @@ fn write_drive(writer: &mut WireWriter, drive: &MouthDrive) {
     writer.u64(stream_generation);
     writer.u64(segment_id);
     writer.u64(first_sample_index);
+    writer.u64(sample_count);
+    writer.u64(playback_sample_index);
     writer.u32(sample_rate);
     writer.u16(channels);
     writer.i64(playback_at_ns);
@@ -4126,8 +4542,23 @@ fn decode_worker_response(bytes: &[u8]) -> Result<WorkerResponse, VisualRuntimeE
         } else {
             (confidence, confidence, 1.0, false, _frame_captured_at_ns)
         };
+        // Schema 3 echoes the audio clock the residual was rendered against.
+        let audio_clock = if schema >= 3 {
+            Some(WorkerAudioClock {
+                stream_generation: reader.u64()?,
+                segment_id: reader.u64()?,
+                first_sample_index: reader.u64()?,
+                sample_count: reader.u64()?,
+                playback_sample_index: reader.u64()?,
+                sample_rate: reader.u32()?,
+                channels: reader.u16()?,
+                playback_at_ns: reader.i64()?,
+            })
+        } else {
+            None
+        };
         let produced_at_ns = reader.i64()?;
-        if !(1..=2).contains(&schema) || texture_schema != 1 || transport != 1 {
+        if !(1..=3).contains(&schema) || texture_schema != 1 || transport != 1 {
             return Err(VisualRuntimeError::Malformed);
         }
         Some(WorkerResidual {
@@ -4164,6 +4595,7 @@ fn decode_worker_response(bytes: &[u8]) -> Result<WorkerResponse, VisualRuntimeE
             visibility_ratio,
             mouth_occluded,
             landmarks_measured_at_ns,
+            audio_clock,
             produced_at_ns,
         })
     } else {
@@ -4242,7 +4674,25 @@ fn validate_worker_response(
     }
     if let Some(residual) = &response.residual {
         let probability = |value: f64| value.is_finite() && (0.0..=1.0).contains(&value);
-        if residual.schema_version != 2
+        // Schema 2 predates the echoed audio clock; schema 3 carries it and
+        // must have been rendered against the expected capture generation.
+        let audio_clock_valid = match (residual.schema_version, &residual.audio_clock) {
+            (2, None) => true,
+            (3, Some(clock)) => {
+                clock.stream_generation == generation
+                    && clock.segment_id != 0
+                    && (8_000..=192_000).contains(&clock.sample_rate)
+                    && (1..=8).contains(&clock.channels)
+                    && clock.playback_at_ns > 0
+                    && drive_sample_span_contains_playback(
+                        clock.first_sample_index,
+                        clock.sample_count,
+                        clock.playback_sample_index,
+                    )
+            }
+            _ => false,
+        };
+        if !audio_clock_valid
             || residual.request_id != request_id
             || residual.generation != generation
             || residual.actor_id != track.actor_id
@@ -4447,31 +4897,48 @@ fn qpc_to_ns(value: u64, lease: &VisualSourceLease) -> Result<i64, VisualRuntime
     i64::try_from(nanoseconds).map_err(|_| VisualRuntimeError::Clock)
 }
 
-fn drive_from_visual_audio_envelope(
-    envelope: &VisualAudioEnvelope,
-    render_at_ns: i64,
-) -> Result<MouthDrive, VisualRuntimeError> {
-    if envelope.schema_version != 1
-        || envelope.session_id.is_empty()
-        || envelope.turn_id.is_empty()
-        || envelope.generation == 0
-        || envelope.stream_id.is_empty()
-        || envelope.segment_id != envelope.stream_id
-        || envelope.source_sample_count == 0
-        || !(8_000..=192_000).contains(&envelope.sample_rate)
-        || !(1..=2).contains(&envelope.channels)
-        || envelope.device_write_qpc == 0
-        || envelope.qpc_frequency == 0
-        || render_at_ns <= 0
-        || !envelope.active
-        || envelope.draining
-        || envelope.cancelled
-        || envelope
+/// Cheap structural/liveness gate for a command-29 envelope. It is evaluated
+/// before any expensive visual step so an idle, finished or not-yet-started
+/// sentence lease costs one broker query and nothing else.
+fn visual_audio_envelope_is_presentable(envelope: &VisualAudioEnvelope) -> bool {
+    envelope.schema_version == 1
+        && !envelope.session_id.is_empty()
+        && !envelope.turn_id.is_empty()
+        && envelope.generation != 0
+        && !envelope.stream_id.is_empty()
+        && envelope.segment_id == envelope.stream_id
+        && envelope.source_sample_count != 0
+        && (8_000..=192_000).contains(&envelope.sample_rate)
+        && (1..=2).contains(&envelope.channels)
+        && envelope.device_write_qpc != 0
+        && envelope.qpc_frequency != 0
+        && envelope.active
+        && !envelope.draining
+        && !envelope.cancelled
+        && envelope
             .mono_rms_q15
             .iter()
             .chain(envelope.mono_peak_q15.iter())
-            .any(|value| *value > 32_767)
-    {
+            .all(|value| *value <= 32_767)
+}
+
+/// Builds the worker audio drive for one visual frame.
+///
+/// `stream_generation` is the broker capture generation of the leased frame's
+/// track (`lease.cancellation_generation`): the worker requires the drive's
+/// audio-clock generation to equal the track's cancellation generation. The
+/// envelope's own `generation` is the app's per-turn playback counter; the
+/// broker already matched it, with session, turn and stream, when it served the
+/// envelope query, so it is only checked for presence here.
+fn drive_from_visual_audio_envelope(
+    envelope: &VisualAudioEnvelope,
+    render_at_ns: i64,
+    stream_generation: u64,
+) -> Result<MouthDrive, VisualRuntimeError> {
+    if stream_generation == 0 {
+        return Err(VisualRuntimeError::NoSelectedTarget);
+    }
+    if !visual_audio_envelope_is_presentable(envelope) || render_at_ns <= 0 {
         return Err(VisualRuntimeError::AudioAuthority);
     }
     let device_write_ns = qpc_value_to_ns(envelope.device_write_qpc, envelope.qpc_frequency)?;
@@ -4520,15 +4987,35 @@ fn drive_from_visual_audio_envelope(
     let playback_source_sample = envelope
         .source_sample_start
         .saturating_add(source_sample_offset);
+    // The sample span of the envelope bin the playback instant falls in. It is
+    // the drive's audio clock span; the exact playback sample is clamped into
+    // it so the worker's "playback inside the declared span" check holds even
+    // when rounding puts the elapsed-time sample one past the bin edge.
+    let bin_count_u64 = u64::try_from(bin_count).unwrap_or(1).max(1);
+    let bin_index_u64 = u64::try_from(bin_index).unwrap_or_default();
+    let source_sample_count = u64::from(envelope.source_sample_count);
+    let bin_start_offset = bin_index_u64.saturating_mul(source_sample_count) / bin_count_u64;
+    let bin_end_offset = bin_index_u64
+        .saturating_add(1)
+        .saturating_mul(source_sample_count)
+        / bin_count_u64;
+    let bin_sample_count = bin_end_offset.saturating_sub(bin_start_offset).max(1);
+    let bin_first_sample = envelope
+        .source_sample_start
+        .saturating_add(bin_start_offset);
+    let bin_last_sample = bin_first_sample.saturating_add(bin_sample_count - 1);
+    let playback_sample_index = playback_source_sample.clamp(bin_first_sample, bin_last_sample);
     if let Some((cue, strength)) = select_visual_speech_cue(
         &envelope.visual_speech_cues,
         playback_source_sample,
         envelope.sample_rate,
     ) {
         return Ok(MouthDrive::TimedViseme {
-            stream_generation: envelope.generation,
+            stream_generation,
             segment_id: stable_nonzero_id(&envelope.stream_id),
             first_sample_index: playback_source_sample,
+            sample_count: bin_sample_count,
+            playback_sample_index: playback_source_sample,
             sample_rate: envelope.sample_rate,
             channels: envelope.channels,
             playback_at_ns: render_at_ns,
@@ -4549,16 +5036,12 @@ fn drive_from_visual_audio_envelope(
         (peak * 0.15).clamp(0.0, 1.0),
         (peak * 0.20).clamp(0.0, 1.0),
     ];
-    let bin_sample_offset = u64::try_from(bin_index)
-        .unwrap_or_default()
-        .saturating_mul(u64::from(envelope.source_sample_count))
-        / u64::try_from(bin_count).unwrap_or(1);
     Ok(MouthDrive::CausalEnvelopeCoefficients {
-        stream_generation: envelope.generation,
+        stream_generation,
         segment_id: stable_nonzero_id(&envelope.stream_id),
-        first_sample_index: envelope
-            .source_sample_start
-            .saturating_add(bin_sample_offset),
+        first_sample_index: bin_first_sample,
+        sample_count: bin_sample_count,
+        playback_sample_index,
         sample_rate: envelope.sample_rate,
         channels: envelope.channels,
         playback_at_ns: render_at_ns,
@@ -4777,6 +5260,40 @@ fn resolve_preferred_review_provider(
         return resolve_yunet_review_provider(yunet_root, exact_target_pid);
     }
     resolve_project_owned_review_provider(mnv3_root, exact_target_pid)
+}
+
+/// Hashes the pinned pack and, only when an atlas root is installed, the atlas.
+/// The practice game has no mandatory atlas: with no `review-mouth-atlas`
+/// directory the worker runs its atlas-free current-pixel route. An installed
+/// atlas that fails validation still fails closed.
+#[cfg(debug_assertions)]
+fn resolve_review_turn_resources(
+    yunet_root: Option<&Path>,
+    mnv3_root: Option<&Path>,
+    atlas_root: Option<&Path>,
+    exact_target_pid: u32,
+    generation: u64,
+) -> Result<ReviewTurnResources, VisualRuntimeError> {
+    let launch = resolve_preferred_review_provider(yunet_root, mnv3_root, exact_target_pid)?;
+    let requested = RequestedCharacterMouthAtlasIdentity {
+        game_profile_id: LEGACY_MARA_GAME_PROFILE_ID,
+        character_id: LEGACY_MARA_CHARACTER_ID,
+        actor_id: stable_nonzero_id("eclipse-harbor:mara-venn"),
+    };
+    let atlas = resolve_optional_review_atlas(atlas_root, generation, &requested)?;
+    Ok(ReviewTurnResources { launch, atlas })
+}
+
+#[cfg(debug_assertions)]
+fn resolve_optional_review_atlas(
+    configured_root: Option<&Path>,
+    generation: u64,
+    requested: &RequestedCharacterMouthAtlasIdentity<'_>,
+) -> Result<Option<CharacterMouthAtlas>, VisualRuntimeError> {
+    if configured_root.is_none() {
+        return Ok(None);
+    }
+    resolve_character_mouth_atlas(configured_root, generation, requested).map(Some)
 }
 
 #[cfg(debug_assertions)]
@@ -5336,7 +5853,6 @@ fn verify_review_provider_file(
     })
 }
 
-#[cfg(debug_assertions)]
 fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
@@ -5754,8 +6270,16 @@ impl VisualRuntimeError {
 mod schema4_join_tests;
 
 #[cfg(test)]
+#[path = "visual_runtime_wire_contract_tests.rs"]
+mod wire_contract_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Broker capture generation used by drive tests. It is deliberately
+    /// different from the envelope's per-turn counter (7).
+    const TEST_CAPTURE_GENERATION: u64 = 42;
 
     #[test]
     fn failed_visual_receipts_keep_typed_diagnostic_reasons_without_raw_log_labels() {
@@ -6730,6 +7254,8 @@ mod tests {
             stream_generation: 1,
             segment_id: 1,
             first_sample_index: 0,
+            sample_count: 32 * 1024 + 1,
+            playback_sample_index: 0,
             sample_rate: 48_000,
             channels: 1,
             playback_at_ns: 1,
@@ -6805,18 +7331,24 @@ mod tests {
             cancelled: false,
             visual_speech_cues: Vec::new(),
         };
-        let drive = drive_from_visual_audio_envelope(&envelope, 1_500_000).expect("causal drive");
+        let drive = drive_from_visual_audio_envelope(&envelope, 1_500_000, TEST_CAPTURE_GENERATION)
+            .expect("causal drive");
         match drive {
             MouthDrive::CausalEnvelopeCoefficients {
                 stream_generation,
                 first_sample_index,
+                sample_count,
+                playback_sample_index,
                 sample_rate,
                 playback_at_ns,
                 coefficients,
                 ..
             } => {
-                assert_eq!(stream_generation, 7);
+                assert_eq!(stream_generation, TEST_CAPTURE_GENERATION);
                 assert_eq!(first_sample_index, 960);
+                // 480 source samples over eight bins: one 60-sample bin.
+                assert_eq!(sample_count, 60);
+                assert_eq!(playback_sample_index, 984);
                 assert_eq!(sample_rate, 48_000);
                 assert_eq!(playback_at_ns, 1_500_000);
                 assert!(coefficients.iter().all(|value| (0.0..=1.0).contains(value)));
@@ -6825,15 +7357,24 @@ mod tests {
             _ => panic!("command 29 must not be converted to PCM or a fabricated viseme"),
         }
         let late_drive =
-            drive_from_visual_audio_envelope(&envelope, 10_500_000).expect("late causal drive");
+            drive_from_visual_audio_envelope(&envelope, 10_500_000, TEST_CAPTURE_GENERATION)
+                .expect("late causal drive");
         match late_drive {
             MouthDrive::CausalEnvelopeCoefficients {
                 first_sample_index,
+                sample_count,
+                playback_sample_index,
                 playback_at_ns,
                 coefficients,
                 ..
             } => {
                 assert_eq!(first_sample_index, 1_380);
+                assert_eq!(sample_count, 60);
+                assert!(
+                    (first_sample_index..first_sample_index + sample_count)
+                        .contains(&playback_sample_index),
+                    "playback sample {playback_sample_index} must lie inside its bin"
+                );
                 assert_eq!(playback_at_ns, 10_500_000);
                 assert!(
                     coefficients[0] > 0.25,
@@ -6843,12 +7384,12 @@ mod tests {
             _ => panic!("late command 29 drive must stay amplitude-only"),
         }
         assert!(matches!(
-            drive_from_visual_audio_envelope(&envelope, 270_000_001),
+            drive_from_visual_audio_envelope(&envelope, 270_000_001, TEST_CAPTURE_GENERATION),
             Err(VisualRuntimeError::AudioAuthority)
         ));
         envelope.draining = true;
         assert!(matches!(
-            drive_from_visual_audio_envelope(&envelope, 1_500_000),
+            drive_from_visual_audio_envelope(&envelope, 1_500_000, TEST_CAPTURE_GENERATION),
             Err(VisualRuntimeError::AudioAuthority)
         ));
     }
@@ -6863,22 +7404,27 @@ mod tests {
             strength_q15: 30_000,
         }];
 
-        let drive = drive_from_visual_audio_envelope(&envelope, 11_000_000)
-            .expect("active cue must be authoritative");
+        let drive =
+            drive_from_visual_audio_envelope(&envelope, 11_000_000, TEST_CAPTURE_GENERATION)
+                .expect("active cue must be authoritative");
         match drive {
             MouthDrive::TimedViseme {
                 stream_generation,
                 segment_id,
                 first_sample_index,
+                sample_count,
+                playback_sample_index,
                 sample_rate,
                 channels,
                 playback_at_ns,
                 viseme,
                 strength,
             } => {
-                assert_eq!(stream_generation, 7);
+                assert_eq!(stream_generation, TEST_CAPTURE_GENERATION);
                 assert_eq!(segment_id, stable_nonzero_id("pcm-001"));
                 assert_eq!(first_sample_index, 1_440);
+                assert_eq!(playback_sample_index, 1_440);
+                assert_eq!(sample_count, 1_200);
                 assert_eq!(sample_rate, 48_000);
                 assert_eq!(channels, 1);
                 assert_eq!(playback_at_ns, 11_000_000);
@@ -6899,8 +7445,9 @@ mod tests {
             canonical_viseme: 10,
             strength_q15: 32_767,
         }];
-        let anticipated = drive_from_visual_audio_envelope(&envelope, 31_000_000)
-            .expect("cue 30ms ahead is inside anticipation");
+        let anticipated =
+            drive_from_visual_audio_envelope(&envelope, 31_000_000, TEST_CAPTURE_GENERATION)
+                .expect("cue 30ms ahead is inside anticipation");
         assert_timed_viseme(anticipated, 2_400, 10, 0.40);
 
         envelope.visual_speech_cues = vec![crate::media_broker::VisualSpeechCue {
@@ -6909,8 +7456,9 @@ mod tests {
             canonical_viseme: 9,
             strength_q15: 32_767,
         }];
-        let released = drive_from_visual_audio_envelope(&envelope, 41_000_000)
-            .expect("cue 30ms behind is inside release");
+        let released =
+            drive_from_visual_audio_envelope(&envelope, 41_000_000, TEST_CAPTURE_GENERATION)
+                .expect("cue 30ms behind is inside release");
         assert_timed_viseme(released, 2_880, 9, 0.625);
 
         // Even when a following vowel has the larger transition weight, a
@@ -6929,8 +7477,9 @@ mod tests {
                 strength_q15: 32_767,
             },
         ];
-        let closure = drive_from_visual_audio_envelope(&envelope, 67_000_000)
-            .expect("strong bilabial release remains decisive");
+        let closure =
+            drive_from_visual_audio_envelope(&envelope, 67_000_000, TEST_CAPTURE_GENERATION)
+                .expect("strong bilabial release remains decisive");
         assert_timed_viseme(closure, 4_128, 1, 0.30);
 
         envelope.visual_speech_cues = vec![crate::media_broker::VisualSpeechCue {
@@ -6940,7 +7489,7 @@ mod tests {
             strength_q15: 32_767,
         }];
         assert!(matches!(
-            drive_from_visual_audio_envelope(&envelope, 31_000_000),
+            drive_from_visual_audio_envelope(&envelope, 31_000_000, TEST_CAPTURE_GENERATION),
             Ok(MouthDrive::CausalEnvelopeCoefficients { .. })
         ));
     }
@@ -6955,12 +7504,12 @@ mod tests {
             strength_q15: 32_767,
         }];
         assert!(matches!(
-            drive_from_visual_audio_envelope(&envelope, 451_000_001),
+            drive_from_visual_audio_envelope(&envelope, 451_000_001, TEST_CAPTURE_GENERATION),
             Err(VisualRuntimeError::AudioAuthority)
         ));
         envelope.active = false;
         assert!(matches!(
-            drive_from_visual_audio_envelope(&envelope, 11_000_000),
+            drive_from_visual_audio_envelope(&envelope, 11_000_000, TEST_CAPTURE_GENERATION),
             Err(VisualRuntimeError::AudioAuthority)
         ));
     }
@@ -7325,7 +7874,7 @@ mod tests {
     }
 
     #[cfg(windows)]
-    fn native_actor_lock_fixture(
+    pub(super) fn native_actor_lock_fixture(
         cancellation_generation: u64,
         source_frame_qpc: u64,
         expires_at_unix_ms: u64,
@@ -7672,6 +8221,8 @@ mod tests {
                 stream_generation: 1,
                 segment_id: 1,
                 first_sample_index: 0,
+                sample_count: 480,
+                playback_sample_index: 0,
                 sample_rate: 48_000,
                 channels: 1,
                 playback_at_ns: 1,

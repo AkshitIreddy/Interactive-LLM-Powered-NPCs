@@ -376,6 +376,21 @@ impl GameTargetManager {
         Ok(())
     }
 
+    /// True while the included practice game is the selected target, whether
+    /// or not the broker still holds its binding. A cached check only; it
+    /// never touches the OS or the broker.
+    #[cfg(debug_assertions)]
+    pub fn synthetic_practice_target_selected(&self) -> bool {
+        self.selected.lock().ok().is_some_and(|selected| {
+            selected.as_ref().is_some_and(|target| {
+                target.game_profile_id == "eclipse-harbor"
+                    && target.binding.executable_leaf.eq_ignore_ascii_case(
+                        crate::synthetic_review_target::SYNTHETIC_TARGET_BASENAME,
+                    )
+            })
+        })
+    }
+
     #[cfg(debug_assertions)]
     pub fn mark_debug_synthetic_broker_bound(
         &self,
