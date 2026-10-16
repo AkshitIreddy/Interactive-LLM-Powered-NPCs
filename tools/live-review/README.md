@@ -4,7 +4,7 @@ Local, developer-only helpers for checking a debug review build end to end
 against the synthetic practice game, without driving the mouse or keyboard.
 
 ```
-powershell -File tools/live-review/stage-review.ps1 -Destination <review dir> -TestGame <local-app-data\test-game>
+powershell -File tools/live-review/stage-review.ps1 -Destination <review dir> -TestGame <local-app-data\test-game> [-MouthAtlas <pack dir>]
 bash tools/live-review/run_turn.sh <out dir> --relaunch
 ```
 
