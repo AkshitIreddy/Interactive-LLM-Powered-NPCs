@@ -9,6 +9,7 @@
 #include <Windows.h>
 
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <optional>
 
@@ -30,6 +31,9 @@ public:
     [[nodiscard]] bool start();
     void stop() noexcept;
     [[nodiscard]] std::optional<ipc::Envelope> take_request();
+    // Blocks until a request is queued, the client disconnects, or the timeout
+    // passes. Returns true when a request may be ready.
+    [[nodiscard]] bool wait_for_request(std::chrono::milliseconds timeout);
     [[nodiscard]] bool submit_response(ipc::Response response);
     [[nodiscard]] bool connected() const noexcept;
     [[nodiscard]] bool disconnected() const noexcept;

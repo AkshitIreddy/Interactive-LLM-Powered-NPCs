@@ -307,6 +307,13 @@ std::optional<ipc::Envelope> CurrentUserPipeServer::take_request() {
     auto result = std::move(impl_->requests.front()); impl_->requests.pop(); return result;
 }
 
+bool CurrentUserPipeServer::wait_for_request(const std::chrono::milliseconds timeout) {
+    std::unique_lock lock(impl_->mutex);
+    return impl_->condition.wait_for(lock, timeout, [&] {
+        return !impl_->requests.empty() || impl_->disconnected.load();
+    });
+}
+
 bool CurrentUserPipeServer::submit_response(ipc::Response response) {
     std::scoped_lock lock(impl_->mutex);
     if (impl_->responses.size() >= ipc::maximum_pending_requests || impl_->disconnected) return false;

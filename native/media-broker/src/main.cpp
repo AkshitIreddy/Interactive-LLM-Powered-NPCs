@@ -873,7 +873,10 @@ int main(int argc, char** argv) {
                 }
             }
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        // Wake as soon as the next request is queued. A plain short sleep is
+        // rounded up to the ~15.6 ms Windows timer tick, which added that much
+        // latency to every broker round trip.
+        (void)pipe.wait_for_request(std::chrono::milliseconds(2));
     }
     pipe.stop();
     playback_service.cancel_all();
