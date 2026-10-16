@@ -161,7 +161,7 @@ describe("canonical provider loadout migration", () => {
         : null;
     expect(route).not.toBeNull();
     expect(route?.disclosure.execution).toBe("local");
-    expect(route?.disclosure.catalog_revision).toBe(10);
+    expect(route?.disclosure.catalog_revision).toBe(11);
     expect(route?.disclosure.egress).toBe("none");
     expect(route?.disclosure.transmitted_data).toEqual([]);
     expect(route?.credential).toBeNull();

@@ -266,7 +266,7 @@ const nativeLoadoutSnapshot = {
             route: {
               primary: {
                 provider_id: "assemblyai",
-                model_id: "u3-rt-pro",
+                model_id: "universal-3-6-pro",
                 voice_id: null,
                 credential: {
                   provider_id: "assemblyai",
@@ -630,7 +630,7 @@ describe("native evidence in the product console", () => {
           inputEndpointGeneration: 27,
           route: {
             providerId: "assemblyai",
-            modelId: "u3-rt-pro",
+            modelId: "universal-3-6-pro",
             egress: "microphone_audio_and_optional_non_secret_context",
             automaticFallback: false,
           },
@@ -675,7 +675,7 @@ describe("native evidence in the product console", () => {
     ).toBeInTheDocument();
     await waitFor(() => expect(nativeLoadouts.snapshot).toHaveBeenCalledOnce());
     await user.click(screen.getByText("Microphone connection details"));
-    expect(screen.getByText(/assemblyai · u3-rt-pro/i)).toBeInTheDocument();
+    expect(screen.getByText(/assemblyai · universal-3-6-pro/i)).toBeInTheDocument();
     expect(
       screen.queryByRole("checkbox", { name: /Authorize one live/i }),
     ).not.toBeInTheDocument();
@@ -783,8 +783,8 @@ describe("native evidence in the product console", () => {
       name: "Enable push-to-talk",
     });
     await waitFor(() => expect(arm).toBeEnabled());
-    expect(document.body).toHaveTextContent(/assemblyai · u3-rt-pro/i);
-    expect(document.body).toHaveTextContent(/u3-rt-pro/i);
+    expect(document.body).toHaveTextContent(/assemblyai · universal-3-6-pro/i);
+    expect(document.body).toHaveTextContent(/universal-3-6-pro/i);
     await user.click(screen.getByText("Microphone connection details"));
     expect(document.body).toHaveTextContent(/Automatic fallback false/i);
 
@@ -818,7 +818,7 @@ describe("native evidence in the product console", () => {
         receiptSha256: "a".repeat(64),
         route: {
           providerId: "assemblyai",
-          modelId: "u3-rt-pro",
+          modelId: "universal-3-6-pro",
           credentialReference: "providers/assemblyai",
           egress: "microphone_audio_and_optional_non_secret_context",
           generation: 21,
@@ -897,7 +897,7 @@ describe("native evidence in the product console", () => {
               sourceLoadoutId: "assemblyai-review-loadout",
               route: {
                 providerId: "assemblyai",
-                modelId: "u3-rt-pro",
+                modelId: "universal-3-6-pro",
                 credentialReference: "providers/assemblyai",
                 egress: "microphone_audio_and_optional_non_secret_context",
                 generation: 21,
@@ -938,7 +938,7 @@ describe("native evidence in the product console", () => {
 
     const accepted = screen.getByLabelText("Accepted native STT receipt");
     expect(accepted).toHaveTextContent(
-      "AssemblyAI u3-rt-pro receipt 018f47c2-7202-7c8d-8e2a-9e2791d6953f",
+      "AssemblyAI universal-3-6-pro receipt 018f47c2-7202-7c8d-8e2a-9e2791d6953f",
     );
     expect(accepted).toHaveTextContent("generation 21");
     expect(accepted).toHaveTextContent("windows-microphone-4 generation 27");

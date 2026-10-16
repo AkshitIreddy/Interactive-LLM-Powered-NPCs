@@ -34,7 +34,7 @@ const capturing: SelectedSttCapturing = {
   inputEndpointGeneration: 27,
   route: {
     providerId: "assemblyai",
-    modelId: "u3-rt-pro",
+    modelId: "universal-3-6-pro",
     egress: "microphone_audio_and_optional_non_secret_context",
     automaticFallback: false,
   },
@@ -50,7 +50,7 @@ const transcriptReady = {
   receiptSha256: "a".repeat(64),
   route: {
     providerId: "assemblyai",
-    modelId: "u3-rt-pro",
+    modelId: "universal-3-6-pro",
     credentialReference: "providers/assemblyai",
     egress: "microphone_audio_and_optional_non_secret_context",
     generation: 14,

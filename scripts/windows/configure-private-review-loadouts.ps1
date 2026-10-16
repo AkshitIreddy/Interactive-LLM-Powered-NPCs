@@ -115,7 +115,7 @@ if ($null -eq $document) {
             -Privacy 'Transcript, selected game context, and memory context are sent to Groq when this route is used.' `
             -Cost "Uses the user's Groq account and its current free or paid limits." `
             -Data @('transcript', 'game_context', 'memory_context')
-        stt = New-HostedRole -Provider 'assemblyai' -Model 'u3-rt-pro' `
+        stt = New-HostedRole -Provider 'assemblyai' -Model 'universal-3-6-pro' `
             -Privacy 'Microphone audio is sent to AssemblyAI only while this speech route is used.' `
             -Cost "Uses the user's AssemblyAI account and its current trial or paid limits." `
             -Data @('microphone_audio')
@@ -215,7 +215,7 @@ foreach ($provider in $llmPresets.Keys) {
         llm = New-HostedRole -Provider $provider -Model ([string]$preset.model) `
             -Privacy ([string]$preset.privacy) -Cost ([string]$preset.cost) `
             -Data @('transcript', 'game_context', 'memory_context')
-        stt = New-HostedRole -Provider 'assemblyai' -Model 'u3-rt-pro' `
+        stt = New-HostedRole -Provider 'assemblyai' -Model 'universal-3-6-pro' `
             -Privacy 'Microphone audio is sent to AssemblyAI while push to talk is active.' `
             -Cost 'Uses the connected AssemblyAI account.' -Data @('microphone_audio')
         tts = New-HostedRole -Provider 'cartesia' -Model 'sonic-3.6' `
@@ -249,7 +249,7 @@ if ($null -eq $document.loadouts.PSObject.Properties['testing-dummy']) {
             -Privacy 'Nothing leaves this PC: the reply echoes the transcript locally.' `
             -Cost 'Free. No inference, no network calls, no credentials.' `
             -Data @()
-        stt = New-HostedRole -Provider 'assemblyai' -Model 'u3-rt-pro' `
+        stt = New-HostedRole -Provider 'assemblyai' -Model 'universal-3-6-pro' `
             -Privacy 'Microphone audio is sent to AssemblyAI while push to talk is active.' `
             -Cost 'Uses the connected AssemblyAI account.' -Data @('microphone_audio')
         tts = New-HostedRole -Provider 'testing' -Model 'testing-synth-v1' -Local `
@@ -315,7 +315,7 @@ try {
     active_game = 'cyberpunk-2077'
     active_llm = $ActivateLlm
     active_loadout = $activeId
-    speech_to_text = 'assemblyai/u3-rt-pro'
+    speech_to_text = 'assemblyai/universal-3-6-pro'
     text_to_speech = 'cartesia/sonic-3.6/a0e99841-438c-4a64-b679-ae501e7d6091'
     memory = 'local/sqlite-fts5'
     automatic_fallbacks = $false

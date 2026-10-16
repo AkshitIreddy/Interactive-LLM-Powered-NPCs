@@ -558,7 +558,7 @@ impl NativeTurnExecutionEvidence {
             && valid_stt_identity(&receipt.source_loadout_id, 128)
             && receipt.source_loadout_id == self.consumed_route.source_loadout_id
             && route.provider_id == "assemblyai"
-            && route.model_id == "u3-rt-pro"
+            && route.model_id == "universal-3-6-pro"
             && route.credential_reference == "providers/assemblyai"
             && route.egress == "microphone_audio_and_optional_non_secret_context"
             && route.generation == receipt.capture_generation

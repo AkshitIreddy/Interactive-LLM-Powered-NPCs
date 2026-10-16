@@ -388,7 +388,7 @@ impl SelectedSttTurnEvidenceV1 {
 impl SelectedSttRouteReceiptV1 {
     fn validate_shape(&self) -> bool {
         self.provider_id == "assemblyai"
-            && self.model_id == "u3-rt-pro"
+            && self.model_id == "universal-3-6-pro"
             && self.credential_reference == "providers/assemblyai"
             && self.egress == "microphone_audio_and_optional_non_secret_context"
             && self.generation > 0

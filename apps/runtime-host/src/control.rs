@@ -1391,7 +1391,7 @@ mod tests {
             "routeSnapshotGeneration": 7,
             "route": {
                 "providerId": "assemblyai",
-                "modelId": "u3-rt-pro",
+                "modelId": "universal-3-6-pro",
                 "execution": "cloud",
                 "egress": "microphone_audio_and_optional_non_secret_context",
                 "credentialReference": "providers/assemblyai"

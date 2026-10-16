@@ -20,7 +20,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{RouteExecution, SelectedProviderRoute};
 
 const CREDENTIAL_TARGET: &str = "providers/assemblyai";
-const MODEL_ID: &str = "u3-rt-pro";
+const MODEL_ID: &str = "universal-3-6-pro";
 const REQUIRED_EGRESS: &str = "microphone_audio_and_optional_non_secret_context";
 const MAX_PCM_CHUNK_BYTES: usize = 64 * 1_024;
 const MAX_TRANSCRIPT_BYTES: usize = 64 * 1_024;

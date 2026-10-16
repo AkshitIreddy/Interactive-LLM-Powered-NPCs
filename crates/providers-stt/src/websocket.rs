@@ -203,7 +203,6 @@ fn allowed_query_name(name: &str) -> bool {
         name,
         "sample_rate"
             | "speech_model"
-            | "format_turns"
             | "language_detection"
             | "keyterms_prompt"
             | "prompt"
@@ -296,7 +295,7 @@ mod tests {
             url,
             query: vec![
                 ("sample_rate".into(), "16000".into()),
-                ("speech_model".into(), "u3-rt-pro".into()),
+                ("speech_model".into(), "universal-3-6-pro".into()),
             ],
             auth: TransportAuth::Header {
                 name: "Authorization",
@@ -317,7 +316,7 @@ mod tests {
             .expect("official endpoint accepted");
         assert_eq!(
             upgrade.uri().to_string(),
-            "wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&speech_model=u3-rt-pro"
+            "wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&speech_model=universal-3-6-pro"
         );
         assert!(upgrade.headers().contains_key("authorization"));
     }

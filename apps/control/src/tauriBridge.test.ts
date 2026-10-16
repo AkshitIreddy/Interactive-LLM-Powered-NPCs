@@ -140,7 +140,7 @@ const selectedSttInputEvidence = () => ({
     sourceLoadoutId: "nvidia-review-loadout",
     route: {
       providerId: "assemblyai",
-      modelId: "u3-rt-pro",
+      modelId: "universal-3-6-pro",
       credentialReference: "providers/assemblyai",
       egress: "microphone_audio_and_optional_non_secret_context",
       generation: 21,

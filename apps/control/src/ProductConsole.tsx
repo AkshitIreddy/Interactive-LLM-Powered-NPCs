@@ -1180,7 +1180,7 @@ export function ProductConsole() {
         selectedAudioInput &&
         assemblyAiProvider?.status === "present" &&
         configuredSttRoute.providerId === "assemblyai" &&
-        configuredSttRoute.modelId === "u3-rt-pro",
+        configuredSttRoute.modelId === "universal-3-6-pro",
     ),
     reason:
       bootstrap.kind !== "snapshot"
@@ -1190,8 +1190,8 @@ export function ProductConsole() {
           : assemblyAiProvider?.status !== "present"
             ? `AssemblyAI native credential is unavailable: ${assemblyAiProvider?.detail ?? "no vault status"}`
             : configuredSttRoute.providerId !== "assemblyai" ||
-                configuredSttRoute.modelId !== "u3-rt-pro"
-              ? `Selected preference is ${configuredSttRoute.providerId} · ${configuredSttRoute.modelId}; explicitly select AssemblyAI · u3-rt-pro. Native state is re-resolved again at capture start.`
+                configuredSttRoute.modelId !== "universal-3-6-pro"
+              ? `Selected preference is ${configuredSttRoute.providerId} · ${configuredSttRoute.modelId}; explicitly select AssemblyAI · universal-3-6-pro. Native state is re-resolved again at capture start.`
               : "Ready to request native capture. A physical F8 press and release remains broker-authoritative.",
     configuredProviderId: configuredSttRoute.providerId,
     configuredModelId: configuredSttRoute.modelId,
@@ -3031,7 +3031,7 @@ function SessionPage({
                     <div>
                       <small>Native input accepted</small>
                       <b>
-                        AssemblyAI u3-rt-pro receipt{" "}
+                        AssemblyAI universal-3-6-pro receipt{" "}
                         {acceptedSttReceipt.receiptId}
                       </b>
                       <code>{acceptedSttReceipt.receiptSha256}</code>
