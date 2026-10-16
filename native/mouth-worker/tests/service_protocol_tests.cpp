@@ -3,9 +3,20 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
+#include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
+
+#ifndef NPC_MOUTH_WIRE_FIXTURE_DIR
+#error "NPC_MOUTH_WIRE_FIXTURE_DIR must name native/mouth-worker/protocol/fixtures"
+#endif
 
 namespace {
 
@@ -469,6 +480,214 @@ void test_malformed_and_bounded_payloads() {
            "residual acknowledgement round-trips");
 }
 
+
+// ---------------------------------------------------------------------------
+// Cross-language wire fixtures. The Rust control plane and this decoder were
+// once changed independently, which made every practice-game frame fail decode.
+// Two committed golden files now pin both directions:
+//   rust-admitted-render-command-v1.bin   written by the Rust encoder
+//                                         (visual_runtime_wire_contract_tests.rs)
+//   cpp-residual-schema3-response-v1.bin  written by this encoder
+// Regenerate the file a side owns with NPC_REGENERATE_WIRE_FIXTURES=1.
+
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+bool regenerating_wire_fixtures() {
+    return std::getenv("NPC_REGENERATE_WIRE_FIXTURES") != nullptr;
+}
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+
+std::filesystem::path wire_fixture_path(const std::string_view name) {
+    return std::filesystem::path(NPC_MOUTH_WIRE_FIXTURE_DIR) / std::string(name);
+}
+
+std::optional<std::vector<std::byte>> read_wire_fixture(const std::string_view name) {
+    std::ifstream stream(wire_fixture_path(name), std::ios::binary);
+    if (!stream) return std::nullopt;
+    const std::vector<char> raw((std::istreambuf_iterator<char>(stream)),
+                                std::istreambuf_iterator<char>());
+    std::vector<std::byte> bytes(raw.size());
+    std::transform(raw.begin(), raw.end(), bytes.begin(),
+                   [](const char value) { return static_cast<std::byte>(value); });
+    return bytes;
+}
+
+bool write_wire_fixture(const std::string_view name, const std::vector<std::byte>& bytes) {
+    std::filesystem::create_directories(std::filesystem::path(NPC_MOUTH_WIRE_FIXTURE_DIR));
+    std::ofstream stream(wire_fixture_path(name), std::ios::binary | std::ios::trunc);
+    if (!stream) return false;
+    for (const auto byte : bytes) stream.put(static_cast<char>(std::to_integer<unsigned char>(byte)));
+    return static_cast<bool>(stream);
+}
+
+// Decodes the exact bytes the Rust encoder produces for its golden request. The
+// values below mirror golden_request()/golden_lease()/golden_drive() in
+// apps/control/src-tauri/src/visual_runtime_wire_contract_tests.rs.
+void test_rust_admitted_render_fixture_decodes() {
+    const auto fixture = read_wire_fixture("rust-admitted-render-command-v1.bin");
+    expect(fixture.has_value(), "Rust golden render command fixture is committed");
+    if (!fixture) return;
+    const auto decoded = decode_admitted_render_command(*fixture);
+    expect(decoded.has_value(),
+           "the Rust encoder's command decodes (drive carries sample_count and playback_sample_index)");
+    if (!decoded) return;
+
+    expect(decoded->request == ProductRequestIdentity{1U, 101U, 102U, 201U, 202U, 301U},
+           "request identity survives the Rust encoding");
+    expect(decoded->track == TrackBinding{42U, 8U, 9U, 10U},
+           "track carries the broker capture generation first");
+    expect(decoded->frame == FrameIdentity{11U, 12U, 13U, 900'000'000},
+           "exact frame identity survives the Rust encoding");
+    expect(decoded->source.texture.native_handle_value == 0x1234U &&
+               decoded->source.texture.owner_process_id == 50U &&
+               decoded->source.texture.intended_consumer_process_id == 60U &&
+               decoded->source.texture.adapter_luid_low == 77U &&
+               decoded->source.texture.adapter_luid_high == 2 &&
+               decoded->source.texture.width == 1'920U &&
+               decoded->source.texture.height == 1'080U &&
+               decoded->source.texture.stride_bytes == 7'680U &&
+               decoded->source.texture.format == PixelFormat::bgra8_unorm_premultiplied &&
+               decoded->source.texture.expires_at_ns == 1'080'000'000,
+           "texture lease survives the Rust encoding");
+    expect(decoded->source.broker_process_id == 50U &&
+               decoded->source.broker_executable_name == "npc-media-broker.exe" &&
+               decoded->source.source_frame_qpc == 9'000'000U &&
+               decoded->source.qpc_frequency == 10'000'000U &&
+               decoded->source.session.session_id_high == 101U &&
+               decoded->source.session.session_id_low == 102U &&
+               decoded->source.session.nonce[0] == std::byte{1} &&
+               decoded->source.session.nonce[31] == std::byte{32},
+           "broker identity, QPC clock and session survive the Rust encoding");
+    expect(decoded->seed_face_bounds.x == 0.2 && decoded->seed_face_bounds.height == 0.7,
+           "seed face bounds survive the Rust encoding");
+    expect(decoded->appearance.runtime_actor_id == 8U &&
+               decoded->appearance.descriptor_revision == 3U &&
+               decoded->appearance.expected_descriptor_digest_low == 22U &&
+               decoded->appearance.observed_descriptor_digest_high == 23U &&
+               decoded->appearance.similarity == 0.93 && decoded->appearance.identity_locked &&
+               decoded->appearance.target_visible && !decoded->appearance.scene_transition,
+           "appearance evidence survives the Rust encoding");
+    expect(decoded->resources.pressure == VisualPressure::elevated_cpu &&
+               decoded->resources.admitted_signal_rate_hz == 10U &&
+               decoded->resources.local_visuals_admitted,
+           "resource state survives the Rust encoding");
+
+    const auto& clock = decoded->drive.clock;
+    expect(decoded->drive.kind == DriveKind::explicit_coefficients,
+           "envelope coefficient drive kind survives the Rust encoding");
+    expect(clock.stream_generation == 42U && clock.segment_id == 0x1122'3344'5566'7788ULL &&
+               clock.first_sample_index == 960U && clock.sample_count == 60U &&
+               clock.playback_sample_index == 984U && clock.sample_rate == 48'000U &&
+               clock.channels == 1U && clock.playback_at_ns == 1'000'500'000,
+           "the whole audio clock, including sample_count and playback_sample_index, "
+           "survives the Rust encoding");
+    expect(clock.playback_sample_index >= clock.first_sample_index &&
+               clock.playback_sample_index < clock.first_sample_index + clock.sample_count,
+           "the Rust drive's playback sample lies inside its declared span");
+    expect(decoded->drive.coefficients.jaw_open == 0.125 &&
+               decoded->drive.coefficients.lip_close == 0.25 &&
+               decoded->drive.coefficients.lower_lip_depress == 1.0 &&
+               decoded->drive.interleaved_pcm.empty(),
+           "coefficient channels survive the Rust encoding without PCM");
+    expect(!decoded->sealed_click_spatial_authority && decoded->deadline_ns == 1'070'000'000,
+           "authority flag and deadline survive the Rust encoding");
+
+    const auto reencoded = encode_admitted_render_command(*decoded);
+    expect(reencoded.has_value() && *reencoded == *fixture,
+           "decoding then re-encoding the Rust bytes is the identity (same field order)");
+}
+
+ResidualProposalV1 schema3_fixture_proposal(const RenderWithAdmittedLandmarksCommandV1& command) {
+    ResidualProposalV1 proposal{};
+    proposal.schema_version = 3U;
+    proposal.request = command.request;
+    proposal.track = command.track;
+    proposal.source_frame = command.frame;
+    proposal.source_frame_qpc = command.source.source_frame_qpc;
+    proposal.normalized_bounds = {0.4, 0.5, 0.1, 0.08};
+    proposal.residual.schema_version = 1U;
+    proposal.residual.transport = LeaseTransport::d3d11_shared_nt_handle;
+    proposal.residual.lease_nonce_high = 501U;
+    proposal.residual.lease_nonce_low = 502U;
+    proposal.residual.owner_process_id = 60U;
+    proposal.residual.intended_consumer_process_id = 50U;
+    proposal.residual.native_handle_value = 0x2345U;
+    proposal.residual.adapter_luid_low = 77U;
+    proposal.residual.adapter_luid_high = 2;
+    proposal.residual.keyed_mutex_acquire_key = 3U;
+    proposal.residual.keyed_mutex_release_key = 4U;
+    proposal.residual.width = 192U;
+    proposal.residual.height = 108U;
+    proposal.residual.stride_bytes = 768U;
+    proposal.residual.format = PixelFormat::bgra8_unorm_premultiplied;
+    proposal.residual.expires_at_ns = 1'080'000'000;
+    proposal.confidence = 0.95;
+    proposal.detector_confidence = 0.96;
+    proposal.landmark_confidence = 0.95;
+    proposal.visibility_ratio = 0.94;
+    proposal.mouth_occluded = false;
+    proposal.landmarks_measured_at_ns = 1'000'000'000;
+    proposal.audio_clock = command.drive.clock;
+    proposal.produced_at_ns = 1'010'000'000;
+    return proposal;
+}
+
+// The values here are asserted by
+// cpp_encoded_schema_three_response_fixture_decodes_and_validates in
+// visual_runtime_wire_contract_tests.rs; keep the two in sync.
+void test_cpp_schema3_response_fixture() {
+    const auto rust_fixture = read_wire_fixture("rust-admitted-render-command-v1.bin");
+    expect(rust_fixture.has_value(), "the Rust command fixture seeds the response fixture");
+    if (!rust_fixture) return;
+    const auto command = decode_admitted_render_command(*rust_fixture);
+    expect(command.has_value(), "the Rust command fixture decodes");
+    if (!command) return;
+
+    WorkerResponseV1 response{};
+    response.response_to_sequence = 55U;
+    response.cancellation_generation = 42U;
+    response.receipt.request = command->request;
+    response.receipt.track = command->track;
+    response.receipt.source_frame = command->frame;
+    response.receipt.disposition = PresentationDisposition::residual_proposed;
+    response.receipt.signal_disposition = SignalDisposition::accepted;
+    response.receipt.worker_disposition = Disposition::residual_ready;
+    response.receipt.drive_kind = DriveKind::explicit_coefficients;
+    response.receipt.admitted_signal_rate_hz = 10U;
+    response.receipt.latch_generation = 3U;
+    response.receipt.submitted_at_ns = 1'001'000'000;
+    response.receipt.completed_at_ns = 1'010'000'000;
+    response.residual = schema3_fixture_proposal(*command);
+    response.detail = "residual_proposed_pending_broker_presentation";
+
+    const auto encoded = encode_response(response);
+    expect(encoded.has_value(), "the schema 3 residual response encodes");
+    if (!encoded) return;
+    const auto decoded = decode_response(*encoded);
+    expect(decoded && decoded->residual &&
+               decoded->residual->audio_clock.stream_generation == 42U &&
+               decoded->residual->audio_clock.sample_count == 60U &&
+               decoded->residual->audio_clock.playback_sample_index == 984U &&
+               decoded->residual->audio_clock.playback_at_ns == 1'000'500'000,
+           "the schema 3 audio clock round-trips through the native codec");
+
+    if (regenerating_wire_fixtures()) {
+        expect(write_wire_fixture("cpp-residual-schema3-response-v1.bin", *encoded),
+               "native golden response fixture is written");
+        return;
+    }
+    const auto committed = read_wire_fixture("cpp-residual-schema3-response-v1.bin");
+    expect(committed.has_value(), "native golden response fixture is committed");
+    expect(committed.has_value() && *committed == *encoded,
+           "the native encoder still produces the committed schema 3 response bytes the "
+           "Rust decoder is tested against (regenerate with NPC_REGENERATE_WIRE_FIXTURES=1 "
+           "and rerun the Rust wire contract tests if this change is intentional)");
+}
+
 } // namespace
 
 int main() {
@@ -479,6 +698,8 @@ int main() {
     test_provider_configuration_round_trip();
     test_character_mouth_atlas_round_trip();
     test_malformed_and_bounded_payloads();
+    test_rust_admitted_render_fixture_decodes();
+    test_cpp_schema3_response_fixture();
     if (failures != 0) {
         std::cerr << failures << " service protocol assertion(s) failed\n";
         return 1;

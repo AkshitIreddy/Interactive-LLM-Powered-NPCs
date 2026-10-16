@@ -115,6 +115,9 @@ if(BUILD_TESTING AND NPC_MOUTH_WORKER_BUILD_TESTS)
     add_executable(npc_mouth_service_protocol_tests tests/service_protocol_tests.cpp)
     target_compile_features(npc_mouth_service_protocol_tests PRIVATE cxx_std_20)
     target_link_libraries(npc_mouth_service_protocol_tests PRIVATE npc_mouth_worker)
+    # Golden bytes shared with the Rust control plane's wire contract tests.
+    target_compile_definitions(npc_mouth_service_protocol_tests PRIVATE
+        "NPC_MOUTH_WIRE_FIXTURE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/protocol/fixtures\"")
     add_test(NAME npc_mouth_service_protocol_tests COMMAND npc_mouth_service_protocol_tests)
 
     add_executable(npc_mouth_landmark_provider_tests tests/landmark_provider_tests.cpp)
