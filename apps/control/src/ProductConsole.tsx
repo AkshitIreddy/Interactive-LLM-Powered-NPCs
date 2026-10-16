@@ -48,6 +48,7 @@ import {
   syntheticReplayCaptureAvailability,
   syntheticReviewTargetAvailability,
   prepareSyntheticReviewTarget,
+  commandErrorMessage,
   verifySelectedGameCapture,
   type SyntheticReplayCaptureAvailability,
   type NativeBootstrapHealth,
@@ -1467,8 +1468,7 @@ export function ProductConsole() {
     } catch (error) {
       if (turnRequestEpochRef.current !== requestEpoch) return;
       setRunning(false);
-      const detail =
-        error instanceof Error ? error.message : "Turn failed before delivery.";
+      const detail = commandErrorMessage(error, "Turn failed before delivery.");
       if (selectedSttReceipt) {
         setSelectedSttReceiptDisposition("rejected");
         setSelectedSttError(

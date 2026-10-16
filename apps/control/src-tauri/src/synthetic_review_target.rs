@@ -76,7 +76,7 @@ impl SyntheticReviewTargetLauncher {
         let mut command = Command::new(&executable_path);
         command
             .arg("--metadata")
-            .arg(&self.metadata_path)
+            .arg(without_verbatim_disk_prefix(self.metadata_path.clone()))
             .arg("--mute")
             .current_dir(
                 executable_path
@@ -232,12 +232,48 @@ fn validate_candidate(path: &Path) -> Result<PathBuf, SyntheticReviewTargetError
     if canonical.parent() != Some(canonical_directory.as_path()) {
         return Err(SyntheticReviewTargetError::Integrity);
     }
-    Ok(canonical)
+    Ok(without_verbatim_disk_prefix(canonical))
+}
+
+/// `canonicalize` returns `\\?\C:\...` paths on Windows. The .NET Framework
+/// practice game exits at startup when launched through one, so hand it the
+/// equivalent plain drive path. Other verbatim forms (UNC, device) are kept.
+fn without_verbatim_disk_prefix(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy();
+    let Some(rest) = text.strip_prefix(r"\\?\") else {
+        return path;
+    };
+    let bytes = rest.as_bytes();
+    let plain_drive_path = bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && bytes[2] == b'\\';
+    if plain_drive_path && rest.len() < 260 {
+        PathBuf::from(rest)
+    } else {
+        path
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn verbatim_drive_paths_become_plain_for_the_practice_game() {
+        assert_eq!(
+            without_verbatim_disk_prefix(PathBuf::from(r"\\?\E:\review\game.exe")),
+            PathBuf::from(r"E:\review\game.exe")
+        );
+        assert_eq!(
+            without_verbatim_disk_prefix(PathBuf::from(r"\\?\UNC\host\share\game.exe")),
+            PathBuf::from(r"\\?\UNC\host\share\game.exe")
+        );
+        assert_eq!(
+            without_verbatim_disk_prefix(PathBuf::from(r"E:\review\game.exe")),
+            PathBuf::from(r"E:\review\game.exe")
+        );
+    }
     use sha2::{Digest, Sha256};
 
     fn write_fixture(root: &Path) -> PathBuf {
@@ -278,7 +314,11 @@ mod tests {
 
         let resolved = resolve_synthetic_review_target(&control, root.path())
             .expect("attested co-located target");
-        assert_eq!(resolved, expected.canonicalize().expect("canonical target"));
+        assert_eq!(
+            resolved.canonicalize().expect("canonical resolved target"),
+            expected.canonicalize().expect("canonical target")
+        );
+        assert!(!resolved.to_string_lossy().starts_with(r"\\?\"));
     }
 
     #[test]

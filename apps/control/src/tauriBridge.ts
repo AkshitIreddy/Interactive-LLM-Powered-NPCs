@@ -1901,7 +1901,34 @@ export async function prepareSyntheticReviewTarget(
     );
   }
   const { invoke } = await import("@tauri-apps/api/core");
-  return invoke<PreparedSyntheticReviewTarget>(availability.commandName);
+  try {
+    return await invoke<PreparedSyntheticReviewTarget>(availability.commandName);
+  } catch (error) {
+    throw new Error(
+      commandErrorMessage(error, "The practice game could not be launched."),
+    );
+  }
+}
+
+/**
+ * Native commands reject with a serialized `CommandError` such as
+ * `{ runtime: { message } }`, not an `Error`, so pull the message out.
+ */
+export function commandErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  if (error && typeof error === "object") {
+    for (const value of Object.values(error)) {
+      if (
+        value &&
+        typeof value === "object" &&
+        typeof (value as { message?: unknown }).message === "string"
+      ) {
+        return (value as { message: string }).message;
+      }
+    }
+  }
+  return fallback;
 }
 
 /**
