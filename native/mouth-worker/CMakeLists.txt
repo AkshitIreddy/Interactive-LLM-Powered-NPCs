@@ -8,6 +8,8 @@ option(NPC_MOUTH_WORKER_BUILD_SYNTHETIC_PROOF "Build the synthetic proof generat
 option(NPC_MOUTH_WORKER_BUILD_HEADLESS_REALISTIC_PROOF
        "Build the real OpenSeeFace + audio headless render proof" ON)
 option(NPC_MOUTH_WORKER_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
+option(NPC_MOUTH_WORKER_REGISTER_INTERACTIVE_WINDOWS_TESTS
+       "Register Windows tests that launch the GUI worker or create D3D devices" OFF)
 
 add_library(npc_mouth_worker STATIC
     src/compositor.cpp
@@ -141,9 +143,15 @@ if(BUILD_TESTING AND NPC_MOUTH_WORKER_BUILD_TESTS)
                 target_compile_options(npc_mouth_worker_windows_service_smoke_tests PRIVATE /WX)
             endif()
         endif()
-        add_test(NAME npc_mouth_worker_windows_service_smoke_tests
-                 COMMAND npc_mouth_worker_windows_service_smoke_tests
-                         $<TARGET_FILE:npc-mouth-worker>)
+        # Launches the GUI-subsystem worker and creates a D3D11 device, so it
+        # is never part of the default CTest run (display-safety requirement).
+        if(NPC_MOUTH_WORKER_REGISTER_INTERACTIVE_WINDOWS_TESTS)
+            add_test(NAME npc_mouth_worker_windows_service_smoke_tests
+                     COMMAND npc_mouth_worker_windows_service_smoke_tests
+                             $<TARGET_FILE:npc-mouth-worker>)
+            set_tests_properties(npc_mouth_worker_windows_service_smoke_tests
+                                 PROPERTIES LABELS interactive_windows_smoke)
+        endif()
     endif()
 endif()
 

@@ -978,7 +978,7 @@ function Invoke-Tests {
             Write-Step 'Building the current-frame mouth-worker tests'
             Invoke-External -FilePath 'cmake' -ArgumentList @('--build', $mouthBuild, '--config', 'Debug', '--parallel', '2')
             Write-Step 'Running the current-frame mouth-worker tests'
-            Invoke-External -FilePath 'ctest' -ArgumentList @('--test-dir', $mouthBuild, '-C', 'Debug', '--output-on-failure')
+            Invoke-External -FilePath 'ctest' -ArgumentList @('--test-dir', $mouthBuild, '-C', 'Debug', '--output-on-failure', '-LE', 'interactive_windows_smoke')
         }
     } else {
         Add-Failure 'Native mouth-worker tests: native/mouth-worker/CMakeLists.txt was not found.'
