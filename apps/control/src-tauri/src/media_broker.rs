@@ -932,50 +932,53 @@ struct SubmitOcclusionPayload {
     source_device_generation: u64,
     #[prost(uint64, tag = "9")]
     track_epoch: u64,
+    // Tags 10-13 must match native/media-broker/src/ipc.cpp (submit_occlusion).
     #[prost(uint64, tag = "10")]
-    source_frame_qpc: u64,
-    #[prost(uint64, tag = "11")]
     actor_id: u64,
-    #[prost(uint64, tag = "12")]
+    #[prost(uint64, tag = "11")]
     track_id: u64,
-    #[prost(uint64, tag = "13")]
+    #[prost(uint64, tag = "12")]
     source_geometry_epoch: u64,
+    #[prost(uint64, tag = "13")]
+    source_frame_qpc: u64,
 }
 
 #[derive(Clone, PartialEq, Message)]
 struct SharedTexturePayload {
-    #[prost(uint32, tag = "1")]
-    schema_version: u32,
-    #[prost(bytes = "vec", tag = "2")]
-    session_nonce: Vec<u8>,
-    #[prost(string, tag = "3")]
-    session_id: String,
-    #[prost(fixed64, tag = "4")]
-    lease_nonce_high: u64,
-    #[prost(fixed64, tag = "5")]
-    lease_nonce_low: u64,
-    #[prost(uint32, tag = "6")]
-    worker_process_id: u32,
-    #[prost(fixed64, tag = "7")]
-    worker_process_creation_time: u64,
-    #[prost(string, tag = "8")]
-    worker_executable_name: String,
-    #[prost(fixed64, tag = "9")]
+    // Tags and wire types must match encode_texture/decode_texture in
+    // native/media-broker/src/ipc.cpp.
+    #[prost(uint64, tag = "1")]
     source_process_handle_value: u64,
-    #[prost(fixed64, tag = "10")]
+    #[prost(uint64, tag = "2")]
     adapter_luid: u64,
-    #[prost(fixed64, tag = "11")]
+    #[prost(uint64, tag = "3")]
     keyed_mutex_acquire_key: u64,
-    #[prost(fixed64, tag = "12")]
+    #[prost(uint64, tag = "4")]
     keyed_mutex_release_key: u64,
-    #[prost(uint32, tag = "13")]
+    #[prost(uint32, tag = "5")]
     width: u32,
-    #[prost(uint32, tag = "14")]
+    #[prost(uint32, tag = "6")]
     height: u32,
-    #[prost(uint32, tag = "15")]
-    stride_bytes: u32,
-    #[prost(uint32, tag = "16")]
+    #[prost(uint32, tag = "7")]
     dxgi_format: u32,
+    #[prost(uint32, tag = "8")]
+    schema_version: u32,
+    #[prost(bytes = "vec", tag = "9")]
+    session_nonce: Vec<u8>,
+    #[prost(string, tag = "10")]
+    session_id: String,
+    #[prost(fixed64, tag = "11")]
+    lease_nonce_high: u64,
+    #[prost(fixed64, tag = "12")]
+    lease_nonce_low: u64,
+    #[prost(uint32, tag = "13")]
+    worker_process_id: u32,
+    #[prost(fixed64, tag = "14")]
+    worker_process_creation_time: u64,
+    #[prost(string, tag = "15")]
+    worker_executable_name: String,
+    #[prost(uint32, tag = "16")]
+    stride_bytes: u32,
     #[prost(uint32, tag = "17")]
     alpha_mode: u32,
     #[prost(uint64, tag = "18")]
@@ -2053,8 +2056,9 @@ struct DebugSyntheticTargetMetadata {
     product_lip_sync: Option<bool>,
     #[serde(default)]
     visual_mode: Option<String>,
+    // Static fixtures report -1 (no content frame); only schema 2 uses it.
     #[serde(default)]
-    content_frame_index: Option<u32>,
+    content_frame_index: Option<i64>,
     #[serde(default)]
     content_frame_sha256: Option<String>,
 }
@@ -4061,7 +4065,9 @@ fn decode_debug_synthetic_target_metadata(
             && metadata.source_mouth_articulation == Some(false)
             && metadata.product_lip_sync == Some(false)
             && metadata.visual_mode.as_deref() == Some("moving-source-controlled-idle-v2")
-            && metadata.content_frame_index.is_some_and(|index| index < 42)
+            && metadata
+                .content_frame_index
+                .is_some_and(|index| (0..42).contains(&index))
             && metadata
                 .content_frame_sha256
                 .as_deref()
@@ -5257,6 +5263,11 @@ fn decode_presentation_receipt(
     response: &BrokerResponse,
     lease: &VisualSourceLease,
 ) -> Result<BrokerPresentationReceipt, MediaBrokerError> {
+    // Envelope-level gates (deadline, target state) reject before the patch
+    // handler writes a receipt; report their status instead of "malformed".
+    if response.payload.is_empty() && response.status() != BrokerStatus::Ok {
+        return Err(MediaBrokerError::Remote(response.status()));
+    }
     if response.payload.len() != 8 && response.payload.len() != 12 {
         return Err(MediaBrokerError::Malformed);
     }
@@ -6299,6 +6310,111 @@ pub enum MediaBrokerError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Reads a flat protobuf message as (tag, wire type, value). Fixed64 and
+    /// varint fields carry their value; length-delimited fields their length.
+    fn wire_fields(mut bytes: &[u8]) -> Vec<(u32, u64, u64)> {
+        fn varint(bytes: &mut &[u8]) -> u64 {
+            let mut value = 0_u64;
+            for shift in (0..64).step_by(7) {
+                let byte = bytes[0];
+                *bytes = &bytes[1..];
+                value |= u64::from(byte & 0x7f) << shift;
+                if byte & 0x80 == 0 {
+                    break;
+                }
+            }
+            value
+        }
+        let mut fields = Vec::new();
+        while !bytes.is_empty() {
+            let key = varint(&mut bytes);
+            let (tag, wire) = ((key >> 3) as u32, key & 7);
+            let value = match wire {
+                0 => varint(&mut bytes),
+                1 => {
+                    let value = u64::from_le_bytes(bytes[..8].try_into().unwrap());
+                    bytes = &bytes[8..];
+                    value
+                }
+                2 => {
+                    let length = varint(&mut bytes) as usize;
+                    bytes = &bytes[length..];
+                    length as u64
+                }
+                other => panic!("unexpected wire type {other}"),
+            };
+            fields.push((tag, wire, value));
+        }
+        fields
+    }
+
+    fn varint_fields(bytes: &[u8]) -> Vec<(u32, u64)> {
+        wire_fields(bytes)
+            .into_iter()
+            .filter(|(_, wire, _)| *wire == 0)
+            .map(|(tag, _, value)| (tag, value))
+            .collect()
+    }
+
+    #[test]
+    fn shared_texture_tags_match_native_broker_decoder() {
+        // native/media-broker/src/ipc.cpp decode_texture: varints 1-8, 13, 16-18;
+        // bytes 9; string 10, 15; fixed64 11, 12, 14.
+        let payload = SharedTexturePayload {
+            source_process_handle_value: 601,
+            adapter_luid: 602,
+            keyed_mutex_acquire_key: 603,
+            keyed_mutex_release_key: 604,
+            width: 605,
+            height: 606,
+            dxgi_format: 607,
+            schema_version: 1,
+            session_nonce: vec![7; 32],
+            session_id: "session".into(),
+            lease_nonce_high: 611,
+            lease_nonce_low: 612,
+            worker_process_id: 613,
+            worker_process_creation_time: 614,
+            worker_executable_name: "npc-mouth-worker.exe".into(),
+            stride_bytes: 616,
+            alpha_mode: 617,
+            expires_qpc: 618,
+        };
+        let fields = wire_fields(&payload.encode_to_vec());
+        let expected = [
+            (1, 0, 601), (2, 0, 602), (3, 0, 603), (4, 0, 604), (5, 0, 605), (6, 0, 606),
+            (7, 0, 607), (8, 0, 1), (9, 2, 32), (10, 2, 7), (11, 1, 611), (12, 1, 612),
+            (13, 0, 613), (14, 1, 614), (15, 2, 20), (16, 0, 616), (17, 0, 617), (18, 0, 618),
+        ];
+        for field in expected {
+            assert!(fields.contains(&field), "missing {field:?}: {fields:?}");
+        }
+    }
+
+    #[test]
+    fn occlusion_payload_tags_match_native_broker_decoder() {
+        // native/media-broker/src/ipc.cpp decodes submit_occlusion as
+        // 9 track_epoch, 10 actor_id, 11 track_id, 12 geometry epoch, 13 frame QPC.
+        let payload = SubmitOcclusionPayload {
+            face_confidence: 0.9,
+            landmark_confidence: 0.8,
+            visibility_ratio: 0.7,
+            mouth_occluded: false,
+            measured_qpc: 501,
+            source_frame_sequence: 502,
+            source_device_generation: 503,
+            track_epoch: 509,
+            actor_id: 510,
+            track_id: 511,
+            source_geometry_epoch: 512,
+            source_frame_qpc: 513,
+        };
+        let fields = varint_fields(&payload.encode_to_vec());
+        for (tag, value) in [(5, 501), (6, 502), (7, 503), (9, 509), (10, 510), (11, 511), (12, 512), (13, 513)] {
+            assert!(fields.contains(&(tag, value)), "tag {tag} should carry {value}: {fields:?}");
+        }
+    }
 
     #[test]
     fn protobuf_codec_matches_health_envelope_contract() {
@@ -7442,6 +7558,15 @@ mod tests {
         .expect("valid task metadata");
         assert_eq!(accepted.native_window, 4660);
         assert_eq!(accepted.process_id, 77);
+
+        // The static practice game reports "no content frame" as -1.
+        let mut static_without_frame = fixture.clone();
+        static_without_frame["content_frame_index"] = serde_json::json!(-1);
+        static_without_frame["frames_per_second"] = serde_json::json!(30);
+        assert!(decode_debug_synthetic_target_metadata(
+            &serde_json::to_vec(&static_without_frame).expect("serialize static metadata")
+        )
+        .is_ok());
 
         for (field, replacement) in [
             ("state", serde_json::json!("ready")),
