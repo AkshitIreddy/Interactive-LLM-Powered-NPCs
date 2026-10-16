@@ -96,6 +96,7 @@ const TESTING_TTS_PROVIDER_ID: &str = "testing";
 const TESTING_TTS_MODEL_ID: &str = "testing-synth-v1";
 const TESTING_TTS_VOICE_ID: &str = "testing-voice-1";
 const TESTING_TTS_SAMPLE_RATE_HZ: u32 = 24_000;
+const TESTING_TTS_FRAMES_PER_CHARACTER: usize = 1_440;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -3888,7 +3889,11 @@ impl TtsSession for TestingSynthTtsSession {
         if cancellation.is_cancelled() {
             return Err(ProviderError::cancelled(&self.descriptor.id));
         }
-        let frames = (request.text.chars().count().max(1) * 240).clamp(2_400, 48_000);
+        // Roughly speech-paced (60 ms per character, 0.4-8 s) so lip-sync has
+        // a whole sentence to follow, with ~4.5 Hz syllable-like loudness
+        // pulses that open and close the mouth like real speech would.
+        let frames = (request.text.chars().count().max(1) * TESTING_TTS_FRAMES_PER_CHARACTER)
+            .clamp(9_600, 192_000);
         let mut pcm_s16le = Vec::with_capacity(frames * 2);
         let mut phase = 0.0_f64;
         for frame in 0..frames {
@@ -3897,7 +3902,9 @@ impl TtsSession for TestingSynthTtsSession {
             phase += frequency / TESTING_TTS_SAMPLE_RATE_HZ as f64;
             let attack = (frame as f64 / 480.0).min(1.0);
             let release = ((frames - frame) as f64 / 480.0).min(1.0);
-            let envelope = attack.min(release);
+            let seconds = frame as f64 / TESTING_TTS_SAMPLE_RATE_HZ as f64;
+            let syllable = 0.5 - 0.5 * (2.0 * std::f64::consts::PI * 4.5 * seconds).cos();
+            let envelope = attack.min(release) * (0.15 + 0.85 * syllable);
             let sample =
                 (8_192.0 * envelope * (2.0 * std::f32::consts::PI as f64 * phase).sin()) as i16;
             pcm_s16le.extend_from_slice(&sample.to_le_bytes());
@@ -4305,7 +4312,10 @@ mod tests {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].sentence_id, 7);
         assert_eq!(records[0].sink, "testingLocal");
-        assert_eq!(records[0].source_frames, 34 * 240);
+        assert_eq!(
+            records[0].source_frames,
+            (34 * TESTING_TTS_FRAMES_PER_CHARACTER) as u64
+        );
         assert!(!records[0].submitted);
         assert!(!records[0].drained);
         assert!(!records[0].completed);
