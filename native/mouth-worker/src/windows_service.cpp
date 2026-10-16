@@ -17,9 +17,11 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <cwctype>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <optional>
 #include <string>
@@ -440,6 +442,71 @@ private:
     return response;
 }
 
+// Review aid. The broker shows residuals through an overlay that is excluded from
+// screen capture, so on-screen pixels cannot show the mouth. When
+// NPC_MOUTH_WORKER_DEBUG_RESIDUAL_DIR names a directory, each proposed residual is
+// written there as raw premultiplied BGRA plus a JSON sidecar, with an occasional
+// copy of the source frame it was rendered over, for offline compositing. The
+// worker runs with an allowlisted environment and only debug control-app builds
+// forward this variable, so product builds never dump.
+class DebugResidualDump final {
+public:
+    void record(const CpuFrame& source, const ResidualPatch& patch) {
+        if (!directory_ || written_ >= maximum_dumps) return;
+        const auto index = written_++;
+        char stem[16]{};
+        std::snprintf(stem, sizeof(stem), "%05u", static_cast<unsigned>(index));
+        const bool with_source = index % source_every == 0U && !source.bgra.empty();
+        write_bytes(*directory_ / (std::string(stem) + "-residual.bgra"), patch.premultiplied_bgra);
+        if (with_source) write_bytes(*directory_ / (std::string(stem) + "-source.bgra"), source.bgra);
+        const auto& bounds = patch.normalized_bounds;
+        const auto& mouth = patch.coefficients;
+        std::ofstream json(*directory_ / (std::string(stem) + ".json"), std::ios::trunc);
+        json << "{\"frame_sequence\":" << patch.source_frame.sequence
+             << ",\"produced_at_ns\":" << patch.produced_at_ns
+             << ",\"width\":" << patch.width << ",\"height\":" << patch.height
+             << ",\"stride_bytes\":" << patch.stride_bytes
+             << ",\"bounds\":[" << bounds.x << "," << bounds.y << "," << bounds.width << ","
+             << bounds.height << "]"
+             << ",\"jaw_open\":" << mouth.jaw_open << ",\"lip_close\":" << mouth.lip_close
+             << ",\"source\":" << (with_source ? "true" : "false")
+             << ",\"source_width\":" << source.lease.width
+             << ",\"source_height\":" << source.lease.height
+             << ",\"source_stride_bytes\":" << source.lease.stride_bytes << "}\n";
+    }
+
+    [[nodiscard]] bool enabled() const noexcept { return directory_.has_value(); }
+
+private:
+    static constexpr std::uint32_t maximum_dumps = 600U;
+    static constexpr std::uint32_t source_every = 25U;
+
+    static std::optional<std::filesystem::path> configured_directory() {
+        std::array<wchar_t, 1024> value{};
+        const DWORD length = GetEnvironmentVariableW(L"NPC_MOUTH_WORKER_DEBUG_RESIDUAL_DIR",
+                                                     value.data(), static_cast<DWORD>(value.size()));
+        if (length == 0U || length >= value.size()) return std::nullopt;
+        std::filesystem::path directory(std::wstring(value.data(), length));
+        std::error_code error;
+        std::filesystem::create_directories(directory, error);
+        if (error) return std::nullopt;
+        return directory;
+    }
+
+    static void write_bytes(const std::filesystem::path& path, const std::vector<std::uint8_t>& bytes) {
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    }
+
+    std::optional<std::filesystem::path> directory_{configured_directory()};
+    std::uint32_t written_{};
+};
+
+DebugResidualDump& debug_residual_dump() {
+    static DebugResidualDump dump;
+    return dump;
+}
+
 void render_resolved_current_frame(MouthProductRuntime& runtime,
                                    WindowsResidualRenderer& renderer,
                                    WorkerResponseV1& response,
@@ -510,6 +577,8 @@ void render_resolved_current_frame(MouthProductRuntime& runtime,
         ":audioskew_ns=" + std::to_string(audio_skew_ns);
     ProductFrameRequest request{};
     request.identity = identity;
+    std::optional<CpuFrame> debug_source;
+    if (debug_residual_dump().enabled()) debug_source = source;
     request.source = std::move(source);
     request.landmarks = std::move(landmarks);
     request.appearance = appearance;
@@ -544,6 +613,7 @@ void render_resolved_current_frame(MouthProductRuntime& runtime,
         }
         return;
     }
+    if (debug_source) debug_residual_dump().record(*debug_source, *response.receipt.residual);
     std::string failure;
     const auto texture = renderer.retain_residual(*response.receipt.residual,
                                                    source_lease, failure);

@@ -76,7 +76,12 @@ const OPENSEEFACE_ORT_SHARED_SHA256: &str =
     "7a71dbee513692aeb0bd2346a50ae0edd28c8b34defc17254605a29e81c60569";
 const PROVIDER_LOAD_SELF_TEST_TIMEOUT: Duration = Duration::from_secs(30);
 const PROVIDER_LOAD_SELF_TEST_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
-const VISUAL_COORDINATOR_INTERVAL: Duration = Duration::from_millis(67);
+// The worker admits at most 15 landmark signals per second, timed by inference
+// completion, so a 67 ms tick lost every other frame to inference-latency
+// jitter. 80 ms clears that minimum with margin while staying well inside the
+// broker's 120 ms residual hold, so the overlay stays up between updates
+// instead of reappearing (which the broker caps at 3 per second).
+const VISUAL_COORDINATOR_INTERVAL: Duration = Duration::from_millis(80);
 const VISUAL_FRAME_DEADLINE_NS: i64 = 150_000_000;
 /// Kept below the worker's 80 ms audio-skew window: the drive is stamped just
 /// after the frame is bound, so an older frame could never satisfy the worker.
@@ -84,6 +89,58 @@ const VISUAL_FRAME_DEADLINE_NS: i64 = 150_000_000;
 const REVIEW_VISUAL_CAPTURE_MAX_AGE_NS: i64 = 70_000_000;
 #[cfg(debug_assertions)]
 const REVIEW_VISUAL_INFERENCE_BUDGET_NS: i64 = 220_000_000;
+
+/// Debug builds only: when `NPC_DEBUG_VISUAL_TIMING_LOG` names a file, each
+/// practice-game frame appends one line with the time spent in every pipeline
+/// stage, so cadence problems can be traced without a debugger attached.
+#[cfg(debug_assertions)]
+struct DebugStageClock {
+    log: Option<(std::path::PathBuf, std::time::Instant, std::time::Instant, String)>,
+}
+
+#[cfg(debug_assertions)]
+impl DebugStageClock {
+    fn start(request_id: u64) -> Self {
+        let log = std::env::var_os("NPC_DEBUG_VISUAL_TIMING_LOG").map(|path| {
+            let now = std::time::Instant::now();
+            (path.into(), now, now, format!("request={request_id}"))
+        });
+        Self { log }
+    }
+
+    fn mark(&mut self, stage: &str) {
+        if let Some((_, _, last, line)) = self.log.as_mut() {
+            let now = std::time::Instant::now();
+            line.push_str(&format!(" {stage}={:.1}", (now - *last).as_secs_f64() * 1000.0));
+            *last = now;
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+impl Drop for DebugStageClock {
+    fn drop(&mut self) {
+        use std::io::Write as _;
+        if let Some((path, started, _, line)) = self.log.take() {
+            let total = started.elapsed().as_secs_f64() * 1000.0;
+            if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                let _ = writeln!(file, "{line} total={total:.1}");
+            }
+        }
+    }
+}
+
+#[cfg(not(debug_assertions))]
+struct DebugStageClock;
+
+#[cfg(not(debug_assertions))]
+impl DebugStageClock {
+    fn start(_request_id: u64) -> Self {
+        Self
+    }
+
+    fn mark(&mut self, _stage: &str) {}
+}
 const MAX_VISUAL_RECEIPT_HISTORY: usize = 128;
 #[cfg(debug_assertions)]
 const REVIEW_DETECTOR_SHA256: &str =
@@ -2023,14 +2080,17 @@ impl MouthWorkerSupervisor {
         if request_id == 0 || sentence_id == 0 || now_ns <= 0 {
             return Err(VisualRuntimeError::InvalidRequest);
         }
+        let mut clock = DebugStageClock::start(request_id);
         // Cheapest check first: one broker query tells an idle, finished or
         // not-yet-started sentence lease apart from the sentence being heard
         // now, so the 16-lease probe never does expensive work for idle ones.
         let liveness = self.query_audio_envelope(audio_binding).await?;
+        clock.mark("liveness");
         if !visual_audio_envelope_is_presentable(&liveness) {
             return Err(VisualRuntimeError::AudioAuthority);
         }
         let (evidence, generation) = self.project_owned_review_capture().await?;
+        clock.mark("capture_evidence");
         if generation == 0 || audio_binding.generation == 0 {
             return Err(VisualRuntimeError::AudioAuthority);
         }
@@ -2038,16 +2098,20 @@ impl MouthWorkerSupervisor {
         let resources = self
             .review_turn_resources(evidence.selected_process_id, generation)
             .await?;
+        clock.mark("resources");
         let (client, worker) = self.ensure_ready(generation).await?;
+        clock.mark("ensure_ready");
         self.configure_project_owned_review_provider(&client, generation, &resources.launch)
             .await?;
         self.configure_review_atlas(&client, generation, resources.atlas.as_ref())
             .await?;
+        clock.mark("configure");
 
         // Provider startup is the expensive cold-path operation. Read the
         // current causal envelope after it is ready, then lease the exact frame
         // last so audio/frame skew is dominated only by the two broker calls.
         let audio = self.query_audio_envelope(audio_binding).await?;
+        clock.mark("audio");
 
         let track = VisualTrackBinding {
             actor_id: review_actor_id,
@@ -2062,6 +2126,7 @@ impl MouthWorkerSupervisor {
                 stage: "allocate_visual_source",
                 source,
             })?;
+        clock.mark("allocate");
         let captured_ns = match qpc_to_ns(lease.source_frame_qpc, &lease) {
             Ok(value) => value,
             Err(error) => {
@@ -2181,6 +2246,7 @@ impl MouthWorkerSupervisor {
                 command,
             )
             .await;
+        clock.mark("worker_render");
         let response = match render {
             Ok(value) => value,
             Err(error) => {
@@ -2198,6 +2264,7 @@ impl MouthWorkerSupervisor {
                 response, request_id, &track, &lease, &worker, &client, generation,
             )
             .await;
+        clock.mark("occlude_and_present");
         let release = self
             .broker
             .release_visual_source(&lease)
@@ -2206,6 +2273,7 @@ impl MouthWorkerSupervisor {
                 stage: "release_visual_source",
                 source,
             });
+        clock.mark("release");
         let mut receipt = presentation?;
         release?;
         receipt.pixel_source = Some(evidence.pixel_source);
@@ -5026,16 +5094,7 @@ fn drive_from_visual_audio_envelope(
     // This is intentionally an amplitude-only procedural drive. The broker's
     // eight bins are temporal energy evidence, not phoneme classes; mapping
     // them to invented visemes would overclaim the signal.
-    let coefficients = [
-        (rms * 1.10).clamp(0.0, 1.0),
-        (1.0 - peak * 1.40).clamp(0.0, 1.0),
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        (peak * 0.15).clamp(0.0, 1.0),
-        (peak * 0.20).clamp(0.0, 1.0),
-    ];
+    let coefficients = envelope_energy_coefficients(rms, peak);
     Ok(MouthDrive::CausalEnvelopeCoefficients {
         stream_generation,
         segment_id: stable_nonzero_id(&envelope.stream_id),
@@ -5047,6 +5106,31 @@ fn drive_from_visual_audio_envelope(
         playback_at_ns: render_at_ns,
         coefficients,
     })
+}
+
+/// Mouth coefficients from one envelope bin's linear RMS and peak.
+///
+/// Mirrors the energy curve of the worker's own PCM fallback
+/// (`compositor.cpp`): speech is commonly normalized far below full scale, so a
+/// linear amplitude map left ordinary -20..-30 dBFS speech with a nearly closed
+/// mouth. Opening starts at -48 dBFS and is full around -18 dBFS. The bins
+/// carry no spectral shape, so rounding and spreading stay neutral.
+fn envelope_energy_coefficients(rms: f64, peak: f64) -> [f64; 8] {
+    let rms_db = if rms > 1.0e-9 { 20.0 * rms.log10() } else { -120.0 };
+    let open = ((rms_db + 48.0) / 30.0).clamp(0.0, 1.0);
+    // A transient peak well above the RMS reads as a plosive release.
+    let crest = if rms > 1.0e-9 { (peak / rms).clamp(1.0, 4.0) } else { 1.0 };
+    let release = ((crest - 1.414) / 2.0).clamp(0.0, 1.0);
+    [
+        (open * 0.88).clamp(0.0, 1.0),
+        (1.0 - open * 1.8).clamp(0.0, 1.0),
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        (open * (0.08 + 0.12 * release)).clamp(0.0, 1.0),
+        (open * 0.55).clamp(0.0, 1.0),
+    ]
 }
 
 fn select_visual_speech_cue(
@@ -6122,6 +6206,13 @@ async fn connect_worker_pipe(_pipe: &str) -> Result<std::fs::File, VisualRuntime
     Err(VisualRuntimeError::Unsupported)
 }
 
+/// Debug app builds let the worker dump residual patches to this directory for offline
+/// review, since the broker overlay is excluded from screen capture.
+#[cfg(all(windows, debug_assertions))]
+const DEBUG_WORKER_ENVIRONMENT: &[&str] = &["NPC_MOUTH_WORKER_DEBUG_RESIDUAL_DIR"];
+#[cfg(all(windows, not(debug_assertions)))]
+const DEBUG_WORKER_ENVIRONMENT: &[&str] = &[];
+
 #[cfg(windows)]
 fn minimal_environment_block() -> Vec<u16> {
     let mut entries = [
@@ -6156,6 +6247,7 @@ fn minimal_environment_block() -> Vec<u16> {
         "WINDIR",
     ]
     .into_iter()
+    .chain(DEBUG_WORKER_ENVIRONMENT.iter().copied())
     .filter_map(|key| {
         std::env::var_os(key).map(|value| format!("{key}={}", value.to_string_lossy()))
     })
@@ -7305,6 +7397,30 @@ mod tests {
             FREQUENCY,
             authority_qpc_ns + 100_000_000,
         ));
+    }
+
+    #[test]
+    fn envelope_energy_opens_the_mouth_for_ordinary_speech_levels() {
+        let silent = envelope_energy_coefficients(0.0, 0.0);
+        assert_eq!(silent[0], 0.0);
+        assert_eq!(silent[1], 1.0);
+        let below_gate = envelope_energy_coefficients(0.003, 0.006);
+        assert_eq!(below_gate[0], 0.0, "-50 dBFS is below the speech gate");
+        // -30 dBFS hosted speech must visibly open, like the worker's PCM path.
+        let quiet = envelope_energy_coefficients(0.0316, 0.06);
+        assert!(quiet[0] > 0.45 && quiet[0] < 0.6, "{quiet:?}");
+        // -15 dBFS (the testing voice's syllable crest) is a full opening.
+        let loud = envelope_energy_coefficients(0.177, 0.25);
+        assert!((loud[0] - 0.88).abs() < 1e-9, "{loud:?}");
+        assert_eq!(loud[1], 0.0);
+        let mut previous = -1.0;
+        for step in 0..=60 {
+            let rms = 10_f64.powf((-60.0 + f64::from(step)) / 20.0);
+            let value = envelope_energy_coefficients(rms, rms * 1.414);
+            assert!(value.iter().all(|c| (0.0..=1.0).contains(c)), "{value:?}");
+            assert!(value[0] >= previous, "jaw must not fall as level rises");
+            previous = value[0];
+        }
     }
 
     #[test]
