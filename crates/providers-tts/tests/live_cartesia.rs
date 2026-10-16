@@ -14,10 +14,10 @@ use std::{
 
 use async_trait::async_trait;
 use npc_providers_tts::{
-    AudioFormat, CartesiaConfig, CartesiaProvider, CartesiaWebSocketTransport, CredentialResolveError,
-    HostedTtsProviderId, ProviderCredentialResolver, SemanticClausePolicy, SensitiveString,
-    SessionIdentity, StreamingTtsProvider, TtsEvent, TtsSessionRequest, VoiceBinding,
-    VoiceBindings, CARTESIA_QUALIFIED_AUDIO_FORMAT, CARTESIA_QUALIFIED_MODEL_ID,
+    AudioFormat, CartesiaConfig, CartesiaProvider, CartesiaWebSocketTransport,
+    CredentialResolveError, HostedTtsProviderId, ProviderCredentialResolver, SemanticClausePolicy,
+    SensitiveString, SessionIdentity, StreamingTtsProvider, TtsEvent, TtsSessionRequest,
+    VoiceBinding, VoiceBindings, CARTESIA_QUALIFIED_AUDIO_FORMAT, CARTESIA_QUALIFIED_MODEL_ID,
     CARTESIA_QUALIFIED_STOCK_VOICE_ID,
 };
 use serde_json::json;
@@ -28,7 +28,8 @@ const EVIDENCE_PATH_ENV: &str = "CARTESIA_LIVE_METRICS_PATH";
 const AUDIO_PATH_ENV: &str = "CARTESIA_LIVE_AUDIO_PATH";
 const PROVIDER_ID: HostedTtsProviderId = HostedTtsProviderId::Cartesia;
 const VOICE_INTENT: &str = "qualification.stock.cartesia";
-const FIXTURE_TEXT: &str = "The east pier is clear. If you are heading upriver, leave before the fog settles.";
+const FIXTURE_TEXT: &str =
+    "The east pier is clear. If you are heading upriver, leave before the fog settles.";
 
 #[derive(Clone)]
 struct FileCredential {

@@ -867,24 +867,24 @@ impl NativeActorLockBusV1 {
             (
                 NativeActorSelectionAuthorityV1::SealedNativeClick,
                 NativeActorLockProvenanceV1::SealedNativeClick {
-                visual_pack_id,
-                visual_pack_admission_sha256,
-                native_click_receipt_sha256,
-                candidate_set_sha256,
-                receipt_nonce_high,
-                receipt_nonce_low,
+                    visual_pack_id,
+                    visual_pack_admission_sha256,
+                    native_click_receipt_sha256,
+                    candidate_set_sha256,
+                    receipt_nonce_high,
+                    receipt_nonce_low,
                 },
             )
             | (
                 NativeActorSelectionAuthorityV1::Explicit,
                 NativeActorLockProvenanceV1::UserAssignedCharacterPack {
-                visual_pack_id,
-                visual_pack_admission_sha256,
-                native_click_receipt_sha256,
-                candidate_set_sha256,
-                receipt_nonce_high,
-                receipt_nonce_low,
-                ..
+                    visual_pack_id,
+                    visual_pack_admission_sha256,
+                    native_click_receipt_sha256,
+                    candidate_set_sha256,
+                    receipt_nonce_high,
+                    receipt_nonce_low,
+                    ..
                 },
             ) => (
                 visual_pack_id,

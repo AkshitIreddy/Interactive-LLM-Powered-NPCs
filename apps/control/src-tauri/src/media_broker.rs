@@ -3972,6 +3972,11 @@ fn read_debug_synthetic_target_candidates(
                     Err(MediaBrokerError::DebugSyntheticTargetClosed)
                 }
                 (true, false, _) => Err(MediaBrokerError::DebugSyntheticMetadataUnavailable),
+                // The primary handoff says the fixture closed; a missing
+                // fallback file does not make that "metadata unavailable".
+                (false, true, MediaBrokerError::DebugSyntheticMetadataUnavailable) => {
+                    Err(MediaBrokerError::DebugSyntheticTargetClosed)
+                }
                 (false, true, error) => Err(error),
                 (_, _, error) => Err(error),
             };
@@ -4203,6 +4208,102 @@ impl Drop for BrokerChild {
     }
 }
 
+/// Launches the suspended broker with exactly one inheritable handle: the log
+/// file, bound to its stdout and stderr. `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`
+/// restricts inheritance to that handle, so no other parent handle (pipes,
+/// credentials, files) can leak into the sidecar. Returns the `CreateProcessW`
+/// result (0 on any failure, in which case nothing is left open).
+#[cfg(windows)]
+fn create_suspended_with_log_handle(
+    application: *const u16,
+    command_line: *mut u16,
+    environment: *const std::ffi::c_void,
+    current_directory: *const u16,
+    log: &std::fs::File,
+    process: &mut windows_sys::Win32::System::Threading::PROCESS_INFORMATION,
+) -> i32 {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, DuplicateHandle, DUPLICATE_SAME_ACCESS, HANDLE,
+    };
+    use windows_sys::Win32::System::Threading::{
+        CreateProcessW, DeleteProcThreadAttributeList, GetCurrentProcess,
+        InitializeProcThreadAttributeList, UpdateProcThreadAttribute, CREATE_NO_WINDOW,
+        CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT,
+        PROC_THREAD_ATTRIBUTE_HANDLE_LIST, STARTF_USESTDHANDLES, STARTUPINFOEXW,
+    };
+
+    // SAFETY: every pointer argument is a live, NUL-terminated buffer owned by
+    // the caller for the whole call. The duplicated handle and the attribute
+    // list are created and released inside this function on every path, and the
+    // list storage is 8-byte aligned and outlives its last use.
+    unsafe {
+        let current = GetCurrentProcess();
+        let mut inheritable: HANDLE = std::ptr::null_mut();
+        if DuplicateHandle(
+            current,
+            log.as_raw_handle() as HANDLE,
+            current,
+            &mut inheritable,
+            0,
+            1,
+            DUPLICATE_SAME_ACCESS,
+        ) == 0
+        {
+            return 0;
+        }
+        let mut list_size = 0_usize;
+        InitializeProcThreadAttributeList(std::ptr::null_mut(), 1, 0, &mut list_size);
+        if list_size == 0 {
+            CloseHandle(inheritable);
+            return 0;
+        }
+        let mut storage = vec![0_u64; list_size.div_ceil(8)];
+        let attributes = storage.as_mut_ptr().cast();
+        if InitializeProcThreadAttributeList(attributes, 1, 0, &mut list_size) == 0 {
+            CloseHandle(inheritable);
+            return 0;
+        }
+        let inherited = [inheritable];
+        let mut created = 0;
+        if UpdateProcThreadAttribute(
+            attributes,
+            0,
+            PROC_THREAD_ATTRIBUTE_HANDLE_LIST as usize,
+            inherited.as_ptr().cast(),
+            std::mem::size_of::<HANDLE>(),
+            std::ptr::null_mut(),
+            std::ptr::null(),
+        ) != 0
+        {
+            let mut startup = STARTUPINFOEXW::default();
+            startup.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
+            startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+            startup.StartupInfo.hStdOutput = inheritable;
+            startup.StartupInfo.hStdError = inheritable;
+            startup.lpAttributeList = attributes;
+            created = CreateProcessW(
+                application,
+                command_line,
+                std::ptr::null(),
+                std::ptr::null(),
+                1,
+                CREATE_SUSPENDED
+                    | CREATE_NO_WINDOW
+                    | CREATE_UNICODE_ENVIRONMENT
+                    | EXTENDED_STARTUPINFO_PRESENT,
+                environment,
+                current_directory,
+                &startup.StartupInfo,
+                process,
+            );
+        }
+        DeleteProcThreadAttributeList(attributes);
+        CloseHandle(inheritable);
+        created
+    }
+}
+
 #[cfg(windows)]
 fn spawn_broker_process(
     executable: &Path,
@@ -4230,28 +4331,52 @@ fn spawn_broker_process(
         .chain([0])
         .collect();
     let environment = minimal_environment_block();
-    let startup = STARTUPINFOW {
-        cb: std::mem::size_of::<STARTUPINFOW>() as u32,
-        ..STARTUPINFOW::default()
-    };
     let mut process = PROCESS_INFORMATION::default();
-    // SAFETY: all UTF-16 buffers are NUL-terminated and remain live. No handles
-    // are inherited. The process starts suspended so it cannot inspect launch
-    // context before joining the parent-owned kill-on-close Job Object.
-    let created = unsafe {
-        CreateProcessW(
+    // Capture the hidden broker's stdout/stderr in a bounded app-owned log. A
+    // failure to open the log or to launch with it must never block the broker,
+    // so the original no-handle launch below remains the fallback.
+    let log_file = parent_job
+        .log_directory()
+        .and_then(|directory| crate::sidecar_log::open_for_child(&directory, "media-broker").ok());
+    let mut created = 0;
+    if let Some(log_file) = log_file.as_ref() {
+        let mut logged_command_line = command_line.clone();
+        created = create_suspended_with_log_handle(
             application.as_ptr(),
-            command_line.as_mut_ptr(),
-            std::ptr::null(),
-            std::ptr::null(),
-            0,
-            CREATE_SUSPENDED | CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
+            logged_command_line.as_mut_ptr(),
             environment.as_ptr().cast(),
             current_directory.as_ptr(),
-            &startup,
+            log_file,
             &mut process,
-        )
-    };
+        );
+        if created == 0 {
+            process = PROCESS_INFORMATION::default();
+        }
+    }
+    drop(log_file);
+    if created == 0 {
+        let startup = STARTUPINFOW {
+            cb: std::mem::size_of::<STARTUPINFOW>() as u32,
+            ..STARTUPINFOW::default()
+        };
+        // SAFETY: all UTF-16 buffers are NUL-terminated and remain live. No handles
+        // are inherited. The process starts suspended so it cannot inspect launch
+        // context before joining the parent-owned kill-on-close Job Object.
+        created = unsafe {
+            CreateProcessW(
+                application.as_ptr(),
+                command_line.as_mut_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                0,
+                CREATE_SUSPENDED | CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
+                environment.as_ptr().cast(),
+                current_directory.as_ptr(),
+                &startup,
+                &mut process,
+            )
+        };
+    }
     if created == 0 || process.hProcess.is_null() || process.hThread.is_null() {
         return Err(MediaBrokerError::Process);
     }
@@ -7481,6 +7606,41 @@ mod tests {
                 &serde_json::to_vec(&corrupt).expect("serialize corrupt closed metadata")
             ),
             Err(MediaBrokerError::DebugSyntheticMetadataInvalid)
+        ));
+    }
+
+    #[test]
+    fn closed_review_handoff_with_missing_fallback_reports_target_closed() {
+        let root = tempfile::tempdir().expect("config root");
+        let review_dir = root
+            .path()
+            .join("io.github.akshitireddy.interactive-npcs.review");
+        std::fs::create_dir_all(&review_dir).expect("review dir");
+        // No production directory or handoff exists: the fallback file is missing.
+        let closed = serde_json::json!({
+            "schema_version": 1,
+            "fixture_kind": "synthetic-original-video-replay",
+            "state": "closed",
+            "pid": 77,
+            "process_id": 77,
+            "window_handle": 4660,
+            "hwnd": 4660,
+            "executable_basename": DEBUG_SYNTHETIC_TARGET_BASENAME,
+            "exe_basename": DEBUG_SYNTHETIC_TARGET_BASENAME,
+            "decoded_frames": 3,
+            "visual_source": DEBUG_SYNTHETIC_VISUAL_SOURCE,
+            "portrait_sha256": DEBUG_SYNTHETIC_PORTRAIT_SHA256,
+            "source_mouth_motion": false,
+        });
+        let primary = review_dir.join(DEBUG_SYNTHETIC_METADATA_FILE_NAME);
+        std::fs::write(
+            &primary,
+            serde_json::to_vec(&closed).expect("serialize closed primary metadata"),
+        )
+        .expect("write closed primary metadata");
+        assert!(matches!(
+            read_debug_synthetic_target_candidates(&primary),
+            Err(MediaBrokerError::DebugSyntheticTargetClosed)
         ));
     }
 

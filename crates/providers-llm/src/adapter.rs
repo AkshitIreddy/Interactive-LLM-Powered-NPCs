@@ -1066,8 +1066,7 @@ fn apply_qualified_model_parameters(
     // are deliberately exact-provider/exact-model: other Groq models retain
     // their documented defaults, and generic compatible endpoints never
     // inherit provider-specific request fields.
-    if options.provider_id == "groq"
-        && (model == "qwen/qwen3.6-27b" || model == "qwen/qwen3.8-27b")
+    if options.provider_id == "groq" && (model == "qwen/qwen3.6-27b" || model == "qwen/qwen3.8-27b")
     {
         body.insert("reasoning_effort".into(), json!("none"));
         body.insert("reasoning_format".into(), json!("hidden"));

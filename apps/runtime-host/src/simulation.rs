@@ -802,18 +802,10 @@ impl HostState {
         };
         let turn_audio_receipts = Arc::new(AudioReceiptLedger::default());
         let turn_subtitle_receipts = Arc::new(SubtitleReceiptLedger::default());
-        let fixture_subtitle_route = selected_route.as_deref().is_none_or(|snapshot| {
-            let zero_spend_testing_route = ready_primary(&snapshot.roles.llm)
-                .is_some_and(|route| route.provider_id == TESTING_LLM_PROVIDER_ID)
-                && ready_primary(&snapshot.roles.tts)
-                    .is_some_and(|route| route.provider_id == TESTING_TTS_PROVIDER_ID);
-            let debug_mock_route = cfg!(debug_assertions)
-                && ready_primary(&snapshot.roles.llm)
-                    .is_some_and(|route| route.provider_id == "mock-llm")
-                && ready_primary(&snapshot.roles.tts)
-                    .is_some_and(|route| route.provider_id == "mock-tts");
-            zero_spend_testing_route || debug_mock_route
-        });
+        let fixture_subtitle_route = fixture_subtitle_route(
+            selected_route.as_deref(),
+            request.subtitle_presentation_context.is_some(),
+        );
         let subtitle_presenter: Option<Arc<dyn SubtitlePresentationSink>> =
             if fixture_subtitle_route {
                 Some(Arc::new(FixtureSubtitlePresentationSink))
@@ -2198,6 +2190,31 @@ fn selected_cloud_provider_ids(snapshot: &SelectedRouteSnapshot) -> Vec<String> 
     providers
 }
 
+/// Whether this turn presents subtitles through the deterministic fixture sink
+/// instead of the native in-game presenter. A turn with no selected route is a
+/// fixture turn. The zero-spend `testing` LLM+TTS pair only uses the fixture
+/// sink when no native subtitle context was supplied; with a context it draws
+/// the real in-game subtitle (its audio and echo reply stay local). The
+/// `mock-*` pair remains a debug-build-only fixture.
+fn fixture_subtitle_route(
+    selected_route: Option<&SelectedRouteSnapshot>,
+    native_subtitle_context_supplied: bool,
+) -> bool {
+    selected_route.is_none_or(|snapshot| {
+        let zero_spend_testing_route = !native_subtitle_context_supplied
+            && ready_primary(&snapshot.roles.llm)
+                .is_some_and(|route| route.provider_id == TESTING_LLM_PROVIDER_ID)
+            && ready_primary(&snapshot.roles.tts)
+                .is_some_and(|route| route.provider_id == TESTING_TTS_PROVIDER_ID);
+        let debug_mock_route = cfg!(debug_assertions)
+            && ready_primary(&snapshot.roles.llm)
+                .is_some_and(|route| route.provider_id == "mock-llm")
+            && ready_primary(&snapshot.roles.tts)
+                .is_some_and(|route| route.provider_id == "mock-tts");
+        zero_spend_testing_route || debug_mock_route
+    })
+}
+
 fn outcome_fixture_only(outcome: &TurnOutcome) -> bool {
     outcome
         .selected_llm_provider
@@ -3504,7 +3521,13 @@ impl MemoryStore for RuntimeMemory {
                     source_kind: match sentence.delivery {
                         npc_runtime_core::DeliveryMode::Audio => "runtime_audio_delivery",
                         npc_runtime_core::DeliveryMode::Subtitle => {
-                            "runtime_native_subtitle_presentation"
+                            match subtitle_receipt.map(|receipt| receipt.provenance) {
+                                // A fixture receipt is never native delivery.
+                                Some(SubtitlePresentationProvenance::DeterministicFixture) => {
+                                    "runtime_fixture_subtitle_presentation"
+                                }
+                                _ => "runtime_native_subtitle_presentation",
+                            }
                         }
                     }
                     .into(),
@@ -3984,6 +4007,10 @@ impl AudioSink for MeasuredMockAudio {
             completed: self.endpoint_delivery,
         })?;
         if !self.endpoint_delivery {
+            // Not a provider fault: this only happens when no broker lease
+            // exists, and the speech lane falls back to subtitles. The turn's
+            // circuit registry lives in a per-turn `TurnSupervisor`, so these
+            // errors can never open the `testing` circuit for a later turn.
             return Err(RuntimeDependencyError::Unavailable(
                 "testing synth was measured in memory, but no output endpoint was supplied".into(),
             ));
@@ -4863,6 +4890,70 @@ mod tests {
         let mut wrong_voice = route.clone();
         wrong_voice.voice_id = Some("someone-elses-voice".into());
         assert_eq!(selected_hosted_tts_format(&wrong_voice), None);
+    }
+
+    fn subtitle_route_snapshot(llm_provider: &str, tts_provider: &str) -> SelectedRouteSnapshot {
+        let disabled = || crate::SelectedRoleRoute {
+            state: SelectedRouteState::Disabled,
+            primary: None,
+            fallbacks: Vec::new(),
+            degradation: None,
+        };
+        let ready = |provider: &str| crate::SelectedRoleRoute {
+            state: SelectedRouteState::Ready,
+            primary: Some(SelectedProviderRoute {
+                provider_id: provider.into(),
+                model_id: "model".into(),
+                voice_id: None,
+                execution: crate::RouteExecution::Local,
+                egress: "none".into(),
+                credential_reference: None,
+            }),
+            fallbacks: Vec::new(),
+            degradation: None,
+        };
+        SelectedRouteSnapshot {
+            schema_version: crate::TURN_ROUTE_SCHEMA_VERSION,
+            source_loadout_id: "subtitle-route".into(),
+            inheritance_chain: Vec::new(),
+            generation: 1,
+            roles: crate::SelectedRouteRoles {
+                llm: ready(llm_provider),
+                stt: disabled(),
+                tts: ready(tts_provider),
+                embeddings: disabled(),
+                vision: disabled(),
+                lip_sync: disabled(),
+            },
+        }
+    }
+
+    #[test]
+    fn testing_routes_use_the_native_subtitle_presenter_when_a_context_is_supplied() {
+        let testing = subtitle_route_snapshot("testing", "testing");
+        // With a native subtitle context the in-game presenter draws the cue.
+        assert!(!fixture_subtitle_route(Some(&testing), true));
+        // Without one there is nothing native to draw on: fixture sink.
+        assert!(fixture_subtitle_route(Some(&testing), false));
+        // No selected route at all is the fixture/legacy path either way.
+        assert!(fixture_subtitle_route(None, true));
+        // Live routes never use the fixture sink.
+        let live = subtitle_route_snapshot("openai", "elevenlabs");
+        assert!(!fixture_subtitle_route(Some(&live), false));
+        assert!(!fixture_subtitle_route(Some(&live), true));
+        // A testing LLM with a live voice is not the zero-spend pair.
+        let mixed = subtitle_route_snapshot("testing", "elevenlabs");
+        assert!(!fixture_subtitle_route(Some(&mixed), false));
+        // The mock pair stays debug-build-only and context-independent.
+        let mock = subtitle_route_snapshot("mock-llm", "mock-tts");
+        assert_eq!(
+            fixture_subtitle_route(Some(&mock), true),
+            cfg!(debug_assertions)
+        );
+        assert_eq!(
+            fixture_subtitle_route(Some(&mock), false),
+            cfg!(debug_assertions)
+        );
     }
 
     #[test]

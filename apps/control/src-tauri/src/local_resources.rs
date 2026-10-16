@@ -723,7 +723,9 @@ impl LocalResourceManager {
                 pack.identity.pack_id.as_str() == YUNET_OPENSEEFACE_VISUAL_SIGNAL_PACK_ID
                     && pack.identity.revision.as_str() == OPENSEEFACE_VISUAL_SIGNAL_REVISION
                     && pack.capability.kind == ModelPackKindV1::Vision
-                    && pack.allowed_residencies.contains(&ResidencyModeV1::CpuResident)
+                    && pack
+                        .allowed_residencies
+                        .contains(&ResidencyModeV1::CpuResident)
             });
             let mut supported = matches.next().cloned().ok_or_else(|| {
                 LocalResourceError::Operation(
@@ -3301,10 +3303,8 @@ mod tests {
 
     fn supported_visual_identity_fixture() -> PackRevision {
         PackRevision {
-            pack_id: npc_model_manager::PackId::parse(
-                YUNET_OPENSEEFACE_VISUAL_SIGNAL_PACK_ID,
-            )
-            .expect("pack id"),
+            pack_id: npc_model_manager::PackId::parse(YUNET_OPENSEEFACE_VISUAL_SIGNAL_PACK_ID)
+                .expect("pack id"),
             revision: npc_model_manager::Revision::parse(OPENSEEFACE_VISUAL_SIGNAL_REVISION)
                 .expect("revision"),
         }
@@ -3313,8 +3313,8 @@ mod tests {
     #[test]
     fn supported_visual_prepare_constructs_only_the_native_catalog_role() {
         let identity = supported_visual_identity_fixture();
-        let prepared = prepare_supported_visual_selection(None, identity.clone())
-            .expect("clean selection");
+        let prepared =
+            prepare_supported_visual_selection(None, identity.clone()).expect("clean selection");
         assert!(prepared.selection_id.starts_with("visual-"));
         assert_eq!(prepared.expected_idle_millis, 1_000);
         assert_eq!(prepared.roles.len(), 1);
@@ -3353,8 +3353,7 @@ mod tests {
             roles: vec![SelectedPackV1 {
                 role: ModelPackKindV1::Embedding,
                 identity: PackRevision {
-                    pack_id: npc_model_manager::PackId::parse("owner.embedding")
-                        .expect("pack id"),
+                    pack_id: npc_model_manager::PackId::parse("owner.embedding").expect("pack id"),
                     revision: npc_model_manager::Revision::parse("r1").expect("revision"),
                 },
                 preferred_residency: ResidencyModeV1::CpuResident,
@@ -3385,13 +3384,14 @@ mod tests {
     #[test]
     fn supported_visual_prepare_request_requires_exact_bounded_shape() {
         let request: PrepareSupportedVisualLoadoutRequestV1 =
-            serde_json::from_str(r#"{"explicitUserConfirmation":true}"#)
-                .expect("bounded request");
+            serde_json::from_str(r#"{"explicitUserConfirmation":true}"#).expect("bounded request");
         assert!(request.explicit_user_confirmation);
-        assert!(serde_json::from_str::<PrepareSupportedVisualLoadoutRequestV1>(
-            r#"{"explicitUserConfirmation":true,"packId":"untrusted"}"#
-        )
-        .is_err());
+        assert!(
+            serde_json::from_str::<PrepareSupportedVisualLoadoutRequestV1>(
+                r#"{"explicitUserConfirmation":true,"packId":"untrusted"}"#
+            )
+            .is_err()
+        );
     }
 
     #[test]

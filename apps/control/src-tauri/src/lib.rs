@@ -24,6 +24,7 @@ mod provider_loadouts;
 mod runtime_bridge;
 mod runtime_router;
 mod selected_stt;
+mod sidecar_log;
 pub mod sidecar_protocol;
 pub mod sidecar_supervisor;
 #[cfg(debug_assertions)]

@@ -7,7 +7,8 @@ use crate::sidecar_protocol::{
 };
 use npc_provider_catalog::{
     CatalogDocument, EgressClass as CatalogEgressClass,
-    ExecutionLocation as CatalogExecutionLocation, Modality, Model, Provider, RestrictedData,
+    ExecutionLocation as CatalogExecutionLocation, Lifecycle, Modality, Model, Provider,
+    RestrictedData,
 };
 use npc_provider_loadouts::{
     credential_target_provider_id, CatalogDisclosureV1, CredentialReferenceV1, EgressClassV1,
@@ -204,12 +205,25 @@ enum ProviderLoadoutStoreError {
     Validation,
     #[error("provider loadout does not match the bundled provider catalog")]
     Catalog,
+    #[error(
+        "provider loadout uses a retired (deprecated) provider model; choose its catalog successor"
+    )]
+    DeprecatedModel,
     #[error("provider loadout contains secret-like material")]
     SecretMaterial,
     #[error("provider loadout file could not be staged")]
     Stage,
     #[error("provider loadout file could not be committed")]
     Commit,
+}
+
+impl From<CatalogRouteError> for ProviderLoadoutStoreError {
+    fn from(error: CatalogRouteError) -> Self {
+        match error {
+            CatalogRouteError::Deprecated => Self::DeprecatedModel,
+            _ => Self::Catalog,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -258,7 +272,7 @@ impl ProviderLoadoutStore {
             .validate()
             .map_err(|_| ProviderLoadoutStoreError::Validation)?;
         validate_document_against_catalog_for_distribution(document, &self.application_namespace)
-            .map_err(|_| ProviderLoadoutStoreError::Catalog)?;
+            .map_err(ProviderLoadoutStoreError::from)?;
         reject_secret_material(document)?;
         fs::create_dir_all(&self.directory).map_err(|_| ProviderLoadoutStoreError::Directory)?;
         let bytes =
@@ -316,7 +330,7 @@ impl ProviderLoadoutStore {
             .validate()
             .map_err(|_| ProviderLoadoutStoreError::Validation)?;
         validate_document_against_catalog_for_distribution(&document, &self.application_namespace)
-            .map_err(|_| ProviderLoadoutStoreError::Catalog)?;
+            .map_err(ProviderLoadoutStoreError::from)?;
         reject_secret_material(&document)?;
         Ok(Some(document))
     }
@@ -358,12 +372,14 @@ fn migrate_document(mut document: ProviderLoadoutDocumentV1) -> ProviderLoadoutD
                 .disclosure
                 .catalog_revision
                 .max(catalog_revision);
+            migrate_retired_model(&mut route.primary);
             for fallback in &mut route.fallbacks {
                 fallback.route.disclosure.catalog_revision = fallback
                     .route
                     .disclosure
                     .catalog_revision
                     .max(catalog_revision);
+                migrate_retired_model(&mut fallback.route);
             }
         }
     }
@@ -374,11 +390,6 @@ fn migrate_document(mut document: ProviderLoadoutDocumentV1) -> ProviderLoadoutD
         return document;
     };
     if let Some(RoleOverrideV1::Route(llm)) = starter.roles.get_mut(&ProviderRole::Llm) {
-        if llm.primary.provider_id == "groq" && llm.primary.model_id == "qwen/qwen3.6-27b" {
-            // Groq retired the 3.6 upstream model (model_not_found observed
-            // 2026-09-17); the qualified non-reasoning successor is 3.8.
-            llm.primary.model_id = "qwen/qwen3.8-27b".into();
-        }
         if llm.primary.provider_id == "nvidia-nim"
             && llm.primary.model_id == "nvidia/nemotron-3-nano-30b-a3b"
         {
@@ -405,6 +416,19 @@ fn migrate_document(mut document: ProviderLoadoutDocumentV1) -> ProviderLoadoutD
     document
 }
 
+/// Rewrites a route that names a retired upstream model to its qualified
+/// successor. Applies to every saved route (any loadout, role, or fallback), so
+/// a stale preset keeps working instead of failing closed at validation.
+/// Anything not listed here is left alone and is rejected by catalog
+/// validation if the catalog marks the model deprecated.
+fn migrate_retired_model(route: &mut ProviderModelRouteV1) {
+    if route.provider_id == "groq" && route.model_id == "qwen/qwen3.6-27b" {
+        // Groq retired the 3.6 upstream model (model_not_found observed
+        // 2026-09-17); the qualified non-reasoning successor is 3.8.
+        route.model_id = "qwen/qwen3.8-27b".into();
+    }
+}
+
 fn bundled_catalog() -> CatalogDocument {
     CatalogDocument::parse(BUNDLED_CATALOG).expect("bundled provider catalog must stay valid")
 }
@@ -417,6 +441,9 @@ enum CatalogRouteError {
     Capability,
     Credential,
     Disclosure,
+    /// The catalog keeps the model only as a retired record so older routes
+    /// fail closed with a specific reason instead of resolving silently.
+    Deprecated,
 }
 
 #[cfg(test)]
@@ -508,6 +535,9 @@ fn validate_route_against_catalog_for_distribution(
         .filter(|model| model.provider_id == catalog_provider_id && model.modality == modality)
         .find(|model| model_matches_route(model, route))
         .ok_or(CatalogRouteError::Model)?;
+    if model.lifecycle == Lifecycle::Deprecated {
+        return Err(CatalogRouteError::Deprecated);
+    }
     if !model.is_selectable() {
         return Err(CatalogRouteError::Capability);
     }
@@ -2496,6 +2526,112 @@ mod tests {
             store.save(&stale).expect_err("stale revision"),
             ProviderLoadoutStoreError::Catalog
         );
+    }
+
+    fn set_groq_llm_model(document: &mut ProviderLoadoutDocumentV1, loadout: &str, model: &str) {
+        let RoleOverrideV1::Route(llm) = document
+            .loadouts
+            .get_mut(&id(loadout))
+            .expect("loadout")
+            .roles
+            .get_mut(&ProviderRole::Llm)
+            .expect("llm")
+        else {
+            panic!("expected LLM route")
+        };
+        llm.primary.model_id = model.into();
+    }
+
+    #[test]
+    fn deprecated_catalog_model_fails_closed_with_a_specific_reason() {
+        let catalog = bundled_catalog();
+        let mut document = starter_document();
+        set_groq_llm_model(&mut document, "api-first-starter", "qwen/qwen3.6-27b");
+        let RoleOverrideV1::Route(llm) =
+            &document.loadouts[&id("api-first-starter")].roles[&ProviderRole::Llm]
+        else {
+            panic!("expected LLM route")
+        };
+        assert_eq!(
+            validate_route_against_catalog_for_distribution(
+                ProviderRole::Llm,
+                &llm.primary,
+                &catalog,
+                false,
+            ),
+            Err(CatalogRouteError::Deprecated)
+        );
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let store = ProviderLoadoutStore::new(temp.path());
+        assert_eq!(
+            store.save(&document).expect_err("deprecated model"),
+            ProviderLoadoutStoreError::DeprecatedModel
+        );
+    }
+
+    #[test]
+    fn every_saved_groq_qwen36_route_migrates_to_qwen38_on_load() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let store = ProviderLoadoutStore::new(temp.path());
+        let mut legacy = starter_document();
+        let starter = legacy.loadouts[&id("api-first-starter")].clone();
+        let mut game = starter.clone();
+        game.id = id("cyberpunk-private-fast-groq");
+        game.name = "Cyberpunk - Groq fast".into();
+        game.scope = LoadoutScopeV1::Game {
+            game_id: "cyberpunk-2077".into(),
+        };
+        game.parent = Some(id("api-first-starter"));
+        legacy.insert(game).expect("game loadout");
+        // A non-starter loadout, a fallback, and a stale catalog revision must
+        // all migrate; an unrelated Groq primary must not change.
+        let RoleOverrideV1::Route(llm) = legacy
+            .loadouts
+            .get_mut(&id("cyberpunk-private-fast-groq"))
+            .expect("game loadout")
+            .roles
+            .get_mut(&ProviderRole::Llm)
+            .expect("llm")
+        else {
+            panic!("expected LLM route")
+        };
+        llm.primary.model_id = "openai/gpt-oss-20b".into();
+        llm.primary.disclosure.catalog_revision -= 1;
+        let mut fallback_route = llm.primary.clone();
+        fallback_route.model_id = "qwen/qwen3.6-27b".into();
+        llm.fallbacks = vec![ExplicitFallbackV1 {
+            route: fallback_route,
+            activation: FallbackActivationV1::ManualOnly,
+            user_authorized: true,
+        }];
+        set_groq_llm_model(&mut legacy, "api-first-starter", "qwen/qwen3.6-27b");
+        fs::write(
+            store.primary_path(),
+            serde_json::to_string_pretty(&legacy).expect("serialize legacy fixture"),
+        )
+        .expect("write legacy fixture");
+
+        let loaded = store.load();
+        assert_eq!(
+            loaded.persistence_health,
+            ProviderLoadoutPersistenceHealth::Healthy
+        );
+        for loadout in ["api-first-starter", "cyberpunk-private-fast-groq"] {
+            let RoleOverrideV1::Route(llm) =
+                &loaded.document.loadouts[&id(loadout)].roles[&ProviderRole::Llm]
+            else {
+                panic!("expected LLM route")
+            };
+            if loadout == "api-first-starter" {
+                assert_eq!(llm.primary.model_id, "qwen/qwen3.8-27b");
+            } else {
+                assert_eq!(llm.primary.model_id, "openai/gpt-oss-20b");
+                assert_eq!(llm.fallbacks.len(), 1);
+            }
+            for fallback in &llm.fallbacks {
+                assert_eq!(fallback.route.model_id, "qwen/qwen3.8-27b", "{loadout}");
+            }
+        }
     }
 
     #[test]

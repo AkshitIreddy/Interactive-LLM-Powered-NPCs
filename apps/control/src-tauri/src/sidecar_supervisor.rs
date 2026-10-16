@@ -145,6 +145,12 @@ impl RuntimeSupervisor {
         })
     }
 
+    /// App-owned directory holding the hidden sidecars' bounded log files
+    /// (`runtime.log`, `media-broker.log`, each with one `.1` generation).
+    pub(crate) fn log_directory(&self) -> Option<PathBuf> {
+        crate::sidecar_log::logs_directory_for_app_data(&self.config.app_data)
+    }
+
     pub fn health(&self) -> RuntimeHealthSnapshot {
         let Ok(state) = self.state.lock() else {
             return RuntimeHealthSnapshot {
@@ -369,6 +375,11 @@ impl RuntimeSupervisor {
         std::fs::create_dir_all(&self.config.app_data).map_err(|_| SupervisorError::AppData)?;
         let app_data = validate_directory(&self.config.app_data)?;
         let nonce = LaunchNonce::new();
+        // Hidden sidecar: capture its stderr (and any stdout after the
+        // descriptor) in a bounded app-owned log instead of discarding it.
+        let log = self
+            .log_directory()
+            .and_then(|directory| crate::sidecar_log::open_shared(&directory, "runtime"));
 
         let mut command = Command::new(&executable);
         command
@@ -384,7 +395,11 @@ impl RuntimeSupervisor {
             .current_dir(executable.parent().ok_or(SupervisorError::InvalidBundle)?)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(if log.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .kill_on_drop(true)
             .env_clear();
         for key in ["SystemRoot", "WINDIR", "TEMP", "TMP"] {
@@ -404,6 +419,9 @@ impl RuntimeSupervisor {
             return Err(error);
         }
         let pid = child.id().ok_or(SupervisorError::Process)?;
+        if let (Some(log), Some(stderr)) = (log.as_ref(), child.stderr.take()) {
+            crate::sidecar_log::pump(stderr, Arc::clone(log));
+        }
         let mut stdout = child.stdout.take().ok_or(SupervisorError::Descriptor)?;
         let descriptor =
             match tokio::time::timeout(DESCRIPTOR_TIMEOUT, read_descriptor(&mut stdout)).await {
@@ -414,6 +432,9 @@ impl RuntimeSupervisor {
                 }
             };
         validate_descriptor(&descriptor, &nonce)?;
+        if let Some(log) = log {
+            crate::sidecar_log::pump(stdout, log);
+        }
         let stream = connect_control_stream(&descriptor).await?;
         let client = ControlClient::connect(stream, nonce, env!("CARGO_PKG_VERSION")).await?;
         client.ping().await?;

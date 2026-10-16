@@ -708,6 +708,12 @@ fn visual_turn_error_code(
     }
 }
 
+fn provider_is_non_live_fixture(provider_id: &str) -> bool {
+    provider_id == "testing"
+        || provider_id.starts_with("mock-")
+        || provider_id.starts_with("fixture-")
+}
+
 fn start_provenance(
     request: &StartSimulationRequest,
     route_snapshot: &TurnRouteSnapshotV1,
@@ -715,11 +721,16 @@ fn start_provenance(
     if request.dev_live_tts.is_some() {
         return (MeasurementBasis::ControlledBenchmark, false);
     }
-    let fixture_only = route_snapshot
-        .roles
-        .values()
+    // Mirror the runtime host's completion rule (`outcome_fixture_only`): only
+    // the LLM and TTS routes decide fixture provenance, and the zero-spend
+    // `testing` provider is a fixture just like `mock-*`/`fixture-*`. Otherwise
+    // a testing turn would start as pending provider evidence yet complete as
+    // runtime_fixture_only.
+    let fixture_only = [ProviderRole::Llm, ProviderRole::Tts]
+        .iter()
+        .filter_map(|role| route_snapshot.roles.get(role))
         .filter_map(|role| role.primary.as_ref())
-        .all(|route| route.provider_id.starts_with("mock-"));
+        .all(|route| provider_is_non_live_fixture(&route.provider_id));
     if fixture_only {
         (MeasurementBasis::TrustedRuntimeFixture, true)
     } else {
@@ -837,11 +848,8 @@ async fn emit_native_result(
                 }
                 sequence += 1;
                 set_native_stage(state, generation, stage);
-                let fixture_stage_ms = fixture_stage_duration(
-                    result.fixture_only,
-                    &result.integration_mode,
-                    stage,
-                );
+                let fixture_stage_ms =
+                    fixture_stage_duration(result.fixture_only, &result.integration_mode, stage);
                 let _ = channel.send(SimulationEvent::StageStarted {
                     simulation_id: simulation_id.into(),
                     generation,
@@ -1939,6 +1947,33 @@ mod tests {
         let (basis, fixture_only) = start_provenance(&StartSimulationRequest::default(), &routes);
         assert_eq!(basis, MeasurementBasis::TrustedRuntimeFixture);
         assert!(fixture_only);
+    }
+
+    #[test]
+    fn testing_provider_turns_start_as_runtime_fixture_like_they_complete() {
+        let mut routes = route_snapshot(4);
+        for role in [ProviderRole::Llm, ProviderRole::Tts] {
+            let primary = routes
+                .roles
+                .get_mut(&role)
+                .and_then(|role| role.primary.as_mut())
+                .expect("route");
+            primary.provider_id = "testing".into();
+        }
+        let (basis, fixture_only) = start_provenance(&StartSimulationRequest::default(), &routes);
+        assert_eq!(basis, MeasurementBasis::TrustedRuntimeFixture);
+        assert!(fixture_only);
+
+        // A live voice behind the testing LLM is not a fixture turn.
+        routes
+            .roles
+            .get_mut(&ProviderRole::Tts)
+            .and_then(|role| role.primary.as_mut())
+            .expect("TTS route")
+            .provider_id = "cartesia".into();
+        let (basis, fixture_only) = start_provenance(&StartSimulationRequest::default(), &routes);
+        assert_eq!(basis, MeasurementBasis::PendingProviderEvidence);
+        assert!(!fixture_only);
     }
 
     #[test]

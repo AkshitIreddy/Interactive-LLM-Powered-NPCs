@@ -1579,9 +1579,7 @@ pub async fn manual_actor_picker_status(
 ) -> Result<ManualActorPickerPresentationV1, CommandError> {
     let active = state.manual_actor_picker.state.lock().await.active.clone();
     let Some(active) = active else {
-        if let NativeActorLockStateV1::Selected(selected) =
-            state.identity_actor_locks.snapshot()
-        {
+        if let NativeActorLockStateV1::Selected(selected) = state.identity_actor_locks.snapshot() {
             if matches!(
                 &selected.provenance,
                 NativeActorLockProvenanceV1::SealedNativeClick { .. }
@@ -1615,8 +1613,7 @@ pub async fn manual_actor_picker_status(
                         .diagnostics()
                         .await
                         .is_ok_and(|diagnostics| {
-                            diagnostics.cancellation_generation
-                                == selected.cancellation_generation
+                            diagnostics.cancellation_generation == selected.cancellation_generation
                         })
                     && state
                         .media_broker
@@ -1630,8 +1627,7 @@ pub async fn manual_actor_picker_status(
                                     == selected.selected_executable_name
                                 && evidence.pixel_source
                                     == CapturePixelSource::WindowsGraphicsCaptureTexture
-                                && evidence.pixel_scope
-                                    == CapturePixelScope::ExactSelectedWindow
+                                && evidence.pixel_scope == CapturePixelScope::ExactSelectedWindow
                                 && evidence.external_display_overlay_pixels_excluded
                                 && evidence.desktop_luminance_excluded_from_pixel_evidence
                                 && evidence.device_generation == selected.device_generation
@@ -1911,7 +1907,9 @@ pub fn enable_character_mouth_pack(
                     && installed.character_id == selected.character_id()
                     && installed.content_sha256 == request.expected_content_sha256
             })
-            .ok_or_else(|| product_error("the exact selected character mouth pack is not installed"))?;
+            .ok_or_else(|| {
+                product_error("the exact selected character mouth pack is not installed")
+            })?;
         lock = state
             .identity_actor_locks
             .assign_character_pack_to_sealed_click(
@@ -1940,10 +1938,7 @@ pub fn enable_character_mouth_pack(
     if enabled.is_err() && user_assigned {
         state
             .identity_actor_locks
-            .revoke_selected_if_lock_generation(
-                lock.lock_generation,
-                lock.cancellation_generation,
-            );
+            .revoke_selected_if_lock_generation(lock.lock_generation, lock.cancellation_generation);
     }
     enabled
 }
@@ -1970,7 +1965,10 @@ pub fn disable_character_mouth_pack(
                 } if lock.game_profile_id == request.game_profile_id
                     && character_id == authority.character_id()
                     && mouth_pack_content_sha256 == &request.expected_content_sha256
-            ) => Some((lock.lock_generation, lock.cancellation_generation)),
+            ) =>
+        {
+            Some((lock.lock_generation, lock.cancellation_generation))
+        }
         _ => None,
     };
     let disabled = state
@@ -2325,7 +2323,11 @@ pub fn prepare_supported_visual_loadout(
     request: PrepareSupportedVisualLoadoutRequestV1,
     state: State<'_, AppState>,
 ) -> Result<SelectedLoadoutPlannerResult, CommandError> {
-    record_native_product_event(&state, "resource-governor", "visual_loadout.prepare_requested");
+    record_native_product_event(
+        &state,
+        "resource-governor",
+        "visual_loadout.prepare_requested",
+    );
     state
         .local_resources
         .prepare_supported_visual_loadout(request)
@@ -3030,9 +3032,7 @@ pub struct SyntheticReviewTargetStatus {
 /// This command never starts a process or changes the selected game target.
 #[cfg(debug_assertions)]
 #[tauri::command]
-pub fn synthetic_review_target_status(
-    state: State<'_, AppState>,
-) -> SyntheticReviewTargetStatus {
+pub fn synthetic_review_target_status(state: State<'_, AppState>) -> SyntheticReviewTargetStatus {
     const EXPECTED_RELATIVE_PATH: &str =
         "local-app-data\\test-game\\interactive-npcs-synthetic-target.exe";
     match state.synthetic_review_target.executable_path() {
@@ -3463,16 +3463,14 @@ fn build_diagnostics(state: &AppState) -> DiagnosticSummary {
         PersistenceHealth::RecoveredFromInvalidFile => CheckStatus::Warning,
         PersistenceHealth::Unavailable => CheckStatus::Warning,
     };
-    let credential_status = if cfg!(windows) {
-        CheckStatus::Passed
-    } else {
-        CheckStatus::Informational
-    };
-    let profile_status = if bundled_profiles == 20 {
+    let (credential_status, credential_remediation) = credential_vault_check(state);
+    let total_profiles = profiles.len();
+    let profile_status = if bundled_profiles == total_profiles {
         CheckStatus::Passed
     } else {
         CheckStatus::Warning
     };
+    let (boundary_status, boundary_detail) = webview_boundary_check();
     let overall =
         if matches!(persistence.health, PersistenceHealth::Unavailable) || bundled_profiles == 0 {
             DiagnosticOverall::Degraded
@@ -3491,10 +3489,12 @@ fn build_diagnostics(state: &AppState) -> DiagnosticSummary {
         checks: vec![
             DiagnosticCheck {
                 id: "control-boundary".into(),
-                status: CheckStatus::Passed,
+                status: boundary_status,
                 title: "Restricted WebView boundary".into(),
-                detail: "The Response Console has no shell command or general filesystem capability.".into(),
-                remediation: None,
+                detail: boundary_detail,
+                remediation: matches!(boundary_status, CheckStatus::Warning).then(|| {
+                    "Remove plugin permissions from the Response Console capability file; product operations must stay typed application commands.".into()
+                }),
             },
             DiagnosticCheck {
                 id: "onboarding-persistence".into(),
@@ -3508,15 +3508,15 @@ fn build_diagnostics(state: &AppState) -> DiagnosticSummary {
                 id: "profile-bundle".into(),
                 status: profile_status,
                 title: "Game profile bundle".into(),
-                detail: format!("{bundled_profiles} of 20 locked game profiles are present in this build."),
-                remediation: (bundled_profiles != 20).then(|| "Complete and validate missing profile files before an RC build.".into()),
+                detail: format!("{bundled_profiles} of {total_profiles} locked game profiles are present in this build."),
+                remediation: (bundled_profiles != total_profiles).then(|| "Complete and validate missing profile files before an RC build.".into()),
             },
             DiagnosticCheck {
                 id: "credential-vault".into(),
                 status: credential_status,
                 title: "Credential reference boundary".into(),
                 detail: state.credentials.availability_detail().into(),
-                remediation: (!cfg!(windows)).then(|| "Run the packaged application on supported Windows 10 or Windows 11.".into()),
+                remediation: credential_remediation,
             },
             DiagnosticCheck {
                 id: "runtime-bridge".into(),
@@ -3556,6 +3556,51 @@ fn build_diagnostics(state: &AppState) -> DiagnosticSummary {
                 remediation: Some("Capture release metrics later under a recorded power profile and controlled background load; CPU boost need not remain enabled outside that test.".into()),
             },
         ],
+    }
+}
+
+/// Probes the credential store with one read-only status query against a fixed
+/// catalog reference. `Present`/`Missing` prove the store answered; only an
+/// unavailable store (or an unsupported platform) is reported as a problem.
+fn credential_vault_check(state: &AppState) -> (CheckStatus, Option<String>) {
+    let Some(reference) = crate::catalog::credential_reference_for("groq") else {
+        return (CheckStatus::Informational, None);
+    };
+    match state.credentials.status(&reference) {
+        CredentialReferenceStatus::Unavailable => (
+            if cfg!(windows) {
+                CheckStatus::Warning
+            } else {
+                CheckStatus::Informational
+            },
+            Some("Run the packaged application on supported Windows 10 or Windows 11 with Windows Credential Manager available.".into()),
+        ),
+        _ => (CheckStatus::Passed, None),
+    }
+}
+
+/// The WebView capability manifest is embedded at build time. The boundary
+/// holds only while it grants no plugin permissions (no shell, filesystem, or
+/// other plugin commands); product operations are typed application commands.
+const WEBVIEW_CAPABILITY_MANIFEST: &str = include_str!("../capabilities/default.json");
+
+fn webview_boundary_check() -> (CheckStatus, String) {
+    let granted = serde_json::from_str::<serde_json::Value>(WEBVIEW_CAPABILITY_MANIFEST)
+        .ok()
+        .and_then(|manifest| manifest.get("permissions")?.as_array().map(Vec::len));
+    match granted {
+        Some(0) => (
+            CheckStatus::Passed,
+            "The Response Console WebView is granted no plugin permissions: no shell command or general filesystem capability.".into(),
+        ),
+        Some(count) => (
+            CheckStatus::Warning,
+            format!("The Response Console WebView capability grants {count} plugin permission(s); the restricted boundary is not intact."),
+        ),
+        None => (
+            CheckStatus::Warning,
+            "The Response Console WebView capability manifest could not be verified.".into(),
+        ),
     }
 }
 
@@ -3695,6 +3740,46 @@ mod tests {
                 .current_results_are_release_evidence
         );
         assert_eq!(diagnostics.measurements.state, "notCaptured");
+    }
+
+    #[test]
+    fn webview_boundary_check_reads_the_real_capability_manifest() {
+        let (status, detail) = webview_boundary_check();
+        assert_eq!(status, CheckStatus::Passed, "{detail}");
+        // The check only sees the embedded manifest, so no other capability
+        // file may grant the WebView anything behind its back.
+        let capabilities = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("capabilities");
+        let files = std::fs::read_dir(capabilities)
+            .expect("capabilities directory")
+            .map(|entry| entry.expect("entry").file_name())
+            .collect::<Vec<_>>();
+        assert_eq!(files, vec![std::ffi::OsString::from("default.json")]);
+    }
+
+    #[test]
+    fn service_checks_are_derived_not_hardcoded() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let state = AppState::new(temp.path().to_path_buf(), None).expect("app state");
+        let diagnostics = build_diagnostics(&state);
+        let total = state.resources.game_summaries().len();
+        let profile = diagnostics
+            .checks
+            .iter()
+            .find(|check| check.id == "profile-bundle")
+            .expect("profile bundle check");
+        assert!(profile.detail.ends_with(&format!(
+            "of {total} locked game profiles are present in this build."
+        )));
+        let vault = diagnostics
+            .checks
+            .iter()
+            .find(|check| check.id == "credential-vault")
+            .expect("credential vault check");
+        // Passed only when the store answered a real status probe.
+        assert_eq!(
+            vault.status == CheckStatus::Passed,
+            state.credentials.status("providers/groq") != CredentialReferenceStatus::Unavailable
+        );
     }
 
     #[test]

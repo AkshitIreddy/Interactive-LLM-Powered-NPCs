@@ -185,6 +185,18 @@ foreach ($provider in $llmPresets.Keys) {
     $id = [string]$preset.id
     if ($null -ne $document.loadouts.PSObject.Properties[$id]) {
         $existing = $document.loadouts.PSObject.Properties[$id].Value
+        # Groq retired qwen3.6 (model_not_found observed 2026-09-17) and the
+        # catalog now marks it deprecated, so a stale Groq preset is upgraded
+        # in place to the qualified qwen3.8 successor; the scope/parent checks
+        # below still apply to the upgraded preset.
+        $upgradedStaleModel = $false
+        if ($provider -ceq 'groq' -and
+            [string]$existing.roles.llm.route.primary.provider_id -ceq 'groq' -and
+            [string]$existing.roles.llm.route.primary.model_id -ceq 'qwen/qwen3.6-27b') {
+            $existing.roles.llm.route.primary.model_id = [string]$preset.model
+            $existing.roles.llm.route.primary.disclosure.catalog_revision = $catalogRevision
+            $upgradedStaleModel = $true
+        }
         if ([string]$existing.scope.kind -cne 'game' -or
             [string]$existing.scope.game_id -cne 'cyberpunk-2077' -or
             [string]$existing.parent -cne $globalId -or
@@ -192,7 +204,10 @@ foreach ($provider in $llmPresets.Keys) {
             [string]$existing.roles.llm.route.primary.model_id -cne [string]$preset.model) {
             throw "Existing loadout $id does not match the private review preset; it was preserved."
         }
-        $changes += [ordered]@{ id = $id; status = 'already_present' }
+        $changes += [ordered]@{
+            id = $id
+            status = $(if ($upgradedStaleModel) { 'upgraded_deprecated_model' } else { 'already_present' })
+        }
         continue
     }
 
