@@ -1,14 +1,28 @@
 [CmdletBinding()]
 param(
-    [string]$ReceiptPath =
-        'E:\temp\InteractiveNPCs\review-mouth-atlas-v80-native-compatible\reviewed-artifact-receipt.v1.json',
-    [string]$ReviewedSchema4ReceiptPath = ''
+    # Optional legacy v80 Mara fixture receipt (schema 1). That folder no longer
+    # exists on this machine, so the legacy checks only run when it is supplied.
+    [string]$ReceiptPath = '',
+    # A real reviewed schema 4 receipt to validate and tamper-test. Defaults to the
+    # procedural Mara pack under .cache/mara-atlas when present.
+    [string]$ReviewedSchema4ReceiptPath = '',
+    # Parent for the disposable scratch directories (default: .cache beside the repo).
+    [string]$ScratchParent = ''
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
 . (Join-Path $PSScriptRoot 'reviewed-mouth-atlas-receipt.ps1')
+
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+$cacheRoot = Join-Path (Split-Path -Parent $repoRoot) '.cache'
+if ([string]::IsNullOrWhiteSpace($ReviewedSchema4ReceiptPath)) {
+    $defaultSchema4Receipt = Join-Path $cacheRoot 'mara-atlas/review-mouth-atlas/reviewed-artifact-receipt.v1.json'
+    if (Test-Path -LiteralPath $defaultSchema4Receipt -PathType Leaf) {
+        $ReviewedSchema4ReceiptPath = $defaultSchema4Receipt
+    }
+}
 
 function Copy-JsonDocument {
     param([Parameter(Mandatory = $true)][object]$Value)
@@ -45,8 +59,11 @@ function Get-CanonicalEnrollmentBindingSha256 {
     }
     $bytes = [System.Text.Encoding]::UTF8.GetBytes(
         ($canonical | ConvertTo-Json -Compress -Depth 8))
-    [System.BitConverter]::ToString(
-        [System.Security.Cryptography.SHA256]::HashData($bytes)).Replace('-', '').ToLowerInvariant()
+    # ComputeHash (not SHA256.HashData, which Windows PowerShell 5.1 lacks).
+    $hasher = [System.Security.Cryptography.SHA256]::Create()
+    try { $digest = $hasher.ComputeHash($bytes) }
+    finally { $hasher.Dispose() }
+    [System.BitConverter]::ToString($digest).Replace('-', '').ToLowerInvariant()
 }
 
 function Write-Utf8JsonDocument {
@@ -90,64 +107,75 @@ function Remove-OwnedSchema4ScratchDirectory {
     }
 }
 
-$resolvedReceipt = [System.IO.Path]::GetFullPath($ReceiptPath)
-$artifactRoot = Split-Path -Parent $resolvedReceipt
-$receipt = Get-Content -LiteralPath $resolvedReceipt -Raw | ConvertFrom-Json
-$validated = Get-NpcReviewedMouthAtlasReceipt -ReceiptPath $resolvedReceipt
-if ($validated.schema_version -ne 1 -or
-    $validated.classification -ne 'legacy-private-fixture' -or
-    $validated.game_profile_id -ne 'eclipse-harbor' -or
-    $validated.character_id -ne 'mara-venn' -or
-    $validated.natural_quality_qualified -or $validated.ordinary_targets_enabled) {
-    throw 'Legacy reviewed mouth-atlas receipt returned the wrong boundary.'
+$legacyChecked = $false
+$validated = $null
+if (-not [string]::IsNullOrWhiteSpace($ReceiptPath)) {
+    $resolvedReceipt = [System.IO.Path]::GetFullPath($ReceiptPath)
+    $artifactRoot = Split-Path -Parent $resolvedReceipt
+    $receipt = Get-Content -LiteralPath $resolvedReceipt -Raw | ConvertFrom-Json
+    $validated = Get-NpcReviewedMouthAtlasReceipt -ReceiptPath $resolvedReceipt
+    if ($validated.schema_version -ne 1 -or
+        $validated.classification -ne 'legacy-private-fixture' -or
+        $validated.game_profile_id -ne 'eclipse-harbor' -or
+        $validated.character_id -ne 'mara-venn' -or
+        $validated.natural_quality_qualified -or $validated.ordinary_targets_enabled) {
+        throw 'Legacy reviewed mouth-atlas receipt returned the wrong boundary.'
+    }
+
+    $tamperedHash = Copy-JsonDocument $receipt
+    $tamperedHash.artifact.texture.sha256 = '0' * 64
+    Assert-Rejected -Name 'Texture hash tamper' `
+        -ExpectedMessage 'Reviewed mouth-atlas artifact hash or size mismatch: atlas-bgra8-premultiplied.bin' `
+        -Action {
+            Assert-NpcReviewedMouthAtlasDocument -Receipt $tamperedHash `
+                -ReceiptPath $resolvedReceipt -ArtifactRoot $artifactRoot | Out-Null
+        }
+
+    $schemaMismatch = Copy-JsonDocument $receipt
+    $schemaMismatch.atlasIdentity.schemaVersion = 4
+    Assert-Rejected -Name 'Schema and representation mismatch' `
+        -ExpectedMessage 'Reviewed mouth-atlas semantic identity is invalid.' `
+        -Action {
+            Assert-NpcReviewedMouthAtlasDocument -Receipt $schemaMismatch `
+                -ReceiptPath $resolvedReceipt -ArtifactRoot $artifactRoot | Out-Null
+        }
+
+    $semanticMismatch = Copy-JsonDocument $receipt
+    $semanticMismatch.atlasIdentity.characterId = 'misty'
+    Assert-Rejected -Name 'Legacy cross-character binding' `
+        -ExpectedMessage 'Legacy mouth-atlas receipt is not the exact Mara private fixture.' `
+        -Action {
+            Assert-NpcReviewedMouthAtlasDocument -Receipt $semanticMismatch `
+                -ReceiptPath $resolvedReceipt -ArtifactRoot $artifactRoot | Out-Null
+        }
+
+    $unknownField = Copy-JsonDocument $receipt
+    $unknownField.atlasIdentity | Add-Member -NotePropertyName claimedQuality -NotePropertyValue 'qualified'
+    Assert-Rejected -Name 'Unknown receipt field' `
+        -ExpectedMessage 'Reviewed mouth-atlas identity has missing or unknown fields.' `
+        -Action {
+            Assert-NpcReviewedMouthAtlasDocument -Receipt $unknownField `
+                -ReceiptPath $resolvedReceipt -ArtifactRoot $artifactRoot | Out-Null
+        }
+
+    $qualifiedLegacy = Copy-JsonDocument $receipt
+    $qualifiedLegacy.review.naturalQualityQualified = $true
+    Assert-Rejected -Name 'Legacy natural-quality claim' `
+        -ExpectedMessage 'Legacy mouth-atlas receipt is not the exact Mara private fixture.' `
+        -Action {
+            Assert-NpcReviewedMouthAtlasDocument -Receipt $qualifiedLegacy `
+                -ReceiptPath $resolvedReceipt -ArtifactRoot $artifactRoot | Out-Null
+        }
+
+    $legacyChecked = $true
+}
+else {
+    # Schema 4 cases below use their own receipt path; this only names the file.
+    $resolvedReceipt = Join-Path $cacheRoot 'reviewed-artifact-receipt.v1.json'
 }
 
-$tamperedHash = Copy-JsonDocument $receipt
-$tamperedHash.artifact.texture.sha256 = '0' * 64
-Assert-Rejected -Name 'Texture hash tamper' `
-    -ExpectedMessage 'Reviewed mouth-atlas artifact hash or size mismatch: atlas-bgra8-premultiplied.bin' `
-    -Action {
-        Assert-NpcReviewedMouthAtlasDocument -Receipt $tamperedHash `
-            -ReceiptPath $resolvedReceipt -ArtifactRoot $artifactRoot | Out-Null
-    }
-
-$schemaMismatch = Copy-JsonDocument $receipt
-$schemaMismatch.atlasIdentity.schemaVersion = 4
-Assert-Rejected -Name 'Schema and representation mismatch' `
-    -ExpectedMessage 'Reviewed mouth-atlas semantic identity is invalid.' `
-    -Action {
-        Assert-NpcReviewedMouthAtlasDocument -Receipt $schemaMismatch `
-            -ReceiptPath $resolvedReceipt -ArtifactRoot $artifactRoot | Out-Null
-    }
-
-$semanticMismatch = Copy-JsonDocument $receipt
-$semanticMismatch.atlasIdentity.characterId = 'misty'
-Assert-Rejected -Name 'Legacy cross-character binding' `
-    -ExpectedMessage 'Legacy mouth-atlas receipt is not the exact Mara private fixture.' `
-    -Action {
-        Assert-NpcReviewedMouthAtlasDocument -Receipt $semanticMismatch `
-            -ReceiptPath $resolvedReceipt -ArtifactRoot $artifactRoot | Out-Null
-    }
-
-$unknownField = Copy-JsonDocument $receipt
-$unknownField.atlasIdentity | Add-Member -NotePropertyName claimedQuality -NotePropertyValue 'qualified'
-Assert-Rejected -Name 'Unknown receipt field' `
-    -ExpectedMessage 'Reviewed mouth-atlas identity has missing or unknown fields.' `
-    -Action {
-        Assert-NpcReviewedMouthAtlasDocument -Receipt $unknownField `
-            -ReceiptPath $resolvedReceipt -ArtifactRoot $artifactRoot | Out-Null
-    }
-
-$qualifiedLegacy = Copy-JsonDocument $receipt
-$qualifiedLegacy.review.naturalQualityQualified = $true
-Assert-Rejected -Name 'Legacy natural-quality claim' `
-    -ExpectedMessage 'Legacy mouth-atlas receipt is not the exact Mara private fixture.' `
-    -Action {
-        Assert-NpcReviewedMouthAtlasDocument -Receipt $qualifiedLegacy `
-            -ReceiptPath $resolvedReceipt -ArtifactRoot $artifactRoot | Out-Null
-    }
-
-$scratchParent = 'E:\temp\InteractiveNPCs'
+$scratchParent = if ([string]::IsNullOrWhiteSpace($ScratchParent)) { $cacheRoot } else { $ScratchParent }
+$scratchParent = [System.IO.Path]::GetFullPath($scratchParent).TrimEnd('\')
 if (-not (Test-Path -LiteralPath $scratchParent -PathType Container)) {
     throw "Schema 4 receipt-test parent is unavailable: $scratchParent"
 }
@@ -311,24 +339,64 @@ if (-not [string]::IsNullOrWhiteSpace($ReviewedSchema4ReceiptPath)) {
         $externalSchema4.ordinary_targets_enabled) {
         throw 'External schema 4 receipt returned the wrong private-review boundary.'
     }
+
+    # Tamper the real pack in a disposable copy: a changed texture byte and an
+    # injected extra file must both be refused.
+    $realPackRoot = Split-Path -Parent ([System.IO.Path]::GetFullPath($ReviewedSchema4ReceiptPath))
+    $tamperRoot = Join-Path $scratchParent (
+        "reviewed-mouth-atlas-receipt-test-$PID-$([guid]::NewGuid().ToString('N'))")
+    try {
+        [System.IO.Directory]::CreateDirectory($tamperRoot) | Out-Null
+        foreach ($packFile in @(Get-ChildItem -LiteralPath $realPackRoot -File -Force)) {
+            Copy-Item -LiteralPath $packFile.FullName -Destination (Join-Path $tamperRoot $packFile.Name)
+        }
+        $copiedReceipt = Join-Path $tamperRoot ([System.IO.Path]::GetFileName($ReviewedSchema4ReceiptPath))
+        Get-NpcReviewedMouthAtlasReceipt -ReceiptPath $copiedReceipt | Out-Null
+        $copiedTexture = Join-Path $tamperRoot $externalSchema4.texture_file_name
+        $textureBytes = [System.IO.File]::ReadAllBytes($copiedTexture)
+        $textureBytes[0] = [byte](($textureBytes[0] + 1) % 256)
+        [System.IO.File]::WriteAllBytes($copiedTexture, $textureBytes)
+        Assert-Rejected -Name 'External schema 4 texture byte tamper' `
+            -ExpectedMessage "Reviewed mouth-atlas artifact hash or size mismatch: $($externalSchema4.texture_file_name)" `
+            -Action { Get-NpcReviewedMouthAtlasReceipt -ReceiptPath $copiedReceipt | Out-Null }
+        $textureBytes[0] = [byte](($textureBytes[0] + 255) % 256)
+        [System.IO.File]::WriteAllBytes($copiedTexture, $textureBytes)
+        Get-NpcReviewedMouthAtlasReceipt -ReceiptPath $copiedReceipt | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $tamperRoot 'extra.bin'), 'x')
+        Assert-Rejected -Name 'External schema 4 unknown file' `
+            -ExpectedMessage 'Reviewed mouth-atlas artifact contains missing or unknown files.' `
+            -Action { Get-NpcReviewedMouthAtlasReceipt -ReceiptPath $copiedReceipt | Out-Null }
+    }
+    finally {
+        if (Test-Path -LiteralPath $tamperRoot) {
+            Remove-OwnedSchema4ScratchDirectory -Path $tamperRoot -ExpectedParent $scratchParent
+        }
+    }
 }
 
 [ordered]@{
     schema = 'interactive-npcs-reviewed-mouth-atlas-receipt-tests/v1'
     status = 'passed'
-    receipt_sha256 = $validated.receipt_sha256
-    accepted_fixture = 'eclipse-harbor/mara-venn schema 1 legacy-private-fixture'
+    legacy_checked = $legacyChecked
+    receipt_sha256 = if ($null -ne $validated) { $validated.receipt_sha256 } else { $null }
+    accepted_fixture = if ($legacyChecked) {
+        'eclipse-harbor/mara-venn schema 1 legacy-private-fixture'
+    } else { 'none (legacy v80 receipt not supplied)' }
     rejected = @(
-        'texture-hash-tamper',
-        'schema-representation-mismatch',
-        'legacy-cross-character-binding',
-        'unknown-receipt-field',
-        'legacy-natural-quality-claim',
         'schema4-semantic-mismatch',
         'schema4-texture-hash-mismatch',
         'schema4-refine-policy-mismatch',
         'schema4-reference-context-mismatch'
-    )
+    ) + @(if ($legacyChecked) {
+        'texture-hash-tamper',
+        'schema-representation-mismatch',
+        'legacy-cross-character-binding',
+        'unknown-receipt-field',
+        'legacy-natural-quality-claim'
+    }) + @(if ($null -ne $externalSchema4) {
+        'external-schema4-texture-byte-tamper',
+        'external-schema4-unknown-file'
+    })
     schema4_fixture = "$($schema4Validated.game_profile_id)/$($schema4Validated.character_id) schema 4 reviewed-private-character-pack"
     external_schema4_receipt_sha256 = if ($null -ne $externalSchema4) {
         $externalSchema4.receipt_sha256

@@ -15,45 +15,87 @@ The command runs checks, requests an NSIS bundle from the pinned Tauri toolchain
 ## Installer-free local review directory
 
 The private review handoff can be built as one co-located directory without
-running an installer or launching the desktop application:
+running an installer or launching the desktop application. Every default is
+derived from the checkout (no drive letter): the folder that contains the
+repository supplies `.cache\` (output, scratch, the mouth atlas) and
+`local-app-data\test-game` (the practice game), so the destination is
+`<workspace>\.cache\portable-review`. `NPC_LARGE_ARTIFACT_ROOT`, when set,
+replaces `.cache\` as the artifact root.
 
 ```powershell
-$env:NPC_LARGE_ARTIFACT_ROOT = 'E:\temp\InteractiveNPCs'
+# Reuse the debug build that already exists (the commit it was built from is an
+# attestation recorded in the manifest, with every build input that differs now).
 ./scripts/windows/prepare-portable-review.ps1 `
-  -DestinationRoot 'E:\temp\InteractiveNPCs\review-v21' `
-  -StableTestGameDirectory `
-    'E:\temp\InteractiveNPCs\review-game-v17-stable\local-app-data\test-game' `
-  -ReviewedMouthAtlasReceiptPath `
-    'E:\temp\InteractiveNPCs\review-mouth-atlas-v80-native-compatible\reviewed-artifact-receipt.v1.json' `
-  -PrivateReviewModelCatalogDirectory `
-    'E:\temp\InteractiveNPCs\private-review-catalog-yunet-20260914-r5'
+  -ReuseExistingBuild -ReusedBuildCommit <build-commit> `
+  -MouthAtlasOwnerApproval '<date>: <what the owner approved>'
+
+# Or build from source (frontend, Tauri --no-bundle, sidecars): omit the two
+# reuse switches. This refuses to start if apps\control\src-tauri\generated-resources exists.
+./scripts/windows/prepare-portable-review.ps1 -MouthAtlasOwnerApproval '...'
 ```
 
-Run the non-mutating preflight while source or vertical-slice work is still in
-progress:
+Add `-PreflightOnly` to validate every input without building or writing
+anything. Inputs and their defaults:
 
-```powershell
-./scripts/windows/prepare-portable-review.ps1 `
-  -DestinationRoot 'E:\temp\InteractiveNPCs\review-v21' `
-  -StableTestGameDirectory `
-    'E:\temp\InteractiveNPCs\review-game-v17-stable\local-app-data\test-game' `
-  -ReviewedMouthAtlasReceiptPath `
-    'E:\temp\InteractiveNPCs\review-mouth-atlas-v80-native-compatible\reviewed-artifact-receipt.v1.json' `
-  -PrivateReviewModelCatalogDirectory `
-    'E:\temp\InteractiveNPCs\private-review-catalog-yunet-20260914-r5' `
-  -PreflightOnly
-```
+| Parameter | Default |
+|---|---|
+| `-StableTestGameDirectory` | `<workspace>\local-app-data\test-game` |
+| `-ReviewedMouthAtlasReceiptPath` | `<artifact root>\mara-atlas\review-mouth-atlas\reviewed-artifact-receipt.v1.json` |
+| `-PrivateReviewModelCatalogDirectory` | none (stages the checked repository catalog) |
+| `-ReuseExistingBuild` / `-ReusedBuildCommit` | off (build fresh) |
+
+Everything runs in Windows PowerShell 5.1 or PowerShell 7; the final fresh
+process verification uses the same host that runs the script. When other work is
+changing the source tree while you package, the source-identity freeze checks
+fail by design ("Source changed while ..."). Package from a clean checkout of
+the commit instead (for example a detached `git worktree`), pass `-ArtifactRoot`,
+`-DestinationRoot`, `-StableTestGameDirectory` and the atlas receipt explicitly
+(the defaults assume the repository sits directly inside the workspace folder),
+and copy the prebuilt `apps\control\src-tauri\binaries` sidecars in. The practice
+game manifest also hashes the working-tree bytes of the files it lists
+(`LICENSE` and the `scripts\synthetic-game-replay` sources); copy those from
+the checkout that prepared the game if line endings differ.
+
+### Practice game layouts
+
+`verify-review-test-game.ps1` accepts two project-owned layouts and the
+package manifest records which one it holds in `test_game.fixture_kind`:
+
+- `static-five-file`: the fixed generated portrait (no camera sequence). This
+  is what exists today; the package says so in `REVIEW.md` and the verifier
+  rejects a camera-sequence payload or claim in such a package.
+- `moving-camera-sequence`: the six-file build with the hash-bound
+  `.inpcseq` sequence (needs the Mara camera idle source footage).
+
+### Mouth atlas and its approval
+
+The atlas receipt is immutable, so a receipt whose own text still says the
+visual review is pending (as the procedural schema 4 Mara pack's does) is only
+accepted with `-MouthAtlasOwnerApproval`. The attestation is stored in
+`mouth_atlas.owner_approval_attestation`, repeated in `REVIEW.md`, and the
+verifier refuses a package whose receipt is pending and has no attestation.
+
+### Reused builds
+
+`-ReuseExistingBuild` skips the frontend/Tauri/sidecar builds. The control app
+and the four sidecars staged in `apps\control\src-tauri\binaries` are re-hashed
+against `sidecar-manifest.v1.json` and PE-audited, product resources are staged
+in a disposable temp directory, and `application.reused_build` records the
+attested build commit, the executable timestamp, and the committed and
+uncommitted build-input files that differ from that commit. The outcome
+`fresh_installer_free_build` becomes `reused-existing-build`; `verify-portable-review.ps1`
+requires that evidence block. A reused build never claims to contain later source.
 
 Private review catalog metadata is deliberately short lived. Refresh an expired
 local-review bootstrap only while its exact signed device measurement remains
-current:
+current (the source directory is a previous private catalog; none exists on this
+machine today, and the checked repository catalog under `packaging\model-packs`
+expired on 2026-10-01, so it cannot be refreshed this way):
 
 ```powershell
 ./scripts/windows/refresh-private-review-model-catalog.ps1 `
-  -SourceDirectory `
-    'E:\temp\InteractiveNPCs\private-review-catalog-yunet-20260907-r3' `
-  -DestinationDirectory `
-    'E:\temp\InteractiveNPCs\private-review-catalog-yunet-20260914-r5'
+  -SourceDirectory '<previous private review catalog directory>' `
+  -DestinationDirectory '<artifact root>\private-review-catalog-yunet-<date>'
 ```
 
 The refresh verifies the previous two-of-two signatures and current measurement
@@ -64,21 +106,20 @@ production trust, or enable promotion/publication. Verify any supplied overlay
 independently with `verify-private-review-model-catalog.ps1`; packaging performs
 the same live cryptographic verification and rejects expired metadata.
 
-The builder compiles a fresh Debug review-namespace shell with Tauri's
-`--no-bundle` path, audits the four GUI-subsystem sidecars, stages the exact
-legal/SBOM resource corpus, and copies the independently built, verified
-six-file synthetic-game package from
-`E:\temp\InteractiveNPCs\review-game-v17-stable\local-app-data\test-game`.
-That closed world contains one hash-bound project-owned `.inpcseq` camera
-sequence and no codec/runtime binary. The separate two-file
+Unless `-ReuseExistingBuild` is given, the builder compiles a fresh Debug
+review-namespace shell with Tauri's `--no-bundle` path and audits the four
+GUI-subsystem sidecars. Either way it stages the exact legal/SBOM resource
+corpus and copies the independently verified synthetic-game package (see
+Practice game layouts). The game closed world holds no codec/runtime binary. The separate two-file
 `review-mouth-atlas` payload is accepted only through
 `-ReviewedMouthAtlasReceiptPath`. The receipt binds the exact atlas and texture
 sizes and SHA-256 values, supported schema/representation pair, identity
 revision, game profile, character, enrollment status, and honest quality
 boundary. It is copied to `review-evidence` while only the two bound payload
-files enter the runtime atlas directory. The existing v80 receipt classifies
+files enter the runtime atlas directory. The v80 receipt, when present, classifies
 the exact Eclipse Harbor/Mara atlas as a legacy private fixture with natural
-quality still open. It cannot be relabeled for Misty or another character. A
+quality still open (that receipt's folder no longer exists; the schema 4
+procedural pack is the current one). It cannot be relabeled for Misty or another character. A
 schema 4 receipt must use `normalized-oral-strip-v1` and include a
 `reviewed-private` semantic enrollment plus matching review-evidence digest;
 the package check does not qualify an unreviewed atlas. The
@@ -99,6 +140,10 @@ without creating or deleting files using:
 ```powershell
 ./scripts/windows/test-reviewed-mouth-atlas-receipt.ps1
 ```
+
+(It also tamper-tests the real schema 4 pack under `.cache\mara-atlas` when
+that exists, using disposable scratch copies; pass `-ReceiptPath` to include the
+legacy v80 fixture checks.)
 
 After a character-specific atlas has a reviewed-private receipt, pass one or
 more receipt paths through `-ReviewedCharacterMouthPackReceiptPaths`. Each pack
@@ -128,7 +173,7 @@ source identity, private-catalog boundary, and synthetic-game provenance with:
 
 ```powershell
 ./scripts/windows/verify-portable-review.ps1 `
-  -Directory 'E:\temp\InteractiveNPCs\review-v21'
+  -Directory '<artifact root>\portable-review'
 ```
 
 This is unsigned, installer-free, local-review evidence. It is not installed

@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Directory,
-    [string]$ArtifactRoot = 'E:\temp\InteractiveNPCs',
+    # Defaults to NPC_LARGE_ARTIFACT_ROOT, else the .cache folder beside the repository.
+    [string]$ArtifactRoot = '',
     [switch]$AllowPendingOutcome
 )
 
@@ -10,6 +11,13 @@ Set-StrictMode -Version 2.0
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 . (Join-Path $PSScriptRoot 'reviewed-mouth-atlas-receipt.ps1')
+if ([string]::IsNullOrWhiteSpace($ArtifactRoot)) {
+    $ArtifactRoot = if (-not [string]::IsNullOrWhiteSpace($env:NPC_LARGE_ARTIFACT_ROOT)) {
+        $env:NPC_LARGE_ARTIFACT_ROOT
+    } else {
+        Join-Path (Split-Path -Parent $repoRoot) '.cache'
+    }
+}
 $root = [System.IO.Path]::GetFullPath($Directory).TrimEnd('\')
 $allowedRoot = [System.IO.Path]::GetFullPath($ArtifactRoot).TrimEnd('\')
 if (-not $root.StartsWith("$allowedRoot\", [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -48,8 +56,28 @@ if (-not $recordedReviewRoot.StartsWith("$allowedRoot\", [System.StringCompariso
         -not [string]::Equals($recordedReviewRoot, $root, [System.StringComparison]::OrdinalIgnoreCase))) {
     throw 'Portable review recorded destination is invalid.'
 }
-if ($manifest.outcomes.fresh_installer_free_build -ne 'passed' -or
-    $manifest.outcomes.stable_game_prerequisite_verification -ne 'passed' -or
+# A package either built the app fresh or reused an existing debug build; the
+# reuse is a distinct recorded outcome and must carry its own evidence block.
+$applicationBuildOrigin = if ($manifest.application.PSObject.Properties.Name -contains 'build_origin') {
+    [string]$manifest.application.build_origin
+} else {
+    'fresh-installer-free-build'
+}
+if ($applicationBuildOrigin -ceq 'reused-existing-debug-build') {
+    if ($manifest.outcomes.fresh_installer_free_build -ne 'reused-existing-build' -or
+        $null -eq $manifest.application.reused_build -or
+        [string]::IsNullOrWhiteSpace([string]$manifest.application.reused_build.control_last_write_utc) -or
+        $manifest.application.reused_build.PSObject.Properties.Name -notcontains
+            'build_input_files_changed_since_control_build_count' -or
+        [string]$manifest.application.reused_build.attested_build_commit -cnotmatch '^[0-9a-f]{40}$') {
+        throw 'Portable review reused-build evidence is missing or inconsistent.'
+    }
+}
+elseif ($applicationBuildOrigin -cne 'fresh-installer-free-build' -or
+    $manifest.outcomes.fresh_installer_free_build -ne 'passed') {
+    throw 'Portable review build origin or fresh-build outcome is invalid.'
+}
+if ($manifest.outcomes.stable_game_prerequisite_verification -ne 'passed' -or
     $manifest.outcomes.private_mouth_atlas_prerequisite_verification -ne 'passed') {
     throw 'Portable review build or prerequisite outcome is invalid.'
 }
@@ -366,9 +394,31 @@ if ([string]$recordedSource.source_candidate_digest.sha256 -ne [string]$manifest
 $testGameRoot = Join-Path $root 'local-app-data/test-game'
 $testGameJson = & (Join-Path $PSScriptRoot 'verify-review-test-game.ps1') -Directory $testGameRoot
 $testGame = $testGameJson | ConvertFrom-Json
-if ($testGame.status -ne 'passed' -or $testGame.file_count -ne 6 -or
+# The practice game is either the six-file camera build or the static five-file
+# build. Manifests written before fixture_kind existed are the camera build.
+$recordedGameKind = if ($manifest.test_game.PSObject.Properties.Name -contains 'fixture_kind') {
+    [string]$manifest.test_game.fixture_kind
+} else {
+    'moving-camera-sequence'
+}
+$expectedGameFileCount = 0
+$expectedGameVisualSource = ''
+if ($recordedGameKind -ceq 'moving-camera-sequence') {
+    $expectedGameFileCount = 6
+    $expectedGameVisualSource = 'verified-sibling-project-owned-mara-camera-sequence-v1'
+}
+elseif ($recordedGameKind -ceq 'static-five-file') {
+    $expectedGameFileCount = 5
+    $expectedGameVisualSource = 'embedded-original-generated-photorealistic-portrait-v1'
+}
+else {
+    throw "Portable review test-game kind is unknown: $recordedGameKind"
+}
+if ($testGame.status -ne 'passed' -or $testGame.file_count -ne $expectedGameFileCount -or
     $testGame.third_party_binary_count -ne 0 -or
-    $testGame.visual_source -ne 'verified-sibling-project-owned-mara-camera-sequence-v1') {
+    $testGame.visual_source -ne $expectedGameVisualSource -or
+    ($manifest.test_game.PSObject.Properties.Name -contains 'file_count' -and
+        [int]$manifest.test_game.file_count -ne $expectedGameFileCount)) {
     throw 'Portable review test game failed provenance verification.'
 }
 $fixtureManifestPath = Join-Path $testGameRoot 'REVIEW-FIXTURE-MANIFEST.json'
@@ -376,22 +426,35 @@ $fixtureManifest = Get-Content -LiteralPath $fixtureManifestPath -Raw | ConvertF
 $sequenceEntries = @($fixtureManifest.files | Where-Object {
         [System.IO.Path]::GetExtension([string]$_.path) -ieq '.inpcseq'
     })
-if ($sequenceEntries.Count -ne 1 -or
-    (Get-LowerSha256 -Path $fixtureManifestPath) -cne [string]$manifest.test_game.distribution_manifest_sha256 -or
+if ((Get-LowerSha256 -Path $fixtureManifestPath) -cne [string]$manifest.test_game.distribution_manifest_sha256 -or
     [string]$manifest.test_game.visual_source -ne [string]$testGame.visual_source) {
-    throw 'Portable review camera-sequence manifest binding is invalid.'
+    throw 'Portable review test-game manifest binding is invalid.'
 }
-$sequenceEntry = $sequenceEntries[0]
-$sequencePath = Join-Path $root ([string]$manifest.test_game.sequence.relative_path)
-if ([string]$manifest.test_game.sequence.relative_path -ne
-        ('local-app-data/test-game/' + [string]$sequenceEntry.path) -or
-    [string]$manifest.test_game.sequence.sha256 -ne [string]$sequenceEntry.sha256 -or
-    [int64]$manifest.test_game.sequence.size_bytes -ne [int64]$sequenceEntry.size_bytes -or
-    (Get-LowerSha256 -Path $sequencePath) -cne [string]$sequenceEntry.sha256) {
-    throw 'Portable review camera-sequence file binding is invalid.'
+if ($recordedGameKind -ceq 'moving-camera-sequence') {
+    if ($sequenceEntries.Count -ne 1) { throw 'Portable review camera-sequence manifest binding is invalid.' }
+    $sequenceEntry = $sequenceEntries[0]
+    $sequencePath = Join-Path $root ([string]$manifest.test_game.sequence.relative_path)
+    if ([string]$manifest.test_game.sequence.relative_path -ne
+            ('local-app-data/test-game/' + [string]$sequenceEntry.path) -or
+        [string]$manifest.test_game.sequence.sha256 -ne [string]$sequenceEntry.sha256 -or
+        [int64]$manifest.test_game.sequence.size_bytes -ne [int64]$sequenceEntry.size_bytes -or
+        (Get-LowerSha256 -Path $sequencePath) -cne [string]$sequenceEntry.sha256) {
+        throw 'Portable review camera-sequence file binding is invalid.'
+    }
+    if (@($actual | Where-Object { [System.IO.Path]::GetExtension($_) -ieq '.inpcseq' }).Count -ne 1) {
+        throw 'Portable review must contain exactly one verified camera-sequence payload.'
+    }
 }
-if (@($actual | Where-Object { [System.IO.Path]::GetExtension($_) -ieq '.inpcseq' }).Count -ne 1) {
-    throw 'Portable review must contain exactly one verified camera-sequence payload.'
+else {
+    # The static build must not carry, or claim, a camera sequence.
+    if ($sequenceEntries.Count -ne 0 -or $null -ne $manifest.test_game.sequence -or
+        @($actual | Where-Object { [System.IO.Path]::GetExtension($_) -ieq '.inpcseq' }).Count -ne 0) {
+        throw 'Portable review static test game must not contain a camera-sequence payload.'
+    }
+    if ([string]$manifest.test_game.visual_mode -ne 'static-portrait-control-v1' -or
+        [string]$testGame.visual_mode -ne 'static-portrait-control-v1') {
+        throw 'Portable review static test-game visual mode is invalid.'
+    }
 }
 
 $atlasRoot = Join-Path $root 'review-mouth-atlas'
@@ -415,6 +478,22 @@ if ($manifest.mouth_atlas.PSObject.Properties.Name -contains 'receipt') {
     }
     $reviewedAtlas = Get-NpcReviewedMouthAtlasReceipt -ReceiptPath $receiptPath `
         -ArtifactRoot $atlasRoot
+    # A receipt whose own text still says the review is pending is only
+    # acceptable with the owner approval attested in the manifest.
+    $receiptSaysPending = ([string]$reviewedAtlas.qualification) -match '(?i)\bpending\b'
+    $recordedApproval = if ($manifest.mouth_atlas.PSObject.Properties.Name -contains
+            'owner_approval_attestation') {
+        [string]$manifest.mouth_atlas.owner_approval_attestation
+    } else {
+        ''
+    }
+    if ($receiptSaysPending -and [string]::IsNullOrWhiteSpace($recordedApproval)) {
+        throw 'Portable review mouth-atlas receipt is pending and the manifest has no owner-approval attestation.'
+    }
+    if ($manifest.mouth_atlas.PSObject.Properties.Name -contains 'receipt_review_pending' -and
+        [bool]$manifest.mouth_atlas.receipt_review_pending -ne $receiptSaysPending) {
+        throw 'Portable review mouth-atlas pending-review record disagrees with its receipt.'
+    }
     $expectedAtlasFiles = @(
         [string]$reviewedAtlas.atlas_file_name,
         [string]$reviewedAtlas.texture_file_name
@@ -562,6 +641,8 @@ if ($engineeringReviewText -match '\]\((?![<#]|(?i:https?|mailto|file):)[^)]+\)'
     executable_count = $actualExecutables.Count
     application_sha256 = [string]$manifest.application.sha256
     test_game_sha256 = [string]$testGame.executable_sha256
+    test_game_kind = $recordedGameKind
+    application_build_origin = $applicationBuildOrigin
     mouth_atlas_schema_version = if (
         $manifest.mouth_atlas.PSObject.Properties.Name -contains 'schema_version') {
         [uint32]$manifest.mouth_atlas.schema_version

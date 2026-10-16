@@ -10,7 +10,7 @@ param(
     [Parameter(Mandatory = $true)][string]$ProviderStateRoot,
     [Parameter(Mandatory = $true)][string]$JoinEvidenceRoot,
     [Parameter(Mandatory = $true)][string]$LogDirectory,
-    [string]$CargoTargetDirectory = 'E:\temp\InteractiveNPCs\cargo-target'
+    [string]$CargoTargetDirectory = (Join-Path (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))) '.cache\cargo-target')
 )
 
 Set-StrictMode -Version 3.0

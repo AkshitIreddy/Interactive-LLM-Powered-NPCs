@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$SourceDirectory,
     [Parameter(Mandatory = $true)][string]$DestinationDirectory,
-    [string]$ArtifactRoot = 'E:\temp\InteractiveNPCs',
+    # Defaults to NPC_LARGE_ARTIFACT_ROOT, else the .cache folder beside the repository.
+    [string]$ArtifactRoot = '',
     [ValidateRange(1, 14)][int]$ValidDays = 7
 )
 
@@ -13,6 +14,13 @@ $global:LASTEXITCODE = 0
 . (Join-Path $PSScriptRoot 'node-tooling.ps1')
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+if ([string]::IsNullOrWhiteSpace($ArtifactRoot)) {
+    $ArtifactRoot = if (-not [string]::IsNullOrWhiteSpace($env:NPC_LARGE_ARTIFACT_ROOT)) {
+        $env:NPC_LARGE_ARTIFACT_ROOT
+    } else {
+        Join-Path (Split-Path -Parent $repoRoot) '.cache'
+    }
+}
 $source = [System.IO.Path]::GetFullPath($SourceDirectory).TrimEnd('\')
 $destination = [System.IO.Path]::GetFullPath($DestinationDirectory).TrimEnd('\')
 $artifactRootFull = [System.IO.Path]::GetFullPath($ArtifactRoot).TrimEnd('\')

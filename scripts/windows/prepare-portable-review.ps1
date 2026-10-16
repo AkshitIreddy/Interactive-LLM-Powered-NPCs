@@ -1,12 +1,27 @@
 [CmdletBinding()]
 param(
-    [string]$DestinationRoot = 'E:\temp\InteractiveNPCs\review-v21',
-    [string]$ArtifactRoot = 'E:\temp\InteractiveNPCs',
-    [string]$StableTestGameDirectory = 'E:\temp\InteractiveNPCs\review-game-v17-stable\local-app-data\test-game',
-    [string]$MouthAtlasDirectory = 'E:\temp\InteractiveNPCs\review-mouth-atlas-v80-native-compatible',
+    # Everything defaults to locations derived from this checkout: the workspace
+    # folder that contains the repository holds .cache (large generated output)
+    # and local-app-data (the practice game). No drive letter is assumed.
+    [string]$DestinationRoot = '',
+    [string]$ArtifactRoot = '',
+    [string]$StableTestGameDirectory = '',
+    [string]$MouthAtlasDirectory = '',
     [string]$ReviewedMouthAtlasReceiptPath = '',
     [string[]]$ReviewedCharacterMouthPackReceiptPaths = @(),
     [string]$PrivateReviewModelCatalogDirectory = '',
+    # Required when the mouth-atlas receipt text still records its visual review
+    # as pending (a receipt is immutable, so an approval that came later is
+    # attested here and recorded in the manifest). Example:
+    #   -MouthAtlasOwnerApproval '2026-10-16: owner approved the procedural atlas, ee toned down'
+    [string]$MouthAtlasOwnerApproval = '',
+    # Package the debug control app and sidecars that are already built instead
+    # of rebuilding them. The reused build is recorded in the manifest.
+    [switch]$ReuseExistingBuild,
+    # With -ReuseExistingBuild: the commit the existing build was made from. This is
+    # an operator attestation (a binary does not record its commit); the build-input
+    # files that differ between it and the current source are listed in the manifest.
+    [string]$ReusedBuildCommit = '',
     [switch]$PreflightOnly
 )
 
@@ -19,6 +34,20 @@ $global:LASTEXITCODE = 0
 . (Join-Path $PSScriptRoot 'reviewed-mouth-atlas-receipt.ps1')
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+$workspaceRoot = Split-Path -Parent $repoRoot
+if ([string]::IsNullOrWhiteSpace($ArtifactRoot)) {
+    $ArtifactRoot = if (-not [string]::IsNullOrWhiteSpace($env:NPC_LARGE_ARTIFACT_ROOT)) {
+        $env:NPC_LARGE_ARTIFACT_ROOT
+    } else {
+        Join-Path $workspaceRoot '.cache'
+    }
+}
+if ([string]::IsNullOrWhiteSpace($DestinationRoot)) {
+    $DestinationRoot = Join-Path $ArtifactRoot 'portable-review'
+}
+if ([string]::IsNullOrWhiteSpace($StableTestGameDirectory)) {
+    $StableTestGameDirectory = Join-Path $workspaceRoot 'local-app-data/test-game'
+}
 $destination = [System.IO.Path]::GetFullPath($DestinationRoot).TrimEnd('\')
 $artifactRootFull = [System.IO.Path]::GetFullPath($ArtifactRoot).TrimEnd('\')
 if (-not $destination.StartsWith("$artifactRootFull\", [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -33,8 +62,10 @@ if ($env:OS -ne 'Windows_NT' -or -not [System.Environment]::Is64BitOperatingSyst
 
 $python = Get-Command python.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
 $cargo = Get-Command cargo.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
-$pwsh = Get-Command pwsh.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
-$pnpm = Get-NpcCorepackPnpmInvocation
+# Verify the finished package in a fresh process of the same PowerShell edition
+# that is running this script (Windows PowerShell 5.1 or PowerShell 7).
+$powerShellHost = (Get-Process -Id $PID).Path
+$pnpm = $null
 $tauriConfig = Join-Path $repoRoot 'packaging/windows/tauri.review.conf.json'
 $metadataProcess = Invoke-NpcHiddenProcess -FilePath $cargo.Source -ArgumentList @(
     'metadata', '--manifest-path', (Join-Path $repoRoot 'apps/control/src-tauri/Cargo.toml'),
@@ -146,17 +177,54 @@ function Get-EngineeringReviewWithAbsoluteLinks {
     return $rewritten
 }
 
+# The practice game ships in one of two project-owned layouts, both checked by
+# verify-review-test-game.ps1: the static five-file build (fixed portrait) or the
+# six-file build that adds the moving camera sequence. The kind is recorded in
+# the package manifest so a package never implies a camera sequence it lacks.
+function Get-ReviewTestGameKind {
+    param([Parameter(Mandatory = $true)][object]$Verification)
+    if ($Verification.status -ne 'passed' -or $Verification.third_party_binary_count -ne 0) {
+        throw 'Synthetic review game prerequisite failed verification.'
+    }
+    if ($Verification.file_count -eq 6 -and
+        $Verification.visual_source -eq 'verified-sibling-project-owned-mara-camera-sequence-v1') {
+        return 'moving-camera-sequence'
+    }
+    if ($Verification.file_count -eq 5 -and
+        $Verification.visual_source -eq 'embedded-original-generated-photorealistic-portrait-v1' -and
+        $Verification.visual_mode -eq 'static-portrait-control-v1') {
+        return 'static-five-file'
+    }
+    throw 'Synthetic review game is neither the verified 5-file static build nor the 6-file camera build.'
+}
+
 if (-not [string]::IsNullOrWhiteSpace($ReviewedMouthAtlasReceiptPath) -and
-    $PSBoundParameters.ContainsKey('MouthAtlasDirectory')) {
+    -not [string]::IsNullOrWhiteSpace($MouthAtlasDirectory)) {
     throw 'Use ReviewedMouthAtlasReceiptPath or the legacy MouthAtlasDirectory lookup, not both.'
 }
 $reviewedMouthAtlasReceipt = if (-not [string]::IsNullOrWhiteSpace($ReviewedMouthAtlasReceiptPath)) {
     [System.IO.Path]::GetFullPath($ReviewedMouthAtlasReceiptPath)
-} else {
+} elseif (-not [string]::IsNullOrWhiteSpace($MouthAtlasDirectory)) {
     $legacyAtlasRoot = [System.IO.Path]::GetFullPath($MouthAtlasDirectory).TrimEnd('\')
     Join-Path $legacyAtlasRoot 'reviewed-artifact-receipt.v1.json'
+} else {
+    # The procedural schema 4 Mara atlas written by tools/mouth-atlas/write_atlas.py.
+    Join-Path $artifactRootFull 'mara-atlas/review-mouth-atlas/reviewed-artifact-receipt.v1.json'
+}
+if (-not (Test-Path -LiteralPath $reviewedMouthAtlasReceipt -PathType Leaf)) {
+    throw ("Reviewed mouth-atlas receipt is missing: $reviewedMouthAtlasReceipt. Generate the atlas " +
+        'with tools/mouth-atlas/write_atlas.py or pass -ReviewedMouthAtlasReceiptPath.')
 }
 $reviewedMouthAtlas = Get-NpcReviewedMouthAtlasReceipt -ReceiptPath $reviewedMouthAtlasReceipt
+# A receipt cannot be edited after the fact (its hashes bind it), so one that
+# still says its review is pending needs an explicit owner attestation, which
+# is recorded in the manifest and REVIEW.md.
+$mouthAtlasReviewPending = ([string]$reviewedMouthAtlas.qualification) -match '(?i)\bpending\b'
+$mouthAtlasOwnerApprovalText = $MouthAtlasOwnerApproval.Trim()
+if ($mouthAtlasReviewPending -and [string]::IsNullOrWhiteSpace($mouthAtlasOwnerApprovalText)) {
+    throw ('The mouth-atlas receipt records its visual review as pending. Pass ' +
+        '-MouthAtlasOwnerApproval with the date and scope of the owner approval to package it.')
+}
 $mouthAtlas = [string]$reviewedMouthAtlas.artifact_root
 $atlasPayloadFiles = @(
     [string]$reviewedMouthAtlas.atlas_file_name,
@@ -272,9 +340,46 @@ if ($remainingRelativeEngineeringLinks -ne 0) {
 $stableGameJson = & (Join-Path $PSScriptRoot 'verify-review-test-game.ps1') -Directory $stableTestGame
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $stableGameVerification = $stableGameJson | ConvertFrom-Json
-if ($stableGameVerification.status -ne 'passed' -or $stableGameVerification.file_count -ne 6 -or
-    $stableGameVerification.visual_source -ne 'verified-sibling-project-owned-mara-camera-sequence-v1') {
-    throw 'Stable synthetic review game prerequisite failed verification.'
+$stableGameKind = Get-ReviewTestGameKind -Verification $stableGameVerification
+
+# The checked repository model catalog is short lived. Record when it ends so a
+# package never silently implies a current catalog.
+$repositoryCatalogPath = Join-Path $repoRoot 'packaging/model-packs/model-catalog-v1.json'
+$repositoryCatalogExpiresUtc = $null
+$repositoryCatalogExpired = $null
+if (Test-Path -LiteralPath $repositoryCatalogPath -PathType Leaf) {
+    $repositoryCatalog = Get-Content -LiteralPath $repositoryCatalogPath -Raw | ConvertFrom-Json
+    $repositoryCatalogExpiryUnix = [int64]$repositoryCatalog.signed.expires_unix_seconds
+    $repositoryCatalogExpiresUtc = [DateTimeOffset]::FromUnixTimeSeconds($repositoryCatalogExpiryUnix).
+        UtcDateTime.ToString('o')
+    $repositoryCatalogExpired = $repositoryCatalogExpiryUnix -le [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    if ($null -eq $privateModelCatalog -and $repositoryCatalogExpired) {
+        Write-Warning ("The checked repository model catalog expired on $repositoryCatalogExpiresUtc. " +
+            'It is staged and the expiry recorded; optional local model packs cannot be admitted until it is renewed.')
+    }
+}
+
+$reuseBinariesDirectory = Join-Path $repoRoot 'apps/control/src-tauri/binaries'
+$reusedBuildCommitFull = $null
+if ($ReuseExistingBuild) {
+    if ([string]::IsNullOrWhiteSpace($ReusedBuildCommit)) {
+        throw ('-ReuseExistingBuild requires -ReusedBuildCommit: the commit the existing debug build was ' +
+            'made from, so the manifest can list every build input that changed since.')
+    }
+    $reuseGit = Get-Command git.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
+    $reusedBuildCommitFull = [string]((& $reuseGit.Source -C $repoRoot rev-parse --verify --quiet `
+            "$ReusedBuildCommit^{commit}") | Select-Object -First 1)
+    if ($reusedBuildCommitFull -cnotmatch '^[0-9a-f]{40}$') {
+        throw "-ReusedBuildCommit is not a commit in this repository: $ReusedBuildCommit"
+    }
+    & $reuseGit.Source -C $repoRoot merge-base --is-ancestor $reusedBuildCommitFull HEAD
+    if ($LASTEXITCODE -ne 0) { throw "-ReusedBuildCommit is not an ancestor of HEAD: $ReusedBuildCommit" }
+    foreach ($required in @($controlBinary, (Join-Path $reuseBinariesDirectory 'sidecar-manifest.v1.json'))) {
+        if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+            throw ("-ReuseExistingBuild needs an existing debug build, but this is missing: $required. " +
+                'Build it first or omit -ReuseExistingBuild to build from source.')
+        }
+    }
 }
 
 $preflight = [ordered]@{
@@ -294,6 +399,13 @@ $preflight = [ordered]@{
     }
     stable_test_game_source = $stableTestGame
     stable_test_game_sha256 = [string]$stableGameVerification.executable_sha256
+    stable_test_game_kind = $stableGameKind
+    stable_test_game_file_count = [int]$stableGameVerification.file_count
+    reuse_existing_build = [bool]$ReuseExistingBuild
+    mouth_atlas_receipt_review_pending = [bool]$mouthAtlasReviewPending
+    mouth_atlas_owner_approval = $mouthAtlasOwnerApprovalText
+    repository_model_catalog_expires_utc = $repositoryCatalogExpiresUtc
+    repository_model_catalog_expired = $repositoryCatalogExpired
     mouth_atlas_source = $mouthAtlas
     mouth_atlas_receipt = [string]$reviewedMouthAtlas.receipt_path
     mouth_atlas_receipt_sha256 = [string]$reviewedMouthAtlas.receipt_sha256
@@ -329,13 +441,23 @@ elseif (-not [string]::Equals([System.IO.Path]::GetFullPath($env:NPC_LARGE_ARTIF
 
 $stage = Join-Path $artifactRootFull ('.portable-review-stage-' + [Guid]::NewGuid().ToString('N'))
 $evidenceWork = Join-Path $artifactRootFull ('.portable-review-evidence-' + [Guid]::NewGuid().ToString('N'))
-$generatedResources = Join-Path $repoRoot 'apps/control/src-tauri/generated-resources'
-if (Test-Path -LiteralPath $generatedResources) {
-    throw "Generated Tauri resources already exist; another package operation may be active: $generatedResources"
+$reuseWork = $null
+if ($ReuseExistingBuild) {
+    # No Tauri build runs, so product resources are staged in a disposable
+    # directory instead of the repository's build-input location.
+    $reuseWork = Join-Path ([System.IO.Path]::GetTempPath()) ('npc-portable-review-' + [Guid]::NewGuid().ToString('N'))
+    $generatedResources = Join-Path $reuseWork 'generated-resources'
+}
+else {
+    $generatedResources = Join-Path $repoRoot 'apps/control/src-tauri/generated-resources'
+    if (Test-Path -LiteralPath $generatedResources) {
+        throw "Generated Tauri resources already exist; another package operation may be active: $generatedResources"
+    }
 }
 
 try {
     New-Item -ItemType Directory -Path $stage,$evidenceWork -Force | Out-Null
+    if ($null -ne $reuseWork) { New-Item -ItemType Directory -Path $reuseWork -Force | Out-Null }
 
     & (Join-Path $repoRoot 'scripts/security/check-source-hygiene.ps1') -Root $repoRoot | Out-Null
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -358,39 +480,112 @@ try {
         -OutputDirectory (Join-Path $evidenceWork 'legal')
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $legal = $legalJson | ConvertFrom-Json
-    $sidecarJson = & (Join-Path $repoRoot 'scripts/prepare-sidecars.ps1') -Configuration Debug
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    $sidecars = $sidecarJson | ConvertFrom-Json
+    $reusedBuild = $null
+    if ($ReuseExistingBuild) {
+        # Package the sidecars staged by an earlier prepare-sidecars run. Each one
+        # is re-hashed against that run's manifest and re-audited as a GUI PE.
+        $sidecarManifestPath = Join-Path $reuseBinariesDirectory 'sidecar-manifest.v1.json'
+        $reusedSidecarManifest = Get-Content -LiteralPath $sidecarManifestPath -Raw | ConvertFrom-Json
+        if ($reusedSidecarManifest.schema -ne 'interactive-npcs-sidecars/v1' -or
+            @($reusedSidecarManifest.binaries).Count -ne 4 -or
+            $reusedSidecarManifest.application_configuration -ne 'Debug') {
+            throw 'The staged sidecar manifest is not the four-binary Debug interactive-npcs-sidecars/v1 manifest.'
+        }
+        foreach ($binary in @($reusedSidecarManifest.binaries)) {
+            $sidecarPath = Join-Path $reuseBinariesDirectory ([string]$binary.file_name)
+            if (-not (Test-Path -LiteralPath $sidecarPath -PathType Leaf) -or
+                (Get-LowerSha256 -Path $sidecarPath) -cne [string]$binary.sha256) {
+                throw "Staged sidecar does not match its manifest (rebuild with scripts/prepare-sidecars.ps1): $sidecarPath"
+            }
+            & (Join-Path $repoRoot 'scripts/audit-pe-product-binary.ps1') `
+                -Path $sidecarPath -ExpectedSubsystem Gui | Out-Null
+        }
+        $sidecars = [pscustomobject]@{
+            manifest_path = $sidecarManifestPath
+            binaries = @($reusedSidecarManifest.binaries)
+        }
+    }
+    else {
+        $sidecarJson = & (Join-Path $repoRoot 'scripts/prepare-sidecars.ps1') -Configuration Debug
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $sidecars = $sidecarJson | ConvertFrom-Json
+    }
 
     $resourceJson = & (Join-Path $repoRoot 'scripts/stage-product-resources.ps1') `
         -SbomPath ([string]$legal.sbom_path) `
         -SidecarManifestPath ([string]$sidecars.manifest_path) `
         -ArtifactScopePath ([string]$legal.artifact_scope_path) `
         -LicenseMaterialRoot ([string]$legal.license_root) `
-        -DestinationRoot $generatedResources
+        -DestinationRoot $generatedResources `
+        -AllowDisposableDestination:$ReuseExistingBuild
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $resources = $resourceJson | ConvertFrom-Json
 
-    Push-Location (Join-Path $repoRoot 'apps/control')
-    try {
-        Invoke-NpcCheckedCommand -FilePath $pnpm.FilePath `
-            -ArgumentList @($pnpm.Prefix + @('run', 'build')) `
-            -FailureMessage 'Pinned frontend build failed'
-        $buildStarted = [DateTime]::UtcNow
-        Invoke-NpcCheckedCommand -FilePath $pnpm.FilePath `
-            -ArgumentList @($pnpm.Prefix + @(
-                'run', 'tauri', 'build', '--debug', '--no-bundle', '--ci', '--config',
-                $tauriConfig.Replace('\', '/'))) `
-            -FailureMessage 'Installer-free Tauri build failed'
+    if ($ReuseExistingBuild) {
+        $controlItem = Get-Item -LiteralPath $controlBinary
+        & (Join-Path $repoRoot 'scripts/audit-pe-product-binary.ps1') `
+            -Path $controlBinary -ExpectedSubsystem Gui | Out-Null
+        # Honest staleness evidence, independent of file timestamps: build-input
+        # files that differ between the attested build commit and HEAD, plus
+        # uncommitted build-input changes from the source identity. Listed, not hidden.
+        $buildInputPrefixes = @(
+            'apps/control/src-tauri/', 'apps/control/src/', 'apps/control/package.json',
+            'apps/control/index.html', 'apps/runtime-host/', 'crates/', 'native/',
+            'Cargo.toml', 'Cargo.lock'
+        )
+        $git = Get-Command git.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
+        $committedAfterBuild = @(& $git.Source -C $repoRoot diff --name-only $reusedBuildCommitFull HEAD `
+                -- $buildInputPrefixes | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                Sort-Object -Unique)
+        $uncommittedBuildInputs = @($sourceBefore.working_tree_changes | ForEach-Object { [string]$_.path } |
+                Where-Object {
+                    $changed = $_
+                    @($buildInputPrefixes | Where-Object { $changed.StartsWith($_, [System.StringComparison]::Ordinal) }).Count -gt 0
+                } | Sort-Object -Unique)
+        $newerInputCount = $committedAfterBuild.Count + $uncommittedBuildInputs.Count
+        $existingResourceManifest = Join-Path $repoRoot 'apps/control/src-tauri/generated-resources/audit/resource-manifest.v1.json'
+        $resourceManifestMatchesBuild = $null
+        if (Test-Path -LiteralPath $existingResourceManifest -PathType Leaf) {
+            $resourceManifestMatchesBuild = (Get-LowerSha256 -Path $existingResourceManifest) -ceq
+                (Get-LowerSha256 -Path ([string]$resources.manifest_path))
+        }
+        $reusedBuild = [ordered]@{
+            note = 'The control app and sidecars were built earlier and packaged as-is. Nothing was rebuilt.'
+            control_last_write_utc = $controlItem.LastWriteTimeUtc.ToString('o')
+            attested_build_commit = $reusedBuildCommitFull
+            build_input_files_changed_since_control_build_count = $newerInputCount
+            committed_build_input_files_since_build_commit = @($committedAfterBuild | Select-Object -First 50)
+            uncommitted_build_input_files = @($uncommittedBuildInputs | Select-Object -First 50)
+            staged_resource_manifest_matches_existing_build_inputs = $resourceManifestMatchesBuild
+        }
+        if ($newerInputCount -gt 0) {
+            Write-Warning ("$newerInputCount build-input file(s) changed since the reused control executable " +
+                'was built; the packaged app does not contain those changes. Recorded in the manifest.')
+        }
     }
-    finally { Pop-Location }
+    else {
+        $pnpm = Get-NpcCorepackPnpmInvocation
+        Push-Location (Join-Path $repoRoot 'apps/control')
+        try {
+            Invoke-NpcCheckedCommand -FilePath $pnpm.FilePath `
+                -ArgumentList @($pnpm.Prefix + @('run', 'build')) `
+                -FailureMessage 'Pinned frontend build failed'
+            $buildStarted = [DateTime]::UtcNow
+            Invoke-NpcCheckedCommand -FilePath $pnpm.FilePath `
+                -ArgumentList @($pnpm.Prefix + @(
+                    'run', 'tauri', 'build', '--debug', '--no-bundle', '--ci', '--config',
+                    $tauriConfig.Replace('\', '/'))) `
+                -FailureMessage 'Installer-free Tauri build failed'
+        }
+        finally { Pop-Location }
 
-    if (-not (Test-Path -LiteralPath $controlBinary -PathType Leaf) -or
-        (Get-Item -LiteralPath $controlBinary).LastWriteTimeUtc -lt $buildStarted.AddSeconds(-2)) {
-        throw 'Fresh installer-free control executable was not produced.'
+        if (-not (Test-Path -LiteralPath $controlBinary -PathType Leaf) -or
+            (Get-Item -LiteralPath $controlBinary).LastWriteTimeUtc -lt $buildStarted.AddSeconds(-2)) {
+            throw 'Fresh installer-free control executable was not produced.'
+        }
+        & (Join-Path $repoRoot 'scripts/audit-pe-product-binary.ps1') `
+            -Path $controlBinary -ExpectedSubsystem Gui | Out-Null
     }
-    & (Join-Path $repoRoot 'scripts/audit-pe-product-binary.ps1') `
-        -Path $controlBinary -ExpectedSubsystem Gui | Out-Null
 
     $sourceProcess = Invoke-NpcHiddenProcess -FilePath $python.Source -ArgumentList @(
         (Join-Path $repoRoot 'scripts/security/generate_source_evidence.py'),
@@ -445,17 +640,32 @@ try {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $testGame = $testGameJson | ConvertFrom-Json
     if ($testGame.status -ne 'passed') { throw 'Synthetic review game was not copied intact.' }
+    $testGameKind = Get-ReviewTestGameKind -Verification $testGame
+    if ($testGameKind -cne $stableGameKind) { throw 'Synthetic review game changed kind while it was copied.' }
     $testGameManifestPath = Join-Path $testGameDirectory 'REVIEW-FIXTURE-MANIFEST.json'
     $testGameManifest = Get-Content -LiteralPath $testGameManifestPath -Raw | ConvertFrom-Json
     $sequenceEntries = @($testGameManifest.files | Where-Object {
             [System.IO.Path]::GetExtension([string]$_.path) -ieq '.inpcseq'
         })
-    if (@($testGameManifest.expected_files).Count -ne 6 -or $sequenceEntries.Count -ne 1 -or
-        [string]$testGameManifest.generated_media.visual_source -ne
-            'verified-sibling-project-owned-mara-camera-sequence-v1') {
-        throw 'Synthetic review game must contain the one verified 42-frame camera sequence.'
+    $testGameSequence = $null
+    if ($testGameKind -ceq 'moving-camera-sequence') {
+        if (@($testGameManifest.expected_files).Count -ne 6 -or $sequenceEntries.Count -ne 1 -or
+            [string]$testGameManifest.generated_media.visual_source -ne
+                'verified-sibling-project-owned-mara-camera-sequence-v1') {
+            throw 'Synthetic review game must contain the one verified 42-frame camera sequence.'
+        }
+        $sequenceEntry = $sequenceEntries[0]
+        $testGameSequence = [ordered]@{
+            relative_path = 'local-app-data/test-game/' + [string]$sequenceEntry.path
+            sha256 = [string]$sequenceEntry.sha256
+            size_bytes = [int64]$sequenceEntry.size_bytes
+        }
     }
-    $sequenceEntry = $sequenceEntries[0]
+    elseif (@($testGameManifest.expected_files).Count -ne 5 -or $sequenceEntries.Count -ne 0 -or
+        [string]$testGameManifest.generated_media.visual_source -ne
+            'embedded-original-generated-photorealistic-portrait-v1') {
+        throw 'The static synthetic review game must be the five-file build with no camera sequence.'
+    }
 
     $atlasTarget = Join-Path $stage 'review-mouth-atlas'
     New-Item -ItemType Directory -Path $atlasTarget -Force | Out-Null
@@ -544,6 +754,41 @@ whole-loadout admission pass.
             [Environment]::NewLine + $characterPackBoundaries
     }
 
+    $testGameReviewNote = if ($testGameKind -ceq 'moving-camera-sequence') {
+        'The practice game is the six-file build with the moving camera sequence (project-owned).'
+    } else {
+        ('The practice game is the STATIC five-file build: a fixed generated portrait that blinks and ' +
+            'breathes but has no moving camera sequence (the six-file camera build needs source footage ' +
+            'that is not available). It exercises the capture, speech and mouth pipeline; it does not ' +
+            'test mouth tracking against a moving subject.')
+    }
+    $mouthAtlasApprovalNote = if ([string]::IsNullOrWhiteSpace($mouthAtlasOwnerApprovalText)) {
+        'The atlas receipt does not record its review as pending.'
+    } else {
+        ('The atlas receipt text predates the owner review and still says it is pending. ' +
+            "Owner approval attested at packaging time: $mouthAtlasOwnerApprovalText")
+    }
+    $repositoryCatalogNote = if ($null -eq $privateModelCatalog -and $repositoryCatalogExpired) {
+        ("The checked repository model catalog expired on $repositoryCatalogExpiresUtc. The runtime refuses " +
+            'an expired catalog when an optional local model pack is installed or admitted, so those packs ' +
+            'stay unavailable until a new catalog is generated. API-provider turns are unaffected.')
+    } else {
+        ''
+    }
+    $buildOutcomeNote = if ($ReuseExistingBuild) {
+        ('Build outcome: REUSED existing debug build (not rebuilt by this package). The control app and ' +
+            "sidecars were re-hashed and PE-audited. $($reusedBuild.build_input_files_changed_since_control_build_count) " +
+            'build-input file(s) differed from the attested build commit when this was packaged; see ' +
+            'application.reused_build in REVIEW-MANIFEST.json.')
+    } else {
+        'Build outcome: passed (fresh installer-free debug build).'
+    }
+    $sourceStateNote = if ([bool]$sourceBefore.dirty) {
+        'dirty: uncommitted working-tree changes are listed in the manifest'
+    } else {
+        'clean in this build'
+    }
+
     $readme = @"
 # Interactive NPCs local review
 
@@ -592,19 +837,23 @@ $($reviewedMouthAtlas.game_profile_id)/$($reviewedMouthAtlas.character_id). Its 
 $($reviewedMouthAtlas.classification); natural-quality qualification is $($reviewedMouthAtlas.natural_quality_qualified).
 Its schema is $($reviewedMouthAtlas.schema_version). Its qualification boundary is:
 $($reviewedMouthAtlas.qualification)
+$mouthAtlasApprovalNote
 Ordinary game targets cannot select that atlas. Directly starting
 local-app-data\test-game\interactive-npcs-synthetic-target.exe is an optional
 standalone fixture check; it does not perform the review launch contract or
 connect itself to the control app.
 
 $modelCatalogReviewNote
+$repositoryCatalogNote
 
 $characterPackReviewNote
 
-Build outcome: passed (fresh installer-free debug build). The packaging verifier
+$testGameReviewNote
+
+$buildOutcomeNote The packaging verifier
 runs on the staged directory and again after its atomic move to the review root.
 The generated REVIEW-MANIFEST.json binds every file, the full source identity
-(clean in this build), the stable test game, the private atlas, and
+($sourceStateNote), the stable test game, the private atlas, and
 review-evidence\engineering-review.md.
 
 Still open: a permitted desktop/game-capture walkthrough, physical audio output,
@@ -696,7 +945,20 @@ by the builder.
             scope = 'checked-repository-bootstrap'
             runtime_root = 'packaging/model-packs'
             source_root = Join-Path $repoRoot 'packaging/model-packs'
+            catalog_expires_utc = $repositoryCatalogExpiresUtc
+            catalog_expired_when_packaged = $repositoryCatalogExpired
         }
+    }
+    $applicationBuildOrigin = if ($ReuseExistingBuild) {
+        'reused-existing-debug-build'
+    } else {
+        'fresh-installer-free-build'
+    }
+    $buildOutcome = if ($ReuseExistingBuild) { 'reused-existing-build' } else { 'passed' }
+    $mouthAtlasOwnerApprovalRecord = if ([string]::IsNullOrWhiteSpace($mouthAtlasOwnerApprovalText)) {
+        $null
+    } else {
+        $mouthAtlasOwnerApprovalText
     }
     $manifest = [ordered]@{
         schema = 'interactive-npcs-portable-review/v1'
@@ -710,6 +972,8 @@ by the builder.
             size_bytes = [int64](Get-Item -LiteralPath (Join-Path $stage 'interactive-npcs-control.exe')).Length
             sha256 = Get-LowerSha256 -Path (Join-Path $stage 'interactive-npcs-control.exe')
             build_configuration = 'Debug'
+            build_origin = $applicationBuildOrigin
+            reused_build = $reusedBuild
             bundle_created = $false
         }
         application_identifier = 'io.github.akshitireddy.interactive-npcs.review'
@@ -732,18 +996,19 @@ by the builder.
             sha256 = [string]$testGame.executable_sha256
             source_sha256 = [string]$testGame.source_sha256
             distribution_manifest_sha256 = Get-LowerSha256 -Path $testGameManifestPath
+            fixture_kind = $testGameKind
+            file_count = [int]$testGame.file_count
             visual_source = [string]$testGameManifest.generated_media.visual_source
-            sequence = [ordered]@{
-                relative_path = 'local-app-data/test-game/' + [string]$sequenceEntry.path
-                sha256 = [string]$sequenceEntry.sha256
-                size_bytes = [int64]$sequenceEntry.size_bytes
-            }
+            visual_mode = [string]$testGame.visual_mode
+            sequence = $testGameSequence
         }
         mouth_atlas = [ordered]@{
             relative_root = 'review-mouth-atlas'
             scope = [string]$reviewedMouthAtlas.classification
             qualification = [string]$reviewedMouthAtlas.qualification
             review_status = [string]$reviewedMouthAtlas.review_status
+            receipt_review_pending = [bool]$mouthAtlasReviewPending
+            owner_approval_attestation = $mouthAtlasOwnerApprovalRecord
             natural_quality_qualified = [bool]$reviewedMouthAtlas.natural_quality_qualified
             ordinary_targets_enabled = [bool]$reviewedMouthAtlas.ordinary_targets_enabled
             model_weights_included = $false
@@ -821,7 +1086,7 @@ by the builder.
         }
         model_catalog = $modelCatalogManifest
         outcomes = [ordered]@{
-            fresh_installer_free_build = 'passed'
+            fresh_installer_free_build = $buildOutcome
             stable_game_prerequisite_verification = 'passed'
             private_mouth_atlas_prerequisite_verification = 'passed'
             staged_closed_world_verification = 'pending'
@@ -882,8 +1147,8 @@ by the builder.
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $verification = $verificationJson | ConvertFrom-Json
     if ($verification.status -ne 'passed') { throw 'Receipt-bound final verification failed.' }
-    $freshVerificationProcess = Invoke-NpcHiddenProcess -FilePath $pwsh.Source -ArgumentList @(
-        '-NoLogo', '-NoProfile', '-NonInteractive', '-File',
+    $freshVerificationProcess = Invoke-NpcHiddenProcess -FilePath $powerShellHost -ArgumentList @(
+        '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
         (Join-Path $PSScriptRoot 'verify-portable-review.ps1'),
         '-Directory', $destination, '-ArtifactRoot', $artifactRootFull
     ) -WorkingDirectory $repoRoot -NoReplayOutput
@@ -904,8 +1169,13 @@ by the builder.
 }
 finally {
     if (Test-Path -LiteralPath $generatedResources) {
+        $generatedResourcesBoundary = if ($null -ne $reuseWork) { $reuseWork } else { $repoRoot }
         Remove-VerifiedReviewBuildDirectory -Path $generatedResources `
-            -Boundary $repoRoot -ExpectedLeafPattern 'generated-resources'
+            -Boundary $generatedResourcesBoundary -ExpectedLeafPattern 'generated-resources'
+    }
+    if ($null -ne $reuseWork -and (Test-Path -LiteralPath $reuseWork)) {
+        Remove-VerifiedReviewBuildDirectory -Path $reuseWork `
+            -Boundary ([System.IO.Path]::GetTempPath()) -ExpectedLeafPattern 'npc-portable-review-*'
     }
     if ($null -ne $stage -and (Test-Path -LiteralPath $stage)) {
         Remove-VerifiedReviewBuildDirectory -Path $stage `

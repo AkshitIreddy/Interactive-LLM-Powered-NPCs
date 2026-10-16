@@ -265,8 +265,11 @@ function Assert-NpcReviewedMouthAtlasDocument {
         }
         $bindingBytes = [System.Text.Encoding]::UTF8.GetBytes(
             ($canonicalBinding | ConvertTo-Json -Compress -Depth 8))
-        $bindingSha256 = [System.BitConverter]::ToString(
-            [System.Security.Cryptography.SHA256]::HashData($bindingBytes)).Replace('-', '').ToLowerInvariant()
+        # ComputeHash (not SHA256.HashData, which Windows PowerShell 5.1 lacks).
+        $bindingHasher = [System.Security.Cryptography.SHA256]::Create()
+        try { $bindingDigest = $bindingHasher.ComputeHash($bindingBytes) }
+        finally { $bindingHasher.Dispose() }
+        $bindingSha256 = [System.BitConverter]::ToString($bindingDigest).Replace('-', '').ToLowerInvariant()
         if (-not (Test-NpcLowerSha256 $Receipt.atlasIdentity.enrollmentBindingSha256) -or
             [string]$Receipt.atlasIdentity.enrollmentBindingSha256 -cne $bindingSha256) {
             throw 'Reviewed character mouth-atlas enrollment digest disagrees with its receipt.'
