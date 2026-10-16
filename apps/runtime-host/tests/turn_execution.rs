@@ -13,7 +13,8 @@ use npc_runtime_host::{
     TurnInputSnapshot, NVIDIA_MAGPIE_PRIVATE_EVALUATION_TERMS_REVISION,
     PRIVATE_EVALUATION_ACKNOWLEDGEMENT_SCHEMA_VERSION,
     PRIVATE_EVALUATION_DEBUG_APPLICATION_NAMESPACE,
-    PRIVATE_EVALUATION_REVIEW_APPLICATION_NAMESPACE, TURN_ROUTE_SCHEMA_VERSION,
+    PRIVATE_EVALUATION_REVIEW_APPLICATION_NAMESPACE, PRODUCTION_APPLICATION_NAMESPACE,
+    TURN_ROUTE_SCHEMA_VERSION,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -26,14 +27,28 @@ fn repo_root() -> PathBuf {
 }
 
 async fn host() -> HostState {
+    host_for_application(PRODUCTION_APPLICATION_NAMESPACE).await
+}
+
+/// Private-evaluation authority is only admitted when the request namespace
+/// equals the host's own namespace, so tests that carry a review-namespace
+/// acknowledgement must run against a host initialized for that namespace.
+async fn review_host() -> HostState {
+    host_for_application(PRIVATE_EVALUATION_REVIEW_APPLICATION_NAMESPACE).await
+}
+
+async fn host_for_application(application_namespace: &str) -> HostState {
     let app_data = tempfile::tempdir().expect("temporary app data");
     // HostState owns its open stores, so keep the directory for the process
     // lifetime instead of deleting files underneath SQLite.
     let app_data = app_data.keep();
-    HostState::initialize(HostConfig {
-        repo_root: repo_root(),
-        app_data,
-    })
+    HostState::initialize_for_application(
+        HostConfig {
+            repo_root: repo_root(),
+            app_data,
+        },
+        application_namespace,
+    )
     .await
     .expect("initialize runtime host")
 }
@@ -220,7 +235,7 @@ fn old_magpie_only_acknowledgement_is_invalid_and_requires_reprompt() {
 
 #[tokio::test]
 async fn nvidia_llm_and_embedding_routes_require_provider_wide_private_evaluation_authority() {
-    let state = host().await;
+    let state = review_host().await;
     let mut nvidia_llm = selected_route("unused", stock_tts());
     nvidia_llm.roles.llm.primary = Some(SelectedProviderRoute {
         provider_id: "nvidia-nim".into(),
@@ -468,7 +483,7 @@ async fn dormant_magpie_manual_fallback_does_not_consume_private_evaluation_auth
 
 #[tokio::test]
 async fn magpie_requires_current_private_evaluation_ack_and_emits_nonpromotion_evidence() {
-    let state = host().await;
+    let state = review_host().await;
     let snapshot = selected_route(
         "mock-stream-v1",
         hosted_stock_tts(
