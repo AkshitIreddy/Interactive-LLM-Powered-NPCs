@@ -210,7 +210,7 @@ pub struct AppState {
     character_mouth_packs: Arc<CharacterMouthPackManagerV1>,
     pub(crate) provider_loadouts: ProviderLoadoutManager,
     character_workspace: CharacterWorkspace,
-    game_targets: GameTargetManager,
+    game_targets: Arc<GameTargetManager>,
     #[cfg(debug_assertions)]
     synthetic_review_target: SyntheticReviewTargetLauncher,
     pub(crate) local_resources: Arc<LocalResourceManager>,
@@ -287,6 +287,7 @@ impl AppState {
             CharacterMouthPackManagerV1::new(&config_directory)
                 .map_err(|error| error.to_string())?,
         );
+        let game_targets = Arc::new(GameTargetManager::default());
         let visual_runtime = MouthWorkerSupervisor::new(
             MouthWorkerLaunchConfig::from_application(
                 cfg!(dev) && cfg!(debug_assertions),
@@ -297,6 +298,13 @@ impl AppState {
             media_broker.clone(),
         )
         .with_character_mouth_packs(Arc::clone(&character_mouth_packs));
+        #[cfg(debug_assertions)]
+        let visual_runtime = {
+            let practice_targets = Arc::clone(&game_targets);
+            visual_runtime.with_practice_target_probe(Arc::new(move || {
+                practice_targets.synthetic_practice_target_selected()
+            }))
+        };
         let identity_actor_locks = NativeActorLockBusV1::new_unqualified();
         let local_resources = Arc::new(
             LocalResourceManager::new(&config_directory, Some(&resource_root))
@@ -376,7 +384,7 @@ impl AppState {
             character_mouth_packs,
             provider_loadouts,
             character_workspace,
-            game_targets: GameTargetManager::default(),
+            game_targets,
             #[cfg(debug_assertions)]
             synthetic_review_target,
             local_resources,
