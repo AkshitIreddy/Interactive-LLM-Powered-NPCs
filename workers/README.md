@@ -24,6 +24,8 @@ The default transport is length-delimited JSON over binary stdin/stdout. Diagnos
 
 The frame format is a four-byte unsigned big-endian payload length followed by UTF-8 JSON. A complete example client is in `examples/client.py`.
 
+The length prefix and payload may each arrive across multiple reads. EOF between frames ends the stream normally; EOF part-way through either component is a truncated frame.
+
 ## Contracts and safety invariants
 
 - Protocol version `1.0`; see `protocol/worker-control-v1.proto` and `protocol/PROTOCOL.md`.
