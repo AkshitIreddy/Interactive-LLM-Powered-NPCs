@@ -53,7 +53,7 @@ def read_frame(stream: BinaryIO) -> dict[str, Any]:
     if prefix == b"":
         raise EndOfStream()
     if len(prefix) != _LENGTH.size:
-        raise TruncatedFrame("truncated frame length")
+        prefix += _read_exact(stream, _LENGTH.size - len(prefix))
     (length,) = _LENGTH.unpack(prefix)
     if length == 0:
         raise InvalidJsonFrame("empty frames are not valid")

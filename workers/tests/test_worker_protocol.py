@@ -30,6 +30,7 @@ from framing import (  # noqa: E402
     FrameWriter,
     InvalidJsonFrame,
     OversizedFrame,
+    TruncatedFrame,
     encode_frame,
     read_frame,
 )
@@ -204,6 +205,23 @@ class WorkerProcess:
 
 
 class FramingTests(unittest.TestCase):
+    def test_short_reads_preserve_frame_boundaries(self) -> None:
+        class ShortReader(io.BytesIO):
+            def read(self, size: int = -1) -> bytes:
+                return super().read(min(size, 2) if size >= 0 else 2)
+
+        messages = [{"event": "synthetic-one"}, {"event": "synthetic-two"}]
+        stream = ShortReader(b"".join(encode_frame(message) for message in messages))
+        for message in messages:
+            self.assertEqual(read_frame(stream), message)
+        with self.assertRaises(EndOfStream):
+            read_frame(stream)
+
+    def test_partial_prefix_eof_is_truncated(self) -> None:
+        for size in (1, 2, 3):
+            with self.subTest(size=size), self.assertRaises(TruncatedFrame):
+                read_frame(io.BytesIO(encode_frame({"event": "synthetic"})[:size]))
+
     def test_frame_round_trip_is_canonical_and_bounded(self) -> None:
         message = {"b": "text", "a": 1}
         encoded = encode_frame(message)
